@@ -1,0 +1,11 @@
+/target
+node_modules/
+/ui/dist/
+/src-tauri/target/
+/src-tauri/gen/
+*.sqlite
+*.db
+*.log
+.env
+.vscode/
+/local/
