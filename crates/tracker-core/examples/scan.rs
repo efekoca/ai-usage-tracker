@@ -4,6 +4,8 @@
 
 use std::collections::HashSet;
 use std::time::Instant;
+use tracker_core::analytics::{limits_view, period_range, report, Period};
+use tracker_core::pricing::PriceBook;
 use tracker_core::discovery::{detect, enumerate_files, Env, ExtraPaths, SourceId};
 use tracker_core::ingest::ingest;
 use tracker_core::store::Store;
@@ -71,6 +73,40 @@ fn main() {
             l.status,
             l.plan,
             l.source
+        );
+    }
+
+    let book = PriceBook::default_book();
+    let now = chrono::Utc::now().timestamp_millis();
+    for period in [Period::Today, Period::Month1, Period::All] {
+        let range = period_range(period, &chrono::Local, now, store.first_event_ms().unwrap());
+        let t = Instant::now();
+        let r = report(&store, &book, range, &Default::default(), &chrono::Local).unwrap();
+        println!(
+            "{period:?}: events={} tokens={} api_eq=${:.2} unpriced={:?} days={} active={} peak_hour={:?} ({:?})",
+            r.totals.events,
+            r.totals.total_tokens,
+            r.totals.cost_usd,
+            r.unpriced_models,
+            r.days_in_range,
+            r.active_days,
+            r.peak_hour,
+            t.elapsed()
+        );
+        for g in r.by_model.iter().take(8) {
+            println!("   model {:<22} tokens={:<12} ${:.2}", g.label, g.totals.total_tokens, g.totals.cost_usd);
+        }
+    }
+    for v in limits_view(&store, &book, now, &[]).unwrap() {
+        println!(
+            "view {:<9} {:<10} used={:?} state={:?} src={} window_events={} projects={}",
+            v.provider.as_str(),
+            v.window,
+            v.used_pct,
+            v.state,
+            v.source,
+            v.window_usage.events,
+            v.projects.len()
         );
     }
 }
