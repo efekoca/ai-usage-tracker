@@ -46,6 +46,9 @@ pub struct WidgetSettings {
     pub scale: f64,
     pub x: Option<i32>,
     pub y: Option<i32>,
+    /// Corner the widget sticks to while it resizes ("bottom-right", …); empty once the user
+    /// drags it somewhere else.
+    pub anchor: String,
     pub auto_hide_fullscreen: bool,
     /// "horizontal" | "vertical" | "line"
     pub layout: String,
@@ -84,6 +87,7 @@ impl Default for WidgetSettings {
             scale: 1.0,
             x: None,
             y: None,
+            anchor: "bottom-right".into(),
             auto_hide_fullscreen: true,
             layout: "horizontal".into(),
             items: default_items(),

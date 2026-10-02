@@ -89,6 +89,11 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE project ADD COLUMN display_path TEXT;
     DELETE FROM file_checkpoint WHERE parser IN ('claude_code_jsonl', 'cowork_jsonl');
     "#,
+    // v4: Cowork sessions are grouped into one project; Codex rollouts are re-read once so
+    // their projects get the original path spelling.
+    r#"
+    DELETE FROM file_checkpoint WHERE parser IN ('codex_rollout', 'cowork_jsonl');
+    "#,
 ];
 
 /// A captured row is hidden when the same request also exists as an exact (log) row.

@@ -123,7 +123,7 @@ fn projects_are_merged_case_insensitively_and_keep_a_readable_name() {
     run(&mut store, &m.env);
     let names: Vec<String> = store.projects().unwrap().into_iter().map(|p| p.name).collect();
     // "C:\Projects\demo-app" and "c:/projects/demo-app" are one project
-    assert_eq!(names, vec!["demo-app".to_string(), "notes".to_string()]);
+    assert_eq!(names, vec!["Cowork".to_string(), "demo-app".to_string()]);
 }
 
 #[test]

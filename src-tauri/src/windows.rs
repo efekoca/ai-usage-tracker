@@ -149,11 +149,11 @@ pub fn ensure_widget(app: &AppHandle, s: &Settings) -> Option<WebviewWindow> {
     }
     match b.build() {
         Ok(win) => {
-            if s.widget.x.is_none() {
-                place_widget(&win, "top-right");
-            } else if !on_any_monitor(&win, s.widget.x.unwrap_or(0), s.widget.y.unwrap_or(0)) {
-                // the monitor it lived on is gone
-                place_widget(&win, "top-right");
+            if !s.widget.anchor.is_empty() {
+                place_widget(&win, &s.widget.anchor);
+            } else if s.widget.x.is_none() || !on_any_monitor(&win, s.widget.x.unwrap_or(0), s.widget.y.unwrap_or(0)) {
+                // never placed, or the monitor it lived on is gone
+                place_widget(&win, "bottom-right");
             }
             let handle = app.clone();
             win.on_window_event(move |e| {
@@ -177,14 +177,22 @@ fn on_any_monitor(w: &WebviewWindow, x: i32, y: i32) -> bool {
     })
 }
 
+/// When the app itself last moved the widget; Moved events right after it are ours, not a drag.
+static LAST_PLACED_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
 fn remember_widget_position(app: &AppHandle, x: i32, y: i32) {
+    if chrono::Utc::now().timestamp_millis() - LAST_PLACED_MS.load(Ordering::SeqCst) < 600 {
+        return;
+    }
     let state = app.state::<AppState>();
     let mut s = state.settings.write().unwrap();
     if s.widget.x == Some(x) && s.widget.y == Some(y) {
         return;
     }
+    // a user drag: the widget now stays where it was dropped
     s.widget.x = Some(x);
     s.widget.y = Some(y);
+    s.widget.anchor.clear();
     let snapshot = s.clone();
     drop(s);
     if let Ok(store) = state.store.try_lock() {
@@ -205,6 +213,7 @@ pub fn place_widget(w: &WebviewWindow, corner: &str) {
         "bottom-right" => (ax + aw - size.width as i32 - margin, ay + ah - size.height as i32 - margin),
         _ => (ax + aw - size.width as i32 - margin, ay + margin),
     };
+    LAST_PLACED_MS.store(chrono::Utc::now().timestamp_millis(), Ordering::SeqCst);
     let _ = w.set_position(PhysicalPosition::new(x, y));
 }
 
@@ -323,7 +332,7 @@ pub fn handle_menu(app: &AppHandle, id: &str) {
                 if let Some(w) = app.get_webview_window(WIDGET) {
                     place_widget(&w, corner);
                 }
-                return;
+                s.widget.anchor = corner.to_owned();
             } else {
                 return;
             }

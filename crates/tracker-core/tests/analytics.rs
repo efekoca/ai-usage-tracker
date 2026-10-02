@@ -59,7 +59,7 @@ fn all_time_report_prices_every_known_model_and_flags_unknown_ones() {
     let tool_sum: u64 = r.by_tool.iter().map(|g| g.totals.total_tokens).sum();
     assert_eq!(tool_sum, r.totals.total_tokens);
     let proj: Vec<&str> = r.by_project.iter().map(|g| g.label.as_str()).collect();
-    assert!(proj.contains(&"demo-app") && proj.contains(&"notes"));
+    assert!(proj.contains(&"demo-app") && proj.contains(&"Cowork"));
     assert_eq!(r.by_accuracy.get("exact"), Some(&9));
     assert_eq!(r.heatmap.iter().flatten().sum::<u64>(), r.totals.total_tokens);
 }
@@ -74,7 +74,7 @@ fn filters_by_tool_project_and_model() {
 
     let demo = store.projects().unwrap().into_iter().find(|p| p.name == "demo-app").unwrap();
     let only_demo = report(&store, &book, range, &Filter { projects: vec![demo.id], ..Default::default() }, &tz()).unwrap();
-    assert_eq!(only_demo.totals.events, 8); // everything except the Cowork "notes" session
+    assert_eq!(only_demo.totals.events, 8); // everything except the Cowork session
 
     let sonnet = report(&store, &book, range, &Filter { models: vec!["claude-sonnet-5".into()], ..Default::default() }, &tz()).unwrap();
     assert_eq!(sonnet.totals.events, 1);
@@ -269,7 +269,7 @@ fn csv_export_masks_hidden_projects_and_leaves_unpriced_cost_empty() {
     assert_eq!(text.lines().count(), 10);
     assert!(!text.contains("demo-app"));
     assert!(text.contains(&format!("project-{}", demo.id)));
-    assert!(text.contains(",notes,"));
+    assert!(text.contains(",Cowork,"));
     let review = text.lines().find(|l| l.contains("codex-auto-review")).unwrap();
     assert!(review.contains(",,exact,"), "{review}");
 
@@ -278,5 +278,5 @@ fn csv_export_masks_hidden_projects_and_leaves_unpriced_cost_empty() {
     let v: serde_json::Value = serde_json::from_slice(&daily).unwrap();
     let total: u64 = v.as_array().unwrap().iter().map(|r| r["events"].as_u64().unwrap()).sum();
     assert_eq!(total, 9);
-    assert!(!String::from_utf8(daily).unwrap().contains("notes"));
+    assert!(!String::from_utf8(daily).unwrap().contains("Cowork"));
 }

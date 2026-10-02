@@ -19,7 +19,7 @@ const settings: Settings = {
   currency: 'USD',
   fx_rate: 1,
   widget: {
-    visible: true, opacity: 0.85, size: 'm', scale: 1, x: null, y: null, auto_hide_fullscreen: true, layout: 'horizontal',
+    visible: true, opacity: 0.85, size: 'm', scale: 1, x: null, y: null, anchor: 'bottom-right', auto_hide_fullscreen: true, layout: 'horizontal',
     items: (['primary', 'cost', 'limit_five_hour', 'limit_seven_day', 'tools', 'week_tokens', 'week_cost', 'month_cost', 'updated'] as const).map((k, i) => ({ kind: k, enabled: i < 4 })),
     providers: [], primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '', corner_radius: 14,
     border: true, shadow: false, show_labels: true, show_reset_time: false, warn_at: 70, high_at: 90, always_on_top: true, lock_position: false, click_action: 'open_dashboard',

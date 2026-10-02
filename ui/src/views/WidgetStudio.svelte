@@ -50,7 +50,7 @@
   async function reset() {
     const keep = { visible: ws.visible, x: ws.x, y: ws.y }
     const d: WidgetSettings = {
-      visible: keep.visible, opacity: 0.85, size: 'm', scale: 1, x: keep.x, y: keep.y, auto_hide_fullscreen: true,
+      visible: keep.visible, opacity: 0.85, size: 'm', scale: 1, x: keep.x, y: keep.y, anchor: 'bottom-right', auto_hide_fullscreen: true,
       layout: 'horizontal',
       items: (['primary', 'cost', 'limit_five_hour', 'limit_seven_day', 'tools', 'week_tokens', 'week_cost', 'month_cost', 'updated'] as WidgetItemKind[]).map((k, i) => ({ kind: k, enabled: i < 4 })),
       providers: [], primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '',
@@ -186,7 +186,7 @@
         <span>{t('ws.position')}</span>
         <div class="corners" role="group" aria-label={t('ws.position')}>
           {#each [['top-left', '↖'], ['top-right', '↗'], ['bottom-left', '↙'], ['bottom-right', '↘']] as [c, g] (c)}
-            <button class="btn" aria-label={t(`ws.corner.${c}`)} title={t(`ws.corner.${c}`)} onclick={() => api.placeWidget(c)}>{g}</button>
+            <button class="btn" aria-label={t(`ws.corner.${c}`)} title={t(`ws.corner.${c}`)} onclick={() => { ws.anchor = c; api.placeWidget(c) }}>{g}</button>
           {/each}
         </div>
       </div>

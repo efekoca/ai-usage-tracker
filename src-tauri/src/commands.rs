@@ -455,11 +455,22 @@ pub fn set_widget_visible(app: AppHandle, state: State<AppState>, visible: bool)
     save_settings(app, state, s).map(|_| ())
 }
 
+/// Snaps the widget to a corner. `remember` makes it the anchor it keeps while resizing.
 #[tauri::command]
-pub fn place_widget(app: AppHandle, corner: String) {
+pub fn place_widget(app: AppHandle, state: State<AppState>, corner: String, remember: Option<bool>) -> Res<()> {
     if let Some(w) = tauri::Manager::get_webview_window(&app, windows::WIDGET) {
         windows::place_widget(&w, &corner);
     }
+    if remember.unwrap_or(true) {
+        let mut s = state.settings.read().unwrap().clone();
+        if s.widget.anchor != corner {
+            s.widget.anchor = corner;
+            s.save(&state.store.lock().unwrap())?;
+            *state.settings.write().unwrap() = s.clone();
+            let _ = app.emit("settings-changed", &s);
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]

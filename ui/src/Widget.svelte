@@ -37,6 +37,8 @@
     if (w > 10 && h > 10 && key !== lastSize) {
       lastSize = key
       await getCurrentWindow().setSize(new LogicalSize(w, h)).catch(() => {})
+      // a widget anchored to a corner stays flush with it as its size changes
+      if (settings?.widget.anchor) await api.placeWidget(settings.widget.anchor, false).catch(() => {})
     }
   }
   $effect(() => {

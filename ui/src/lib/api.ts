@@ -154,6 +154,7 @@ export interface WidgetSettings {
   scale: number
   x: number | null
   y: number | null
+  anchor: string
   auto_hide_fullscreen: boolean
   layout: 'horizontal' | 'vertical' | 'line'
   items: { kind: WidgetItemKind; enabled: boolean }[]
@@ -341,7 +342,7 @@ export const api = {
   quit: () => invoke<void>('quit_app'),
   captureStatus: () => invoke<CaptureStatus>('capture_status'),
   setCapture: (kind: 'codex' | 'statusline' | 'otel', enabled: boolean) => invoke<string>('set_capture', { kind, enabled }),
-  placeWidget: (corner: string) => invoke<void>('place_widget', { corner }),
+  placeWidget: (corner: string, remember = true) => invoke<void>('place_widget', { corner, remember }),
 }
 
 export function on<T>(event: string, cb: (payload: T) => void): Promise<UnlistenFn> {

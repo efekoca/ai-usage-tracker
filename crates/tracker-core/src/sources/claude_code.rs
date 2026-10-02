@@ -48,7 +48,10 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
         }
         let mut recognised = false;
         if let Some(mut ev) = usage_event(v, ctx) {
-            if root_cwd.is_some() {
+            if ctx.client_override == Some("cowork") {
+                // each Cowork session runs in its own scratch folder; group them as one project
+                ev.project_path = Some("Cowork".into());
+            } else if root_cwd.is_some() {
                 ev.project_path = root_cwd.clone();
             }
             out.events.push(ev);
