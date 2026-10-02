@@ -93,6 +93,8 @@
       </section>
     {/if}
 
+    <p class="subtle small live"><Icon name="info" size={13} /> {t('onb.live')}</p>
+
     <section class="privacy">
       <button class="btn ghost" aria-expanded={showPrivacy} onclick={() => (showPrivacy = !showPrivacy)}><Icon name="lock" size={15} />{t('onb.privacy')}</button>
       {#if showPrivacy}<p class="subtle small">{t('settings.privacy.text')}</p>{/if}
@@ -171,6 +173,17 @@
   .privacy p {
     margin-top: 6px;
     padding: 0 12px;
+  }
+  .live {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    margin: 4px 12px 10px;
+    line-height: 1.5;
+  }
+  .live :global(svg) {
+    flex: none;
+    margin-top: 3px;
   }
   .cta {
     display: flex;

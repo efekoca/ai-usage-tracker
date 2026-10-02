@@ -156,7 +156,9 @@ impl WidgetSettings {
     }
 }
 
-/// Opt-in live capture switches (all off by default).
+/// Live capture switches. The two limit reads are on by default (they change no files and use
+/// the user's own Claude Code / Codex sign-in); the two methods that edit Claude Code's
+/// settings file stay off until the user turns them on.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CaptureSettings {
@@ -178,13 +180,13 @@ pub struct CaptureSettings {
 impl Default for CaptureSettings {
     fn default() -> Self {
         CaptureSettings {
-            codex_poll: false,
+            codex_poll: true,
             codex_poll_minutes: 5,
             codex_path: String::new(),
             statusline: false,
             otel: false,
             otel_port: tracker_core::capture::otlp::DEFAULT_PORT,
-            claude_poll: false,
+            claude_poll: true,
             claude_poll_minutes: 5,
             claude_path: String::new(),
         }
@@ -271,5 +273,26 @@ impl Settings {
             s.fx_rate = 1.0;
         }
         store.set_setting(KEY, &serde_json::to_string(&s).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn limit_reads_are_on_and_file_editing_methods_off_by_default() {
+        let c = Settings::default().capture;
+        assert!(c.claude_poll && c.codex_poll);
+        assert!(!c.statusline && !c.otel);
+    }
+
+    #[test]
+    fn settings_saved_by_an_older_version_get_the_new_defaults() {
+        // written before the Claude limit read existed
+        let s: Settings = serde_json::from_str(r#"{"onboarded":true,"capture":{"codex_poll":false}}"#).unwrap();
+        assert!(s.capture.claude_poll);
+        assert!(!s.capture.codex_poll, "an explicit choice is kept");
+        assert_eq!(s.limit_display, "used");
     }
 }

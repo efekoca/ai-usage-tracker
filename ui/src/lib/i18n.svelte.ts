@@ -235,6 +235,7 @@ const tr: Dict = {
   'onb.plan.none': 'Bilmiyorum / seçme',
   'onb.start': 'Başla',
   'onb.privacy': 'Ne okunur, ne saklanır?',
+  'onb.live': "Limitler güncel kalsın diye Claude ve Codex limit okuma açık gelir: kendi Claude Code ve Codex kurulumunuzla, modele istek göndermeden yalnızca limit yüzdesini okur, hiçbir dosyayı değiştirmez. İsterseniz Kaynaklar → Canlı yakalama'dan kapatabilirsiniz.",
 
   'common.loading': 'Yükleniyor…',
   'common.empty': 'Bu dönemde kullanım yok.',
@@ -365,8 +366,8 @@ const tr: Dict = {
   'cache.breakdown': 'Ayrıntı',
   'cache.method': 'İsabet oranı = önbellek okuma ÷ istem token\'ları. Net tasarruf, her istek kendi modelinin fiyatıyla hesaplanır: okunan token × (girdi fiyatı − okuma fiyatı) − yazılan token × (yazma fiyatı − girdi fiyatı). Negatif tasarruf, yazılan önbelleğin kendini amorti edecek kadar okunmadığını gösterir. Codex önbelleğe yazmayı ayrıca bildirmediğinde yazma 0 sayılır.',
 
-  'cap.title': 'Canlı yakalama (isteğe bağlı)',
-  'cap.lead': 'Kayıt dosyalarına ek olarak, uygulama kurulduktan sonraki kullanımı kendisi de kaydedebilir. Hepsi varsayılan kapalıdır; açtığınızda yaptığı değişiklik burada yazar ve kapattığınızda geri alınır. Prompt veya yanıt içeriği hiçbir yöntemde saklanmaz.',
+  'cap.title': 'Canlı yakalama',
+  'cap.lead': 'Kayıt dosyalarına ek olarak, uygulama kurulduktan sonraki kullanımı kendisi de kaydedebilir. Claude ve Codex limit okuma hiçbir dosyayı değiştirmediği için açık gelir; ayar dosyası değiştiren diğer ikisi siz açana kadar kapalıdır. Her yöntemin yaptığı değişiklik burada yazar ve kapattığınızda geri alınır. Prompt veya yanıt içeriği hiçbir yöntemde saklanmaz.',
   'cap.changes': 'Değiştirdiği',
   'cap.status': 'Durum',
   'cap.working': 'Uygulanıyor…',
@@ -649,6 +650,7 @@ const en: Dict = {
   'onb.plan.none': 'Not sure / skip',
   'onb.start': 'Get started',
   'onb.privacy': 'What is read and stored?',
+  'onb.live': 'To keep limits current, Claude and Codex limit reads are on: they use your own Claude Code and Codex installs to read only the limit percentages, make no model request and change no files. Turn them off any time under Sources → Live capture.',
 
   'common.loading': 'Loading…',
   'common.empty': 'No usage in this period.',
@@ -779,8 +781,8 @@ const en: Dict = {
   'cache.breakdown': 'Breakdown',
   'cache.method': 'Hit rate = cache read ÷ prompt tokens. Net savings are priced per request with that model\'s rates: read tokens × (input − read price) − written tokens × (write − input price). Negative savings mean written cache was not read enough to pay off. When Codex does not report cache writes separately they count as 0.',
 
-  'cap.title': 'Live capture (optional)',
-  'cap.lead': 'Besides the log files, the app can record usage itself from now on. Everything is off by default; what each switch changes is listed here and undone when you turn it off. No method ever stores prompt or response content.',
+  'cap.title': 'Live capture',
+  'cap.lead': 'Besides the log files, the app can record usage itself from now on. Claude and Codex limit reads change no files and are on by default; the two methods that edit a settings file stay off until you turn them on. What each switch changes is listed here and undone when you turn it off. No method ever stores prompt or response content.',
   'cap.changes': 'Changes',
   'cap.status': 'Status',
   'cap.working': 'Applying…',

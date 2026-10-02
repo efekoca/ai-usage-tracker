@@ -14,7 +14,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tracker_core::capture::claude_settings::{self as cs, CaptureState, RevertOutcome};
 use tracker_core::capture::{claude_usage, codex_limits, otlp, statusline};
-use tracker_core::discovery::{self, Env};
+use tracker_core::discovery::{self, Env, SourceId};
 use tracker_core::store::Store;
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -423,6 +423,18 @@ pub fn stop_receiver(app: &AppHandle) {
     drop(r);
 }
 
+/// Background reads start only after the first-run screen was confirmed, and only for a
+/// provider whose sources the user kept enabled.
+fn reads_allowed(s: &Settings, sources: &[SourceId]) -> bool {
+    s.onboarded && sources.iter().any(|id| s.enabled_sources.contains(id))
+}
+
+/// Runs both limit reads now (e.g. right after the first-run screen was confirmed).
+pub fn wake_readers(app: &AppHandle) {
+    wake_claude(app);
+    wake_codex(app);
+}
+
 fn wake_claude(app: &AppHandle) {
     if let Some(tx) = app.state::<AppState>().capture.claude_wake.lock().unwrap().as_ref() {
         let _ = tx.send(());
@@ -449,7 +461,10 @@ fn start_claude_poller(app: &AppHandle) {
     let _ = std::thread::Builder::new().name("claude-limits".into()).spawn(move || {
         const TICK: Duration = Duration::from_secs(30);
         const MIN_GAP_MS: i64 = 60_000;
+        // after a failed read (not installed, not signed in) wait this long unless asked again
+        const RETRY_AFTER_FAILURE_MS: i64 = 30 * 60_000;
         let mut last_try_ms: i64 = 0;
+        let mut failing = false;
         let mut seen_event_ms: Option<i64> = None;
         let mut forced = false;
         loop {
@@ -463,7 +478,7 @@ fn start_claude_poller(app: &AppHandle) {
                 return;
             }
             let s = state.settings.read().unwrap().clone();
-            if !s.capture.claude_poll {
+            if !s.capture.claude_poll || !reads_allowed(&s, &[SourceId::ClaudeCode, SourceId::Cowork, SourceId::ClaudeDesktop]) {
                 forced = false;
                 continue;
             }
@@ -471,7 +486,11 @@ fn start_claude_poller(app: &AppHandle) {
             let idle_ms = 60_000 * s.capture.claude_poll_minutes.clamp(1, 120) as i64;
             let latest = latest_claude_event_ms(&state);
             let new_activity = latest.is_some() && latest != seen_event_ms;
-            let due = forced || now - last_try_ms >= idle_ms || (new_activity && now - last_try_ms >= MIN_GAP_MS);
+            let due = if failing {
+                forced || now - last_try_ms >= RETRY_AFTER_FAILURE_MS
+            } else {
+                forced || now - last_try_ms >= idle_ms || (new_activity && now - last_try_ms >= MIN_GAP_MS)
+            };
             if !due {
                 continue;
             }
@@ -479,11 +498,13 @@ fn start_claude_poller(app: &AppHandle) {
             last_try_ms = now;
             seen_event_ms = latest;
             let Some(bin) = claude_binary(&s) else {
+                failing = true;
                 state.capture.claude.lock().unwrap().last_error = Some("claude_not_found".into());
                 continue;
             };
             match read_claude(&state, &s, &bin).and_then(|snaps| store_limits(&state.db_path, &snaps)) {
                 Ok(()) => {
+                    failing = false;
                     let mut c = state.capture.claude.lock().unwrap();
                     c.binary = Some(bin.to_string_lossy().into_owned());
                     c.last_ok_ms = Some(now_ms());
@@ -492,8 +513,12 @@ fn start_claude_poller(app: &AppHandle) {
                     let _ = app.emit("data-changed", ());
                 }
                 Err(e) => {
-                    log::warn!("claude limit read failed: {e}");
-                    state.capture.claude.lock().unwrap().last_error = Some(e);
+                    failing = true;
+                    let mut c = state.capture.claude.lock().unwrap();
+                    if c.last_error.as_deref() != Some(e.as_str()) {
+                        log::warn!("claude limit read failed: {e}");
+                    }
+                    c.last_error = Some(e);
                 }
             }
         }
@@ -532,11 +557,13 @@ pub fn start(app: &AppHandle) {
             }
             let s = state.settings.read().unwrap().clone();
             wait = Duration::from_secs(60 * s.capture.codex_poll_minutes.clamp(1, 120));
-            if !s.capture.codex_poll {
+            if !s.capture.codex_poll || !reads_allowed(&s, &[SourceId::Codex]) {
                 continue;
             }
             let Some(bin) = codex_binary(&s) else {
                 state.capture.codex.lock().unwrap().last_error = Some("codex_not_found".into());
+                // nothing to run; look again much later
+                wait = Duration::from_secs(30 * 60);
                 continue;
             };
             match codex_limits::query(&bin, Duration::from_secs(20), now_ms()).and_then(|snaps| store_limits(&state.db_path, &snaps)) {
@@ -549,8 +576,11 @@ pub fn start(app: &AppHandle) {
                     let _ = app.emit("data-changed", ());
                 }
                 Err(e) => {
-                    log::warn!("codex limit read failed: {e}");
-                    state.capture.codex.lock().unwrap().last_error = Some(e);
+                    let mut c = state.capture.codex.lock().unwrap();
+                    if c.last_error.as_deref() != Some(e.as_str()) {
+                        log::warn!("codex limit read failed: {e}");
+                    }
+                    c.last_error = Some(e);
                 }
             }
         }

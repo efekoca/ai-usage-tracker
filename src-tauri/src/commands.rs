@@ -81,6 +81,9 @@ pub fn save_settings(app: AppHandle, state: State<AppState>, settings: Settings)
         windows::apply_autostart(&app, settings.autostart);
     }
     windows::apply_widget_settings(&app, &settings);
+    if settings.onboarded && (!old.onboarded || old.enabled_sources != settings.enabled_sources) {
+        crate::capture::wake_readers(&app);
+    }
     let _ = app.emit("settings-changed", &settings);
     Ok(settings)
 }

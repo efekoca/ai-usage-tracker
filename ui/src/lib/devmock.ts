@@ -25,7 +25,7 @@ const settings: Settings = {
     border: true, shadow: false, show_labels: true, show_reset_time: false, warn_at: 70, high_at: 90, always_on_top: true, lock_position: false, click_action: 'open_dashboard',
     font_family: '', text_scale: 1, number_scale: 1, number_weight: 700, tabular_nums: true,
   },
-  capture: { codex_poll: false, codex_poll_minutes: 5, codex_path: '', statusline: false, otel: false, otel_port: 43180, claude_poll: false, claude_poll_minutes: 5, claude_path: '' },
+  capture: { codex_poll: true, codex_poll_minutes: 5, codex_path: '', statusline: false, otel: false, otel_port: 43180, claude_poll: true, claude_poll_minutes: 5, claude_path: '' },
   autostart: false,
   allow_config_updates: false,
   primary_metric: 'tokens',
