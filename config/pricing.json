@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-02",
+  "updated_at": "2026-10-03",
   "currency": "USD",
   "unit": "per_million_tokens",
   "sources": {
@@ -69,9 +69,17 @@
       "speed_multipliers": { "fast": 2.5 }, "verified_at": "2026-10-02" },
     { "id": "gpt-5.3-codex", "provider": "openai", "input": 1.75, "cache_read": 0.175, "output": 14,
       "speed_multipliers": { "fast": 2 }, "verified_at": "2026-10-02" },
+    { "id": "gpt-6-astra", "provider": "openai", "input": 10, "cache_read": 1, "cache_write_5m": 12.5, "output": 50,
+      "long_context": { "threshold": 272000, "input": 20, "cache_read": 2, "cache_write_5m": 25, "output": 75 },
+      "speed_multipliers": { "fast": 2, "ultrafast": 6 }, "verified_at": "2026-10-03" },
     { "id": "gpt-6-sol", "provider": "openai", "input": 2, "cache_read": 0.2, "cache_write_5m": 2.5, "output": 10,
-      "verified_at": "2026-10-02", "notes": "Standard short-context rate; long-context tier not verified." },
+      "long_context": { "threshold": 272000, "input": 4, "cache_read": 0.4, "cache_write_5m": 5, "output": 15 },
+      "speed_multipliers": { "fast": 2 }, "verified_at": "2026-10-03" },
     { "id": "gpt-6.1-sol", "provider": "openai", "input": 2, "cache_read": 0.1, "cache_write_5m": 2.5, "output": 10,
-      "verified_at": "2026-10-02", "notes": "Standard short-context rate; long-context tier not verified." }
+      "long_context": { "threshold": 272000, "input": 4, "cache_read": 0.2, "cache_write_5m": 5, "output": 15 },
+      "speed_multipliers": { "fast": 2 }, "verified_at": "2026-10-03" },
+    { "id": "gpt-6-luna", "provider": "openai", "input": 0.1, "cache_read": 0.01, "cache_write_5m": 0.125, "output": 0.5,
+      "long_context": { "threshold": 272000, "input": 0.2, "cache_read": 0.02, "cache_write_5m": 0.25, "output": 0.75 },
+      "speed_multipliers": { "fast": 2 }, "verified_at": "2026-10-03" }
   ]
 }
