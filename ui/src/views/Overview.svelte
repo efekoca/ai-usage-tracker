@@ -1,0 +1,193 @@
+<script lang="ts">
+  import { app, toolColor } from '../lib/store.svelte'
+  import { fmtCompact, fmtDate, fmtHour, fmtMoney, t, toolLabel, weekdayNames } from '../lib/i18n.svelte'
+  import StatTile from '../components/StatTile.svelte'
+  import Segmented from '../components/Segmented.svelte'
+  import AreaChart from '../components/charts/AreaChart.svelte'
+  import Composition from '../components/charts/Composition.svelte'
+  import BarList from '../components/charts/BarList.svelte'
+  import LimitMeter from '../components/LimitMeter.svelte'
+  import AccuracyBadge from '../components/AccuracyBadge.svelte'
+  import Icon from '../components/Icon.svelte'
+
+  let metric: 'tokens' | 'cost' = $state(app.settings?.primary_metric ?? 'tokens')
+  const r = $derived(app.report)
+  const toolsPresent = $derived((r?.by_tool ?? []).map((g) => g.key).filter((k) => k in toolColor).sort())
+  const series = $derived(toolsPresent.map((k) => ({ key: k, label: toolLabel(k), color: toolColor[k] })))
+  const values = $derived((r?.daily ?? []).map((d) => (metric === 'tokens' ? d.by_tool : d.cost_by_tool)))
+  const fmt = $derived(metric === 'tokens' ? fmtCompact : (v: number) => fmtMoney(v, { compact: true }))
+  const headline = $derived(
+    app.limits.filter((l) => l.window === 'five_hour' || l.window === 'seven_day' || l.source === 'user_threshold'),
+  )
+  const hasClaude = $derived(toolsPresent.includes('claude_code'))
+</script>
+
+{#if !r}
+  <p class="muted">{t('common.loading')}</p>
+{:else if r.totals.events === 0}
+  <div class="empty card">
+    <Icon name="overview" size={28} />
+    <p>{t('common.empty')}</p>
+  </div>
+{:else}
+  {#if r.unpriced_models.length}
+    <div class="banner" role="status">
+      <Icon name="info" size={16} />
+      <span>{t('overview.unpriced', { n: r.unpriced_models.length, models: r.unpriced_models.join(', ') })}</span>
+      <span class="spacer"></span>
+      <button class="btn" onclick={() => (app.view = 'settings')}>{t('overview.unpricedAction')}</button>
+    </div>
+  {/if}
+
+  <section class="tiles card">
+    <StatTile hero label={t('overview.totalTokens')} value={fmtCompact(r.totals.total_tokens)} current={r.totals.total_tokens} previous={r.previous.total_tokens}>
+      <AccuracyBadge kind="exact" />
+    </StatTile>
+    <StatTile label={t('overview.cost')} hint={t('metric.apiEq.help')} value={fmtMoney(r.totals.cost_usd)} current={r.totals.cost_usd} previous={r.previous.cost_usd} />
+    <StatTile label={t('overview.avgDaily')} value={fmtCompact(r.avg_daily_tokens)}>
+      <span class="subtle">{fmtMoney(r.avg_daily_cost)}</span>
+    </StatTile>
+    <StatTile label={t('overview.activeDays')} value="{r.active_days} / {r.days_in_range}">
+      {#if r.peak_day}<span class="subtle">{t('overview.peakDay')}: {fmtDate(r.peak_day.date, 'short')}</span>{/if}
+    </StatTile>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>{t('overview.trend')}</h2>
+      <span class="spacer"></span>
+      <Segmented label={t('overview.trend')} options={[{ value: 'tokens', label: t('metric.tokens') }, { value: 'cost', label: t('metric.cost') }]} bind:value={metric} />
+    </div>
+    <AreaChart
+      dates={r.daily.map((d) => d.date)}
+      {values}
+      {series}
+      format={fmt}
+      ariaLabel="{t('overview.trend')}: {metric === 'tokens' ? fmtCompact(r.totals.total_tokens) : fmtMoney(r.totals.cost_usd)}"
+    />
+  </section>
+
+  <div class="grid2">
+    <section class="card">
+      <div class="card-head"><h2>{t('overview.composition')}</h2></div>
+      <Composition tokens={r.totals.tokens} />
+    </section>
+    <section class="card">
+      <div class="card-head">
+        <h2>{t('overview.limitsNow')}</h2>
+        <span class="spacer"></span>
+        <button class="btn ghost" onclick={() => (app.view = 'limits')}><Icon name="chevron" size={14} /></button>
+      </div>
+      {#if headline.length === 0}
+        <p class="muted small">{t('limits.none')}</p>
+      {:else}
+        <div class="meters">
+          {#each headline as l (l.provider + l.limit_id + l.window)}
+            <LimitMeter
+              compact
+              title="{t(`provider.${l.provider}`)} · {t(`limits.window.${l.window}`)}"
+              window={l.window}
+              used={l.used_pct}
+              state={l.state}
+              accuracy={l.accuracy}
+              resetsAt={l.resets_at}
+              observedMs={l.observed_ms}
+            />
+          {/each}
+        </div>
+      {/if}
+    </section>
+  </div>
+
+  <div class="grid2">
+    <section class="card">
+      <div class="card-head"><h2>{t('overview.topModels')}</h2></div>
+      <BarList
+        ariaLabel={t('overview.topModels')}
+        max={6}
+        items={r.by_model.map((g) => ({ key: g.key, label: g.label, value: metric === 'tokens' ? g.totals.total_tokens : g.totals.cost_usd, sub: g.totals.unpriced_events ? '—' : undefined }))}
+        format={fmt}
+      />
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>{t('overview.byTool')}</h2></div>
+      <BarList
+        ariaLabel={t('overview.byTool')}
+        items={r.by_tool.map((g) => ({ key: g.key, label: toolLabel(g.key), value: metric === 'tokens' ? g.totals.total_tokens : g.totals.cost_usd, color: toolColor[g.key] }))}
+        format={fmt}
+      />
+      <div class="facts small muted">
+        {#if r.peak_hour !== null}<span>{t('overview.peakHour')}: <b>{fmtHour(r.peak_hour)}</b></span>{/if}
+        {#if r.peak_weekday !== null}<span>{weekdayNames()[r.peak_weekday]}</span>{/if}
+      </div>
+    </section>
+  </div>
+
+  {#if hasClaude}
+    <p class="footnote subtle small"><Icon name="info" size={13} /> {t('overview.excludesAux')}</p>
+  {/if}
+{/if}
+
+<style>
+  section {
+    margin-bottom: 16px;
+  }
+  .tiles {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 1fr 1fr;
+    gap: 24px;
+  }
+  @media (max-width: 1000px) {
+    .tiles {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+  .card-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    min-height: 30px;
+  }
+  .spacer {
+    flex: 1;
+  }
+  .grid2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 960px) {
+    .grid2 {
+      grid-template-columns: 1fr;
+    }
+  }
+  .meters {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .banner {
+    margin-bottom: 16px;
+    align-items: center;
+  }
+  .facts {
+    display: flex;
+    gap: 14px;
+    margin-top: 10px;
+  }
+  .empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 60px;
+    color: var(--ink-2);
+  }
+  .footnote {
+    display: flex;
+    gap: 6px;
+    align-items: flex-start;
+    max-width: 760px;
+  }
+</style>

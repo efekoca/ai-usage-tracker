@@ -1,0 +1,107 @@
+<script lang="ts">
+  // View header: title, period segmented control (with custom range) and filters in one row.
+  import { app, setFilter, setPeriod } from '../lib/store.svelte'
+  import { t, toolLabel } from '../lib/i18n.svelte'
+  import { api, type Period, type Tool } from '../lib/api'
+  import Segmented from './Segmented.svelte'
+  import Icon from './Icon.svelte'
+
+  type Kind = Period['kind']
+  const kinds: Kind[] = ['today', 'days7', 'month1', 'months3', 'months6', 'year1', 'all', 'custom']
+  let kind: Kind = $state(app.period.kind)
+  let from = $state(app.period.kind === 'custom' ? app.period.from : new Date(Date.now() - 13 * 864e5).toISOString().slice(0, 10))
+  let to = $state(app.period.kind === 'custom' ? app.period.to : new Date().toISOString().slice(0, 10))
+  let showFilters = $state(false)
+  let models: string[] = $state([])
+  let projects: { id: number; name: string; hidden: boolean }[] = $state([])
+
+  $effect(() => {
+    if (showFilters) {
+      api.models().then((m) => (models = m))
+      api.projects().then((p) => (projects = p))
+    }
+  })
+
+  function pick(k: Kind) {
+    if (k !== 'custom') setPeriod({ kind: k } as Period)
+  }
+  function applyCustom() {
+    setPeriod({ kind: 'custom', from, to })
+  }
+  const activeFilters = $derived((app.filter.tools?.length ?? 0) + (app.filter.models?.length ?? 0) + (app.filter.projects?.length ?? 0))
+  const tools: Tool[] = ['claude_code', 'codex']
+</script>
+
+<header class="bar">
+  <h1>{t(`nav.${app.view}`)}</h1>
+  <div class="spacer"></div>
+  <Segmented label={t('period.label')} options={kinds.map((k) => ({ value: k, label: t(`period.${k}`) }))} bind:value={kind} onchange={pick} />
+  <button class="btn" class:primary={activeFilters > 0} aria-expanded={showFilters} onclick={() => (showFilters = !showFilters)}>
+    <Icon name="filter" size={15} />{t('common.filters')}{activeFilters ? ` · ${activeFilters}` : ''}
+  </button>
+</header>
+{#if kind === 'custom'}
+  <div class="sub">
+    <label>{t('period.from')} <input class="field" type="date" bind:value={from} max={to} /></label>
+    <label>{t('period.to')} <input class="field" type="date" bind:value={to} min={from} /></label>
+    <button class="btn primary" onclick={applyCustom}>{t('period.apply')}</button>
+  </div>
+{/if}
+{#if showFilters}
+  <div class="sub filters">
+    <label>
+      {t('common.tool')}
+      <select class="field" value={app.filter.tools?.[0] ?? ''} onchange={(e) => setFilter({ ...app.filter, tools: e.currentTarget.value ? [e.currentTarget.value as Tool] : [] })}>
+        <option value="">{t('common.all')}</option>
+        {#each tools as tl (tl)}<option value={tl}>{toolLabel(tl)}</option>{/each}
+      </select>
+    </label>
+    <label>
+      {t('common.model')}
+      <select class="field" value={app.filter.models?.[0] ?? ''} onchange={(e) => setFilter({ ...app.filter, models: e.currentTarget.value ? [e.currentTarget.value] : [] })}>
+        <option value="">{t('common.all')}</option>
+        {#each models as m (m)}<option value={m}>{m}</option>{/each}
+      </select>
+    </label>
+    <label>
+      {t('common.project')}
+      <select class="field" value={String(app.filter.projects?.[0] ?? '')} onchange={(e) => setFilter({ ...app.filter, projects: e.currentTarget.value ? [Number(e.currentTarget.value)] : [] })}>
+        <option value="">{t('common.all')}</option>
+        {#each projects as p (p.id)}<option value={String(p.id)}>{p.hidden ? `${t('projects.hidden')} #${p.id}` : p.name}</option>{/each}
+      </select>
+    </label>
+    {#if activeFilters}
+      <button class="btn ghost" onclick={() => setFilter({})}>{t('common.clear')}</button>
+    {/if}
+  </div>
+{/if}
+
+<style>
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 22px 28px 12px;
+    flex-wrap: wrap;
+  }
+  .spacer {
+    flex: 1;
+  }
+  .sub {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 0 28px 12px;
+    flex-wrap: wrap;
+    font-size: 13px;
+    color: var(--ink-2);
+  }
+  .sub label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .filters select {
+    max-width: 220px;
+  }
+</style>
