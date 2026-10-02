@@ -153,6 +153,8 @@ pub struct UsageEvent {
     pub speed: Option<String>,
     pub service_tier: Option<String>,
     pub inference_geo: Option<String>,
+    /// Provider request id (Anthropic `req_…`) — links a captured event to its log copy.
+    pub request_id: Option<String>,
     pub accuracy: Accuracy,
     /// Parser that produced the record (`claude_code_jsonl`, `codex_rollout`, …).
     pub source: String,

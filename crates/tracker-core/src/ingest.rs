@@ -3,6 +3,7 @@
 //! (truncation, replacement, move) cannot double count because every record has a global key.
 
 use crate::discovery::DiscoveredFile;
+use crate::capture::statusline;
 use crate::sources::{claude_code, claude_plan, codex, cowork_audit, ParseOutput, ParserKind};
 use crate::store::Store;
 use serde::Serialize;
@@ -95,6 +96,7 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<Vec<S
         ParserKind::CoworkAudit => cowork_audit::parse_file(&f.path, offset),
         ParserKind::ClaudePlanHistory => claude_plan::parse_file(&f.path),
         ParserKind::CodexRollout => codex::parse_file(&f.path, offset, &state),
+        ParserKind::StatuslineCapture => statusline::parse_file(&f.path, offset),
     }
     .map_err(|e| e.to_string())?;
 

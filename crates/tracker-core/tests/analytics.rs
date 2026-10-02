@@ -42,6 +42,11 @@ fn all_time_report_prices_every_known_model_and_flags_unknown_ones() {
     assert_eq!(r.unpriced_models, vec!["codex-auto-review".to_string()]);
     assert_eq!(r.totals.unpriced_tokens, 110);
     assert_eq!(r.totals.unpriced_events, 1);
+    // net cache saving: reads at (input − read) minus write premiums, per model (hand-computed)
+    assert!(close(r.totals.cache_savings_usd, 0.0197275), "{}", r.totals.cache_savings_usd);
+    let day1 = &r.daily[0];
+    assert_eq!(day1.cache_read, 2000 + 3000 + 600 + 1400 + 800);
+    assert_eq!(day1.prompt_tokens, day1.cache_read + 5 + 3 + 400 + 500 + 100 + 500 + 200 + 1000 + 200 + 100);
 
     // local days 2026-09-01 … 2026-09-03 (UTC+3)
     let days: Vec<&str> = r.daily.iter().map(|d| d.date.as_str()).collect();
@@ -116,6 +121,7 @@ fn ev(key: &str, ts: i64, tool: Tool, model: &str, project: &str, input: u64, ou
         speed: None,
         service_tier: None,
         inference_geo: None,
+        request_id: None,
         accuracy: Accuracy::Exact,
         source: "test".into(),
     }

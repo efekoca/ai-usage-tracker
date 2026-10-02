@@ -75,10 +75,23 @@ const MIGRATIONS: &[&str] = &[
         value TEXT NOT NULL
     );
     "#,
+    // v2: provider request ids link live-captured events to their log copies. Claude
+    // transcripts are re-read once so existing rows get their request id.
+    r#"
+    ALTER TABLE usage_event ADD COLUMN request_id TEXT;
+    CREATE INDEX usage_event_req ON usage_event(request_id);
+    CREATE INDEX usage_event_session ON usage_event(session_id);
+    DELETE FROM file_checkpoint WHERE parser IN ('claude_code_jsonl', 'cowork_jsonl');
+    "#,
 ];
 
+/// A captured row is hidden when the same request also exists as an exact (log) row.
+const NOT_SUPERSEDED: &str = "NOT (u.accuracy = 'captured' AND u.request_id IS NOT NULL AND EXISTS (
+        SELECT 1 FROM usage_event x WHERE x.request_id = u.request_id AND x.accuracy = 'exact'))";
+
 const EVENT_COLUMNS: &str = "key, ts_ms, tool, client, model, project_id, session_id, input, cache_read, cache_write,
-    cache_write_1h, output, reasoning, request_input, web_search, speed, service_tier, inference_geo, accuracy, source";
+    cache_write_1h, output, reasoning, request_input, web_search, speed, service_tier, inference_geo, accuracy, source,
+    request_id";
 
 /// Merge rule for a repeated event key: field-wise maximum (streaming duplicates), earliest
 /// timestamp, and a log-derived (exact) copy upgrades a captured one.
@@ -93,6 +106,7 @@ const UPSERT_EVENT_TAIL: &str = "ON CONFLICT(key) DO UPDATE SET
     request_input = MAX(request_input, excluded.request_input),
     web_search = MAX(web_search, excluded.web_search),
     project_id = COALESCE(project_id, excluded.project_id),
+    request_id = COALESCE(request_id, excluded.request_id),
     accuracy = CASE WHEN excluded.accuracy = 'exact' THEN 'exact' ELSE accuracy END";
 
 pub struct Store {
@@ -203,9 +217,11 @@ impl Store {
     /// Events with `from_ms <= ts < to_ms`.
     pub fn events_between(&self, from_ms: i64, to_ms: i64) -> Result<Vec<EventRow>> {
         let mut st = self.conn.prepare_cached(
-            "SELECT ts_ms, tool, client, model, project_id, session_id, input, cache_read, cache_write,
-                    cache_write_1h, output, reasoning, request_input, web_search, speed, inference_geo, accuracy
-             FROM usage_event WHERE ts_ms >= ?1 AND ts_ms < ?2 ORDER BY ts_ms",
+            &format!(
+                "SELECT ts_ms, tool, client, model, project_id, session_id, input, cache_read, cache_write,
+                        cache_write_1h, output, reasoning, request_input, web_search, speed, inference_geo, accuracy
+                 FROM usage_event u WHERE ts_ms >= ?1 AND ts_ms < ?2 AND {NOT_SUPERSEDED} ORDER BY ts_ms"
+            ),
         )?;
         let rows = st.query_map(params![from_ms, to_ms], |r| {
             let tool: String = r.get(1)?;
@@ -314,6 +330,8 @@ impl Store {
             if theirs == 0 || theirs as usize > MIGRATIONS.len() {
                 return Err(rusqlite::Error::InvalidQuery);
             }
+            // backups made before v2 have no request_id column
+            let their_req = if theirs >= 2 { "e.request_id" } else { "NULL" };
             let tx = self.conn.unchecked_transaction()?;
             tx.execute(
                 "INSERT INTO project(path, name, hidden) SELECT path, name, hidden FROM other.project WHERE true
@@ -325,7 +343,7 @@ impl Store {
                     "INSERT INTO usage_event({EVENT_COLUMNS})
                      SELECT e.key, e.ts_ms, e.tool, e.client, e.model, p.id, e.session_id, e.input, e.cache_read,
                             e.cache_write, e.cache_write_1h, e.output, e.reasoning, e.request_input, e.web_search,
-                            e.speed, e.service_tier, e.inference_geo, e.accuracy, e.source
+                            e.speed, e.service_tier, e.inference_geo, e.accuracy, e.source, {their_req}
                      FROM other.usage_event e
                      LEFT JOIN other.project op ON op.id = e.project_id
                      LEFT JOIN main.project p ON p.path = op.path
@@ -403,11 +421,23 @@ impl StoreTx<'_> {
         for e in events {
             let pid = match &e.project_path {
                 Some(p) if !p.is_empty() => Some(self.project_id(p)?),
-                _ => None,
+                // captured events carry no working directory: borrow the project of a logged
+                // event from the same session, if any
+                _ => match &e.session_id {
+                    Some(s) => self
+                        .tx
+                        .query_row(
+                            "SELECT project_id FROM usage_event WHERE session_id = ?1 AND project_id IS NOT NULL LIMIT 1",
+                            [s],
+                            |r| r.get(0),
+                        )
+                        .optional()?,
+                    None => None,
+                },
             };
             let mut st = self.tx.prepare_cached(&format!(
                 "INSERT INTO usage_event({EVENT_COLUMNS})
-                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)
                  {UPSERT_EVENT_TAIL}"
             ))?;
             st.execute(params![
@@ -431,6 +461,7 @@ impl StoreTx<'_> {
                 e.inference_geo,
                 e.accuracy.as_str(),
                 e.source,
+                e.request_id,
             ])?;
         }
         Ok(())

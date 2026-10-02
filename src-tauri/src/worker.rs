@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
-use tracker_core::discovery::{self, Env, SourceId};
+use tracker_core::capture::statusline;
+use tracker_core::discovery::{self, DiscoveredFile, Env, SourceId};
+use tracker_core::sources::ParserKind;
 use tracker_core::ingest::ingest;
 use tracker_core::store::Store;
 
@@ -110,7 +112,13 @@ fn scan(app: &AppHandle, store: &mut Store) {
         return; // nothing is read until the user has confirmed sources in onboarding
     }
     let enabled: HashSet<SourceId> = settings.enabled_sources.iter().copied().collect();
-    let files = discovery::enumerate_files(&Env::from_system(), &settings.extra_paths, &enabled);
+    let mut files = discovery::enumerate_files(&Env::from_system(), &settings.extra_paths, &enabled);
+    // this app's own status-line capture (older rotated file first)
+    for p in [statusline::rotated_file(&state.data_dir), statusline::capture_file(&state.data_dir)] {
+        if p.is_file() {
+            files.push(DiscoveredFile { file_id: discovery::file_identity(&p), path: p, parser: ParserKind::StatuslineCapture, source: SourceId::ClaudeCode });
+        }
+    }
     {
         let mut st = state.status.lock().unwrap();
         st.running = true;
@@ -182,6 +190,7 @@ fn watch_roots(env: &Env, s: &Settings) -> Vec<(PathBuf, bool)> {
             v.push((d.clone(), false)); // only for plan-usage-history.json
         }
     }
+    v.push((statusline::capture_dir(&crate_data_dir()), false));
     if on(SourceId::Codex) {
         for h in discovery::codex_homes(env, &s.extra_paths) {
             v.push((h.join("sessions"), true));
@@ -192,6 +201,10 @@ fn watch_roots(env: &Env, s: &Settings) -> Vec<(PathBuf, bool)> {
     v.sort();
     v.dedup();
     v
+}
+
+fn crate_data_dir() -> PathBuf {
+    tracker_core::store::default_data_dir().unwrap_or_default()
 }
 
 fn is_relevant(p: &Path) -> bool {

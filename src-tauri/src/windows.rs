@@ -67,6 +67,15 @@ pub fn accent_color() -> Option<String> {
     }
 }
 
+/// Creating a WebView window waits for the event loop. When the caller *is* the event loop
+/// (synchronous IPC commands, menu and tray handlers) that wait deadlocks on Windows, so
+/// window creation always happens on a short-lived helper thread.
+fn off_main(f: impl FnOnce() + Send + 'static) {
+    if let Err(e) = std::thread::Builder::new().name("window-builder".into()).spawn(f) {
+        log::error!("cannot spawn window builder: {e}");
+    }
+}
+
 // ------------------------------------------------------------------ main window
 
 pub fn show_main(app: &AppHandle) {
@@ -75,6 +84,14 @@ pub fn show_main(app: &AppHandle) {
         let _ = w.show();
         let _ = w.set_focus();
         return;
+    }
+    let app = app.clone();
+    off_main(move || build_main(&app));
+}
+
+fn build_main(app: &AppHandle) {
+    if app.get_webview_window(MAIN).is_some() {
+        return; // a concurrent request already built it
     }
     let mut b = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::App("index.html".into()))
         .title("AI Usage Tracker")
@@ -197,13 +214,23 @@ pub fn apply_widget_settings(app: &AppHandle, s: &Settings) {
         }
         return;
     }
-    if let Some(w) = ensure_widget(app, s) {
-        let (wd, ht) = widget_size(&s.widget.size);
-        let _ = w.set_size(tauri::LogicalSize::new(wd, ht));
+    // the widget page sizes its own window to fit its content
+    let show = |w: &WebviewWindow, s: &Settings| {
         if !FULLSCREEN_HIDDEN.load(Ordering::SeqCst) {
             let _ = w.show();
         }
-        let _ = w.set_always_on_top(true);
+        let _ = w.set_always_on_top(s.widget.always_on_top);
+    };
+    match app.get_webview_window(WIDGET) {
+        Some(w) => show(&w, s),
+        None => {
+            let (app, s) = (app.clone(), s.clone());
+            off_main(move || {
+                if let Some(w) = ensure_widget(&app, &s) {
+                    show(&w, &s);
+                }
+            });
+        }
     }
 }
 
@@ -279,6 +306,11 @@ pub fn handle_menu(app: &AppHandle, id: &str) {
                 s.widget.opacity = v;
             } else if let Some(v) = other.strip_prefix("w:size:") {
                 s.widget.size = v.to_owned();
+                s.widget.scale = match v {
+                    "s" => 0.85,
+                    "l" => 1.25,
+                    _ => 1.0,
+                };
             } else if let Some(corner) = other.strip_prefix("w:pos:") {
                 if let Some(w) = app.get_webview_window(WIDGET) {
                     place_widget(&w, corner);

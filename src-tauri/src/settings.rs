@@ -8,22 +8,145 @@ use tracker_core::store::Store;
 
 const KEY: &str = "settings.v1";
 
+/// One line/block the widget can show, in the user's order.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WidgetItem {
+    /// `primary` (big number), `cost`, `limit_five_hour`, `limit_seven_day`, `tools`,
+    /// `week_cost`, `month_cost`, `week_tokens`, `updated`
+    pub kind: String,
+    pub enabled: bool,
+}
+
+fn default_items() -> Vec<WidgetItem> {
+    [
+        ("primary", true),
+        ("cost", true),
+        ("limit_five_hour", true),
+        ("limit_seven_day", true),
+        ("tools", false),
+        ("week_tokens", false),
+        ("week_cost", false),
+        ("month_cost", false),
+        ("updated", false),
+    ]
+    .into_iter()
+    .map(|(k, e)| WidgetItem { kind: k.into(), enabled: e })
+    .collect()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WidgetSettings {
     pub visible: bool,
     /// Background opacity 0.3–1.0.
     pub opacity: f64,
-    /// "s" | "m" | "l"
+    /// Size preset kept for the context menu: "s" | "m" | "l" (maps to `scale`).
     pub size: String,
+    /// Free zoom factor 0.6–2.0; the window follows the content size.
+    pub scale: f64,
     pub x: Option<i32>,
     pub y: Option<i32>,
     pub auto_hide_fullscreen: bool,
+    /// "horizontal" | "vertical" | "line"
+    pub layout: String,
+    pub items: Vec<WidgetItem>,
+    /// Which providers to show; empty = all enabled ones.
+    pub providers: Vec<String>,
+    /// Range of the big number: "today" | "days7" | "month1"
+    pub primary_period: String,
+    /// "tokens" | "cost"
+    pub primary_metric: String,
+    /// "ring" | "bar" | "text"
+    pub limit_style: String,
+    /// "system" | "light" | "dark"
+    pub theme: String,
+    /// `#rrggbb`, or empty for the system accent.
+    pub accent: String,
+    pub corner_radius: f64,
+    pub border: bool,
+    pub shadow: bool,
+    pub show_labels: bool,
+    pub show_reset_time: bool,
+    pub warn_at: f64,
+    pub high_at: f64,
+    pub always_on_top: bool,
+    pub lock_position: bool,
+    /// "open_dashboard" | "none"
+    pub click_action: String,
 }
 
 impl Default for WidgetSettings {
     fn default() -> Self {
-        WidgetSettings { visible: true, opacity: 0.85, size: "m".into(), x: None, y: None, auto_hide_fullscreen: true }
+        WidgetSettings {
+            visible: true,
+            opacity: 0.85,
+            size: "m".into(),
+            scale: 1.0,
+            x: None,
+            y: None,
+            auto_hide_fullscreen: true,
+            layout: "horizontal".into(),
+            items: default_items(),
+            providers: Vec::new(),
+            primary_period: "today".into(),
+            primary_metric: "tokens".into(),
+            limit_style: "ring".into(),
+            theme: "system".into(),
+            accent: String::new(),
+            corner_radius: 14.0,
+            border: true,
+            shadow: false,
+            show_labels: true,
+            show_reset_time: false,
+            warn_at: 70.0,
+            high_at: 90.0,
+            always_on_top: true,
+            lock_position: false,
+            click_action: "open_dashboard".into(),
+        }
+    }
+}
+
+impl WidgetSettings {
+    /// Fills in items added by newer versions and clamps values.
+    pub fn normalize(&mut self) {
+        for d in default_items() {
+            if !self.items.iter().any(|i| i.kind == d.kind) {
+                self.items.push(WidgetItem { enabled: false, ..d });
+            }
+        }
+        self.items.retain(|i| default_items().iter().any(|d| d.kind == i.kind));
+        self.opacity = self.opacity.clamp(0.3, 1.0);
+        self.scale = if self.scale.is_finite() { self.scale.clamp(0.6, 2.0) } else { 1.0 };
+        self.corner_radius = self.corner_radius.clamp(0.0, 28.0);
+        self.warn_at = self.warn_at.clamp(1.0, 100.0);
+        self.high_at = self.high_at.clamp(self.warn_at, 100.0);
+    }
+}
+
+/// Opt-in live capture switches (all off by default).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CaptureSettings {
+    pub codex_poll: bool,
+    pub codex_poll_minutes: u64,
+    /// Explicit path to `codex.exe`; empty = auto-detect.
+    pub codex_path: String,
+    pub statusline: bool,
+    pub otel: bool,
+    pub otel_port: u16,
+}
+
+impl Default for CaptureSettings {
+    fn default() -> Self {
+        CaptureSettings {
+            codex_poll: false,
+            codex_poll_minutes: 5,
+            codex_path: String::new(),
+            statusline: false,
+            otel: false,
+            otel_port: tracker_core::capture::otlp::DEFAULT_PORT,
+        }
     }
 }
 
@@ -47,6 +170,7 @@ pub struct Settings {
     /// Manual USD → `currency` rate (no network lookup).
     pub fx_rate: f64,
     pub widget: WidgetSettings,
+    pub capture: CaptureSettings,
     pub autostart: bool,
     /// Optional network use: allow fetching a newer pricing/plan file. Off by default.
     pub allow_config_updates: bool,
@@ -68,6 +192,7 @@ impl Default for Settings {
             currency: "USD".into(),
             fx_rate: 1.0,
             widget: WidgetSettings::default(),
+            capture: CaptureSettings::default(),
             autostart: false,
             allow_config_updates: false,
             primary_metric: "tokens".into(),
@@ -78,17 +203,22 @@ impl Default for Settings {
 impl Settings {
     pub fn load(store: &Store) -> Settings {
         match store.setting(KEY) {
-            Ok(Some(s)) => serde_json::from_str(&s).unwrap_or_else(|e| {
-                log::warn!("settings unreadable, using defaults: {e}");
-                Settings::default()
-            }),
+            Ok(Some(s)) => serde_json::from_str::<Settings>(&s)
+                .map(|mut s| {
+                    s.widget.normalize();
+                    s
+                })
+                .unwrap_or_else(|e| {
+                    log::warn!("settings unreadable, using defaults: {e}");
+                    Settings::default()
+                }),
             _ => Settings::default(),
         }
     }
 
     pub fn save(&self, store: &Store) -> Result<(), String> {
         let mut s = self.clone();
-        s.widget.opacity = s.widget.opacity.clamp(0.3, 1.0);
+        s.widget.normalize();
         if !(s.fx_rate.is_finite() && s.fx_rate > 0.0) {
             s.fx_rate = 1.0;
         }

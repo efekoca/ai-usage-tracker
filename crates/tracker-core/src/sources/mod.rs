@@ -20,6 +20,8 @@ pub enum ParserKind {
     CoworkAudit,
     ClaudePlanHistory,
     CodexRollout,
+    /// This app's own Claude Code status-line capture file.
+    StatuslineCapture,
 }
 
 impl ParserKind {
@@ -30,6 +32,7 @@ impl ParserKind {
             ParserKind::CoworkAudit => "cowork_audit",
             ParserKind::ClaudePlanHistory => "claude_plan_history",
             ParserKind::CodexRollout => "codex_rollout",
+            ParserKind::StatuslineCapture => "statusline_capture",
         }
     }
     /// Whole-file JSON documents are re-read completely when they change;

@@ -64,6 +64,10 @@ pub fn get_settings(state: State<AppState>) -> Settings {
 #[tauri::command]
 pub fn save_settings(app: AppHandle, state: State<AppState>, settings: Settings) -> Res<Settings> {
     let old = state.settings.read().unwrap().clone();
+    let mut settings = settings;
+    // capture switches change only through set_capture (they edit files outside the app)
+    settings.capture = old.capture.clone();
+    settings.widget.normalize();
     settings.save(&state.store.lock().unwrap())?;
     *state.settings.write().unwrap() = settings.clone();
 
@@ -201,14 +205,57 @@ pub struct WidgetLimit {
     resets_at: Option<i64>,
 }
 
-#[derive(Serialize)]
-pub struct WidgetData {
-    total_tokens: u64,
+#[derive(Serialize, Default)]
+pub struct WidgetPeriod {
+    tokens: u64,
     cost_usd: f64,
     has_unpriced: bool,
     tools: Vec<WidgetTool>,
+}
+
+#[derive(Serialize)]
+pub struct WidgetData {
+    today: WidgetPeriod,
+    days7: WidgetPeriod,
+    month1: WidgetPeriod,
     limits: Vec<WidgetLimit>,
     providers: Vec<Provider>,
+    updated_ms: i64,
+}
+
+/// Totals per tool for a period, only for the enabled providers.
+fn widget_period(
+    store: &tracker_core::store::Store,
+    book: &PriceBook,
+    period: Period,
+    now: i64,
+    providers: &HashSet<Provider>,
+) -> Res<WidgetPeriod> {
+    let range = analytics::period_range(period, &chrono::Local, now, None);
+    let mut out = WidgetPeriod::default();
+    let mut per: std::collections::BTreeMap<&'static str, WidgetTool> = Default::default();
+    for e in store.events_between(range.from_ms, range.to_ms).map_err(err)? {
+        if !providers.contains(&e.tool.provider()) {
+            continue;
+        }
+        let cost = book.cost(&tracker_core::pricing::CostInput {
+            model: &e.model,
+            tokens: &e.tokens,
+            request_input: e.request_input,
+            web_search_requests: e.web_search,
+            speed: e.speed.as_deref(),
+            inference_geo: e.inference_geo.as_deref(),
+        });
+        let c = cost.map(|c| c.total()).unwrap_or(0.0);
+        out.has_unpriced |= cost.is_none();
+        out.tokens += e.tokens.total();
+        out.cost_usd += c;
+        let t = per.entry(e.tool.as_str()).or_insert(WidgetTool { tool: e.tool, tokens: 0, cost_usd: 0.0 });
+        t.tokens += e.tokens.total();
+        t.cost_usd += c;
+    }
+    out.tools = per.into_values().collect();
+    Ok(out)
 }
 
 #[tauri::command]
@@ -218,29 +265,21 @@ pub fn get_widget_data(state: State<AppState>) -> Res<WidgetData> {
     let store = state.store.lock().unwrap();
     let book = state.book.read().unwrap();
     let now = now_ms();
-    let r = analytics::report(&store, &book, analytics::today(&chrono::Local, now), &Filter::default(), &chrono::Local)
-        .map_err(err)?;
-    let tools = r
-        .by_tool
-        .iter()
-        .filter_map(|g| Tool::parse(&g.key).map(|t| WidgetTool { tool: t, tokens: g.totals.total_tokens, cost_usd: g.totals.cost_usd }))
-        .filter(|t| providers.contains(&t.tool.provider()))
-        .collect();
     let limits = analytics::limits_view(&store, &book, now, &settings.thresholds)
         .map_err(err)?
         .into_iter()
         .filter(|l| providers.contains(&l.provider) && (l.window == "five_hour" || l.window == "seven_day"))
         .map(|l| WidgetLimit { provider: l.provider, window: l.window, used_pct: l.used_pct, state: l.state, accuracy: l.accuracy, resets_at: l.resets_at })
         .collect();
-    let mut provs: Vec<Provider> = providers.into_iter().collect();
+    let mut provs: Vec<Provider> = providers.iter().copied().collect();
     provs.sort_by_key(|p| p.as_str());
     Ok(WidgetData {
-        total_tokens: r.totals.total_tokens,
-        cost_usd: r.totals.cost_usd,
-        has_unpriced: r.totals.unpriced_events > 0,
-        tools,
+        today: widget_period(&store, &book, Period::Today, now, &providers)?,
+        days7: widget_period(&store, &book, Period::Days7, now, &providers)?,
+        month1: widget_period(&store, &book, Period::Month1, now, &providers)?,
         limits,
         providers: provs,
+        updated_ms: state.status.lock().unwrap().last_scan_ms.unwrap_or(now),
     })
 }
 
@@ -419,6 +458,19 @@ pub fn set_widget_visible(app: AppHandle, state: State<AppState>, visible: bool)
 #[tauri::command]
 pub fn widget_menu(app: AppHandle) {
     windows::popup_widget_menu(&app);
+}
+
+// ------------------------------------------------------------------ live capture
+
+#[tauri::command]
+pub fn capture_status(app: AppHandle) -> crate::capture::CaptureStatus {
+    crate::capture::status(&app)
+}
+
+/// Async: enabling Codex runs one limit read (up to ~20 s) and must not block the UI thread.
+#[tauri::command]
+pub async fn set_capture(app: AppHandle, kind: String, enabled: bool) -> Res<String> {
+    crate::capture::set(&app, &kind, enabled)
 }
 
 #[tauri::command]

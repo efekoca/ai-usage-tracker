@@ -122,6 +122,7 @@ pub(crate) fn usage_event(v: &Value, ctx: &ClaudeCtx) -> Option<UsageEvent> {
         speed: str_at(&usage, "speed").map(str::to_owned),
         service_tier: str_at(&usage, "service_tier").map(str::to_owned),
         inference_geo: str_at(&usage, "inference_geo").map(str::to_owned),
+        request_id: str_at(v, "requestId").map(str::to_owned),
         accuracy: Accuracy::Exact,
         source: ctx.source.to_owned(),
     })

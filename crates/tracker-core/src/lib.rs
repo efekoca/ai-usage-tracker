@@ -2,6 +2,7 @@
 //! and incremental ingestion. Independent of the UI shell so it can be tested in isolation.
 
 pub mod analytics;
+pub mod capture;
 pub mod discovery;
 pub mod export;
 pub mod ingest;

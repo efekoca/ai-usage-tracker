@@ -129,6 +129,7 @@ fn event(st: &State, path: &Path, offset: u64, ts_ms: i64, last: &Value) -> Usag
         speed: None,
         service_tier: None,
         inference_geo: None,
+        request_id: None,
         accuracy: Accuracy::Exact,
         source: SOURCE.into(),
     }

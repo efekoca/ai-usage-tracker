@@ -105,11 +105,14 @@ pub struct Totals {
     pub cost_usd: f64,
     pub unpriced_events: u64,
     pub unpriced_tokens: u64,
+    /// Net API-equivalent saving from prompt caching (reads minus write premium), priced part.
+    pub cache_savings_usd: f64,
 }
 
 impl Totals {
-    fn add(&mut self, e: &EventRow, cost: Option<&Cost>) {
+    fn add(&mut self, e: &EventRow, cost: Option<&Cost>, savings: f64) {
         self.events += 1;
+        self.cache_savings_usd += savings;
         self.tokens.add(&e.tokens);
         self.total_tokens += e.tokens.total();
         match cost {
@@ -145,6 +148,11 @@ pub struct DayPoint {
     pub by_tool: BTreeMap<String, u64>,
     /// API-equivalent cost per tool.
     pub cost_by_tool: BTreeMap<String, f64>,
+    /// Prompt tokens (uncached input + cache read + cache write) and the cached part.
+    pub prompt_tokens: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+    pub cache_savings_usd: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -171,15 +179,23 @@ pub struct Report {
     pub by_accuracy: BTreeMap<String, u64>,
 }
 
-fn cost_of(book: &PriceBook, e: &EventRow) -> Option<Cost> {
-    book.cost(&CostInput {
+fn input_of(e: &EventRow) -> CostInput<'_> {
+    CostInput {
         model: &e.model,
         tokens: &e.tokens,
         request_input: e.request_input,
         web_search_requests: e.web_search,
         speed: e.speed.as_deref(),
         inference_geo: e.inference_geo.as_deref(),
-    })
+    }
+}
+
+fn cost_of(book: &PriceBook, e: &EventRow) -> Option<Cost> {
+    book.cost(&input_of(e))
+}
+
+fn savings_of(book: &PriceBook, e: &EventRow) -> f64 {
+    book.cache_savings(&input_of(e)).unwrap_or(0.0)
 }
 
 fn sorted_groups(map: HashMap<String, (String, bool, Totals)>) -> Vec<Group> {
@@ -207,9 +223,10 @@ pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filte
 
     for e in events.iter().filter(|e| filter.matches(e)) {
         let c = cost_of(book, e);
-        totals.add(e, c.as_ref());
+        let sv = savings_of(book, e);
+        totals.add(e, c.as_ref(), sv);
         let add = |m: &mut HashMap<String, (String, bool, Totals)>, key: String, label: String, hidden: bool| {
-            m.entry(key).or_insert_with(|| (label, hidden, Totals::default())).2.add(e, c.as_ref());
+            m.entry(key).or_insert_with(|| (label, hidden, Totals::default())).2.add(e, c.as_ref(), sv);
         };
         add(&mut by_tool, e.tool.as_str().into(), e.tool.as_str().into(), false);
         let client = e.client.clone().unwrap_or_else(|| "unknown".into());
@@ -226,7 +243,7 @@ pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filte
 
         if let Some(local) = tz.timestamp_millis_opt(e.ts_ms).single() {
             let d = days.entry(local.date_naive()).or_default();
-            d.0.add(e, c.as_ref());
+            d.0.add(e, c.as_ref(), sv);
             *d.1.entry(e.tool.as_str().to_owned()).or_insert(0) += e.tokens.total();
             *d.2.entry(e.tool.as_str().to_owned()).or_insert(0.0) += c.as_ref().map(Cost::total).unwrap_or(0.0);
             heat[local.weekday().num_days_from_monday() as usize][local.hour() as usize] += e.tokens.total();
@@ -237,7 +254,7 @@ pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filte
     let prev_range = range.previous();
     let mut previous = Totals::default();
     for e in store.events_between(prev_range.from_ms, prev_range.to_ms)?.iter().filter(|e| filter.matches(e)) {
-        previous.add(e, cost_of(book, e).as_ref());
+        previous.add(e, cost_of(book, e).as_ref(), savings_of(book, e));
     }
 
     // dense daily series over the whole range
@@ -247,7 +264,18 @@ pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filte
     let mut d = first;
     while d <= last {
         let (t, by_tool, cost_by_tool) = days.remove(&d).unwrap_or_default();
-        daily.push(DayPoint { date: d.to_string(), tokens: t.total_tokens, cost_usd: t.cost_usd, events: t.events, by_tool, cost_by_tool });
+        daily.push(DayPoint {
+            date: d.to_string(),
+            tokens: t.total_tokens,
+            cost_usd: t.cost_usd,
+            events: t.events,
+            by_tool,
+            cost_by_tool,
+            prompt_tokens: t.tokens.input + t.tokens.cache_read + t.tokens.cache_write,
+            cache_read: t.tokens.cache_read,
+            cache_write: t.tokens.cache_write,
+            cache_savings_usd: t.cache_savings_usd,
+        });
         d = d + Days::new(1);
     }
     let days_in_range = daily.len() as u32;
@@ -481,8 +509,9 @@ fn window_usage(
     let mut per: HashMap<Option<i64>, Totals> = HashMap::new();
     for e in store.events_between(from_ms, to_ms + 1)?.iter().filter(|e| tools.contains(&e.tool)) {
         let c = cost_of(book, e);
-        total.add(e, c.as_ref());
-        per.entry(e.project_id).or_default().add(e, c.as_ref());
+        let sv = savings_of(book, e);
+        total.add(e, c.as_ref(), sv);
+        per.entry(e.project_id).or_default().add(e, c.as_ref(), sv);
     }
     let by_cost = total.cost_usd > 0.0;
     let mut shares: Vec<ProjectShare> = per

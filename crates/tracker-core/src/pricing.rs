@@ -180,6 +180,30 @@ impl PriceBook {
     }
 }
 
+impl PriceBook {
+    /// Net API-equivalent saving from prompt caching for one request: cache reads billed below
+    /// the input price, minus the premium paid for cache writes. Negative when writes were
+    /// never re-used enough to pay off. `None` for unpriced models.
+    pub fn cache_savings(&self, c: &CostInput) -> Option<f64> {
+        let p = self.lookup(c.model)?;
+        let rates = match &p.long_context {
+            Some(lc) if c.request_input > lc.threshold => &lc.rates,
+            _ => &p.rates,
+        };
+        let mult = c.speed.and_then(|s| p.speed_multipliers.get(s)).copied().unwrap_or(1.0)
+            * c.inference_geo.and_then(|g| p.geo_multipliers.get(g)).copied().unwrap_or(1.0);
+        let per = |tokens: u64, rate: f64| tokens as f64 * rate / 1_000_000.0 * mult;
+        let read_rate = rates.cache_read.unwrap_or(rates.input);
+        let cw5 = rates.cache_write_5m.unwrap_or(rates.input);
+        let cw1 = rates.cache_write_1h.unwrap_or(cw5);
+        let t = c.tokens;
+        let w1h = t.cache_write_1h.min(t.cache_write);
+        let saved = per(t.cache_read, rates.input - read_rate);
+        let premium = per(t.cache_write - w1h, cw5 - rates.input) + per(w1h, cw1 - rates.input);
+        Some(saved - premium)
+    }
+}
+
 fn strip_date_suffix(m: &str) -> Option<&str> {
     let (head, tail) = m.rsplit_once('-')?;
     (tail.len() == 8 && tail.bytes().all(|b| b.is_ascii_digit())).then_some(head)
@@ -264,6 +288,23 @@ mod tests {
             .cost(&CostInput { model: "claude-sonnet-5", tokens: &t, request_input: 0, web_search_requests: 3, speed: None, inference_geo: None })
             .unwrap();
         assert!((c.web_search - 0.03).abs() < 1e-12);
+    }
+
+    #[test]
+    fn cache_savings_net_out_the_write_premium() {
+        let b = PriceBook::default_book();
+        // opus 5.5: input 4, read 0.2, 5m write 5, 1h write 8 ($/1M)
+        let t = tokens(0, 1_000_000, 1_000_000, 0, 0);
+        let s = b
+            .cache_savings(&CostInput { model: "claude-opus-5-5", tokens: &t, request_input: 0, web_search_requests: 0, speed: None, inference_geo: None })
+            .unwrap();
+        assert!((s - (3.8 - 1.0)).abs() < 1e-9, "{s}");
+        let t = tokens(0, 0, 1_000_000, 1_000_000, 0);
+        let s = b
+            .cache_savings(&CostInput { model: "claude-opus-5-5", tokens: &t, request_input: 0, web_search_requests: 0, speed: None, inference_geo: None })
+            .unwrap();
+        assert!((s + 4.0).abs() < 1e-9, "{s}"); // a 1h write nobody read: pure premium
+        assert!(b.cache_savings(&CostInput { model: "nope", tokens: &t, request_input: 0, web_search_requests: 0, speed: None, inference_geo: None }).is_none());
     }
 
     #[test]

@@ -1,5 +1,6 @@
 //! Process-wide state shared by commands, the worker thread and windows.
 
+use crate::capture::CaptureRuntime;
 use crate::settings::Settings;
 use crate::worker::Worker;
 use serde::Serialize;
@@ -32,6 +33,7 @@ pub struct AppState {
     pub settings: RwLock<Settings>,
     pub status: Mutex<ScanStatus>,
     pub worker: Worker,
+    pub capture: CaptureRuntime,
     pub quitting: AtomicBool,
     pub started_hidden: bool,
 }

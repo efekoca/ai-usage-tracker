@@ -1,6 +1,7 @@
 //! AI Usage Tracker desktop shell: wires tracker-core to a tray app with a dashboard window
 //! and an always-on-top widget.
 
+mod capture;
 mod commands;
 mod settings;
 mod state;
@@ -14,6 +15,18 @@ use std::sync::{Mutex, RwLock};
 use tauri::{Manager, RunEvent};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 use tracker_core::store::Store;
+
+/// Command-line modes that must not start the GUI (or the single-instance check).
+pub fn cli_mode() -> Option<i32> {
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--statusline") {
+        return Some(capture::statusline_main());
+    }
+    if args.iter().any(|a| a == "--revert-capture") {
+        return Some(capture::revert_all_main());
+    }
+    None
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -51,6 +64,7 @@ pub fn run() {
                 settings: RwLock::new(settings.clone()),
                 status: Mutex::new(ScanStatus::default()),
                 worker,
+                capture: capture::CaptureRuntime::new(),
                 quitting: AtomicBool::new(false),
                 started_hidden,
             });
@@ -61,6 +75,7 @@ pub fn run() {
             }
             windows::apply_widget_settings(app.handle(), &settings);
             windows::start_fullscreen_watch(app.handle().clone());
+            capture::start(app.handle());
             log::info!("started v{}", app.package_info().version);
             Ok(())
         })
@@ -94,6 +109,8 @@ pub fn run() {
             commands::set_widget_visible,
             commands::widget_menu,
             commands::quit_app,
+            commands::capture_status,
+            commands::set_capture,
         ])
         .build(tauri::generate_context!())
         .expect("error while building AI Usage Tracker");
