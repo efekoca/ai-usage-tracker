@@ -283,3 +283,21 @@ fn archive_survives_reopen_and_backup_and_wipe() {
     assert_eq!(store.event_count().unwrap(), 0);
     assert_eq!(store.limit_count().unwrap(), 0);
 }
+
+#[test]
+fn a_session_that_changes_directory_stays_one_project() {
+    let m = machine();
+    let p = m.home.join(".claude/projects/C--Work-site/s.jsonl");
+    fs::create_dir_all(p.parent().unwrap()).unwrap();
+    let line = |id: &str, cwd: &str| {
+        format!(
+            r#"{{"type":"assistant","sessionId":"s-cd","timestamp":"2026-09-05T10:00:00.000Z","cwd":"{cwd}","message":{{"id":"{id}","model":"claude-sonnet-5","usage":{{"input_tokens":1,"output_tokens":1}}}}}}"#
+        )
+    };
+    fs::write(&p, format!("{}\n{}\n", line("msg_cd1", "C:/Work/Site"), line("msg_cd2", "C:/Work/Site/src/ui"))).unwrap();
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &m.env);
+    let names: Vec<(String, String)> = store.projects().unwrap().into_iter().map(|p| (p.name, p.path)).collect();
+    assert!(names.contains(&("Site".to_string(), "C:/Work/Site".to_string())), "{names:?}");
+    assert!(!names.iter().any(|(n, _)| n == "ui"));
+}

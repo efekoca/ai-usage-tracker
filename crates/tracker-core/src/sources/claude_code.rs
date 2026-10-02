@@ -25,6 +25,9 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
     let (lines, next) = read_jsonl_from(path, offset)?;
     let mut out = ParseOutput { next_offset: next, ..Default::default() };
     let mut max_version = str_at(state, "max_version").map(str::to_owned);
+    // The session's first working directory is its project; later lines can carry
+    // sub-directories the agent cd'd into, which would split one project into many.
+    let mut root_cwd = str_at(state, "root_cwd").map(str::to_owned);
     let mut typed = 0u64;
     for line in &lines {
         out.lines_total += 1;
@@ -40,8 +43,14 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
         {
             max_version = Some(ver.to_owned());
         }
+        if root_cwd.is_none() {
+            root_cwd = str_at(v, "cwd").filter(|s| !s.is_empty()).map(str::to_owned);
+        }
         let mut recognised = false;
-        if let Some(ev) = usage_event(v, ctx) {
+        if let Some(mut ev) = usage_event(v, ctx) {
+            if root_cwd.is_some() {
+                ev.project_path = root_cwd.clone();
+            }
             out.events.push(ev);
             recognised = true;
         }
@@ -56,7 +65,7 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
     if out.lines_total >= 20 && typed == 0 {
         out.warnings.push("unrecognised format: no line has a `type` field".into());
     }
-    out.state = json!({ "max_version": max_version });
+    out.state = json!({ "max_version": max_version, "root_cwd": root_cwd });
     Ok(out)
 }
 

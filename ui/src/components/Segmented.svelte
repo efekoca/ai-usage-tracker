@@ -69,7 +69,7 @@
 <style>
   .seg {
     position: relative;
-    display: grid;
+    display: inline-grid;
     grid-template-columns: repeat(var(--n), 1fr);
     padding: 2px;
     border-radius: 9px;

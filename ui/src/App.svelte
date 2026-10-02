@@ -16,6 +16,12 @@
   import WidgetStudio from './views/WidgetStudio.svelte'
 
   let failed = $state('')
+  let page: HTMLDivElement | undefined = $state()
+  // every view starts at the top
+  $effect(() => {
+    void app.view
+    page?.scrollTo({ top: 0 })
+  })
   onMount(() => {
     init().catch((e) => (failed = String(e)))
   })
@@ -97,7 +103,7 @@
       {#if withToolbar.includes(app.view)}
         <Toolbar />
       {/if}
-      <div class="page" aria-busy={app.loading}>
+      <div class="page" bind:this={page} aria-busy={app.loading}>
         {#if app.error}
           <div class="banner" role="alert"><Icon name="warning" size={16} />{t('common.error', { e: app.error })}</div>
         {/if}

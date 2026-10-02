@@ -1,7 +1,7 @@
 <script lang="ts">
   // Stat tile: label · value · optional signed delta vs the previous period.
   import Icon from './Icon.svelte'
-  import { fmtPct, t } from '../lib/i18n.svelte'
+  import { fmtDec, fmtPct, t } from '../lib/i18n.svelte'
   import type { Snippet } from 'svelte'
 
   let {
@@ -32,7 +32,8 @@
     {#if delta !== null && Number.isFinite(delta)}
       <span class="delta" class:up={delta > 0} class:down={delta < 0}>
         <Icon name={delta >= 0 ? 'up' : 'down'} size={12} />
-        {fmtPct(Math.abs(delta) * 100)}
+        <!-- beyond +200 % a multiplier reads better than a four-digit percentage -->
+        {delta >= 2 ? `${fmtDec(1 + delta, delta >= 9 ? 0 : 1)}×` : fmtPct(Math.abs(delta) * 100)}
       </span>
       <span class="subtle">{t('overview.vsPrev')}</span>
     {/if}

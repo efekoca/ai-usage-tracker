@@ -48,7 +48,7 @@
       <span class="big num">{primaryValue}</span>
     </div>
   {:else if kind === 'cost'}
-    <span class="secondary num">{secondaryValue}{period?.has_unpriced && ws.primary_metric === 'tokens' ? '*' : ''}</span>
+    <span class="secondary num">{secondaryValue}</span>
   {:else if kind === 'tools' && period}
     <div class="tools">
       {#each period.tools as tl (tl.tool)}

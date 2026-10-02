@@ -83,6 +83,12 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX usage_event_session ON usage_event(session_id);
     DELETE FROM file_checkpoint WHERE parser IN ('claude_code_jsonl', 'cowork_jsonl');
     "#,
+    // v3: projects keyed by the session's first directory (not every sub-directory), with the
+    // original spelling kept for display. Claude transcripts are re-read to re-assign them.
+    r#"
+    ALTER TABLE project ADD COLUMN display_path TEXT;
+    DELETE FROM file_checkpoint WHERE parser IN ('claude_code_jsonl', 'cowork_jsonl');
+    "#,
 ];
 
 /// A captured row is hidden when the same request also exists as an exact (log) row.
@@ -105,7 +111,7 @@ const UPSERT_EVENT_TAIL: &str = "ON CONFLICT(key) DO UPDATE SET
     reasoning = MAX(reasoning, excluded.reasoning),
     request_input = MAX(request_input, excluded.request_input),
     web_search = MAX(web_search, excluded.web_search),
-    project_id = COALESCE(project_id, excluded.project_id),
+    project_id = COALESCE(excluded.project_id, project_id),
     request_id = COALESCE(request_id, excluded.request_id),
     accuracy = CASE WHEN excluded.accuracy = 'exact' THEN 'exact' ELSE accuracy END";
 
@@ -256,7 +262,7 @@ impl Store {
     }
 
     pub fn projects(&self) -> Result<Vec<ProjectRow>> {
-        let mut st = self.conn.prepare("SELECT id, path, name, hidden FROM project ORDER BY name")?;
+        let mut st = self.conn.prepare("SELECT id, COALESCE(display_path, path), name, hidden FROM project ORDER BY name")?;
         let rows = st.query_map([], |r| {
             Ok(ProjectRow { id: r.get(0)?, path: r.get(1)?, name: r.get(2)?, hidden: r.get::<_, i64>(3)? != 0 })
         })?;
@@ -312,6 +318,14 @@ impl Store {
         )?;
         let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
         rows.collect()
+    }
+
+    /// Removes projects that no longer have any usage (e.g. after re-assignment).
+    pub fn prune_projects(&self) -> Result<usize> {
+        self.conn.execute(
+            "DELETE FROM project WHERE id NOT IN (SELECT DISTINCT project_id FROM usage_event WHERE project_id IS NOT NULL)",
+            [],
+        )
     }
 
     /// Deletes every usage record, snapshot and checkpoint (settings are kept).
@@ -409,7 +423,11 @@ impl StoreTx<'_> {
             return Ok(*id);
         }
         let name = project_name(path);
-        self.tx.execute("INSERT INTO project(path, name) VALUES(?1, ?2) ON CONFLICT(path) DO NOTHING", params![key, name])?;
+        self.tx.execute(
+            "INSERT INTO project(path, name, display_path) VALUES(?1, ?2, ?3)
+             ON CONFLICT(path) DO UPDATE SET display_path = COALESCE(display_path, excluded.display_path)",
+            params![key, name, path],
+        )?;
         let id: i64 = self.tx.query_row("SELECT id FROM project WHERE path = ?1", [&key], |r| r.get(0))?;
         self.project_cache.insert(key, id);
         Ok(id)

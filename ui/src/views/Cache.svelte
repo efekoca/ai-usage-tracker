@@ -199,7 +199,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 12px 20px 4px;
+    padding: 12px 16px 4px;
   }
   .th h2 {
     margin: 0;
@@ -214,7 +214,7 @@
   }
   .table-card th,
   .table-card td {
-    padding: 8px 20px;
+    padding: 8px 12px;
     text-align: left;
     border-bottom: 0.5px solid var(--hairline);
     white-space: nowrap;
@@ -245,7 +245,7 @@
     gap: 8px;
   }
   .minibar {
-    width: 64px;
+    width: 44px;
     height: 5px;
     border-radius: 3px;
     background: var(--surface-hover);

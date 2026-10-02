@@ -3,6 +3,8 @@
   import { fmtCompact, fmtDate, fmtInt, fmtMoney, t, toolLabel } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
   import CalendarHeatmap from '../components/charts/CalendarHeatmap.svelte'
+  import Columns from '../components/charts/Columns.svelte'
+  import { toolLabel as tl } from '../lib/i18n.svelte'
 
   let mode: 'calendar' | 'table' = $state('calendar')
   let metric: 'tokens' | 'cost' = $state(app.settings?.primary_metric ?? 'tokens')
@@ -15,10 +17,14 @@
   const tools = $derived([...new Set(days.flatMap((d) => Object.keys(d.by_tool)))].sort())
   const sel = $derived(days.find((d) => d.date === selected) ?? null)
   const rows = $derived([...days].reverse())
+  // a calendar is sparse for short periods; columns read better there
+  const short = $derived(days.length <= 45)
+  const colSeries = $derived(tools.map((k) => ({ key: k, label: tl(k), color: toolColor[k] })))
+  const colValues = $derived(days.map((d) => (metric === 'tokens' ? d.by_tool : d.cost_by_tool)))
 </script>
 
 <div class="head">
-  <Segmented label={t('daily.title')} options={[{ value: 'calendar', label: t('daily.calendar') }, { value: 'table', label: t('daily.table') }]} bind:value={mode} />
+  <Segmented label={t('daily.title')} options={[{ value: 'calendar', label: t('common.chart') }, { value: 'table', label: t('daily.table') }]} bind:value={mode} />
   <Segmented label={t('metric.tokens')} options={[{ value: 'tokens', label: t('metric.tokens') }, { value: 'cost', label: t('metric.cost') }]} bind:value={metric} />
 </div>
 
@@ -26,7 +32,11 @@
   <p class="muted">{t('common.loading')}</p>
 {:else if mode === 'calendar'}
   <section class="card">
-    <CalendarHeatmap {days} value={val} format={fmt} ariaLabel={t('daily.calendar')} {selected} onselect={(d) => (selected = d)} />
+    {#if short}
+      <Columns dates={days.map((d) => d.date)} values={colValues} series={colSeries} format={metric === 'tokens' ? fmtCompact : (v) => fmtMoney(v, { compact: true })} ariaLabel={t('daily.calendar')} {selected} onselect={(d) => (selected = d)} />
+    {:else}
+      <CalendarHeatmap {days} value={val} format={fmt} ariaLabel={t('daily.calendar')} {selected} onselect={(d) => (selected = d)} />
+    {/if}
   </section>
   {#if sel}
     <section class="card day">

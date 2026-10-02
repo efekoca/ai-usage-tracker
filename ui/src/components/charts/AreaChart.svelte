@@ -88,6 +88,12 @@
       {#each layers as layer, li (series[li].key)}
         <path d={areaGen(layer) ?? ''} fill={series[li].color} fill-opacity="0.1" />
         <path d={lineGen(layer) ?? ''} fill="none" stroke={series[li].color} stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+        <!-- points with no neighbours draw no line segment, so show them as dots -->
+        {#each layer as d, i (i)}
+          {#if Number.isFinite(d[1]) && !Number.isFinite(layer[i - 1]?.[1] ?? NaN) && !Number.isFinite(layer[i + 1]?.[1] ?? NaN)}
+            <circle cx={x(i)} cy={y(d[1])} r="3.5" fill={series[li].color} />
+          {/if}
+        {/each}
       {/each}
       <line class="base" x1="0" x2={iw} y1={ih} y2={ih} />
       {#each xLabels as i (i)}

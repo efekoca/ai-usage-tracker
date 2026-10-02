@@ -56,6 +56,9 @@ pub fn ingest(store: &mut Store, files: &[DiscoveredFile], mut on_progress: impl
         }
         on_progress(Progress { done: i + 1, total: files.len() });
     }
+    if rep.files_read > 0 {
+        let _ = store.prune_projects();
+    }
     rep.events_after = store.event_count().unwrap_or(0);
     rep.limits_after = store.limit_count().unwrap_or(0);
     rep

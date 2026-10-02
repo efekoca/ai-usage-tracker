@@ -93,10 +93,18 @@ fn build_main(app: &AppHandle) {
     if app.get_webview_window(MAIN).is_some() {
         return; // a concurrent request already built it
     }
+    // roomy by default, but never larger than ~90 % of the primary monitor's work area
+    let (mut w, mut h) = (1360.0, 880.0);
+    if let Ok(Some(m)) = app.primary_monitor() {
+        let s = m.scale_factor();
+        let area = m.work_area().size;
+        w = f64::min(w, area.width as f64 / s * 0.9);
+        h = f64::min(h, area.height as f64 / s * 0.9);
+    }
     let mut b = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::App("index.html".into()))
         .title("AI Usage Tracker")
-        .inner_size(1180.0, 780.0)
-        .min_inner_size(820.0, 560.0)
+        .inner_size(w.max(900.0), h.max(600.0))
+        .min_inner_size(860.0, 560.0)
         .center()
         .visible(true);
     if supports_mica() {
@@ -400,14 +408,51 @@ pub fn start_fullscreen_watch(app: AppHandle) {
         .expect("spawn fullscreen watcher");
 }
 
+/// True when an exclusive D3D game / presentation runs, or the foreground window (of another
+/// process) covers its whole monitor. `QUNS_BUSY` alone is not trusted: always-on-top
+/// full-screen overlays (e.g. GPU overlays) report it permanently.
 #[cfg(windows)]
 fn fullscreen_app_active() -> bool {
-    use windows_sys::Win32::UI::Shell::{
-        SHQueryUserNotificationState, QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN,
-    };
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST};
+    use windows_sys::Win32::UI::Shell::{SHQueryUserNotificationState, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible};
+
     let mut state = 0;
-    let hr = unsafe { SHQueryUserNotificationState(&mut state) };
-    hr == 0 && (state == QUNS_BUSY || state == QUNS_RUNNING_D3D_FULL_SCREEN || state == QUNS_PRESENTATION_MODE)
+    if unsafe { SHQueryUserNotificationState(&mut state) } == 0
+        && (state == QUNS_RUNNING_D3D_FULL_SCREEN || state == QUNS_PRESENTATION_MODE)
+    {
+        return true;
+    }
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_null() || IsWindowVisible(hwnd) == 0 {
+            return false;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if pid == std::process::id() {
+            return false;
+        }
+        let mut class = [0u16; 64];
+        let n = GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32);
+        let class = String::from_utf16_lossy(&class[..n.max(0) as usize]);
+        // the desktop and the taskbar are "full screen" too, but never count
+        if matches!(class.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd") {
+            return false;
+        }
+        let mut r: RECT = std::mem::zeroed();
+        if GetWindowRect(hwnd, &mut r) == 0 {
+            return false;
+        }
+        let mut mi: MONITORINFO = std::mem::zeroed();
+        mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        if GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut mi) == 0 {
+            return false;
+        }
+        let m = mi.rcMonitor;
+        r.left <= m.left && r.top <= m.top && r.right >= m.right && r.bottom >= m.bottom
+    }
 }
 
 #[cfg(not(windows))]

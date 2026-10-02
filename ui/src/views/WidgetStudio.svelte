@@ -210,7 +210,7 @@
     gap: 16px;
     align-items: start;
   }
-  @media (max-width: 1080px) {
+  @media (max-width: 1240px) {
     .studio {
       grid-template-columns: 1fr;
     }
@@ -218,6 +218,7 @@
   .preview {
     position: sticky;
     top: 0;
+    z-index: 2;
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -258,9 +259,10 @@
   }
   .item {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
+    gap: 8px 16px;
     padding: 10px 0;
     border-bottom: 0.5px solid var(--hairline);
     min-height: 44px;
