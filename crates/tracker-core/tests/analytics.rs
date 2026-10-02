@@ -121,6 +121,7 @@ fn ev(key: &str, ts: i64, tool: Tool, model: &str, project: &str, input: u64, ou
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn snap(ts: i64, provider: Provider, tool: Tool, window: &str, used: f64, resets_at: Option<i64>, plan: Option<&str>, source: &str) -> LimitSnapshot {
     LimitSnapshot {
         ts_ms: ts,

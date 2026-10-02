@@ -198,7 +198,9 @@ pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filte
     let mut totals = Totals::default();
     let (mut by_tool, mut by_client, mut by_model, mut by_project) =
         (HashMap::new(), HashMap::new(), HashMap::new(), HashMap::new());
-    let mut days: BTreeMap<NaiveDate, (Totals, BTreeMap<String, u64>, BTreeMap<String, f64>)> = BTreeMap::new();
+    // per local day: totals, tokens per tool, cost per tool
+    type DayAcc = (Totals, BTreeMap<String, u64>, BTreeMap<String, f64>);
+    let mut days: BTreeMap<NaiveDate, DayAcc> = BTreeMap::new();
     let mut heat = vec![vec![0u64; 24]; 7];
     let mut unpriced = BTreeMap::new();
     let mut by_accuracy = BTreeMap::new();
