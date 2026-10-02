@@ -167,6 +167,12 @@ pub struct CaptureSettings {
     pub statusline: bool,
     pub otel: bool,
     pub otel_port: u16,
+    /// Claude plan-limit reads through Claude Code's `get_usage` request.
+    pub claude_poll: bool,
+    /// Idle interval; while Claude is in use a read follows new activity within a minute.
+    pub claude_poll_minutes: u64,
+    /// Explicit path to `claude.exe`; empty = auto-detect.
+    pub claude_path: String,
 }
 
 impl Default for CaptureSettings {
@@ -178,6 +184,9 @@ impl Default for CaptureSettings {
             statusline: false,
             otel: false,
             otel_port: tracker_core::capture::otlp::DEFAULT_PORT,
+            claude_poll: false,
+            claude_poll_minutes: 5,
+            claude_path: String::new(),
         }
     }
 }

@@ -26,7 +26,70 @@ pub fn cli_mode() -> Option<i32> {
     if args.iter().any(|a| a == "--revert-capture") {
         return Some(capture::revert_all_main());
     }
+    if relaunched_outside_package() {
+        return Some(0);
+    }
     None
+}
+
+/// A process started from inside a packaged (MSIX) app, e.g. by the Claude desktop app, can
+/// inherit that package's file-system virtualization even without a package identity: its
+/// writes to %LOCALAPPDATA% land in `Packages\<package>\LocalCache\Local`, a private copy the
+/// normally started app never sees. Such a start hands over to Explorer, which starts this app
+/// in the user's normal context, and exits.
+#[cfg(windows)]
+fn relaunched_outside_package() -> bool {
+    let Some(data_dir) = tracker_core::store::default_data_dir() else { return false };
+    if !writes_are_redirected(&data_dir) {
+        return false;
+    }
+    // never loop: a relaunch that is still redirected carries on where it is
+    let marker = data_dir.join(".relaunched");
+    let recent = std::fs::metadata(&marker)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|age| age < std::time::Duration::from_secs(30));
+    if recent {
+        log_early("still redirected after a relaunch; continuing in place");
+        return false;
+    }
+    let _ = std::fs::write(&marker, b"");
+    let Ok(exe) = std::env::current_exe() else { return false };
+    let explorer = std::env::var_os("SystemRoot").map(|r| std::path::PathBuf::from(r).join("explorer.exe")).unwrap_or_else(|| "explorer.exe".into());
+    std::process::Command::new(explorer).arg(exe).spawn().is_ok()
+}
+
+/// Writes a probe file into the data folder and looks for it under every package's
+/// `LocalCache\Local`: finding it there means writes are being virtualized.
+#[cfg(windows)]
+fn writes_are_redirected(data_dir: &std::path::Path) -> bool {
+    let (Some(folder), Some(local)) = (data_dir.file_name(), data_dir.parent()) else { return false };
+    if std::fs::create_dir_all(data_dir).is_err() {
+        return false;
+    }
+    let name = format!(".where-{}", std::process::id());
+    let probe = data_dir.join(&name);
+    if std::fs::write(&probe, b"").is_err() {
+        return false;
+    }
+    let found = std::fs::read_dir(local.join("Packages"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|e| e.path().join("LocalCache").join("Local").join(folder).join(&name).exists());
+    let _ = std::fs::remove_file(&probe);
+    found
+}
+
+#[cfg(windows)]
+fn log_early(msg: &str) {
+    eprintln!("ai-usage-tracker: {msg}");
+}
+
+#[cfg(not(windows))]
+fn relaunched_outside_package() -> bool {
+    false
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

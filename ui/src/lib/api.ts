@@ -190,9 +190,15 @@ export interface CaptureSettings {
   statusline: boolean
   otel: boolean
   otel_port: number
+  claude_poll: boolean
+  claude_poll_minutes: number
+  claude_path: string
 }
 
 export interface CaptureStatus {
+  claude_poll: boolean
+  claude: { binary: string | null; last_ok_ms: number | null; last_error: string | null }
+  claude_candidates_found: boolean
   codex_poll: boolean
   codex: { binary: string | null; last_ok_ms: number | null; last_error: string | null }
   codex_candidates_found: boolean
@@ -350,7 +356,7 @@ export const api = {
   widgetMenu: () => invoke<void>('widget_menu'),
   quit: () => invoke<void>('quit_app'),
   captureStatus: () => invoke<CaptureStatus>('capture_status'),
-  setCapture: (kind: 'codex' | 'statusline' | 'otel', enabled: boolean) => invoke<string>('set_capture', { kind, enabled }),
+  setCapture: (kind: 'claude' | 'codex' | 'statusline' | 'otel', enabled: boolean) => invoke<string>('set_capture', { kind, enabled }),
   placeWidget: (corner: string, remember = true) => invoke<void>('place_widget', { corner, remember }),
   listFonts: () => invoke<string[]>('list_fonts'),
 }

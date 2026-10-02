@@ -25,7 +25,7 @@ const settings: Settings = {
     border: true, shadow: false, show_labels: true, show_reset_time: false, warn_at: 70, high_at: 90, always_on_top: true, lock_position: false, click_action: 'open_dashboard',
     font_family: '', text_scale: 1, number_scale: 1, number_weight: 700, tabular_nums: true,
   },
-  capture: { codex_poll: false, codex_poll_minutes: 5, codex_path: '', statusline: false, otel: false, otel_port: 43180 },
+  capture: { codex_poll: false, codex_poll_minutes: 5, codex_path: '', statusline: false, otel: false, otel_port: 43180, claude_poll: false, claude_poll_minutes: 5, claude_path: '' },
   autostart: false,
   allow_config_updates: false,
   primary_metric: 'tokens',
@@ -161,10 +161,11 @@ export function installMock() {
           return { today: per(18_400_000, 12.84), days7: per(96_000_000, 71.3), month1: per(402_000_000, 288.1), limits: limits().map((l) => ({ provider: l.provider, window: l.window, used_pct: l.used_pct, state: l.state, accuracy: l.accuracy, resets_at: l.resets_at, observed_ms: l.observed_ms })), providers: ['anthropic', 'openai'], updated_ms: Date.now() - 60000 }
         }
         case 'capture_status':
-          return { codex_poll: settings.capture.codex_poll, codex: { binary: 'C:/codex.exe', last_ok_ms: Date.now() - 120000, last_error: null }, codex_candidates_found: true, statusline: settings.capture.statusline, statusline_file: 'C:\Users\you\.claude\settings.json', statusline_chained: false, statusline_last_ms: Date.now() - 30000, otel: settings.capture.otel, otel_port: 43180, otel_listening: settings.capture.otel, otel_events: 42, otel_last_ms: Date.now() - 5000, otel_error: null, settings_file: 'C:\Users\you\.claude\settings.json' }
+          return { claude_poll: settings.capture.claude_poll, claude: { binary: 'C:/claude.exe', last_ok_ms: Date.now() - 40000, last_error: null }, claude_candidates_found: true, codex_poll: settings.capture.codex_poll, codex: { binary: 'C:/codex.exe', last_ok_ms: Date.now() - 120000, last_error: null }, codex_candidates_found: true, statusline: settings.capture.statusline, statusline_file: 'C:\Users\you\.claude\settings.json', statusline_chained: false, statusline_last_ms: Date.now() - 30000, otel: settings.capture.otel, otel_port: 43180, otel_listening: settings.capture.otel, otel_events: 42, otel_last_ms: Date.now() - 5000, otel_error: null, settings_file: 'C:\Users\you\.claude\settings.json' }
         case 'set_capture': {
-          const k = a.kind as 'codex' | 'statusline' | 'otel'
+          const k = a.kind as 'claude' | 'codex' | 'statusline' | 'otel'
           if (k === 'codex') settings.capture.codex_poll = !!a.enabled
+          else if (k === 'claude') settings.capture.claude_poll = !!a.enabled
           else settings.capture[k] = !!a.enabled
           return a.enabled ? 'enabled' : 'restored'
         }

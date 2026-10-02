@@ -34,7 +34,7 @@
     return s === key ? (ok ? t('settings.data.done') : raw) : s
   }
 
-  async function toggle(kind: 'codex' | 'statusline' | 'otel', on: boolean) {
+  async function toggle(kind: 'claude' | 'codex' | 'statusline' | 'otel', on: boolean) {
     busy = kind
     try {
       const r = await api.setCapture(kind, on)
@@ -57,7 +57,7 @@
   <p class="subtle small lead">{t('cap.lead')}</p>
 
   {#if st}
-    {#each [['codex', st.codex_poll], ['statusline', st.statusline], ['otel', st.otel]] as const as [kind, on] (kind)}
+    {#each [['claude', st.claude_poll], ['codex', st.codex_poll], ['statusline', st.statusline], ['otel', st.otel]] as const as [kind, on] (kind)}
       <div class="method" class:on>
         <div class="top">
           <div class="txt">
@@ -69,13 +69,18 @@
         <dl>
           <dt>{t('cap.changes')}</dt>
           <dd>
-            {#if kind === 'codex'}{t('cap.codex.changes')}
+            {#if kind === 'codex' || kind === 'claude'}{t(`cap.${kind}.changes`)}
             {:else}{t(`cap.${kind}.changes`)} <code>{st.settings_file}</code>{/if}
           </dd>
           <dt>{t('cap.status')}</dt>
           <dd>
             {#if busy === kind}
               <span class="spin" aria-hidden="true"></span> {t('cap.working')}
+            {:else if kind === 'claude'}
+              {#if !st.claude_candidates_found}<Icon name="warning" size={13} /> {t('cap.msg.claude_not_found')}
+              {:else if on && st.claude.last_error}<Icon name="warning" size={13} /> {explain('claude', st.claude.last_error, false)}
+              {:else if on}<Icon name="check" size={13} /> {t('cap.codex.ok', { t: ago(st.claude.last_ok_ms) })}
+              {:else}{t('common.off')}{/if}
             {:else if kind === 'codex'}
               {#if !st.codex_candidates_found}<Icon name="warning" size={13} /> {t('cap.msg.codex_not_found')}
               {:else if on && st.codex.last_error}<Icon name="warning" size={13} /> {explain('codex', st.codex.last_error, false)}

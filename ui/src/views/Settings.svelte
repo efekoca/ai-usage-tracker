@@ -134,6 +134,10 @@
     <Segmented label={t('settings.primaryMetric')} value={s.primary_metric} options={[{ value: 'tokens', label: t('metric.tokens') }, { value: 'cost', label: t('metric.cost') }]} onchange={(v) => saveSettings({ primary_metric: v })} />
   </div>
   <div class="item">
+    <div><span>{t('limits.mode')}</span><div class="subtle small">{t('limits.mode.help')}</div></div>
+    <Segmented label={t('limits.mode')} value={s.limit_display} options={[{ value: 'used', label: t('limits.mode.used') }, { value: 'remaining', label: t('limits.mode.remaining') }]} onchange={(v) => saveSettings({ limit_display: v })} />
+  </div>
+  <div class="item">
     <div><span>{t('settings.autostart')}</span><div class="subtle small">{t('settings.autostart.help')}</div></div>
     <Toggle checked={s.autostart} label={t('settings.autostart')} onchange={(v) => saveSettings({ autostart: v })} />
   </div>

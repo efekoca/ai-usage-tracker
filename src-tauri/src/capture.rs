@@ -1,5 +1,5 @@
 //! Live capture runtime: installs/reverts the opt-in methods and runs their background parts
-//! (Codex limit poller, loopback OTLP receiver). The status-line bridge itself runs as a
+//! (Codex and Claude limit pollers, loopback OTLP receiver). The status-line bridge itself runs as a
 //! separate short-lived process (`ai-usage-tracker.exe --statusline`, see `statusline_main`).
 
 use crate::settings::Settings;
@@ -13,12 +13,12 @@ use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tracker_core::capture::claude_settings::{self as cs, CaptureState, RevertOutcome};
-use tracker_core::capture::{codex_limits, otlp, statusline};
+use tracker_core::capture::{claude_usage, codex_limits, otlp, statusline};
 use tracker_core::discovery::{self, Env};
 use tracker_core::store::Store;
 
 #[derive(Debug, Clone, Default, Serialize)]
-pub struct CodexStatus {
+pub struct PollStatus {
     pub binary: Option<String>,
     pub last_ok_ms: Option<i64>,
     pub last_error: Option<String>,
@@ -27,13 +27,22 @@ pub struct CodexStatus {
 pub struct CaptureRuntime {
     pub receiver: Mutex<Option<otlp::Receiver>>,
     pub receiver_error: Mutex<Option<String>>,
-    pub codex: Mutex<CodexStatus>,
+    pub codex: Mutex<PollStatus>,
     codex_wake: Mutex<Option<Sender<()>>>,
+    pub claude: Mutex<PollStatus>,
+    claude_wake: Mutex<Option<Sender<()>>>,
 }
 
 impl CaptureRuntime {
     pub fn new() -> Self {
-        CaptureRuntime { receiver: Mutex::new(None), receiver_error: Mutex::new(None), codex: Mutex::new(CodexStatus::default()), codex_wake: Mutex::new(None) }
+        CaptureRuntime {
+            receiver: Mutex::new(None),
+            receiver_error: Mutex::new(None),
+            codex: Mutex::new(PollStatus::default()),
+            codex_wake: Mutex::new(None),
+            claude: Mutex::new(PollStatus::default()),
+            claude_wake: Mutex::new(None),
+        }
     }
 }
 
@@ -183,6 +192,7 @@ pub fn revert_all_main() -> i32 {
         s.capture.statusline = false;
         s.capture.otel = false;
         s.capture.codex_poll = false;
+        s.capture.claude_poll = false;
         let _ = s.save(&store);
     }
     0
@@ -193,8 +203,11 @@ pub fn revert_all_main() -> i32 {
 #[derive(Debug, Clone, Serialize)]
 pub struct CaptureStatus {
     pub codex_poll: bool,
-    pub codex: CodexStatus,
+    pub codex: PollStatus,
     pub codex_candidates_found: bool,
+    pub claude_poll: bool,
+    pub claude: PollStatus,
+    pub claude_candidates_found: bool,
     pub statusline: bool,
     pub statusline_file: String,
     pub statusline_chained: bool,
@@ -219,6 +232,9 @@ pub fn status(app: &AppHandle) -> CaptureStatus {
         codex_poll: s.capture.codex_poll,
         codex: rt.codex.lock().unwrap().clone(),
         codex_candidates_found: codex_binary(&s).is_some(),
+        claude_poll: s.capture.claude_poll,
+        claude: rt.claude.lock().unwrap().clone(),
+        claude_candidates_found: claude_binary(&s).is_some(),
         statusline: s.capture.statusline,
         statusline_file: st.statusline.as_ref().map(|c| c.settings_file.to_string_lossy().into_owned()).unwrap_or_default(),
         statusline_chained: st.statusline.as_ref().is_some_and(|c| c.previous.is_some()),
@@ -236,6 +252,21 @@ pub fn status(app: &AppHandle) -> CaptureStatus {
 fn codex_binary(s: &Settings) -> Option<PathBuf> {
     let configured = (!s.capture.codex_path.trim().is_empty()).then(|| PathBuf::from(s.capture.codex_path.trim()));
     codex_limits::find_codex(&Env::from_system(), &s.extra_paths, configured.as_deref())
+}
+
+fn claude_binary(s: &Settings) -> Option<PathBuf> {
+    let configured = (!s.capture.claude_path.trim().is_empty()).then(|| PathBuf::from(s.capture.claude_path.trim()));
+    claude_usage::find_claude(&Env::from_system(), configured.as_deref())
+}
+
+/// One Claude limit read: an empty folder of this app's own as the working directory, so no
+/// project settings, files or trust prompts are involved.
+fn read_claude(state: &AppState, s: &Settings, bin: &Path) -> Result<Vec<tracker_core::model::LimitSnapshot>, String> {
+    let work = state.data_dir.join("claude-usage");
+    std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+    let env = Env::from_system();
+    let cfg = claude_usage::config_dir(&env, &s.extra_paths);
+    claude_usage::query(bin, &work, cfg.as_deref(), Duration::from_secs(30), now_ms()).map_err(|e| e.to_string())
 }
 
 fn persist(app: &AppHandle, f: impl FnOnce(&mut Settings)) -> Result<Settings, String> {
@@ -268,7 +299,7 @@ pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
             let snaps = codex_limits::query(&bin, Duration::from_secs(20), now_ms())?;
             store_limits(&state.db_path, &snaps)?;
             *state.capture.codex.lock().unwrap() =
-                CodexStatus { binary: Some(bin.to_string_lossy().into_owned()), last_ok_ms: Some(now_ms()), last_error: None };
+                PollStatus { binary: Some(bin.to_string_lossy().into_owned()), last_ok_ms: Some(now_ms()), last_error: None };
             persist(app, |s| s.capture.codex_poll = true)?;
             wake_codex(app);
             let _ = app.emit("data-changed", ());
@@ -276,6 +307,21 @@ pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
         }
         ("codex", false) => {
             persist(app, |s| s.capture.codex_poll = false)?;
+            Ok("disabled".into())
+        }
+        ("claude", true) => {
+            let bin = claude_binary(&settings).ok_or("claude_not_found")?;
+            let snaps = read_claude(&state, &settings, &bin)?;
+            store_limits(&state.db_path, &snaps)?;
+            *state.capture.claude.lock().unwrap() =
+                PollStatus { binary: Some(bin.to_string_lossy().into_owned()), last_ok_ms: Some(now_ms()), last_error: None };
+            persist(app, |s| s.capture.claude_poll = true)?;
+            wake_claude(app);
+            let _ = app.emit("data-changed", ());
+            Ok("enabled".into())
+        }
+        ("claude", false) => {
+            persist(app, |s| s.capture.claude_poll = false)?;
             Ok("disabled".into())
         }
         ("statusline", true) => {
@@ -377,6 +423,83 @@ pub fn stop_receiver(app: &AppHandle) {
     drop(r);
 }
 
+fn wake_claude(app: &AppHandle) {
+    if let Some(tx) = app.state::<AppState>().capture.claude_wake.lock().unwrap().as_ref() {
+        let _ = tx.send(());
+    }
+}
+
+/// Newest Claude usage event in the archive (logs of Claude Code and Cowork).
+fn latest_claude_event_ms(state: &AppState) -> Option<i64> {
+    let store = state.store.lock().ok()?;
+    store
+        .conn()
+        .query_row("SELECT MAX(ts_ms) FROM usage_event WHERE tool = 'claude_code'", [], |r| r.get::<_, Option<i64>>(0))
+        .ok()
+        .flatten()
+}
+
+/// Claude limit poller: reads soon after new Claude activity (at most once a minute) so the
+/// reading keeps up with use, and at the idle interval otherwise (Claude chat use on the web or
+/// in the desktop app leaves no local log, so it is only seen this way).
+fn start_claude_poller(app: &AppHandle) {
+    let (tx, rx) = channel::<()>();
+    *app.state::<AppState>().capture.claude_wake.lock().unwrap() = Some(tx);
+    let app = app.clone();
+    let _ = std::thread::Builder::new().name("claude-limits".into()).spawn(move || {
+        const TICK: Duration = Duration::from_secs(30);
+        const MIN_GAP_MS: i64 = 60_000;
+        let mut last_try_ms: i64 = 0;
+        let mut seen_event_ms: Option<i64> = None;
+        let mut forced = false;
+        loop {
+            match rx.recv_timeout(if last_try_ms == 0 { Duration::from_secs(25) } else { TICK }) {
+                Ok(()) => forced = true,
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return,
+            }
+            let state = app.state::<AppState>();
+            if state.quitting.load(Ordering::SeqCst) {
+                return;
+            }
+            let s = state.settings.read().unwrap().clone();
+            if !s.capture.claude_poll {
+                forced = false;
+                continue;
+            }
+            let now = now_ms();
+            let idle_ms = 60_000 * s.capture.claude_poll_minutes.clamp(1, 120) as i64;
+            let latest = latest_claude_event_ms(&state);
+            let new_activity = latest.is_some() && latest != seen_event_ms;
+            let due = forced || now - last_try_ms >= idle_ms || (new_activity && now - last_try_ms >= MIN_GAP_MS);
+            if !due {
+                continue;
+            }
+            forced = false;
+            last_try_ms = now;
+            seen_event_ms = latest;
+            let Some(bin) = claude_binary(&s) else {
+                state.capture.claude.lock().unwrap().last_error = Some("claude_not_found".into());
+                continue;
+            };
+            match read_claude(&state, &s, &bin).and_then(|snaps| store_limits(&state.db_path, &snaps)) {
+                Ok(()) => {
+                    let mut c = state.capture.claude.lock().unwrap();
+                    c.binary = Some(bin.to_string_lossy().into_owned());
+                    c.last_ok_ms = Some(now_ms());
+                    c.last_error = None;
+                    drop(c);
+                    let _ = app.emit("data-changed", ());
+                }
+                Err(e) => {
+                    log::warn!("claude limit read failed: {e}");
+                    state.capture.claude.lock().unwrap().last_error = Some(e);
+                }
+            }
+        }
+    });
+}
+
 fn wake_codex(app: &AppHandle) {
     if let Some(tx) = app.state::<AppState>().capture.codex_wake.lock().unwrap().as_ref() {
         let _ = tx.send(());
@@ -391,6 +514,7 @@ pub fn start(app: &AppHandle) {
     {
         log::warn!("otlp receiver could not start: {e}");
     }
+    start_claude_poller(app);
     let (tx, rx) = channel::<()>();
     *app.state::<AppState>().capture.codex_wake.lock().unwrap() = Some(tx);
     let app = app.clone();
