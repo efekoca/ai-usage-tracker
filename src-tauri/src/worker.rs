@@ -1,0 +1,218 @@
+//! Background ingestion: event-driven via file watching (ReadDirectoryChangesW through
+//! `notify`), debounced, with a slow periodic safety rescan. Idle cost is a blocked thread.
+
+use crate::settings::Settings;
+use crate::state::AppState;
+use notify::{RecursiveMode, Watcher};
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter, Manager};
+use tracker_core::discovery::{self, Env, SourceId};
+use tracker_core::ingest::ingest;
+use tracker_core::store::Store;
+
+const DEBOUNCE: Duration = Duration::from_millis(1500);
+const SAFETY_RESCAN: Duration = Duration::from_secs(300);
+
+pub enum Msg {
+    /// Something changed (or the user asked): rescan soon.
+    Scan,
+    /// Sources/paths changed: rebuild watches, then scan.
+    Reconfigure,
+    Shutdown,
+}
+
+#[derive(Clone)]
+pub struct Worker {
+    tx: Sender<Msg>,
+}
+
+impl Worker {
+    pub fn send(&self, m: Msg) {
+        let _ = self.tx.send(m);
+    }
+}
+
+/// Creates the channel now; the thread is started by [`start`] once state is managed.
+pub fn channel_pair() -> (Worker, std::sync::mpsc::Receiver<Msg>) {
+    let (tx, rx) = channel();
+    (Worker { tx }, rx)
+}
+
+pub fn start(app: AppHandle, db_path: PathBuf, rx: std::sync::mpsc::Receiver<Msg>) {
+    let tx = app.state::<AppState>().worker.tx.clone();
+    std::thread::Builder::new()
+        .name("ingest-worker".into())
+        .spawn(move || run(app, db_path, rx, tx))
+        .expect("spawn worker");
+}
+
+fn run(app: AppHandle, db_path: PathBuf, rx: std::sync::mpsc::Receiver<Msg>, tx: Sender<Msg>) {
+    let mut store = match Store::open(&db_path) {
+        Ok(s) => s,
+        Err(e) => {
+            log::error!("worker cannot open database: {e}");
+            return;
+        }
+    };
+    let mut watcher: Option<notify::RecommendedWatcher> = None;
+    let mut watched: Vec<(PathBuf, bool)> = Vec::new();
+    let mut pending = true; // initial scan on startup
+    let mut rewatch = true;
+
+    loop {
+        if rewatch {
+            let settings = app.state::<AppState>().settings.read().unwrap().clone();
+            let roots = watch_roots(&Env::from_system(), &settings);
+            if roots != watched || watcher.is_none() {
+                watcher = make_watcher(&roots, tx.clone());
+                watched = roots;
+            }
+            rewatch = false;
+        }
+        if pending {
+            // debounce bursts of file events into one scan
+            let deadline = Instant::now() + DEBOUNCE;
+            while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+                match rx.recv_timeout(left) {
+                    Ok(Msg::Shutdown) => return,
+                    Ok(Msg::Reconfigure) => rewatch = true,
+                    Ok(Msg::Scan) | Err(RecvTimeoutError::Timeout) => {}
+                    Err(RecvTimeoutError::Disconnected) => return,
+                }
+            }
+            scan(&app, &mut store);
+            pending = false;
+            continue;
+        }
+        match rx.recv_timeout(SAFETY_RESCAN) {
+            Ok(Msg::Scan) => pending = true,
+            Ok(Msg::Reconfigure) => {
+                rewatch = true;
+                pending = true;
+            }
+            Ok(Msg::Shutdown) | Err(RecvTimeoutError::Disconnected) => return,
+            Err(RecvTimeoutError::Timeout) => {
+                // also picks up tool directories created after startup
+                rewatch = true;
+                pending = true;
+            }
+        }
+    }
+}
+
+fn scan(app: &AppHandle, store: &mut Store) {
+    let state = app.state::<AppState>();
+    let settings = state.settings.read().unwrap().clone();
+    if !settings.onboarded {
+        return; // nothing is read until the user has confirmed sources in onboarding
+    }
+    let enabled: HashSet<SourceId> = settings.enabled_sources.iter().copied().collect();
+    let files = discovery::enumerate_files(&Env::from_system(), &settings.extra_paths, &enabled);
+    {
+        let mut st = state.status.lock().unwrap();
+        st.running = true;
+        st.done = 0;
+        st.total = files.len();
+    }
+    let big = files.len() > 20;
+    let mut last_emit = Instant::now();
+    let report = ingest(store, &files, |p| {
+        if big && (last_emit.elapsed() > Duration::from_millis(150) || p.done == p.total) {
+            last_emit = Instant::now();
+            {
+                let mut st = state.status.lock().unwrap();
+                st.done = p.done;
+                st.total = p.total;
+            }
+            let _ = app.emit("scan-progress", &p);
+        }
+    });
+    for (path, w) in report.warnings.iter().take(20) {
+        log::warn!("parse warning in {}: {w}", redact_home(path));
+    }
+    for (path, e) in &report.errors {
+        log::warn!("ingest error in {}: {e}", redact_home(path));
+    }
+    let changed = report.new_events() > 0 || report.limits_after != report.limits_before || report.files_read > 0;
+    {
+        let mut st = state.status.lock().unwrap();
+        st.running = false;
+        st.done = files.len();
+        st.last_scan_ms = Some(chrono::Utc::now().timestamp_millis());
+        st.last_new_events = report.new_events();
+        st.files_seen = report.files_seen;
+        st.warnings = report.warnings.len();
+        st.errors = report.errors.len();
+    }
+    let _ = app.emit("scan-finished", state.status.lock().unwrap().clone());
+    if changed {
+        let _ = app.emit("data-changed", ());
+    }
+}
+
+/// Keeps user names out of the app log.
+fn redact_home(p: &str) -> String {
+    match dirs_home() {
+        Some(h) if p.len() >= h.len() && p.is_char_boundary(h.len()) && p[..h.len()].eq_ignore_ascii_case(&h) => {
+            format!("~{}", &p[h.len()..])
+        }
+        _ => p.to_owned(),
+    }
+}
+
+fn dirs_home() -> Option<String> {
+    Env::from_system().home.map(|h| h.to_string_lossy().into_owned())
+}
+
+/// Directories to watch and whether to watch them recursively.
+fn watch_roots(env: &Env, s: &Settings) -> Vec<(PathBuf, bool)> {
+    let on = |id| s.enabled_sources.contains(&id);
+    let mut v = Vec::new();
+    if on(SourceId::ClaudeCode) {
+        v.extend(discovery::claude_config_roots(env, &s.extra_paths).into_iter().map(|r| (r.join("projects"), true)));
+    }
+    for d in discovery::claude_desktop_dirs(env) {
+        if on(SourceId::Cowork) {
+            v.push((d.join("local-agent-mode-sessions"), true));
+        }
+        if on(SourceId::ClaudeDesktop) {
+            v.push((d.clone(), false)); // only for plan-usage-history.json
+        }
+    }
+    if on(SourceId::Codex) {
+        for h in discovery::codex_homes(env, &s.extra_paths) {
+            v.push((h.join("sessions"), true));
+            v.push((h.join("archived_sessions"), true));
+        }
+    }
+    v.retain(|(p, _)| p.is_dir());
+    v.sort();
+    v.dedup();
+    v
+}
+
+fn is_relevant(p: &Path) -> bool {
+    p.extension().is_some_and(|e| e == "jsonl") || p.file_name().is_some_and(|n| n == "plan-usage-history.json")
+}
+
+fn make_watcher(roots: &[(PathBuf, bool)], tx: Sender<Msg>) -> Option<notify::RecommendedWatcher> {
+    let mut w = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+        if let Ok(ev) = res
+            && ev.paths.iter().any(|p| is_relevant(p))
+        {
+            let _ = tx.send(Msg::Scan);
+        }
+    })
+    .map_err(|e| log::warn!("file watcher unavailable, falling back to periodic scans: {e}"))
+    .ok()?;
+    for (r, recursive) in roots {
+        let mode = if *recursive { RecursiveMode::Recursive } else { RecursiveMode::NonRecursive };
+        if let Err(e) = w.watch(r, mode) {
+            log::warn!("cannot watch a source directory: {e}");
+        }
+    }
+    Some(w)
+}

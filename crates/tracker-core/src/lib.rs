@@ -3,8 +3,11 @@
 
 pub mod analytics;
 pub mod discovery;
+pub mod export;
 pub mod ingest;
 pub mod model;
 pub mod pricing;
 pub mod sources;
 pub mod store;
+
+pub use rusqlite;

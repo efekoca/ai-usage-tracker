@@ -227,3 +227,49 @@ fn user_thresholds_only_fill_windows_without_real_readings() {
     let cx = v.iter().find(|v| v.provider == Provider::OpenAI).unwrap();
     assert_eq!(cx.used_pct, Some(0.0));
 }
+
+#[test]
+fn backup_merges_back_without_duplicates() {
+    let (_m, store) = loaded();
+    let dir = tempfile::tempdir().unwrap();
+    let backup = dir.path().join("backup.db");
+    store.backup_to(&backup).unwrap();
+
+    let mut fresh = Store::open(&dir.path().join("fresh.db")).unwrap();
+    let (events, limits) = fresh.merge_from(&backup).unwrap();
+    assert_eq!((events, limits), (9, 12));
+    assert_eq!(fresh.projects().unwrap().len(), 2);
+    // merging the same backup again changes nothing
+    fresh.merge_from(&backup).unwrap();
+    assert_eq!(fresh.event_count().unwrap(), 9);
+    assert_eq!(fresh.limit_count().unwrap(), 12);
+    // a non-tracker file is rejected
+    std::fs::write(dir.path().join("junk.db"), b"").unwrap();
+    assert!(fresh.merge_from(&dir.path().join("junk.db")).is_err());
+}
+
+#[test]
+fn csv_export_masks_hidden_projects_and_leaves_unpriced_cost_empty() {
+    use tracker_core::export::{export, Format, Granularity};
+    let (_m, store) = loaded();
+    let demo = store.projects().unwrap().into_iter().find(|p| p.name == "demo-app").unwrap();
+    store.set_project_hidden(demo.id, true).unwrap();
+    let mut buf = Vec::new();
+    let range = Range { from_ms: 0, to_ms: i64::MAX / 2 };
+    let n = export(&store, &PriceBook::default_book(), range, &Filter::default(), &tz(), Granularity::Events, Format::Csv, false, &mut buf).unwrap();
+    let text = String::from_utf8(buf).unwrap();
+    assert_eq!(n, 9);
+    assert_eq!(text.lines().count(), 10);
+    assert!(!text.contains("demo-app"));
+    assert!(text.contains(&format!("project-{}", demo.id)));
+    assert!(text.contains(",notes,"));
+    let review = text.lines().find(|l| l.contains("codex-auto-review")).unwrap();
+    assert!(review.contains(",,exact,"), "{review}");
+
+    let mut daily = Vec::new();
+    export(&store, &PriceBook::default_book(), range, &Filter::default(), &tz(), Granularity::Daily, Format::Json, true, &mut daily).unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&daily).unwrap();
+    let total: u64 = v.as_array().unwrap().iter().map(|r| r["events"].as_u64().unwrap()).sum();
+    assert_eq!(total, 9);
+    assert!(!String::from_utf8(daily).unwrap().contains("notes"));
+}

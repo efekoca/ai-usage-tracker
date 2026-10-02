@@ -87,7 +87,7 @@ pub struct Filter {
 }
 
 impl Filter {
-    fn matches(&self, e: &EventRow) -> bool {
+    pub fn matches(&self, e: &EventRow) -> bool {
         (self.tools.is_empty() || self.tools.contains(&e.tool))
             && (self.clients.is_empty() || e.client.as_ref().is_some_and(|c| self.clients.contains(c)))
             && (self.models.is_empty() || self.models.contains(&e.model))
@@ -141,7 +141,10 @@ pub struct DayPoint {
     pub tokens: u64,
     pub cost_usd: f64,
     pub events: u64,
+    /// Tokens per tool.
     pub by_tool: BTreeMap<String, u64>,
+    /// API-equivalent cost per tool.
+    pub cost_by_tool: BTreeMap<String, f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -195,7 +198,7 @@ pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filte
     let mut totals = Totals::default();
     let (mut by_tool, mut by_client, mut by_model, mut by_project) =
         (HashMap::new(), HashMap::new(), HashMap::new(), HashMap::new());
-    let mut days: BTreeMap<NaiveDate, (Totals, BTreeMap<String, u64>)> = BTreeMap::new();
+    let mut days: BTreeMap<NaiveDate, (Totals, BTreeMap<String, u64>, BTreeMap<String, f64>)> = BTreeMap::new();
     let mut heat = vec![vec![0u64; 24]; 7];
     let mut unpriced = BTreeMap::new();
     let mut by_accuracy = BTreeMap::new();
@@ -223,6 +226,7 @@ pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filte
             let d = days.entry(local.date_naive()).or_default();
             d.0.add(e, c.as_ref());
             *d.1.entry(e.tool.as_str().to_owned()).or_insert(0) += e.tokens.total();
+            *d.2.entry(e.tool.as_str().to_owned()).or_insert(0.0) += c.as_ref().map(Cost::total).unwrap_or(0.0);
             heat[local.weekday().num_days_from_monday() as usize][local.hour() as usize] += e.tokens.total();
         }
     }
@@ -240,8 +244,8 @@ pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filte
     let mut daily = Vec::new();
     let mut d = first;
     while d <= last {
-        let (t, by_tool) = days.remove(&d).unwrap_or_default();
-        daily.push(DayPoint { date: d.to_string(), tokens: t.total_tokens, cost_usd: t.cost_usd, events: t.events, by_tool });
+        let (t, by_tool, cost_by_tool) = days.remove(&d).unwrap_or_default();
+        daily.push(DayPoint { date: d.to_string(), tokens: t.total_tokens, cost_usd: t.cost_usd, events: t.events, by_tool, cost_by_tool });
         d = d + Days::new(1);
     }
     let days_in_range = daily.len() as u32;

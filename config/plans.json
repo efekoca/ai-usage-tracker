@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-10-02",
+  "notes": {
+    "en": "Providers publish limit mechanics, not absolute numbers. Real utilisation is shown only when a tool reports it; otherwise you can set your own budget per window (shown as an estimate).",
+    "tr": "Sağlayıcılar limit mekaniğini yayınlıyor, mutlak sayıları değil. Gerçek kullanım yüzdesi yalnızca araç bildirdiğinde gösterilir; aksi halde her pencere için kendi bütçenizi tanımlayabilirsiniz (tahmini olarak gösterilir)."
+  },
+  "providers": {
+    "anthropic": {
+      "label": "Claude",
+      "shared_pool_note": {
+        "en": "Claude apps and Claude Code share one usage pool.",
+        "tr": "Claude uygulamaları ve Claude Code aynı kullanım havuzunu paylaşır."
+      },
+      "plans": [
+        { "id": "free", "name": "Free", "windows": ["five_hour"], "source": "https://support.claude.com/en/articles/8325606-what-is-the-pro-plan" },
+        { "id": "pro", "name": "Pro", "windows": ["five_hour", "seven_day"], "relative": "1x", "source": "https://support.claude.com/en/articles/8325606-what-is-the-pro-plan" },
+        { "id": "max5x", "name": "Max 5x", "windows": ["five_hour", "seven_day"], "relative": "5x Pro", "source": "https://support.claude.com/en/articles/11049741-what-is-the-max-plan" },
+        { "id": "max20x", "name": "Max 20x", "windows": ["five_hour", "seven_day"], "relative": "20x Pro", "source": "https://support.claude.com/en/articles/11049741-what-is-the-max-plan" },
+        { "id": "team_standard", "name": "Team (Standard)", "windows": ["five_hour", "seven_day"], "source": "https://support.claude.com/en/articles/9266767-what-is-the-team-plan" },
+        { "id": "team_premium", "name": "Team (Premium)", "windows": ["five_hour", "seven_day"], "relative": "6.25x Pro", "source": "https://support.claude.com/en/articles/9266767-what-is-the-team-plan" },
+        { "id": "enterprise", "name": "Enterprise", "windows": ["five_hour", "seven_day"], "source": "https://support.claude.com/en/articles/9797531-what-is-the-enterprise-plan" },
+        { "id": "api", "name": "API (pay as you go)", "windows": [], "source": "https://platform.claude.com/docs/en/about-claude/pricing" }
+      ]
+    },
+    "openai": {
+      "label": "ChatGPT / Codex",
+      "plans": [
+        { "id": "free", "name": "Free", "windows": [], "source": "https://learn.chatgpt.com/docs/pricing" },
+        { "id": "go", "name": "Go", "windows": ["five_hour", "seven_day", "thirty_day"], "source": "https://learn.chatgpt.com/docs/pricing" },
+        { "id": "plus", "name": "Plus", "windows": ["five_hour", "seven_day"], "source": "https://learn.chatgpt.com/docs/pricing" },
+        { "id": "pro", "name": "Pro", "windows": ["seven_day"], "note": { "en": "Pro currently has no five-hour limit.", "tr": "Pro'da şu an 5 saatlik limit yok." }, "source": "https://learn.chatgpt.com/docs/pricing" },
+        { "id": "business", "name": "Business / Team", "windows": ["five_hour", "seven_day"], "source": "https://learn.chatgpt.com/docs/pricing" },
+        { "id": "enterprise", "name": "Enterprise / Edu", "windows": [], "source": "https://learn.chatgpt.com/docs/pricing" },
+        { "id": "api", "name": "API (pay as you go)", "windows": [], "source": "https://developers.openai.com/api/docs/pricing" }
+      ]
+    }
+  }
+}

@@ -77,6 +77,24 @@ const MIGRATIONS: &[&str] = &[
     "#,
 ];
 
+const EVENT_COLUMNS: &str = "key, ts_ms, tool, client, model, project_id, session_id, input, cache_read, cache_write,
+    cache_write_1h, output, reasoning, request_input, web_search, speed, service_tier, inference_geo, accuracy, source";
+
+/// Merge rule for a repeated event key: field-wise maximum (streaming duplicates), earliest
+/// timestamp, and a log-derived (exact) copy upgrades a captured one.
+const UPSERT_EVENT_TAIL: &str = "ON CONFLICT(key) DO UPDATE SET
+    ts_ms = MIN(ts_ms, excluded.ts_ms),
+    input = MAX(input, excluded.input),
+    cache_read = MAX(cache_read, excluded.cache_read),
+    cache_write = MAX(cache_write, excluded.cache_write),
+    cache_write_1h = MAX(cache_write_1h, excluded.cache_write_1h),
+    output = MAX(output, excluded.output),
+    reasoning = MAX(reasoning, excluded.reasoning),
+    request_input = MAX(request_input, excluded.request_input),
+    web_search = MAX(web_search, excluded.web_search),
+    project_id = COALESCE(project_id, excluded.project_id),
+    accuracy = CASE WHEN excluded.accuracy = 'exact' THEN 'exact' ELSE accuracy END";
+
 pub struct Store {
     conn: Connection,
     project_cache: HashMap<String, i64>,
@@ -287,6 +305,51 @@ impl Store {
         )
     }
 
+    /// Merges another tracker database (e.g. a backup) into this one using the same de-dup
+    /// rules as ingestion. Nothing is deleted. Returns (events touched, snapshots added).
+    pub fn merge_from(&mut self, other: &Path) -> Result<(usize, usize)> {
+        self.conn.execute("ATTACH DATABASE ?1 AS other", [other.to_string_lossy()])?;
+        let result = (|| {
+            let theirs: i64 = self.conn.query_row("PRAGMA other.user_version", [], |r| r.get(0))?;
+            if theirs == 0 || theirs as usize > MIGRATIONS.len() {
+                return Err(rusqlite::Error::InvalidQuery);
+            }
+            let tx = self.conn.unchecked_transaction()?;
+            tx.execute(
+                "INSERT INTO project(path, name, hidden) SELECT path, name, hidden FROM other.project WHERE true
+                 ON CONFLICT(path) DO NOTHING",
+                [],
+            )?;
+            let events = tx.execute(
+                &format!(
+                    "INSERT INTO usage_event({EVENT_COLUMNS})
+                     SELECT e.key, e.ts_ms, e.tool, e.client, e.model, p.id, e.session_id, e.input, e.cache_read,
+                            e.cache_write, e.cache_write_1h, e.output, e.reasoning, e.request_input, e.web_search,
+                            e.speed, e.service_tier, e.inference_geo, e.accuracy, e.source
+                     FROM other.usage_event e
+                     LEFT JOIN other.project op ON op.id = e.project_id
+                     LEFT JOIN main.project p ON p.path = op.path
+                     WHERE true
+                     {UPSERT_EVENT_TAIL}"
+                ),
+                [],
+            )?;
+            let limits = tx.execute(
+                "INSERT INTO limit_snapshot(ts_ms, provider, tool, account, limit_id, window, used_pct, resets_at, status,
+                     plan, source, accuracy)
+                 SELECT ts_ms, provider, tool, account, limit_id, window, used_pct, resets_at, status, plan, source, accuracy
+                 FROM other.limit_snapshot WHERE true
+                 ON CONFLICT(source, account, limit_id, window, ts_ms) DO NOTHING",
+                [],
+            )?;
+            tx.commit()?;
+            Ok((events, limits))
+        })();
+        self.conn.execute("DETACH DATABASE other", [])?;
+        self.project_cache.clear();
+        result
+    }
+
     /// Consistent copy of the database (works while the app is running).
     pub fn backup_to(&self, dest: &Path) -> Result<()> {
         let _ = std::fs::remove_file(dest);
@@ -342,24 +405,11 @@ impl StoreTx<'_> {
                 Some(p) if !p.is_empty() => Some(self.project_id(p)?),
                 _ => None,
             };
-            let mut st = self.tx.prepare_cached(
-                "INSERT INTO usage_event(key, ts_ms, tool, client, model, project_id, session_id, input, cache_read,
-                     cache_write, cache_write_1h, output, reasoning, request_input, web_search, speed, service_tier,
-                     inference_geo, accuracy, source)
+            let mut st = self.tx.prepare_cached(&format!(
+                "INSERT INTO usage_event({EVENT_COLUMNS})
                  VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)
-                 ON CONFLICT(key) DO UPDATE SET
-                     ts_ms = MIN(ts_ms, excluded.ts_ms),
-                     input = MAX(input, excluded.input),
-                     cache_read = MAX(cache_read, excluded.cache_read),
-                     cache_write = MAX(cache_write, excluded.cache_write),
-                     cache_write_1h = MAX(cache_write_1h, excluded.cache_write_1h),
-                     output = MAX(output, excluded.output),
-                     reasoning = MAX(reasoning, excluded.reasoning),
-                     request_input = MAX(request_input, excluded.request_input),
-                     web_search = MAX(web_search, excluded.web_search),
-                     project_id = COALESCE(project_id, excluded.project_id),
-                     accuracy = CASE WHEN excluded.accuracy = 'exact' THEN 'exact' ELSE accuracy END",
-            )?;
+                 {UPSERT_EVENT_TAIL}"
+            ))?;
             st.execute(params![
                 e.key,
                 e.ts_ms,
