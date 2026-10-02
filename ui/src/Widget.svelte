@@ -1,32 +1,63 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
-  import { getCurrentWindow } from '@tauri-apps/api/window'
-  import { api, on, type Settings, type WidgetData } from './lib/api'
-  import { fmtCompact, fmtDec, fmtMoney, fmtPct, t } from './lib/i18n.svelte'
+  import { onMount, tick } from 'svelte'
+  import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window'
+  import { api, on, type AppInfo, type Settings, type WidgetData } from './lib/api'
   import { applyAppearance } from './lib/store.svelte'
+  import WidgetView from './components/WidgetView.svelte'
 
   let data = $state<WidgetData | null>(null)
   let settings = $state<Settings | null>(null)
+  let info: AppInfo | null = null
+  let root: HTMLElement | undefined = $state()
+  let host: HTMLElement | undefined = $state()
+
+  function apply(s: Settings) {
+    // the widget can have its own theme; "system" follows the app's theme setting
+    applyAppearance({ ...s, theme: s.widget.theme === 'system' ? s.theme : s.widget.theme }, info)
+    document.documentElement.dataset.mica = 'false'
+  }
 
   async function load() {
     try {
       data = await api.widgetData()
     } catch {
-      /* backend busy; next tick retries */
+      /* backend busy; the next tick retries */
     }
   }
+
+  // the window follows the content size (layout, items and scale all change it)
+  let lastSize = ''
+  async function fit() {
+    await tick()
+    if (!host || !root) return
+    const r = host.getBoundingClientRect()
+    const w = Math.ceil(r.width)
+    const h = Math.ceil(r.height)
+    const key = `${w}x${h}`
+    if (w > 10 && h > 10 && key !== lastSize) {
+      lastSize = key
+      await getCurrentWindow().setSize(new LogicalSize(w, h)).catch(() => {})
+    }
+  }
+  $effect(() => {
+    void data
+    void settings
+    fit()
+  })
+
   onMount(() => {
     ;(async () => {
-      const [info, s] = await Promise.all([api.appInfo(), api.getSettings()])
+      const [i, s] = await Promise.all([api.appInfo(), api.getSettings()])
+      info = i
       settings = s
-      applyAppearance(s, info)
+      apply(s)
       await load()
     })()
     const subs = [
       on('data-changed', load),
       on<Settings>('settings-changed', (s) => {
         settings = s
-        applyAppearance(s, null)
+        apply(s)
         load()
       }),
     ]
@@ -37,7 +68,7 @@
     }
   })
 
-  // click opens the dashboard; a press that moves starts a window drag
+  // click runs the click action; a press that moves starts a window drag (unless locked)
   let down: { x: number; y: number } | null = null
   function pointerdown(e: PointerEvent) {
     if (e.button !== 0) return
@@ -46,155 +77,39 @@
   function pointermove(e: PointerEvent) {
     if (down && Math.hypot(e.screenX - down.x, e.screenY - down.y) > 4) {
       down = null
-      getCurrentWindow().startDragging()
+      if (!settings?.widget.lock_position) getCurrentWindow().startDragging()
     }
   }
   function pointerup() {
-    if (down) api.openMain()
+    if (down && settings?.widget.click_action !== 'none') api.openMain()
     down = null
   }
   function menu(e: MouseEvent) {
     e.preventDefault()
     api.widgetMenu()
   }
-
-  const zoom = $derived(settings?.widget.size === 's' ? 0.82 : settings?.widget.size === 'l' ? 1.24 : 1)
-  const alpha = $derived(Math.round((settings?.widget.opacity ?? 0.85) * 100))
-  const providerLimits = $derived(
-    (data?.providers ?? []).map((p) => ({
-      provider: p,
-      five: data?.limits.find((l) => l.provider === p && l.window === 'five_hour') ?? null,
-      week: data?.limits.find((l) => l.provider === p && l.window === 'seven_day') ?? null,
-    })),
-  )
-  const R = 15
-  const C = 2 * Math.PI * R
-  const level = (pct: number) => (pct >= 90 ? 'var(--critical)' : pct >= 70 ? 'var(--serious)' : 'var(--accent)')
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div
-  class="w"
-  style="zoom:{zoom};--alpha:{alpha}%"
-  onpointerdown={pointerdown}
-  onpointermove={pointermove}
-  onpointerup={pointerup}
-  oncontextmenu={menu}
-  title={t('widget.open')}
->
-  {#if !data}
-    <span class="muted small">…</span>
-  {:else if data.providers.length === 0}
-    <span class="muted small">{t('widget.noSources')}</span>
-  {:else}
-    <div class="today">
-      <span class="label">{t('widget.today')}</span>
-      <span class="big num">{fmtCompact(data.total_tokens)}</span>
-      <span class="cost num">{fmtMoney(data.cost_usd)}{data.has_unpriced ? '*' : ''}</span>
-    </div>
-    <div class="rings">
-      {#each providerLimits as pl (pl.provider)}
-        {@const five = pl.five && pl.five.state === 'fresh' && pl.five.used_pct !== null ? pl.five.used_pct : null}
-        {@const week = pl.week && pl.week.state === 'fresh' && pl.week.used_pct !== null ? pl.week.used_pct : null}
-        <div class="ring" aria-label="{t(`provider.${pl.provider}`)} {five !== null ? fmtPct(five) : '—'}">
-          <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
-            <circle cx="20" cy="20" r={R} class="track" />
-            {#if five !== null}
-              <circle cx="20" cy="20" r={R} class="arc" stroke={level(five)} stroke-dasharray="{(Math.min(100, five) / 100) * C} {C}" transform="rotate(-90 20 20)" />
-            {/if}
-            <text x="20" y="20" dy="0.35em" text-anchor="middle">{five !== null ? fmtDec(five) : '–'}</text>
-          </svg>
-          <div class="rl">
-            <span class="pn">{t(`provider.${pl.provider}`)}</span>
-            <span class="sub">{t('widget.5h')}{week !== null ? ` · ${t('widget.week')} ${fmtPct(week)}` : ''}{pl.five?.accuracy === 'estimated' ? ' ≈' : ''}</span>
-          </div>
-        </div>
-      {/each}
-    </div>
+<div class="host" bind:this={host} onpointerdown={pointerdown} onpointermove={pointermove} onpointerup={pointerup} oncontextmenu={menu}>
+  {#if settings}
+    <WidgetView {data} ws={settings.widget} bind:root />
   {/if}
 </div>
 
 <style>
   :global(html.widget),
-  :global(html.widget body) {
+  :global(html.widget body),
+  :global(html.widget #app) {
     background: transparent !important;
-  }
-  .w {
-    height: 100vh;
-    box-sizing: border-box;
-    margin: 0;
-    padding: 12px 14px;
-    border-radius: 14px;
-    background: color-mix(in srgb, var(--surface) var(--alpha), transparent);
-    border: 0.5px solid var(--hairline-strong);
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    user-select: none;
     overflow: hidden;
+    height: auto;
   }
-  .today {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
+  .host {
+    display: inline-block;
+    line-height: 0;
   }
-  .label {
-    font-size: 11px;
-    color: var(--ink-2);
-    font-weight: 500;
-  }
-  .big {
-    font-size: 24px;
-    font-weight: 700;
-    letter-spacing: -0.03em;
-    line-height: 1.15;
-  }
-  .cost {
-    font-size: 12px;
-    color: var(--ink-2);
-  }
-  .rings {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin-left: auto;
-  }
-  .ring {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .ring svg {
-    width: 32px;
-    height: 32px;
-  }
-  .track {
-    fill: none;
-    stroke: var(--surface-press);
-    stroke-width: 4;
-  }
-  .arc {
-    fill: none;
-    stroke-width: 4;
-    stroke-linecap: round;
-    transition: stroke-dasharray 600ms var(--ease);
-  }
-  text {
-    font-size: 10.5px;
-    font-weight: 650;
-    fill: var(--ink);
-  }
-  .rl {
-    display: flex;
-    flex-direction: column;
-    line-height: 1.2;
-  }
-  .pn {
-    font-size: 12px;
-    font-weight: 600;
-  }
-  .sub {
-    font-size: 10.5px;
-    color: var(--ink-2);
+  .host :global(.w) {
+    line-height: 1.35;
   }
 </style>

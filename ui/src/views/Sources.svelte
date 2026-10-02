@@ -5,6 +5,7 @@
   import { fmtDuration, t } from '../lib/i18n.svelte'
   import Toggle from '../components/Toggle.svelte'
   import Icon from '../components/Icon.svelte'
+  import CapturePanel from '../components/CapturePanel.svelte'
 
   let sources: SourceInfo[] = $state([])
   let warnings: ParserWarning[] = $state([])
@@ -111,6 +112,8 @@
     {/each}
   </section>
 {/if}
+
+<CapturePanel />
 
 <div class="banner"><Icon name="clock" size={16} />{t('sources.retention')}</div>
 

@@ -114,6 +114,9 @@
   }
   .panel {
     width: min(640px, 100%);
+    /* bottom padding of a flex scroll container is not kept by WebView2; reserve it here */
+    padding-bottom: 56px;
+    height: max-content;
     display: flex;
     flex-direction: column;
     gap: 16px;

@@ -2,10 +2,14 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Permissions for the dashboard and the widget. Only local IPC; no network or shell access is granted to the web content.",
-  "windows": ["main", "widget"],
+  "windows": [
+    "main",
+    "widget"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
+    "core:window:allow-set-size",
     "dialog:allow-save",
     "dialog:allow-open",
     "dialog:allow-ask",

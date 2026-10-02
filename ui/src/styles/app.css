@@ -2,7 +2,8 @@
    colors are the validated reference palette (categorical slots in fixed order, a single-hue
    sequential ramp and a reserved status set). */
 
-:root {
+:root,
+[data-theme='light'] {
   color-scheme: light;
   --font: 'Inter Variable', 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
   --accent: #2a78d6;
@@ -94,7 +95,8 @@
     --bad-ink: #e66767;
   }
 }
-:root[data-theme='dark'] {
+:root[data-theme='dark'],
+[data-theme='dark'] {
   color-scheme: dark;
   --window: #121211;
   --sidebar: rgba(28, 28, 27, 0.6);

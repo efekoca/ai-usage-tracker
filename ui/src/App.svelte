@@ -12,6 +12,8 @@
   import Projects from './views/Projects.svelte'
   import Sources from './views/Sources.svelte'
   import SettingsView from './views/Settings.svelte'
+  import Cache from './views/Cache.svelte'
+  import WidgetStudio from './views/WidgetStudio.svelte'
 
   let failed = $state('')
   onMount(() => {
@@ -23,15 +25,17 @@
       { id: 'overview', icon: 'overview' },
       { id: 'daily', icon: 'daily' },
       { id: 'breakdown', icon: 'breakdown' },
+      { id: 'cache', icon: 'cache' },
       { id: 'limits', icon: 'limits' },
       { id: 'projects', icon: 'projects' },
     ] },
     { section: 'nav.section.manage', items: [
       { id: 'sources', icon: 'sources' },
+      { id: 'widget', icon: 'widget' },
       { id: 'settings', icon: 'settings' },
     ] },
   ]
-  const withToolbar: View[] = ['overview', 'daily', 'breakdown', 'projects']
+  const withToolbar: View[] = ['overview', 'daily', 'breakdown', 'cache', 'projects']
 
   function navKey(e: KeyboardEvent) {
     const flat = nav.flatMap((s) => s.items.map((i) => i.id))
@@ -104,6 +108,8 @@
         {:else if app.view === 'projects'}<Projects />
         {:else if app.view === 'sources'}<Sources />
         {:else if app.view === 'settings'}<SettingsView />
+        {:else if app.view === 'cache'}<Cache />
+        {:else if app.view === 'widget'}<WidgetStudio />
         {/if}
       </div>
     </main>

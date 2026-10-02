@@ -456,6 +456,13 @@ pub fn set_widget_visible(app: AppHandle, state: State<AppState>, visible: bool)
 }
 
 #[tauri::command]
+pub fn place_widget(app: AppHandle, corner: String) {
+    if let Some(w) = tauri::Manager::get_webview_window(&app, windows::WIDGET) {
+        windows::place_widget(&w, &corner);
+    }
+}
+
+#[tauri::command]
 pub fn widget_menu(app: AppHandle) {
     windows::popup_widget_menu(&app);
 }

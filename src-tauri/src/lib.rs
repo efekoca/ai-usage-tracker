@@ -108,6 +108,7 @@ pub fn run() {
             commands::open_main,
             commands::set_widget_visible,
             commands::widget_menu,
+            commands::place_widget,
             commands::quit_app,
             commands::capture_status,
             commands::set_capture,

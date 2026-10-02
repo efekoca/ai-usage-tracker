@@ -2,7 +2,7 @@
 import { api, on, type AppInfo, type Filter, type LimitView, type Period, type Report, type ScanStatus, type Settings } from './api'
 import { i18n, resolveLang } from './i18n.svelte'
 
-export type View = 'overview' | 'daily' | 'breakdown' | 'limits' | 'projects' | 'sources' | 'settings'
+export type View = 'overview' | 'daily' | 'breakdown' | 'cache' | 'limits' | 'projects' | 'sources' | 'widget' | 'settings'
 
 export const app = $state({
   ready: false,

@@ -49,6 +49,7 @@ export interface Totals {
   cost_usd: number
   unpriced_events: number
   unpriced_tokens: number
+  cache_savings_usd: number
 }
 
 export interface Group {
@@ -65,6 +66,10 @@ export interface DayPoint {
   events: number
   by_tool: Record<string, number>
   cost_by_tool: Record<string, number>
+  prompt_tokens: number
+  cache_read: number
+  cache_write: number
+  cache_savings_usd: number
 }
 
 export interface Report {
@@ -117,13 +122,20 @@ export interface LimitView {
   projects: ProjectShare[]
 }
 
-export interface WidgetData {
-  total_tokens: number
+export interface WidgetPeriod {
+  tokens: number
   cost_usd: number
   has_unpriced: boolean
   tools: { tool: Tool; tokens: number; cost_usd: number }[]
+}
+
+export interface WidgetData {
+  today: WidgetPeriod
+  days7: WidgetPeriod
+  month1: WidgetPeriod
   limits: { provider: Provider; window: string; used_pct: number | null; state: LimitState; accuracy: Accuracy; resets_at: number | null }[]
   providers: Provider[]
+  updated_ms: number
 }
 
 export interface Threshold {
@@ -133,13 +145,60 @@ export interface Threshold {
   cost_usd?: number | null
 }
 
+export type WidgetItemKind = 'primary' | 'cost' | 'limit_five_hour' | 'limit_seven_day' | 'tools' | 'week_tokens' | 'week_cost' | 'month_cost' | 'updated'
+
 export interface WidgetSettings {
   visible: boolean
   opacity: number
   size: 's' | 'm' | 'l'
+  scale: number
   x: number | null
   y: number | null
   auto_hide_fullscreen: boolean
+  layout: 'horizontal' | 'vertical' | 'line'
+  items: { kind: WidgetItemKind; enabled: boolean }[]
+  providers: Provider[]
+  primary_period: 'today' | 'days7' | 'month1'
+  primary_metric: 'tokens' | 'cost'
+  limit_style: 'ring' | 'bar' | 'text'
+  theme: 'system' | 'light' | 'dark'
+  accent: string
+  corner_radius: number
+  border: boolean
+  shadow: boolean
+  show_labels: boolean
+  show_reset_time: boolean
+  warn_at: number
+  high_at: number
+  always_on_top: boolean
+  lock_position: boolean
+  click_action: 'open_dashboard' | 'none'
+}
+
+export interface CaptureSettings {
+  codex_poll: boolean
+  codex_poll_minutes: number
+  codex_path: string
+  statusline: boolean
+  otel: boolean
+  otel_port: number
+}
+
+export interface CaptureStatus {
+  codex_poll: boolean
+  codex: { binary: string | null; last_ok_ms: number | null; last_error: string | null }
+  codex_candidates_found: boolean
+  statusline: boolean
+  statusline_file: string
+  statusline_chained: boolean
+  statusline_last_ms: number | null
+  otel: boolean
+  otel_port: number
+  otel_listening: boolean
+  otel_events: number
+  otel_last_ms: number | null
+  otel_error: string | null
+  settings_file: string
 }
 
 export interface Settings {
@@ -154,6 +213,7 @@ export interface Settings {
   currency: string
   fx_rate: number
   widget: WidgetSettings
+  capture: CaptureSettings
   autostart: boolean
   allow_config_updates: boolean
   primary_metric: 'tokens' | 'cost'
@@ -279,6 +339,9 @@ export const api = {
   setWidgetVisible: (visible: boolean) => invoke<void>('set_widget_visible', { visible }),
   widgetMenu: () => invoke<void>('widget_menu'),
   quit: () => invoke<void>('quit_app'),
+  captureStatus: () => invoke<CaptureStatus>('capture_status'),
+  setCapture: (kind: 'codex' | 'statusline' | 'otel', enabled: boolean) => invoke<string>('set_capture', { kind, enabled }),
+  placeWidget: (corner: string) => invoke<void>('place_widget', { corner }),
 }
 
 export function on<T>(event: string, cb: (payload: T) => void): Promise<UnlistenFn> {

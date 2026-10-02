@@ -159,16 +159,8 @@
     <Toggle checked={s.widget.visible} label={t('settings.widget.show')} onchange={(v) => saveSettings({ widget: { ...s.widget, visible: v } })} />
   </div>
   <div class="item">
-    <span>{t('settings.widget.opacity')}</span>
-    <input type="range" min="0.3" max="1" step="0.05" value={s.widget.opacity} aria-label={t('settings.widget.opacity')} onchange={(e) => saveSettings({ widget: { ...s.widget, opacity: Number(e.currentTarget.value) } })} />
-  </div>
-  <div class="item">
-    <span>{t('settings.widget.size')}</span>
-    <Segmented label={t('settings.widget.size')} value={s.widget.size} options={[{ value: 's', label: t('settings.size.s') }, { value: 'm', label: t('settings.size.m') }, { value: 'l', label: t('settings.size.l') }]} onchange={(v) => saveSettings({ widget: { ...s.widget, size: v } })} />
-  </div>
-  <div class="item">
-    <span>{t('settings.widget.autohide')}</span>
-    <Toggle checked={s.widget.auto_hide_fullscreen} label={t('settings.widget.autohide')} onchange={(v) => saveSettings({ widget: { ...s.widget, auto_hide_fullscreen: v } })} />
+    <div><span>{t('ws.title')}</span><div class="subtle small">{t('settings.widget.studio')}</div></div>
+    <button class="btn" onclick={() => (app.view = 'widget')}><Icon name="widget" size={15} />{t('ws.open')}</button>
   </div>
 </section>
 

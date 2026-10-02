@@ -29,13 +29,14 @@
 
   // series are overlaid, not stacked, so every line reads as its own value
   const layers = $derived(series.map((s) => values.map((v) => [0, v[s.key] ?? 0] as [number, number])))
-  const maxY = $derived(Math.max(1e-9, ...values.flatMap((v) => series.map((s) => v[s.key] ?? 0))))
+  const maxY = $derived(Math.max(1e-9, ...values.flatMap((v) => series.map((s) => v[s.key] ?? 0)).filter(Number.isFinite)))
   const x = $derived(scaleLinear().domain([0, Math.max(1, dates.length - 1)]).range([0, iw]))
   const y = $derived(scaleLinear().domain([0, maxY]).nice(4).range([ih, 0]))
   const ticks = $derived(y.ticks(4))
 
   const areaGen = $derived(
     area<[number, number]>()
+      .defined((d) => Number.isFinite(d[1]))
       .x((_, i) => x(i))
       .y0((d) => y(d[0]))
       .y1((d) => y(d[1]))
@@ -43,6 +44,7 @@
   )
   const lineGen = $derived(
     line<[number, number]>()
+      .defined((d) => Number.isFinite(d[1]))
       .x((_, i) => x(i))
       .y((d) => y(d[1]))
       .curve(curveMonotoneX),
@@ -94,7 +96,9 @@
       {#if hover !== null}
         <line class="cross" x1={x(hover)} x2={x(hover)} y1="0" y2={ih} />
         {#each layers as layer, li (series[li].key)}
+          {#if Number.isFinite(layer[hover][1])}
           <circle cx={x(hover)} cy={y(layer[hover][1])} r="4.5" fill={series[li].color} stroke="var(--surface)" stroke-width="2" />
+          {/if}
         {/each}
       {/if}
       <rect class="hit" width={iw} height={ih} role="presentation" onpointermove={move} onpointerleave={() => (hover = null)} />
@@ -105,7 +109,7 @@
     <div class="tip" style="left:{Math.min(Math.max(left, 90), width - 90)}px">
       <div class="tip-date">{fmtDate(dates[hover], 'long')}</div>
       {#each [...series].reverse() as s (s.key)}
-        <div class="tip-row"><i style="background:{s.color}"></i><span>{s.label}</span><b class="num">{format(values[hover]?.[s.key] ?? 0)}</b></div>
+        <div class="tip-row"><i style="background:{s.color}"></i><span>{s.label}</span><b class="num">{Number.isFinite(values[hover]?.[s.key] ?? 0) ? format(values[hover]?.[s.key] ?? 0) : '—'}</b></div>
       {/each}
       {#if series.length > 1}
         <div class="tip-row total"><span>Σ</span><b class="num">{format(total(hover))}</b></div>

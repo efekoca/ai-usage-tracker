@@ -18,7 +18,13 @@ const settings: Settings = {
   hide_project_names: false,
   currency: 'USD',
   fx_rate: 1,
-  widget: { visible: true, opacity: 0.85, size: 'm', x: null, y: null, auto_hide_fullscreen: true },
+  widget: {
+    visible: true, opacity: 0.85, size: 'm', scale: 1, x: null, y: null, auto_hide_fullscreen: true, layout: 'horizontal',
+    items: (['primary', 'cost', 'limit_five_hour', 'limit_seven_day', 'tools', 'week_tokens', 'week_cost', 'month_cost', 'updated'] as const).map((k, i) => ({ kind: k, enabled: i < 4 })),
+    providers: [], primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '', corner_radius: 14,
+    border: true, shadow: false, show_labels: true, show_reset_time: false, warn_at: 70, high_at: 90, always_on_top: true, lock_position: false, click_action: 'open_dashboard',
+  },
+  capture: { codex_poll: false, codex_poll_minutes: 5, codex_path: '', statusline: false, otel: false, otel_port: 43180 },
   autostart: false,
   allow_config_updates: false,
   primary_metric: 'tokens',
@@ -48,6 +54,7 @@ function totals(tokens: number, cost: number, unpriced = false): Totals {
     cost_usd: unpriced ? 0 : cost,
     unpriced_events: unpriced ? 3 : 0,
     unpriced_tokens: unpriced ? tokens : 0,
+    cache_savings_usd: unpriced ? 0 : cost * 0.9,
   }
 }
 
@@ -73,6 +80,10 @@ function report(p: Period): Report {
       events: Math.round((cc + cx) / 120000),
       by_tool: { ...(cc ? { claude_code: cc } : {}), ...(cx ? { codex: cx } : {}) },
       cost_by_tool: { ...(cc ? { claude_code: cc * 0.75e-6 } : {}), ...(cx ? { codex: cx * 0.6e-6 } : {}) },
+      prompt_tokens: Math.round((cc + cx) * 0.99),
+      cache_read: Math.round((cc + cx) * (0.85 + rnd() * 0.12)),
+      cache_write: Math.round((cc + cx) * 0.04),
+      cache_savings_usd: (cc + cx) * 0.6e-6,
     })
   }
   const total = daily.reduce((a, d) => a + d.tokens, 0)
@@ -141,8 +152,20 @@ export function installMock() {
           return report(a.period as Period)
         case 'get_limits':
           return limits()
-        case 'get_widget_data':
-          return { total_tokens: 18_400_000, cost_usd: 12.84, has_unpriced: false, tools: [], limits: limits().map((l) => ({ provider: l.provider, window: l.window, used_pct: l.used_pct, state: l.state, accuracy: l.accuracy, resets_at: l.resets_at })), providers: ['anthropic', 'openai'] }
+        case 'get_widget_data': {
+          const per = (tok: number, cost: number) => ({ tokens: tok, cost_usd: cost, has_unpriced: false, tools: [{ tool: 'claude_code', tokens: tok * 0.8, cost_usd: cost * 0.85 }, { tool: 'codex', tokens: tok * 0.2, cost_usd: cost * 0.15 }] })
+          return { today: per(18_400_000, 12.84), days7: per(96_000_000, 71.3), month1: per(402_000_000, 288.1), limits: limits().map((l) => ({ provider: l.provider, window: l.window, used_pct: l.used_pct, state: l.state, accuracy: l.accuracy, resets_at: l.resets_at })), providers: ['anthropic', 'openai'], updated_ms: Date.now() - 60000 }
+        }
+        case 'capture_status':
+          return { codex_poll: settings.capture.codex_poll, codex: { binary: 'C:/codex.exe', last_ok_ms: Date.now() - 120000, last_error: null }, codex_candidates_found: true, statusline: settings.capture.statusline, statusline_file: 'C:\Users\you\.claude\settings.json', statusline_chained: false, statusline_last_ms: Date.now() - 30000, otel: settings.capture.otel, otel_port: 43180, otel_listening: settings.capture.otel, otel_events: 42, otel_last_ms: Date.now() - 5000, otel_error: null, settings_file: 'C:\Users\you\.claude\settings.json' }
+        case 'set_capture': {
+          const k = a.kind as 'codex' | 'statusline' | 'otel'
+          if (k === 'codex') settings.capture.codex_poll = !!a.enabled
+          else settings.capture[k] = !!a.enabled
+          return a.enabled ? 'enabled' : 'restored'
+        }
+        case 'place_widget':
+          return null
         case 'detect_sources':
           return [
             { id: 'claude_code', found: true, supported: true, roots: ['C:\\Users\\you\\.claude'], file_count: 27, enabled: true },
