@@ -47,6 +47,13 @@
     saveSettings({ thresholds: list }).then(() => api.limits().then((l) => (app.limits = l)))
   }
   const planNote = (p: Provider) => plans?.providers[p]?.plans.find((x) => x.id === app.settings?.plans[p])
+  function setPrice(p: Provider, raw: string) {
+    const v = Number(raw.replace(',', '.'))
+    const next = { ...(app.settings?.plan_prices ?? {}) }
+    if (v > 0) next[p] = v
+    else delete next[p]
+    saveSettings({ plan_prices: next })
+  }
 </script>
 
 <header class="bar">
@@ -67,6 +74,13 @@
         </select>
         {#if planNote(p)}
           {@const pl = planNote(p)!}
+          {#if pl.id !== 'api' && pl.monthly_usd !== 0}
+            {@const own = app.settings?.plan_prices?.[p]}
+            <label class="price">
+              <span class="subtle small">{t('value.price')}</span>
+              <input class="field" inputmode="decimal" value={own ?? ''} placeholder={typeof pl.monthly_usd === 'number' ? `${pl.monthly_usd} (${t('value.listPrice')})` : '—'} onchange={(e) => setPrice(p, e.currentTarget.value)} title={pl.price_note?.[i18n.lang] ?? ''} />
+            </label>
+          {/if}
           <span class="subtle small">{pl.note ? pl.note[i18n.lang] : ''}</span>
           <button class="btn ghost small" onclick={() => api.openUrl(pl.source)}><Icon name="external" size={13} />{t('settings.pricing.sources')}</button>
         {/if}
@@ -87,7 +101,7 @@
         <span class="prov">{t(`provider.${l.provider}`)}</span>
         {#if l.plan}<span class="pill">{l.plan}</span>{/if}
       </div>
-      <LimitMeter window={l.window} used={l.used_pct} state={l.state} accuracy={l.accuracy} resetsAt={l.resets_at} observedMs={l.observed_ms} source={l.source} sinceTokens={l.usage_since.total_tokens} provider={l.provider} />
+      <LimitMeter window={l.window} used={l.used_pct} state={l.state} accuracy={l.accuracy} resetsAt={l.resets_at} observedMs={l.observed_ms} source={l.source} sinceTokens={l.usage_since.total_tokens} provider={l.provider} forecast={l.forecast} />
       <div class="usage">
         <div class="small muted">{t('limits.windowUsage')}</div>
         <div class="row">
@@ -146,6 +160,14 @@
 </section>
 
 <style>
+  .price {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .price .field {
+    width: 128px;
+  }
   header.bar {
     display: flex;
     align-items: center;

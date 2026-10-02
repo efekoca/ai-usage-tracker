@@ -36,6 +36,10 @@ pub struct AppState {
     pub capture: CaptureRuntime,
     pub quitting: AtomicBool,
     pub started_hidden: bool,
+    /// Signalled by the hidden report page when it is ready to print.
+    pub report_ready: Mutex<Option<std::sync::mpsc::Sender<()>>>,
+    /// The PDF saved last, which the UI may ask to open.
+    pub last_report: Mutex<Option<PathBuf>>,
 }
 
 impl AppState {

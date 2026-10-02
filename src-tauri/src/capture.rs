@@ -311,8 +311,12 @@ pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
         }
         ("claude", true) => {
             let bin = claude_binary(&settings).ok_or("claude_not_found")?;
-            let snaps = read_claude(&state, &settings, &bin)?;
-            store_limits(&state.db_path, &snaps)?;
+            match read_claude(&state, &settings, &bin) {
+                Ok(snaps) => store_limits(&state.db_path, &snaps)?,
+                // signed in with plan limits, just asked too soon: the next cycle reads them
+                Err(e) if e == "claude_throttled" => {}
+                Err(e) => return Err(e),
+            }
             *state.capture.claude.lock().unwrap() =
                 PollStatus { binary: Some(bin.to_string_lossy().into_owned()), last_ok_ms: Some(now_ms()), last_error: None };
             persist(app, |s| s.capture.claude_poll = true)?;
@@ -451,20 +455,22 @@ fn latest_claude_event_ms(state: &AppState) -> Option<i64> {
         .flatten()
 }
 
-/// Claude limit poller: reads soon after new Claude activity (at most once a minute) so the
-/// reading keeps up with use, and at the idle interval otherwise (Claude chat use on the web or
-/// in the desktop app leaves no local log, so it is only seen this way).
+/// Claude limit poller. Claude's usage service limits how often it is asked, so reads are at
+/// least five minutes apart: every five minutes while Claude is in use, every fifteen when
+/// idle (chat use on the web or in the desktop app leaves no local log and is only seen this
+/// way). A throttled answer keeps the last reading; real failures back off up to 30 minutes.
 fn start_claude_poller(app: &AppHandle) {
     let (tx, rx) = channel::<()>();
     *app.state::<AppState>().capture.claude_wake.lock().unwrap() = Some(tx);
     let app = app.clone();
     let _ = std::thread::Builder::new().name("claude-limits".into()).spawn(move || {
         const TICK: Duration = Duration::from_secs(30);
-        const MIN_GAP_MS: i64 = 60_000;
-        // after a failed read (not installed, not signed in) wait this long unless asked again
-        const RETRY_AFTER_FAILURE_MS: i64 = 30 * 60_000;
+        const ACTIVE_GAP_MS: i64 = 5 * 60_000;
+        const IDLE_GAP_MS: i64 = 15 * 60_000;
+        const MAX_BACKOFF_MS: i64 = 30 * 60_000;
         let mut last_try_ms: i64 = 0;
-        let mut failing = false;
+        // consecutive real failures (not throttling): 5, 10, 20, 30 minutes apart
+        let mut failures: u32 = 0;
         let mut seen_event_ms: Option<i64> = None;
         let mut forced = false;
         loop {
@@ -483,13 +489,14 @@ fn start_claude_poller(app: &AppHandle) {
                 continue;
             }
             let now = now_ms();
-            let idle_ms = 60_000 * s.capture.claude_poll_minutes.clamp(1, 120) as i64;
+            let active_gap = (60_000 * s.capture.claude_poll_minutes.clamp(5, 120) as i64).max(ACTIVE_GAP_MS);
             let latest = latest_claude_event_ms(&state);
             let new_activity = latest.is_some() && latest != seen_event_ms;
-            let due = if failing {
-                forced || now - last_try_ms >= RETRY_AFTER_FAILURE_MS
+            let since = now - last_try_ms;
+            let due = if failures > 0 {
+                forced || since >= (ACTIVE_GAP_MS << (failures - 1).min(3)).min(MAX_BACKOFF_MS)
             } else {
-                forced || now - last_try_ms >= idle_ms || (new_activity && now - last_try_ms >= MIN_GAP_MS)
+                forced || since >= IDLE_GAP_MS.max(active_gap) || (new_activity && since >= active_gap)
             };
             if !due {
                 continue;
@@ -498,13 +505,13 @@ fn start_claude_poller(app: &AppHandle) {
             last_try_ms = now;
             seen_event_ms = latest;
             let Some(bin) = claude_binary(&s) else {
-                failing = true;
+                failures = failures.saturating_add(1);
                 state.capture.claude.lock().unwrap().last_error = Some("claude_not_found".into());
                 continue;
             };
             match read_claude(&state, &s, &bin).and_then(|snaps| store_limits(&state.db_path, &snaps)) {
                 Ok(()) => {
-                    failing = false;
+                    failures = 0;
                     let mut c = state.capture.claude.lock().unwrap();
                     c.binary = Some(bin.to_string_lossy().into_owned());
                     c.last_ok_ms = Some(now_ms());
@@ -512,8 +519,10 @@ fn start_claude_poller(app: &AppHandle) {
                     drop(c);
                     let _ = app.emit("data-changed", ());
                 }
+                // asked too soon: the last reading stays; try again next cycle, no error shown
+                Err(e) if e == "claude_throttled" => {}
                 Err(e) => {
-                    failing = true;
+                    failures = failures.saturating_add(1);
                     let mut c = state.capture.claude.lock().unwrap();
                     if c.last_error.as_deref() != Some(e.as_str()) {
                         log::warn!("claude limit read failed: {e}");

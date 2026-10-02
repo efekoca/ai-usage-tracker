@@ -118,6 +118,11 @@ pub struct Totals {
 }
 
 impl Totals {
+    /// Adds one request with its cost (`None` = unpriced) and net cache saving.
+    pub fn add_event(&mut self, e: &EventRow, cost: Option<&Cost>, savings: f64) {
+        self.add(e, cost, savings)
+    }
+
     fn add(&mut self, e: &EventRow, cost: Option<&Cost>, savings: f64) {
         self.events += 1;
         self.cache_savings_usd += savings;
@@ -336,9 +341,10 @@ pub enum LimitState {
     Behind,
 }
 
-/// Usage this long after a reading makes it `Behind` (a request and the reading it produced
-/// can be logged a little apart).
-const BEHIND_GRACE_MS: i64 = 2 * 60_000;
+/// Usage this long after a reading makes it `Behind`. Live readers refresh every few minutes
+/// (Claude's usage service limits how often it is asked), so a reading this recent still counts
+/// as current; older readings followed by use are shown as outdated.
+pub const BEHIND_GRACE_MS: i64 = 10 * 60_000;
 
 /// User-defined budget for a window, used only when no real limit reading exists.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -382,6 +388,8 @@ pub struct LimitView {
     pub window_usage: Totals,
     /// Usage after the reading (`Behind` only): what the reading does not include yet.
     pub usage_since: Totals,
+    /// Pace of the current window from its recent readings (current readings only).
+    pub forecast: Option<crate::insights::Forecast>,
     pub projects: Vec<ProjectShare>,
 }
 
@@ -459,6 +467,11 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
         });
         // project shares of a limit only make sense against a current reading
         let used = if state == LimitState::Fresh { s.used_pct } else { None };
+        // the window's average pace so far (current readings only)
+        let forecast = match (state, s.resets_at, dur_ms, s.used_pct) {
+            (LimitState::Fresh, Some(r), Some(d), Some(cur)) => Some(crate::insights::forecast(now_ms, cur, r * 1000, d)),
+            _ => None,
+        };
         let (usage, shares) = match start {
             Some(st) => window_usage(store, book, &projects, s.provider, st, now_ms, used)?,
             None => (Totals::default(), Vec::new()),
@@ -479,6 +492,7 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
             window_start_ms: start,
             window_usage: usage,
             usage_since,
+            forecast,
             projects: shares,
         });
     }
@@ -513,6 +527,7 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
             accuracy: Accuracy::Estimated,
             state: LimitState::Fresh,
             usage_since: Totals::default(),
+            forecast: None,
             window_start_ms: Some(start),
             window_usage: usage,
             projects: shares,

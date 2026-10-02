@@ -71,6 +71,9 @@ pub enum UsageError {
     /// Claude Code answered but has no plan limits: not signed in, signed in with an API key,
     /// or the login expired.
     NotAvailable,
+    /// Plan limits apply but the usage service gave no numbers this time (it limits how often
+    /// it is asked); the last reading stays valid and a later read succeeds.
+    Throttled,
     Failed(String),
 }
 
@@ -78,6 +81,7 @@ impl std::fmt::Display for UsageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             UsageError::NotAvailable => f.write_str("claude_no_plan_limits"),
+            UsageError::Throttled => f.write_str("claude_throttled"),
             UsageError::Failed(e) => f.write_str(e),
         }
     }
@@ -86,9 +90,11 @@ impl std::fmt::Display for UsageError {
 /// Maps a `get_usage` response to snapshots.
 pub fn parse_response(resp: &Value, now_ms: i64) -> Result<Vec<LimitSnapshot>, UsageError> {
     let available = resp.get("rate_limits_available").and_then(Value::as_bool).unwrap_or(false);
-    let limits = resp.get("rate_limits").filter(|v| v.is_object());
-    let (true, Some(limits)) = (available, limits) else {
+    if !available {
         return Err(UsageError::NotAvailable);
+    }
+    let Some(limits) = resp.get("rate_limits").filter(|v| v.is_object()) else {
+        return Err(UsageError::Throttled);
     };
     let plan = str_at(resp, "subscription_type").map(str::to_owned);
     let mut out = Vec::new();
@@ -207,6 +213,13 @@ mod tests {
         let r = json!({"subscription_type": null, "rate_limits_available": false, "rate_limits": null});
         assert_eq!(parse_response(&r, 1), Err(UsageError::NotAvailable));
         assert_eq!(parse_response(&json!({}), 1), Err(UsageError::NotAvailable));
+    }
+
+    #[test]
+    fn limits_that_apply_but_are_not_given_are_a_throttled_read() {
+        // what Claude Code answers when asked again too soon
+        let r = json!({"subscription_type": "max", "rate_limits_available": true, "rate_limits": null});
+        assert_eq!(parse_response(&r, 1), Err(UsageError::Throttled));
     }
 
     #[test]

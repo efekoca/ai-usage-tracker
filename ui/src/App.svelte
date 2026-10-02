@@ -14,6 +14,8 @@
   import SettingsView from './views/Settings.svelte'
   import Cache from './views/Cache.svelte'
   import WidgetStudio from './views/WidgetStudio.svelte'
+  import Sessions from './views/Sessions.svelte'
+  import Context from './views/Context.svelte'
 
   let failed = $state('')
   let page: HTMLDivElement | undefined = $state()
@@ -31,7 +33,9 @@
       { id: 'overview', icon: 'overview' },
       { id: 'daily', icon: 'daily' },
       { id: 'breakdown', icon: 'breakdown' },
+      { id: 'sessions', icon: 'sessions' },
       { id: 'cache', icon: 'cache' },
+      { id: 'context', icon: 'context' },
       { id: 'limits', icon: 'limits' },
       { id: 'projects', icon: 'projects' },
     ] },
@@ -41,7 +45,7 @@
       { id: 'settings', icon: 'settings' },
     ] },
   ]
-  const withToolbar: View[] = ['overview', 'daily', 'breakdown', 'cache', 'projects']
+  const withToolbar: View[] = ['overview', 'daily', 'breakdown', 'sessions', 'cache', 'context', 'projects']
 
   function navKey(e: KeyboardEvent) {
     const flat = nav.flatMap((s) => s.items.map((i) => i.id))
@@ -115,6 +119,8 @@
         {:else if app.view === 'sources'}<Sources />
         {:else if app.view === 'settings'}<SettingsView />
         {:else if app.view === 'cache'}<Cache />
+        {:else if app.view === 'sessions'}<Sessions />
+        {:else if app.view === 'context'}<Context />
         {:else if app.view === 'widget'}<WidgetStudio />
         {/if}
       </div>

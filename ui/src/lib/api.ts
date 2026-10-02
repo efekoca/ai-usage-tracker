@@ -121,6 +121,7 @@ export interface LimitView {
   window_start_ms: number | null
   window_usage: Totals
   usage_since: Totals
+  forecast: Forecast | null
   projects: ProjectShare[]
 }
 
@@ -233,6 +234,9 @@ export interface Settings {
   primary_metric: 'tokens' | 'cost'
   dismissed_unpriced: string[]
   limit_display: 'used' | 'remaining'
+  plan_prices: Record<string, number>
+  weekly_report_auto: boolean
+  weekly_report_dir: string
 }
 
 export interface SourceInfo {
@@ -263,6 +267,7 @@ export interface AppInfo {
   supports_mica: boolean
   accent_color: string | null
   started_hidden: boolean
+  reports_dir: string
 }
 
 export interface ProjectRow {
@@ -309,11 +314,18 @@ export interface PlanDef {
   relative?: string
   note?: { en: string; tr: string }
   source: string
+  /** Monthly list price in USD; null when the plan has no fixed price. */
+  monthly_usd?: number | null
+  price_note?: { en: string; tr: string }
+  price_options?: number[]
+  price_source?: string
 }
 
 export interface PlansFile {
   schema_version: number
   updated_at: string
+  prices_verified_at?: string
+  price_note?: { en: string; tr: string }
   notes: { en: string; tr: string }
   providers: Record<Provider, { label: string; shared_pool_note?: { en: string; tr: string }; plans: PlanDef[] }>
 }
@@ -323,6 +335,101 @@ export interface ParserWarning {
   parser: string
   count: number
   last: string
+}
+
+export type ForecastKind = 'fills' | 'safe' | 'idle' | 'insufficient'
+export interface Forecast {
+  kind: ForecastKind
+  rate_per_hour: number | null
+  fills_at_ms: number | null
+  at_reset_pct: number | null
+  basis_minutes: number
+}
+
+export interface SessionModel {
+  model: string
+  events: number
+  total_tokens: number
+  cost_usd: number
+  unpriced: boolean
+}
+export interface SessionRow {
+  session_id: string
+  tool: Tool
+  client: string | null
+  project_id: number | null
+  project: string
+  hidden: boolean
+  started_ms: number
+  ended_ms: number
+  totals: Totals
+  models: SessionModel[]
+  max_context: number
+  avg_context: number
+}
+export interface Sessions {
+  sessions: SessionRow[]
+  events_without_session: number
+}
+
+export interface CompareTarget {
+  model: string
+  provider: Provider
+  cost_usd: number
+  delta_usd: number
+  verified_at: string | null
+  notes: string | null
+}
+export interface ModelCompare {
+  basis_events: number
+  basis_tokens: number
+  excluded_events: number
+  actual_cost_usd: number
+  actual_by_model: [string, number][]
+  targets: CompareTarget[]
+}
+
+export interface ContextBucket {
+  from: number
+  to: number | null
+  requests: number
+  cost_usd: number
+}
+export interface ContextByModel {
+  model: string
+  requests: number
+  avg: number
+  p90: number
+  max: number
+  threshold: number | null
+  over_threshold: number
+  long_context_extra_usd: number
+}
+export interface ContextStats {
+  requests: number
+  avg: number
+  median: number
+  p90: number
+  p99: number
+  max: number
+  buckets: ContextBucket[]
+  long_context_requests: number
+  long_context_extra_usd: number
+  by_model: ContextByModel[]
+  daily: { date: string; requests: number; avg: number; p90: number; max: number }[]
+}
+
+export interface ProviderValue {
+  provider: Provider
+  cost_usd: number
+  events: number
+  unpriced_events: number
+  cumulative: number[]
+}
+export interface PlanValue {
+  range: { from_ms: number; to_ms: number }
+  dates: string[]
+  providers: ProviderValue[]
 }
 
 export const api = {
@@ -335,6 +442,12 @@ export const api = {
   parserWarnings: () => invoke<ParserWarning[]>('parser_warnings'),
   report: (period: Period, filter?: Filter) => invoke<Report>('get_report', { period, filter }),
   limits: () => invoke<LimitView[]>('get_limits'),
+  sessions: (period: Period, filter?: Filter) => invoke<Sessions>('get_sessions', { period, filter }),
+  compareModels: (period: Period, filter?: Filter) => invoke<ModelCompare>('compare_models', { period, filter }),
+  contextStats: (period: Period, filter?: Filter) => invoke<ContextStats>('context_stats', { period, filter }),
+  planValue: () => invoke<PlanValue>('plan_value'),
+  exportReport: (from: string, to: string, path: string) => invoke<void>('export_report', { from, to, path }),
+  openLastReport: () => invoke<void>('open_last_report'),
   widgetData: () => invoke<WidgetData>('get_widget_data'),
   projects: () => invoke<ProjectRow[]>('list_projects'),
   projectsForSettings: () => invoke<ProjectRow[]>('list_projects_for_settings'),

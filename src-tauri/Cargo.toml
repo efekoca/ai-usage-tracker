@@ -28,3 +28,6 @@ notify = "8"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_Foundation", "Win32_System_Registry", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi"] }
+# same versions as Tauri's own WebView2 binding, for the PDF report (PrintToPdf)
+webview2-com = "0.39"
+windows = "0.62"

@@ -294,8 +294,8 @@ fn reading_followed_by_more_usage_is_marked_behind() {
     {
         let mut tx = store.transaction().unwrap();
         tx.upsert_events(&[
-            // a minute after the reading: the same request, within the grace period
-            ev("same", now - 3_540_000, Tool::ClaudeCode, "claude-sonnet-5", r"C:\p\a", 1_000, 0),
+            // within the grace period after the reading
+            ev("same", now - 3_300_000, Tool::ClaudeCode, "claude-sonnet-5", r"C:\p\a", 1_000, 0),
             // Codex use says nothing about the Claude window
             ev("cx", now - 1_200_000, Tool::Codex, "gpt-5.6-terra", r"C:\p\a", 1_000, 0),
         ])

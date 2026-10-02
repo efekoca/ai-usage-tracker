@@ -9,6 +9,7 @@
   import LimitMeter from '../components/LimitMeter.svelte'
   import AccuracyBadge from '../components/AccuracyBadge.svelte'
   import Icon from '../components/Icon.svelte'
+  import PlanValue from '../components/PlanValue.svelte'
 
   let metric: 'tokens' | 'cost' = $state(app.settings?.primary_metric ?? 'tokens')
   const r = $derived(app.report)
@@ -99,12 +100,15 @@
               accuracy={l.accuracy}
               resetsAt={l.resets_at}
               observedMs={l.observed_ms}
+              forecast={l.forecast}
             />
           {/each}
         </div>
       {/if}
     </section>
   </div>
+
+  <PlanValue />
 
   <div class="grid2">
     <section class="card">

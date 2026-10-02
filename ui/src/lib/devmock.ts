@@ -31,6 +31,9 @@ const settings: Settings = {
   primary_metric: 'tokens',
   dismissed_unpriced: [],
   limit_display: 'used',
+  plan_prices: {},
+  weekly_report_auto: false,
+  weekly_report_dir: '',
 }
 
 const day = 864e5
@@ -121,11 +124,78 @@ function limits(): LimitView[] {
   const now = Date.now()
   const share = (p: string, s: number, used: number | null) => ({ project_id: projects.indexOf(p) + 1, name: p, hidden: false, totals: totals(Math.round(s * 5e7), s * 30), share: s, estimated_pct: used === null ? null : used * s })
   return [
-    { provider: 'anthropic', limit_id: '', window: 'five_hour', window_minutes: 300, used_pct: 46, resets_at: Math.round(now / 1000 + 2.3 * 3600), observed_ms: now - 192 * 60000, source: 'cowork_audit', status: 'allowed', plan: null, accuracy: 'exact', state: 'behind', window_start_ms: now - 2.7 * 3600e3, window_usage: totals(41e6, 31.2), usage_since: totals(190e6, 65.9), projects: [share('demo-app', 0.62, 46), share('notes', 0.38, 46)] },
-    { provider: 'anthropic', limit_id: '', window: 'seven_day', window_minutes: 10080, used_pct: 73, resets_at: Math.round(now / 1000 + 2.6 * 86400), observed_ms: now - 4 * 60000, source: 'cowork_audit', status: 'allowed_warning', plan: null, accuracy: 'exact', state: 'fresh', window_start_ms: now - 4.4 * 86400e3, window_usage: totals(612e6, 402.5), usage_since: totals(0, 0), projects: [share('demo-app', 0.5, 73), share('website', 0.3, 73), share('notes', 0.2, 73)] },
-    { provider: 'openai', limit_id: 'codex', window: 'five_hour', window_minutes: 300, used_pct: 12, resets_at: Math.round(now / 1000 + 4 * 3600), observed_ms: now - 20 * 60000, source: 'codex_rollout', status: null, plan: 'plus', accuracy: 'exact', state: 'fresh', window_start_ms: now - 3600e3, window_usage: totals(5e6, 3.1), usage_since: totals(0, 0), projects: [share('data-pipeline', 1, 12)] },
-    { provider: 'openai', limit_id: 'codex', window: 'seven_day', window_minutes: 10080, used_pct: 31, resets_at: null, observed_ms: now - 9 * 86400e3, source: 'codex_rollout', status: null, plan: 'plus', accuracy: 'exact', state: 'reset', window_start_ms: now - 7 * 86400e3, window_usage: totals(0, 0), usage_since: totals(0, 0), projects: [] },
+    { provider: 'anthropic', limit_id: '', window: 'five_hour', window_minutes: 300, used_pct: 46, resets_at: Math.round(now / 1000 + 2.3 * 3600), observed_ms: now - 192 * 60000, source: 'cowork_audit', status: 'allowed', plan: null, accuracy: 'exact', state: 'behind', window_start_ms: now - 2.7 * 3600e3, window_usage: totals(41e6, 31.2), usage_since: totals(190e6, 65.9), forecast: null, projects: [share('demo-app', 0.62, 46), share('notes', 0.38, 46)] },
+    { provider: 'anthropic', limit_id: '', window: 'seven_day', window_minutes: 10080, used_pct: 73, resets_at: Math.round(now / 1000 + 2.6 * 86400), observed_ms: now - 4 * 60000, source: 'cowork_audit', status: 'allowed_warning', plan: null, accuracy: 'exact', state: 'fresh', window_start_ms: now - 4.4 * 86400e3, window_usage: totals(612e6, 402.5), usage_since: totals(0, 0), forecast: { kind: 'fills', rate_per_hour: 0.9, fills_at_ms: now + 30 * 3600e3, at_reset_pct: null, basis_minutes: 5760 }, projects: [share('demo-app', 0.5, 73), share('website', 0.3, 73), share('notes', 0.2, 73)] },
+    { provider: 'openai', limit_id: 'codex', window: 'five_hour', window_minutes: 300, used_pct: 12, resets_at: Math.round(now / 1000 + 4 * 3600), observed_ms: now - 20 * 60000, source: 'codex_rollout', status: null, plan: 'plus', accuracy: 'exact', state: 'fresh', window_start_ms: now - 3600e3, window_usage: totals(5e6, 3.1), usage_since: totals(0, 0), forecast: { kind: 'safe', rate_per_hour: 4.2, fills_at_ms: null, at_reset_pct: 29, basis_minutes: 60 }, projects: [share('data-pipeline', 1, 12)] },
+    { provider: 'openai', limit_id: 'codex', window: 'seven_day', window_minutes: 10080, used_pct: 31, resets_at: null, observed_ms: now - 9 * 86400e3, source: 'codex_rollout', status: null, plan: 'plus', accuracy: 'exact', state: 'reset', window_start_ms: now - 7 * 86400e3, window_usage: totals(0, 0), usage_since: totals(0, 0), forecast: null, projects: [] },
   ]
+}
+
+function mockSessions() {
+  const now = Date.now()
+  const models = [['claude-opus-5-5', 'claude_code'], ['claude-sonnet-5', 'claude_code'], ['gpt-5.6-terra', 'codex']] as const
+  const sessions = Array.from({ length: 24 }, (_, i) => {
+    const [model, tool] = models[i % 3]
+    const tok = Math.round(2e6 + ((i * 7919) % 13) * 3.1e6)
+    const cost = tok / 1e6 * (tool === 'codex' ? 0.6 : 0.9)
+    const start = now - i * 5.3 * 3600e3
+    return {
+      session_id: `${(0x1a2b3c4d + i * 7777).toString(16)}-4e5f-6789-abcd-${(i * 99991).toString(16).padStart(12, '0')}`,
+      tool, client: tool === 'codex' ? 'Codex Desktop' : 'claude-desktop',
+      project_id: (i % 5) + 1, project: projects[i % 5], hidden: i % 5 === 4,
+      started_ms: start, ended_ms: start + (12 + (i * 37) % 160) * 60000,
+      totals: { ...totals(tok, cost), events: 20 + (i * 13) % 140 },
+      models: [{ model, events: 20 + (i * 13) % 140, total_tokens: tok, cost_usd: cost, unpriced: false }],
+      max_context: 40_000 + ((i * 7) % 11) * 31_000, avg_context: 30_000 + ((i * 5) % 9) * 14_000,
+    }
+  })
+  return { sessions, events_without_session: 3 }
+}
+
+function mockCompare() {
+  const actual = 288.1
+  const ids: [string, 'anthropic' | 'openai', number][] = [['gpt-5.6-luna', 'openai', 0.07], ['claude-haiku-4-5', 'anthropic', 0.24], ['gpt-5.3-codex', 'openai', 0.38], ['claude-sonnet-5', 'anthropic', 0.48], ['gpt-5.6-terra', 'openai', 0.52], ['claude-opus-5-5', 'anthropic', 0.9], ['gpt-5.6-sol', 'openai', 1.05], ['claude-opus-5', 'anthropic', 1.21], ['claude-fable-5-1', 'anthropic', 1.63], ['claude-opus-4-1', 'anthropic', 3.6]]
+  return {
+    basis_events: 1180, basis_tokens: 402_000_000, excluded_events: 3, actual_cost_usd: actual,
+    actual_by_model: [['claude-opus-5-5', 221.4], ['gpt-5.6-terra', 51.2], ['claude-sonnet-5', 15.5]],
+    targets: ids.map(([model, provider, f]) => ({ model, provider, cost_usd: actual * f, delta_usd: actual * f - actual, verified_at: '2026-10-02', notes: null })),
+  }
+}
+
+function mockContext() {
+  const edges = [0, 10_000, 50_000, 100_000, 200_000, 272_000, 500_000, 1_000_000]
+  const counts = [40, 210, 380, 290, 70, 22, 6, 0]
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(Date.now() - (6 - i) * 86400e3)
+    return { date: d.toISOString().slice(0, 10), requests: 120 + i * 11, avg: 70_000 + i * 6_000, p90: 160_000 + i * 9_000, max: 240_000 + i * 20_000 }
+  })
+  return {
+    requests: 1018, avg: 92_400, median: 71_300, p90: 181_000, p99: 290_000, max: 612_000,
+    buckets: edges.map((from, i) => ({ from, to: edges[i + 1] ?? null, requests: counts[i], cost_usd: counts[i] * 0.21 })),
+    long_context_requests: 22, long_context_extra_usd: 6.84,
+    by_model: [
+      { model: 'claude-opus-5-5', requests: 640, avg: 98_000, p90: 190_000, max: 612_000, threshold: null, over_threshold: 0, long_context_extra_usd: 0 },
+      { model: 'gpt-5.6-terra', requests: 290, avg: 88_000, p90: 230_000, max: 401_000, threshold: 272_000, over_threshold: 22, long_context_extra_usd: 6.84 },
+      { model: 'claude-sonnet-5', requests: 88, avg: 41_000, p90: 90_000, max: 140_000, threshold: null, over_threshold: 0, long_context_extra_usd: 0 },
+    ],
+    daily: days,
+  }
+}
+
+function mockPlanValue() {
+  const n = 30
+  const dates = Array.from({ length: n }, (_, i) => new Date(Date.now() - (n - 1 - i) * 86400e3).toISOString().slice(0, 10))
+  const run = (per: number) => { let r = 0; return dates.map((_, i) => (r += per * (0.4 + ((i * 37) % 10) / 8))) }
+  const a = run(9.1)
+  const o = run(1.2)
+  return {
+    range: { from_ms: Date.now() - n * 86400e3, to_ms: Date.now() },
+    dates,
+    providers: [
+      { provider: 'anthropic', cost_usd: a[n - 1], events: 9000, unpriced_events: 0, cumulative: a },
+      { provider: 'openai', cost_usd: o[n - 1], events: 1200, unpriced_events: 93, cumulative: o },
+    ],
+  }
 }
 
 const pricing = {
@@ -144,7 +214,7 @@ export function installMock() {
       const a = args as Record<string, unknown>
       switch (cmd) {
         case 'app_info':
-          return { version: '0.1.0', data_dir: 'C:\\Users\\you\\AppData\\Local\\AIUsageTracker', pricing_origin: 'bundled', pricing_updated_at: '2026-10-02', supports_mica: false, accent_color: null, started_hidden: false }
+          return { version: '0.1.0', data_dir: 'C:\\Users\\you\\AppData\\Local\\AIUsageTracker', pricing_origin: 'bundled', pricing_updated_at: '2026-10-02', supports_mica: false, accent_color: null, started_hidden: false, reports_dir: 'C:\Users\you\Documents\AI Usage Tracker' }
         case 'get_settings':
           return settings
         case 'save_settings':
@@ -154,6 +224,14 @@ export function installMock() {
           return { running: false, done: 0, total: 0, last_scan_ms: Date.now() - 42000, last_new_events: 0, files_seen: 122, warnings: 0, errors: 0 }
         case 'get_report':
           return report(a.period as Period)
+        case 'get_sessions':
+          return mockSessions()
+        case 'compare_models':
+          return mockCompare()
+        case 'context_stats':
+          return mockContext()
+        case 'plan_value':
+          return mockPlanValue()
         case 'get_limits':
           return limits()
         case 'get_widget_data': {

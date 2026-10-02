@@ -13,27 +13,32 @@
         "tr": "Claude uygulamaları ve Claude Code aynı kullanım havuzunu paylaşır."
       },
       "plans": [
-        { "id": "free", "name": "Free", "windows": ["five_hour"], "source": "https://support.claude.com/en/articles/8325606-what-is-the-pro-plan" },
-        { "id": "pro", "name": "Pro", "windows": ["five_hour", "seven_day"], "relative": "1x", "source": "https://support.claude.com/en/articles/8325606-what-is-the-pro-plan" },
-        { "id": "max5x", "name": "Max 5x", "windows": ["five_hour", "seven_day"], "relative": "5x Pro", "source": "https://support.claude.com/en/articles/11049741-what-is-the-max-plan" },
-        { "id": "max20x", "name": "Max 20x", "windows": ["five_hour", "seven_day"], "relative": "20x Pro", "source": "https://support.claude.com/en/articles/11049741-what-is-the-max-plan" },
-        { "id": "team_standard", "name": "Team (Standard)", "windows": ["five_hour", "seven_day"], "source": "https://support.claude.com/en/articles/9266767-what-is-the-team-plan" },
-        { "id": "team_premium", "name": "Team (Premium)", "windows": ["five_hour", "seven_day"], "relative": "6.25x Pro", "source": "https://support.claude.com/en/articles/9266767-what-is-the-team-plan" },
-        { "id": "enterprise", "name": "Enterprise", "windows": ["five_hour", "seven_day"], "source": "https://support.claude.com/en/articles/9797531-what-is-the-enterprise-plan" },
-        { "id": "api", "name": "API (pay as you go)", "windows": [], "source": "https://platform.claude.com/docs/en/about-claude/pricing" }
+        {"id": "free", "name": "Free", "windows": ["five_hour"], "source": "https://support.claude.com/en/articles/8325606-what-is-the-pro-plan", "monthly_usd": 0, "price_source": "https://claude.com/pricing"},
+        {"id": "pro", "name": "Pro", "windows": ["five_hour", "seven_day"], "relative": "1x", "source": "https://support.claude.com/en/articles/8325606-what-is-the-pro-plan", "monthly_usd": 20, "price_note": {"en": "$17/month when billed annually.", "tr": "Yıllık faturalandırmada aylık $17."}, "price_source": "https://claude.com/pricing"},
+        {"id": "max5x", "name": "Max 5x", "windows": ["five_hour", "seven_day"], "relative": "5x Pro", "source": "https://support.claude.com/en/articles/11049741-what-is-the-max-plan", "monthly_usd": 100, "price_source": "https://claude.com/pricing"},
+        {"id": "max20x", "name": "Max 20x", "windows": ["five_hour", "seven_day"], "relative": "20x Pro", "source": "https://support.claude.com/en/articles/11049741-what-is-the-max-plan", "monthly_usd": 200, "price_source": "https://claude.com/pricing"},
+        {"id": "team_standard", "name": "Team (Standard)", "windows": ["five_hour", "seven_day"], "source": "https://support.claude.com/en/articles/9266767-what-is-the-team-plan", "monthly_usd": 25, "price_note": {"en": "Per seat; $20 when billed annually.", "tr": "Koltuk başına; yıllık faturalandırmada $20."}, "price_source": "https://claude.com/pricing"},
+        {"id": "team_premium", "name": "Team (Premium)", "windows": ["five_hour", "seven_day"], "relative": "6.25x Pro", "source": "https://support.claude.com/en/articles/9266767-what-is-the-team-plan", "monthly_usd": 125, "price_note": {"en": "Per seat; $100 when billed annually.", "tr": "Koltuk başına; yıllık faturalandırmada $100."}, "price_source": "https://claude.com/pricing"},
+        {"id": "enterprise", "name": "Enterprise", "windows": ["five_hour", "seven_day"], "source": "https://support.claude.com/en/articles/9797531-what-is-the-enterprise-plan", "monthly_usd": null, "price_note": {"en": "Seat price plus usage at API rates; not a fixed monthly price.", "tr": "Koltuk ücreti artı API fiyatlarıyla kullanım; sabit aylık fiyat yok."}, "price_source": "https://claude.com/pricing"},
+        {"id": "api", "name": "API (pay as you go)", "windows": [], "source": "https://platform.claude.com/docs/en/about-claude/pricing", "monthly_usd": null}
       ]
     },
     "openai": {
       "label": "ChatGPT / Codex",
       "plans": [
-        { "id": "free", "name": "Free", "windows": [], "source": "https://learn.chatgpt.com/docs/pricing" },
-        { "id": "go", "name": "Go", "windows": ["five_hour", "seven_day", "thirty_day"], "source": "https://learn.chatgpt.com/docs/pricing" },
-        { "id": "plus", "name": "Plus", "windows": ["five_hour", "seven_day"], "source": "https://learn.chatgpt.com/docs/pricing" },
-        { "id": "pro", "name": "Pro", "windows": ["seven_day"], "note": { "en": "Pro currently has no five-hour limit.", "tr": "Pro'da şu an 5 saatlik limit yok." }, "source": "https://learn.chatgpt.com/docs/pricing" },
-        { "id": "business", "name": "Business / Team", "windows": ["five_hour", "seven_day"], "source": "https://learn.chatgpt.com/docs/pricing" },
-        { "id": "enterprise", "name": "Enterprise / Edu", "windows": [], "source": "https://learn.chatgpt.com/docs/pricing" },
-        { "id": "api", "name": "API (pay as you go)", "windows": [], "source": "https://developers.openai.com/api/docs/pricing" }
+        {"id": "free", "name": "Free", "windows": [], "source": "https://learn.chatgpt.com/docs/pricing", "monthly_usd": 0, "price_source": "https://learn.chatgpt.com/docs/pricing"},
+        {"id": "go", "name": "Go", "windows": ["five_hour", "seven_day", "thirty_day"], "source": "https://learn.chatgpt.com/docs/pricing", "monthly_usd": 8, "price_source": "https://learn.chatgpt.com/docs/pricing"},
+        {"id": "plus", "name": "Plus", "windows": ["five_hour", "seven_day"], "source": "https://learn.chatgpt.com/docs/pricing", "monthly_usd": 20, "price_source": "https://learn.chatgpt.com/docs/pricing"},
+        {"id": "pro", "name": "Pro", "windows": ["seven_day"], "note": {"en": "Pro currently has no five-hour limit.", "tr": "Pro'da şu an 5 saatlik limit yok."}, "source": "https://learn.chatgpt.com/docs/pricing", "monthly_usd": null, "price_note": {"en": "Offered at $100, $200 or $500 per month: enter yours.", "tr": "Aylık $100, $200 veya $500 seçenekleri var: sizinkini girin."}, "price_options": [100,200,500], "price_source": "https://learn.chatgpt.com/docs/pricing"},
+        {"id": "business", "name": "Business / Team", "windows": ["five_hour", "seven_day"], "source": "https://learn.chatgpt.com/docs/pricing", "monthly_usd": 25, "price_note": {"en": "Per user; $20 when billed annually.", "tr": "Kullanıcı başına; yıllık faturalandırmada $20."}, "price_source": "https://learn.chatgpt.com/docs/pricing"},
+        {"id": "enterprise", "name": "Enterprise / Edu", "windows": [], "source": "https://learn.chatgpt.com/docs/pricing", "monthly_usd": null, "price_note": {"en": "Price not published (contact sales).", "tr": "Fiyat yayımlanmıyor (satış ekibiyle görüşülür)."}, "price_source": "https://learn.chatgpt.com/docs/pricing"},
+        {"id": "api", "name": "API (pay as you go)", "windows": [], "source": "https://developers.openai.com/api/docs/pricing", "monthly_usd": null}
       ]
     }
+  },
+  "prices_verified_at": "2026-10-02",
+  "price_note": {
+    "en": "Monthly list prices in USD, billed monthly, before tax. Seats are per user. Enter your own price in Limits if you pay a different amount (e.g. annual billing).",
+    "tr": "Aylık faturalandırmada USD liste fiyatları, vergi hariç. Koltuk fiyatları kullanıcı başınadır. Farklı bir tutar ödüyorsanız (ör. yıllık faturalandırma) Limitler sayfasından kendi fiyatınızı girebilirsiniz."
   }
 }

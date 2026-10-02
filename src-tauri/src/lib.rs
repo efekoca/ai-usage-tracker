@@ -4,6 +4,7 @@
 mod capture;
 mod commands;
 mod fonts;
+mod pdf;
 mod settings;
 mod state;
 mod windows;
@@ -131,6 +132,8 @@ pub fn run() {
                 capture: capture::CaptureRuntime::new(),
                 quitting: AtomicBool::new(false),
                 started_hidden,
+                report_ready: Mutex::new(None),
+                last_report: Mutex::new(None),
             });
             worker::start(app.handle().clone(), db_path, rx);
             windows::build_tray(app.handle())?;
@@ -140,6 +143,7 @@ pub fn run() {
             windows::apply_widget_settings(app.handle(), &settings);
             windows::start_fullscreen_watch(app.handle().clone());
             capture::start(app.handle());
+            pdf::start_weekly(app.handle().clone());
             log::info!("started v{}", app.package_info().version);
             Ok(())
         })
@@ -174,6 +178,13 @@ pub fn run() {
             commands::widget_menu,
             commands::place_widget,
             commands::list_fonts,
+            commands::get_sessions,
+            commands::compare_models,
+            commands::context_stats,
+            commands::plan_value,
+            commands::export_report,
+            commands::report_ready,
+            commands::open_last_report,
             commands::quit_app,
             commands::capture_status,
             commands::set_capture,

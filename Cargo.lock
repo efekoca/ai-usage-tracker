@@ -33,6 +33,8 @@ dependencies = [
  "tauri-plugin-log",
  "tauri-plugin-single-instance",
  "tracker-core",
+ "webview2-com",
+ "windows",
  "windows-sys 0.61.2",
 ]
 

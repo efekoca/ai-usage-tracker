@@ -6,6 +6,7 @@
   import Composition from '../components/charts/Composition.svelte'
   import HourHeatmap from '../components/charts/HourHeatmap.svelte'
   import Icon from '../components/Icon.svelte'
+  import CompareModels from '../components/CompareModels.svelte'
 
   let metric: 'tokens' | 'cost' = $state(app.settings?.primary_metric ?? 'tokens')
   const r = $derived(app.report)
@@ -92,6 +93,8 @@
     <h2>{t('breakdown.hours')}</h2>
     <HourHeatmap grid={r.heatmap} format={fmtCompact} ariaLabel={t('breakdown.hours')} />
   </section>
+
+  <CompareModels />
 {/if}
 
 <style>

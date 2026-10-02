@@ -3,8 +3,8 @@
   // icon + label; stale/reset readings are shown as unknown instead of a misleading bar.
   import Icon from './Icon.svelte'
   import AccuracyBadge from './AccuracyBadge.svelte'
-  import { fmtCompact, fmtDuration, fmtLimit, fmtTime, limitShown, t, windowLabel } from '../lib/i18n.svelte'
-  import type { Accuracy, LimitState, Provider } from '../lib/api'
+  import { fmtCompact, fmtDec, fmtDuration, fmtLimit, fmtTime, fmtWhen, limitShown, t, windowLabel } from '../lib/i18n.svelte'
+  import type { Accuracy, Forecast, LimitState, Provider } from '../lib/api'
   import { app } from '../lib/store.svelte'
 
   let {
@@ -19,6 +19,7 @@
     compact = false,
     sinceTokens = 0,
     provider = null,
+    forecast = null,
   }: {
     window: string
     used: number | null
@@ -32,6 +33,8 @@
     /** tokens used after the reading ('behind' only) */
     sinceTokens?: number
     provider?: Provider | null
+    /** pace of the current window (fresh readings only) */
+    forecast?: Forecast | null
   } = $props()
 
   let now = $state(Date.now())
@@ -83,6 +86,27 @@
       <span class="subtle">{t('limits.observed', { t: fmtDuration(now - observedMs) })}</span>
     {/if}
   </div>
+  {#if known && forecast && (!compact || forecast.kind === 'fills')}
+    {@const f = forecast}
+    <p class="forecast" class:warn={f.kind === 'fills'} title={t('forecast.help')}>
+      <Icon name={f.kind === 'fills' ? 'warning' : f.kind === 'insufficient' ? 'clock' : 'chart'} size={13} />
+      <span>
+        {#if f.kind === 'fills' && f.fills_at_ms}
+          {compact ? t('forecast.fillsShort', { t: fmtWhen(f.fills_at_ms) }) : t('forecast.fills', { t: fmtWhen(f.fills_at_ms), d: fmtDuration((resetsAt ?? 0) * 1000 - f.fills_at_ms) })}
+        {:else if f.kind === 'safe' && f.at_reset_pct !== null}
+          {t('forecast.safe', { pct: fmtLimit(f.at_reset_pct, mode) })}
+        {:else if f.kind === 'idle'}
+          {t('forecast.idle')}
+        {:else}
+          {t('forecast.insufficient')}
+        {/if}
+        {#if !compact && f.rate_per_hour !== null && (f.kind === 'fills' || f.kind === 'safe')}
+          <span class="subtle"> · {t('forecast.rate', { n: fmtDec(f.rate_per_hour, 1) })}</span>
+        {/if}
+      </span>
+      {#if !compact}<AccuracyBadge kind="estimated" compact />{/if}
+    </p>
+  {/if}
   {#if behind && !compact}
     <p class="hint subtle">
       {sinceTokens > 0 ? t('limits.state.behind.since', { n: fmtCompact(sinceTokens) }) + ' ' : ''}{provider === 'anthropic' ? t('limits.state.behind.claudeHint') : t('limits.state.behind.hint')}
@@ -163,6 +187,23 @@
   }
   .src {
     font-size: 11.5px;
+  }
+  .forecast {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+  .forecast span {
+    flex: 1;
+  }
+  .forecast.warn {
+    color: var(--ink);
+  }
+  .forecast.warn :global(svg) {
+    color: var(--serious);
   }
   .hint {
     margin: 0;

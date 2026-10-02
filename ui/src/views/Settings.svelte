@@ -7,6 +7,7 @@
   import Segmented from '../components/Segmented.svelte'
   import Toggle from '../components/Toggle.svelte'
   import Icon from '../components/Icon.svelte'
+  import ReportCard from '../components/ReportCard.svelte'
 
   const s = $derived(app.settings!)
   let pricing: PricingFile | null = $state(null)
@@ -266,6 +267,8 @@
     </div>
   </section>
 {/if}
+
+<ReportCard />
 
 <section class="card group">
   <h2>{t('settings.data')}</h2>

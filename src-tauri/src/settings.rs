@@ -224,6 +224,13 @@ pub struct Settings {
     pub dismissed_unpriced: Vec<String>,
     /// How limit percentages read: "used" (Claude's convention) or "remaining" (Codex's).
     pub limit_display: String,
+    /// The user's own monthly plan price in USD per provider ("anthropic" / "openai"), when
+    /// it differs from the list price or the plan has none.
+    pub plan_prices: std::collections::BTreeMap<String, f64>,
+    /// Save last week's PDF summary every Monday (while the app runs).
+    pub weekly_report_auto: bool,
+    /// Folder for those PDFs; empty = Documents\AI Usage Tracker.
+    pub weekly_report_dir: String,
 }
 
 impl Default for Settings {
@@ -246,6 +253,9 @@ impl Default for Settings {
             primary_metric: "tokens".into(),
             dismissed_unpriced: Vec::new(),
             limit_display: "used".into(),
+            plan_prices: Default::default(),
+            weekly_report_auto: false,
+            weekly_report_dir: String::new(),
         }
     }
 }

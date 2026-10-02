@@ -94,6 +94,7 @@ impl Cost {
 }
 
 /// What the calculator needs from one usage record.
+#[derive(Clone, Copy)]
 pub struct CostInput<'a> {
     pub model: &'a str,
     pub tokens: &'a Tokens,
@@ -201,6 +202,27 @@ impl PriceBook {
         let saved = per(t.cache_read, rates.input - read_rate);
         let premium = per(t.cache_write - w1h, cw5 - rates.input) + per(w1h, cw1 - rates.input);
         Some(saved - premium)
+    }
+}
+
+impl PriceBook {
+    /// Whether this request is priced at its model's long-context tier.
+    pub fn is_long_context(&self, c: &CostInput) -> bool {
+        self.lookup(c.model).and_then(|p| p.long_context.as_ref()).is_some_and(|lc| c.request_input > lc.threshold)
+    }
+
+    /// What the long-context tier added to this request over the model's standard rates
+    /// (0 below the threshold; `None` for unpriced models).
+    pub fn long_context_premium(&self, c: &CostInput) -> Option<f64> {
+        let p = self.lookup(c.model)?;
+        if !self.is_long_context(c) {
+            return Some(0.0);
+        }
+        let with_tier = self.cost(c)?.total();
+        // the same request just under the threshold uses the standard rates
+        let threshold = p.long_context.as_ref().map(|lc| lc.threshold).unwrap_or(0);
+        let standard = self.cost(&CostInput { request_input: threshold, ..*c })?.total();
+        Some(with_tier - standard)
     }
 }
 

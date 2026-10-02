@@ -9,10 +9,11 @@ use serde::Serialize;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tracker_core::analytics::{self, Filter, LimitState, LimitView, Period, Report};
 use tracker_core::discovery::{self, Env, SourceId, SourceStatus};
 use tracker_core::export::{self, Format, Granularity};
+use tracker_core::insights;
 use tracker_core::model::{Accuracy, Provider, Tool};
 use tracker_core::pricing::{PriceBook, PricingFile};
 use tracker_core::store::ProjectRow;
@@ -39,6 +40,8 @@ pub struct AppInfo {
     supports_mica: bool,
     accent_color: Option<String>,
     started_hidden: bool,
+    /// Default folder for the Monday PDF summaries.
+    reports_dir: String,
 }
 
 #[tauri::command]
@@ -51,6 +54,7 @@ pub fn app_info(app: AppHandle, state: State<AppState>) -> AppInfo {
         supports_mica: windows::supports_mica(),
         accent_color: windows::accent_color(),
         started_hidden: state.started_hidden,
+        reports_dir: crate::pdf::default_dir(&app).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
     }
 }
 
@@ -516,3 +520,76 @@ pub fn quit_app(app: AppHandle, state: State<AppState>) {
     app.exit(0);
 }
 
+
+// ------------------------------------------------------------------ insights
+// Run as async commands so long ranges never block the window's event loop.
+
+fn range_for(store: &tracker_core::store::Store, period: Period) -> Res<analytics::Range> {
+    Ok(analytics::period_range(period, &chrono::Local, now_ms(), store.first_event_ms().map_err(err)?))
+}
+
+#[tauri::command]
+pub async fn get_sessions(app: AppHandle, period: Period, filter: Option<Filter>) -> Res<insights::Sessions> {
+    let state = app.state::<AppState>();
+    let hide_all = state.settings.read().unwrap().hide_project_names;
+    let store = state.store.lock().unwrap();
+    let book = state.book.read().unwrap();
+    let mut r = insights::sessions(&store, &book, range_for(&store, period)?, &filter.unwrap_or_default()).map_err(err)?;
+    for s in &mut r.sessions {
+        if hide_all || s.hidden {
+            s.project.clear();
+            s.hidden = true;
+        }
+    }
+    Ok(r)
+}
+
+#[tauri::command]
+pub async fn compare_models(app: AppHandle, period: Period, filter: Option<Filter>) -> Res<insights::ModelCompare> {
+    let state = app.state::<AppState>();
+    let store = state.store.lock().unwrap();
+    let book = state.book.read().unwrap();
+    insights::compare_models(&store, &book, range_for(&store, period)?, &filter.unwrap_or_default()).map_err(err)
+}
+
+#[tauri::command]
+pub async fn context_stats(app: AppHandle, period: Period, filter: Option<Filter>) -> Res<insights::ContextStats> {
+    let state = app.state::<AppState>();
+    let store = state.store.lock().unwrap();
+    let book = state.book.read().unwrap();
+    insights::context_stats(&store, &book, range_for(&store, period)?, &filter.unwrap_or_default(), &chrono::Local).map_err(err)
+}
+
+/// API-equivalent cost per provider over the last 30 days, for the plan-value comparison.
+#[tauri::command]
+pub async fn plan_value(app: AppHandle) -> Res<insights::PlanValue> {
+    let state = app.state::<AppState>();
+    let store = state.store.lock().unwrap();
+    let book = state.book.read().unwrap();
+    insights::plan_value(&store, &book, range_for(&store, Period::Month1)?, &chrono::Local).map_err(err)
+}
+
+// ------------------------------------------------------------------ PDF report
+
+/// Saves the summary of the local days `from..=to` as a PDF at `path` (chosen by the user).
+#[tauri::command]
+pub async fn export_report(app: AppHandle, from: String, to: String, path: PathBuf) -> Res<()> {
+    crate::pdf::render(&app, &from, &to, &path)?;
+    *app.state::<AppState>().last_report.lock().unwrap() = Some(path);
+    Ok(())
+}
+
+/// Called by the report page once its data and charts are in place.
+#[tauri::command]
+pub fn report_ready(state: State<AppState>) {
+    if let Some(tx) = state.report_ready.lock().unwrap().take() {
+        let _ = tx.send(());
+    }
+}
+
+/// Opens the PDF this app saved last (only that file, never an arbitrary path).
+#[tauri::command]
+pub fn open_last_report(state: State<AppState>) -> Res<()> {
+    let path = state.last_report.lock().unwrap().clone().ok_or("no report yet")?;
+    std::process::Command::new("explorer").arg(path).spawn().map(|_| ()).map_err(err)
+}
