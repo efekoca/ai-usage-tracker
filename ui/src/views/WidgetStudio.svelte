@@ -88,7 +88,7 @@
       <Segmented label={t('ws.backdrop')} bind:value={backdrop} options={[{ value: 'photo', label: t('ws.backdrop.photo') }, { value: 'light', label: t('settings.theme.light') }, { value: 'dark', label: t('settings.theme.dark') }]} />
     </div>
     <div class="stage {backdrop}" data-theme={ws.theme === 'system' ? undefined : ws.theme}>
-      <WidgetView {data} {ws} />
+      <WidgetView {data} {ws} mode={app.settings?.limit_display ?? 'used'} />
     </div>
     <p class="subtle small">{t('ws.preview.help')}</p>
   </section>
@@ -114,6 +114,10 @@
       <div class="item">
         <span>{t('ws.metric')}</span>
         <Segmented label={t('ws.metric')} value={ws.primary_metric} options={[{ value: 'tokens', label: t('metric.tokens') }, { value: 'cost', label: t('metric.cost') }]} onchange={(v) => set('primary_metric', v)} />
+      </div>
+      <div class="item">
+        <span>{t('limits.mode')}<span class="subtle small block">{t('limits.mode.help')}</span></span>
+        <Segmented label={t('limits.mode')} value={app.settings?.limit_display ?? 'used'} options={[{ value: 'used', label: t('limits.mode.used') }, { value: 'remaining', label: t('limits.mode.remaining') }]} onchange={(v) => saveSettings({ limit_display: v })} />
       </div>
       <div class="item">
         <span>{t('ws.providers')}</span>

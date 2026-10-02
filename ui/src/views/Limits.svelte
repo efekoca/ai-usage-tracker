@@ -6,6 +6,7 @@
   import LimitMeter from '../components/LimitMeter.svelte'
   import AccuracyBadge from '../components/AccuracyBadge.svelte'
   import Icon from '../components/Icon.svelte'
+  import Segmented from '../components/Segmented.svelte'
 
   let plans: PlansFile | null = $state(null)
   onMount(async () => {
@@ -48,7 +49,12 @@
   const planNote = (p: Provider) => plans?.providers[p]?.plans.find((x) => x.id === app.settings?.plans[p])
 </script>
 
-<header class="bar"><h1>{t('limits.title')}</h1></header>
+<header class="bar">
+  <h1>{t('limits.title')}</h1>
+  <span class="spacer"></span>
+  <span class="subtle small" title={t('limits.mode.help')}>{t('limits.mode')}</span>
+  <Segmented label={t('limits.mode')} value={app.settings?.limit_display ?? 'used'} options={[{ value: 'used', label: t('limits.mode.used') }, { value: 'remaining', label: t('limits.mode.remaining') }]} onchange={(v) => saveSettings({ limit_display: v })} />
+</header>
 
 {#if plans}
   <section class="card plans">
@@ -140,8 +146,15 @@
 </section>
 
 <style>
-  .bar {
+  header.bar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
     padding: 16px 0 14px;
+  }
+  header .spacer {
+    flex: 1;
   }
   section {
     margin-bottom: 16px;

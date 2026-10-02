@@ -319,3 +319,26 @@ fn a_pricing_modifier_on_a_later_copy_of_a_message_is_kept() {
         .unwrap();
     assert_eq!(row, ("fast".to_string(), Some("us".to_string()), 50));
 }
+
+#[test]
+fn a_subagent_started_in_a_sub_directory_belongs_to_the_session_project() {
+    let m = machine();
+    let dir = m.home.join(".claude/projects/C--Work-Site");
+    let sub = dir.join("s-sub/subagents/agent-1.jsonl");
+    fs::create_dir_all(sub.parent().unwrap()).unwrap();
+    let line = |id: &str, cwd: &str| {
+        format!(
+            r#"{{"type":"assistant","sessionId":"s-sub","timestamp":"2026-09-05T10:00:00.000Z","cwd":"{cwd}","message":{{"id":"{id}","model":"claude-sonnet-5","usage":{{"input_tokens":1,"output_tokens":1}}}}}}"#
+        )
+    };
+    fs::write(dir.join("s-sub.jsonl"), format!("{}\n", line("msg_main", "C:/Work/Site"))).unwrap();
+    // the agent was launched while the shell sat in a sub-directory
+    fs::write(&sub, format!("{}\n", line("msg_agent", "C:/Work/Site/ui"))).unwrap();
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &m.env);
+    let names: Vec<String> = store.projects().unwrap().into_iter().map(|p| p.name).collect();
+    assert!(names.contains(&"Site".to_string()), "{names:?}");
+    assert!(!names.contains(&"ui".to_string()), "{names:?}");
+    let n: i64 = store.conn().query_row("SELECT count(*) FROM usage_event WHERE key = 'cc:msg_agent' AND project_id IS NOT NULL", [], |r| r.get(0)).unwrap();
+    assert_eq!(n, 1, "the subagent transcript is read");
+}

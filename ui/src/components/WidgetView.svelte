@@ -2,10 +2,15 @@
   // The widget's content, driven entirely by WidgetSettings. Used by the widget window and by
   // the live preview on the Widget settings page.
   import type { Provider, WidgetData, WidgetItemKind, WidgetSettings } from '../lib/api'
-  import { fmtCompact, fmtDec, fmtDuration, fmtMoney, fmtPct, fmtTime, t, toolLabel } from '../lib/i18n.svelte'
+  import { fmtCompact, fmtDec, fmtDuration, fmtMoney, fmtPct, fmtTime, limitShown, t, toolLabel, type LimitMode } from '../lib/i18n.svelte'
   import { toolColor } from '../lib/store.svelte'
 
-  let { data, ws, root = $bindable() }: { data: WidgetData | null; ws: WidgetSettings; root?: HTMLElement } = $props()
+  let {
+    data,
+    ws,
+    mode = 'used',
+    root = $bindable(),
+  }: { data: WidgetData | null; ws: WidgetSettings; mode?: LimitMode; root?: HTMLElement } = $props()
 
   const on = (k: WidgetItemKind) => ws.items.some((i) => i.kind === k && i.enabled)
   const order = $derived(ws.items.filter((i) => i.enabled).map((i) => i.kind))
@@ -26,8 +31,9 @@
     const known = l.state === 'fresh' && l.used_pct !== null
     // 'behind': used after the reading, so the current value is unknown; the last reading is
     // shown only as "last N %", never as the current value
-    const last = l.state === 'behind' && l.used_pct !== null ? { pct: l.used_pct, ago: l.observed_ms ? fmtDuration(now - l.observed_ms) : '' } : null
-    return { pct: known ? Math.max(0, Math.min(100, l.used_pct as number)) : null, last, resets: l.resets_at, estimated: l.accuracy === 'estimated', captured: l.accuracy === 'captured' }
+    const last = l.state === 'behind' && l.used_pct !== null ? { pct: limitShown(l.used_pct, mode), ago: l.observed_ms ? fmtDuration(now - l.observed_ms) : '' } : null
+    const pct = known ? Math.max(0, Math.min(100, l.used_pct as number)) : null
+    return { pct, val: pct === null ? null : limitShown(pct, mode), last, resets: l.resets_at, estimated: l.accuracy === 'estimated', captured: l.accuracy === 'captured' }
   }
   const level = (pct: number) => (pct >= ws.high_at ? 'var(--critical)' : pct >= ws.warn_at ? 'var(--serious)' : 'var(--w-accent)')
   const winShort = (k: WidgetItemKind) => (k === 'limit_five_hour' ? t('widget.5h') : t('widget.week'))
@@ -75,42 +81,42 @@
   {#if rows.length}
     {@const lead = rows[0]}
     {#if ws.limit_style === 'ring'}
-      <div class="ring" aria-label="{t(`provider.${p}`)} {rows.map((r) => `${winShort(r.k)} ${r.l.pct !== null ? fmtPct(r.l.pct) : r.l.last ? t('widget.lastReading', { pct: fmtPct(r.l.last.pct), t: r.l.last.ago }) : '—'}`).join(', ')}">
+      <div class="ring" aria-label="{t(`provider.${p}`)} {rows.map((r) => `${winShort(r.k)} ${r.l.val !== null ? fmtPct(r.l.val) : r.l.last ? t('widget.lastReading', { pct: fmtPct(r.l.last.pct), t: r.l.last.ago }) : '—'}`).join(', ')}">
         <svg viewBox="0 0 40 40" aria-hidden="true">
           <circle cx="20" cy="20" r={R} class="track" />
           {#if lead.l.pct !== null}
-            <circle cx="20" cy="20" r={R} class="arc" stroke={level(lead.l.pct)} stroke-dasharray="{(lead.l.pct / 100) * C} {C}" transform="rotate(-90 20 20)" />
+            <circle cx="20" cy="20" r={R} class="arc" stroke={level(lead.l.pct)} stroke-dasharray="{((lead.l.val ?? 0) / 100) * C} {C}" transform="rotate(-90 20 20)" />
           {/if}
-          <text x="20" y="20" dy="0.35em" text-anchor="middle">{lead.l.pct !== null ? fmtDec(lead.l.pct) : lead.l.last ? '?' : '–'}</text>
+          <text x="20" y="20" dy="0.35em" text-anchor="middle">{lead.l.val !== null ? fmtDec(lead.l.val) : lead.l.last ? '?' : '–'}</text>
         </svg>
         <div class="rl">
-          {#if ws.show_labels}<span class="pn">{t(`provider.${p}`)}</span>{/if}
+          {#if ws.show_labels}<span class="pn">{t(`provider.${p}`)} <span class="mode">{t(`widget.mode.${mode}`)}</span></span>{/if}
           <span class="sub">
             {winShort(lead.k)}{lead.l.estimated ? ' ≈' : ''}{lead.l.last ? ` · ${t('widget.lastShort', { pct: fmtPct(lead.l.last.pct) })}` : ws.show_reset_time && lead.l.resets ? ` · ${fmtDuration(lead.l.resets * 1000 - now)}` : ''}
             {#each rows.slice(1) as r (r.k)}
-              · {winShort(r.k)} <b class="num" style="color:{r.l.pct !== null && r.l.pct >= ws.warn_at ? level(r.l.pct) : 'inherit'}">{r.l.pct !== null ? fmtPct(r.l.pct) : r.l.last ? '?' : '—'}</b>
+              · {winShort(r.k)} <b class="num" style="color:{r.l.pct !== null && r.l.pct >= ws.warn_at ? level(r.l.pct) : 'inherit'}">{r.l.val !== null ? fmtPct(r.l.val) : r.l.last ? '?' : '—'}</b>
             {/each}
           </span>
         </div>
       </div>
     {:else if ws.limit_style === 'bar'}
       <div class="barrow">
-        {#if ws.show_labels}<span class="pn">{t(`provider.${p}`)}</span>{/if}
+        {#if ws.show_labels}<span class="pn">{t(`provider.${p}`)} <span class="mode">{t(`widget.mode.${mode}`)}</span></span>{/if}
         {#each rows as r (r.k)}
           <div class="bh">
             <span class="sub">{winShort(r.k)}{ws.show_reset_time && r.l.resets ? ` · ${fmtDuration(r.l.resets * 1000 - now)}` : ''}</span>
-            <span class="pv num">{r.l.pct !== null ? fmtPct(r.l.pct) : r.l.last ? '?' : '—'}{r.l.estimated ? ' ≈' : ''}</span>
+            <span class="pv num">{r.l.val !== null ? fmtPct(r.l.val) : r.l.last ? '?' : '—'}{r.l.estimated ? ' ≈' : ''}</span>
           </div>
-          <div class="bt"><span style="width:{r.l.pct ?? 0}%;background:{r.l.pct !== null ? level(r.l.pct) : 'transparent'}"></span></div>
+          <div class="bt"><span style="width:{r.l.val ?? 0}%;background:{r.l.pct !== null ? level(r.l.pct) : 'transparent'}"></span></div>
         {/each}
       </div>
     {:else}
       <span class="textlimit">
-        {#if ws.show_labels}<span class="pn">{t(`provider.${p}`)}</span>{/if}
+        {#if ws.show_labels}<span class="pn">{t(`provider.${p}`)} <span class="mode">{t(`widget.mode.${mode}`)}</span></span>{/if}
         {#each rows as r, i (r.k)}
           {#if i > 0}<span class="sub">·</span>{/if}
           <span class="sub">{winShort(r.k)}</span>
-          <b class="num" style="color:{r.l.pct !== null && r.l.pct >= ws.warn_at ? level(r.l.pct) : 'inherit'}">{r.l.pct !== null ? fmtPct(r.l.pct) : r.l.last ? '?' : '—'}</b>
+          <b class="num" style="color:{r.l.pct !== null && r.l.pct >= ws.warn_at ? level(r.l.pct) : 'inherit'}">{r.l.val !== null ? fmtPct(r.l.val) : r.l.last ? '?' : '—'}</b>
         {/each}
       </span>
     {/if}
@@ -299,6 +305,10 @@
   .pn {
     font-size: calc(12px * var(--ts));
     font-weight: 600;
+  }
+  .mode {
+    font-weight: 400;
+    color: var(--ink-3);
   }
   .sub {
     font-size: calc(10.5px * var(--ts));

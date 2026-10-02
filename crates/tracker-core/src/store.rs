@@ -99,6 +99,10 @@ const MIGRATIONS: &[&str] = &[
     r#"
     DELETE FROM file_checkpoint WHERE parser IN ('claude_code_jsonl', 'cowork_jsonl', 'cowork_audit');
     "#,
+    // v6: subagent transcripts belong to their session's launch directory; re-read Claude Code.
+    r#"
+    DELETE FROM file_checkpoint WHERE parser = 'claude_code_jsonl';
+    "#,
 ];
 
 /// A captured row is hidden when the same request also exists as an exact (log) row.

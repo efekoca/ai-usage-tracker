@@ -211,6 +211,8 @@ pub struct Settings {
     /// Unpriced models whose warning the user dismissed; a model that becomes unpriced later
     /// warns again.
     pub dismissed_unpriced: Vec<String>,
+    /// How limit percentages read: "used" (Claude's convention) or "remaining" (Codex's).
+    pub limit_display: String,
 }
 
 impl Default for Settings {
@@ -232,6 +234,7 @@ impl Default for Settings {
             allow_config_updates: false,
             primary_metric: "tokens".into(),
             dismissed_unpriced: Vec::new(),
+            limit_display: "used".into(),
         }
     }
 }

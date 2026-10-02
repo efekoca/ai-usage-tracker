@@ -99,7 +99,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="host" bind:this={host} onpointerdown={pointerdown} onpointermove={pointermove} onpointerup={pointerup} oncontextmenu={menu}>
   {#if settings}
-    <WidgetView {data} ws={settings.widget} bind:root />
+    <WidgetView {data} ws={settings.widget} mode={settings.limit_display} bind:root />
   {/if}
 </div>
 

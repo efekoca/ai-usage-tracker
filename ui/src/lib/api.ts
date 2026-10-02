@@ -226,6 +226,7 @@ export interface Settings {
   allow_config_updates: boolean
   primary_metric: 'tokens' | 'cost'
   dismissed_unpriced: string[]
+  limit_display: 'used' | 'remaining'
 }
 
 export interface SourceInfo {

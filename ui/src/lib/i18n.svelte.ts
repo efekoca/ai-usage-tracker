@@ -121,9 +121,15 @@ const tr: Dict = {
   'limits.state.behind': 'Son okuma {pct} · {t} önce',
   'limits.state.behind.help': 'Bu okumadan sonra kullanım olduğu için güncel değer bilinmiyor; en az son okuma kadar, büyük olasılıkla daha yüksek. Yeni bir okuma gelince güncellenir.',
   'limits.state.behind.since': 'Son okumadan sonra {n} token kullanıldı; güncel değer bilinmiyor.',
-  'limits.state.behind.claudeHint': 'Claude limitini güncel tutan yerel bir kayıt yok. Güncel değer için Kaynaklar → Canlı yakalama → Durum satırı köprüsünü açın (Claude Code terminalde veya VS Code içinde kullanılırken her yanıtta güncellenir).',
+  'limits.state.behind.claudeHint': 'Claude limitini sürekli güncel tutan yerel bir kayıt yok: Claude masaüstü bu değeri ara sıra yazar, Cowork oturumları her yanıtta yazar. Claude Code terminalde kullanılıyorsa Kaynaklar → Canlı yakalama → Durum satırı köprüsü her yanıtta günceller; Claude masaüstündeki Code sekmesi durum satırını çalıştırmaz.',
   'limits.state.behind.hint': 'Yeni bir okuma gelince güncellenir.',
   'limits.status.outdated': 'Güncel değil',
+  'limits.val.used': '{pct} kullanıldı',
+  'limits.val.remaining': '{pct} kaldı',
+  'limits.mode': 'Limit yüzdeleri',
+  'limits.mode.used': 'Kullanılan',
+  'limits.mode.remaining': 'Kalan',
+  'limits.mode.help': "Kullanılan: Claude'un gösterdiği gibi (%15 kullanıldı). Kalan: Codex'in gösterdiği gibi (%85 kaldı). Uyarı renkleri her iki görünümde de kullanıma göre değişir.",
   'limits.source.claude_plan_history': 'Claude masaüstü uygulaması',
   'limits.source.cowork_audit': 'Cowork oturumu',
   'limits.source.claude_code_jsonl': 'Claude Code (limit uyarısı)',
@@ -259,6 +265,8 @@ const tr: Dict = {
   'widget.period.month1': 'Son 30 gün',
   'widget.updated': '{t} güncellendi',
   'widget.lastShort': 'son {pct}',
+  'widget.mode.used': 'kullanılan',
+  'widget.mode.remaining': 'kalan',
   'widget.lastReading': 'güncel değil (son okuma {pct}, {t} önce)',
 
   'ws.title': 'Widget stüdyosu',
@@ -520,9 +528,15 @@ const en: Dict = {
   'limits.state.behind': 'Last reading {pct} · {t} ago',
   'limits.state.behind.help': 'There was usage after this reading, so the current value is unknown: at least the last reading and probably higher. It updates when a new reading arrives.',
   'limits.state.behind.since': '{n} tokens used since the last reading; the current value is unknown.',
-  'limits.state.behind.claudeHint': 'No local record keeps the Claude limit current. For a live value, turn on Sources → Live capture → Status-line bridge (updates on every reply while Claude Code runs in a terminal or VS Code).',
+  'limits.state.behind.claudeHint': 'No local record keeps the Claude limit current: the Claude desktop app writes it now and then, Cowork sessions on every reply. When Claude Code runs in a terminal, Sources → Live capture → Status-line bridge updates it on every reply; the Code tab of the Claude desktop app does not run status lines.',
   'limits.state.behind.hint': 'It updates when a new reading arrives.',
   'limits.status.outdated': 'Outdated',
+  'limits.val.used': '{pct} used',
+  'limits.val.remaining': '{pct} left',
+  'limits.mode': 'Limit percentages',
+  'limits.mode.used': 'Used',
+  'limits.mode.remaining': 'Left',
+  'limits.mode.help': 'Used: as Claude shows it (15% used). Left: as Codex shows it (85% left). Warning colors follow usage either way.',
   'limits.source.claude_plan_history': 'Claude desktop app',
   'limits.source.cowork_audit': 'Cowork session',
   'limits.source.claude_code_jsonl': 'Claude Code (limit notice)',
@@ -658,6 +672,8 @@ const en: Dict = {
   'widget.period.month1': 'Last 30 days',
   'widget.updated': 'Updated {t}',
   'widget.lastShort': 'last {pct}',
+  'widget.mode.used': 'used',
+  'widget.mode.remaining': 'left',
   'widget.lastReading': 'outdated (last reading {pct}, {t} ago)',
 
   'ws.title': 'Widget studio',
@@ -835,6 +851,17 @@ export function fmtCompact(n: number): string {
 /** Percentage with the locale's sign placement (tr: "%46", en: "46%"); `n` is 0–100. */
 export function fmtPct(n: number, digits = 0): string {
   return new Intl.NumberFormat(locale(), { style: 'percent', maximumFractionDigits: digits, minimumFractionDigits: digits }).format(n / 100)
+}
+
+export type LimitMode = 'used' | 'remaining'
+/** The percentage shown for a limit: used, or what is left of it (always 0–100). */
+export function limitShown(used: number, mode: LimitMode): number {
+  const u = Math.max(0, Math.min(100, used))
+  return mode === 'remaining' ? 100 - u : u
+}
+/** "%15 kullanıldı" / "%85 kaldı" — the number always says which way it counts. */
+export function fmtLimit(used: number, mode: LimitMode): string {
+  return t(`limits.val.${mode}`, { pct: fmtPct(limitShown(used, mode)) })
 }
 
 /** Plain decimal number without a unit. */

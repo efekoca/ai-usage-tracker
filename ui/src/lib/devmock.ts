@@ -30,6 +30,7 @@ const settings: Settings = {
   allow_config_updates: false,
   primary_metric: 'tokens',
   dismissed_unpriced: [],
+  limit_display: 'used',
 }
 
 const day = 864e5

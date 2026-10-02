@@ -9,6 +9,10 @@
 //! * Resumed/forked sessions copy earlier messages into a new file → de-dup must be global.
 //! * `model: "<synthetic>"` lines are client-side error placeholders with zero usage.
 //! * `quotaLimits` appears on a line when a plan limit rejected the request.
+//! * Transcripts live in `projects/<encoded launch dir>/`, where the launch directory has every
+//!   non-alphanumeric character replaced by `-`. Subagent transcripts
+//!   (`projects/<dir>/<session>/subagents/*.jsonl`) start in whatever directory the agent was in,
+//!   so the project is anchored to the launch directory that folder name encodes.
 
 use super::{read_jsonl_from, str_at, u64_at, i64_at, ParseOutput};
 use crate::model::{parse_ts_ms, Accuracy, LimitSnapshot, Provider, Tokens, Tool, UsageEvent};
@@ -21,7 +25,35 @@ pub struct ClaudeCtx<'a> {
     pub source: &'a str,
 }
 
+/// `C:Usersmeapp` → `C--Users-me-app` (Claude Code's project folder naming).
+fn encode_dir(p: &str) -> String {
+    p.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
+}
+
+/// The `<encoded dir>` folder right under `projects`, if the file is inside one.
+fn project_folder(path: &Path) -> Option<String> {
+    let mut parts = path.components().map(|c| c.as_os_str().to_string_lossy().into_owned());
+    parts.by_ref().find(|c| c.eq_ignore_ascii_case("projects"))?;
+    parts.next()
+}
+
+/// The directory a session was launched in: the deepest ancestor of `cwd` (itself included)
+/// whose encoding is the transcript's project folder name. Falls back to `cwd`.
+fn launch_dir(cwd: &str, folder: Option<&str>) -> String {
+    if let Some(folder) = folder {
+        for a in Path::new(cwd).ancestors() {
+            let s = a.to_string_lossy();
+            let s = s.trim_end_matches(['\\', '/']);
+            if !s.is_empty() && encode_dir(s).eq_ignore_ascii_case(folder) {
+                return s.to_owned();
+            }
+        }
+    }
+    cwd.to_owned()
+}
+
 pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> std::io::Result<ParseOutput> {
+    let folder = project_folder(path);
     let (lines, next) = read_jsonl_from(path, offset)?;
     let mut out = ParseOutput { next_offset: next, ..Default::default() };
     let mut max_version = str_at(state, "max_version").map(str::to_owned);
@@ -44,7 +76,7 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
             max_version = Some(ver.to_owned());
         }
         if root_cwd.is_none() {
-            root_cwd = str_at(v, "cwd").filter(|s| !s.is_empty()).map(str::to_owned);
+            root_cwd = str_at(v, "cwd").filter(|s| !s.is_empty()).map(|c| launch_dir(c, folder.as_deref()));
         }
         let mut recognised = false;
         if let Some(mut ev) = usage_event(v, ctx) {

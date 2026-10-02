@@ -3,8 +3,9 @@
   // icon + label; stale/reset readings are shown as unknown instead of a misleading bar.
   import Icon from './Icon.svelte'
   import AccuracyBadge from './AccuracyBadge.svelte'
-  import { fmtCompact, fmtDuration, fmtPct, fmtTime, t, windowLabel } from '../lib/i18n.svelte'
+  import { fmtCompact, fmtDuration, fmtLimit, fmtTime, limitShown, t, windowLabel } from '../lib/i18n.svelte'
   import type { Accuracy, LimitState, Provider } from '../lib/api'
+  import { app } from '../lib/store.svelte'
 
   let {
     window: win,
@@ -46,6 +47,9 @@
   const pct = $derived(known ? Math.max(0, Math.min(100, used as number)) : 0)
   const level = $derived(behind ? 'outdated' : !known ? 'unknown' : pct >= 100 ? 'full' : pct >= 90 ? 'high' : pct >= 70 ? 'warn' : 'ok')
   const icon = $derived(level === 'ok' ? 'check' : level === 'unknown' || level === 'outdated' ? 'clock' : 'warning')
+  // severity always follows usage; only the number and the bar follow the chosen reading
+  const mode = $derived(app.settings?.limit_display ?? 'used')
+  const shown = $derived(known ? limitShown(pct, mode) : 0)
 </script>
 
 <div class="meter" class:compact>
@@ -53,15 +57,15 @@
     <span class="name">{title || windowLabel(win)}</span>
     <span class="spacer"></span>
     {#if known}
-      <span class="pct num">{fmtPct(pct)}</span>
+      <span class="pct num">{fmtLimit(pct, mode)}</span>
     {:else if behind}
       <span class="pct subtle" title={t('limits.state.behind.help')}>?</span>
     {:else}
       <span class="pct subtle">—</span>
     {/if}
   </div>
-  <div class="track" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow={known ? pct : undefined} aria-label={title || windowLabel(win)}>
-    <span class="fill {level}" style="width:{pct}%"></span>
+  <div class="track" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow={known ? shown : undefined} aria-valuetext={known ? fmtLimit(pct, mode) : undefined} aria-label={title || windowLabel(win)}>
+    <span class="fill {level}" style="width:{shown}%"></span>
   </div>
   <div class="foot">
     <span class="status {level}"><Icon name={icon} size={13} />{t(`limits.status.${level}`)}</span>
@@ -72,7 +76,7 @@
     {:else if lstate === 'stale'}
       <span class="subtle">{t('limits.state.stale')}</span>
     {:else if behind && observedMs}
-      <span class="subtle" title={t('limits.state.behind.help')}>{t('limits.state.behind', { pct: fmtPct(used ?? 0), t: fmtDuration(now - observedMs) })}</span>
+      <span class="subtle" title={t('limits.state.behind.help')}>{t('limits.state.behind', { pct: fmtLimit(used ?? 0, mode), t: fmtDuration(now - observedMs) })}</span>
     {:else if resetsAt}
       <span class="subtle" title={fmtTime(resetsAt * 1000)}>{t('limits.resetsIn', { t: fmtDuration(resetsAt * 1000 - now) })}</span>
     {:else if observedMs}
