@@ -3,8 +3,8 @@
   // icon + label; stale/reset readings are shown as unknown instead of a misleading bar.
   import Icon from './Icon.svelte'
   import AccuracyBadge from './AccuracyBadge.svelte'
-  import { fmtDuration, fmtPct, fmtTime, t, windowLabel } from '../lib/i18n.svelte'
-  import type { Accuracy, LimitState } from '../lib/api'
+  import { fmtCompact, fmtDuration, fmtPct, fmtTime, t, windowLabel } from '../lib/i18n.svelte'
+  import type { Accuracy, LimitState, Provider } from '../lib/api'
 
   let {
     window: win,
@@ -16,6 +16,8 @@
     source = '',
     title = '',
     compact = false,
+    sinceTokens = 0,
+    provider = null,
   }: {
     window: string
     used: number | null
@@ -26,6 +28,9 @@
     source?: string
     title?: string
     compact?: boolean
+    /** tokens used after the reading ('behind' only) */
+    sinceTokens?: number
+    provider?: Provider | null
   } = $props()
 
   let now = $state(Date.now())
@@ -34,12 +39,13 @@
     return () => clearInterval(id)
   })
 
-  // 'behind': the provider was used after this reading, so the real value is at least this
-  const known = $derived((lstate === 'fresh' || lstate === 'behind') && used !== null)
-  const atLeast = $derived(lstate === 'behind')
+  // 'behind': the provider was used after this reading, so the current value is unknown (only
+  // that it is at least the reading). It is shown as the last reading, never as the current value.
+  const known = $derived(lstate === 'fresh' && used !== null)
+  const behind = $derived(lstate === 'behind' && used !== null)
   const pct = $derived(known ? Math.max(0, Math.min(100, used as number)) : 0)
-  const level = $derived(!known ? 'unknown' : pct >= 100 ? 'full' : pct >= 90 ? 'high' : pct >= 70 ? 'warn' : 'ok')
-  const icon = $derived(level === 'ok' ? 'check' : level === 'unknown' ? 'clock' : 'warning')
+  const level = $derived(behind ? 'outdated' : !known ? 'unknown' : pct >= 100 ? 'full' : pct >= 90 ? 'high' : pct >= 70 ? 'warn' : 'ok')
+  const icon = $derived(level === 'ok' ? 'check' : level === 'unknown' || level === 'outdated' ? 'clock' : 'warning')
 </script>
 
 <div class="meter" class:compact>
@@ -47,7 +53,9 @@
     <span class="name">{title || windowLabel(win)}</span>
     <span class="spacer"></span>
     {#if known}
-      <span class="pct num">{atLeast ? '≥ ' : ''}{fmtPct(pct)}</span>
+      <span class="pct num">{fmtPct(pct)}</span>
+    {:else if behind}
+      <span class="pct subtle" title={t('limits.state.behind.help')}>?</span>
     {:else}
       <span class="pct subtle">—</span>
     {/if}
@@ -63,14 +71,19 @@
       <span class="subtle">{t('limits.state.reset')}</span>
     {:else if lstate === 'stale'}
       <span class="subtle">{t('limits.state.stale')}</span>
-    {:else if atLeast && observedMs}
-      <span class="subtle" title={t('limits.state.behind.help')}>{t('limits.state.behind', { t: fmtDuration(now - observedMs) })}</span>
+    {:else if behind && observedMs}
+      <span class="subtle" title={t('limits.state.behind.help')}>{t('limits.state.behind', { pct: fmtPct(used ?? 0), t: fmtDuration(now - observedMs) })}</span>
     {:else if resetsAt}
       <span class="subtle" title={fmtTime(resetsAt * 1000)}>{t('limits.resetsIn', { t: fmtDuration(resetsAt * 1000 - now) })}</span>
     {:else if observedMs}
       <span class="subtle">{t('limits.observed', { t: fmtDuration(now - observedMs) })}</span>
     {/if}
   </div>
+  {#if behind && !compact}
+    <p class="hint subtle">
+      {sinceTokens > 0 ? t('limits.state.behind.since', { n: fmtCompact(sinceTokens) }) + ' ' : ''}{provider === 'anthropic' ? t('limits.state.behind.claudeHint') : t('limits.state.behind.hint')}
+    </p>
+  {/if}
   {#if source && !compact}
     <div class="src subtle">{t(`limits.source.${source}`)}</div>
   {/if}
@@ -146,6 +159,11 @@
   }
   .src {
     font-size: 11.5px;
+  }
+  .hint {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.45;
   }
   .spacer {
     flex: 1;

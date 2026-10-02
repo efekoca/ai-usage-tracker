@@ -81,7 +81,7 @@
         <span class="prov">{t(`provider.${l.provider}`)}</span>
         {#if l.plan}<span class="pill">{l.plan}</span>{/if}
       </div>
-      <LimitMeter window={l.window} used={l.used_pct} state={l.state} accuracy={l.accuracy} resetsAt={l.resets_at} observedMs={l.observed_ms} source={l.source} />
+      <LimitMeter window={l.window} used={l.used_pct} state={l.state} accuracy={l.accuracy} resetsAt={l.resets_at} observedMs={l.observed_ms} source={l.source} sinceTokens={l.usage_since.total_tokens} provider={l.provider} />
       <div class="usage">
         <div class="small muted">{t('limits.windowUsage')}</div>
         <div class="row">

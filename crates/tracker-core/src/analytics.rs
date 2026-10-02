@@ -380,6 +380,8 @@ pub struct LimitView {
     pub window_start_ms: Option<i64>,
     /// Usage recorded in local logs since the window started (exact counts).
     pub window_usage: Totals,
+    /// Usage after the reading (`Behind` only): what the reading does not include yet.
+    pub usage_since: Totals,
     pub projects: Vec<ProjectShare>,
 }
 
@@ -441,10 +443,13 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
             (None, Some(d)) if now_ms - s.ts_ms > d => LimitState::Stale,
             _ => LimitState::Fresh,
         };
+        let mut usage_since = Totals::default();
         if state == LimitState::Fresh {
             let tools = provider_tools(s.provider);
-            let used_since = store.events_between(s.ts_ms + BEHIND_GRACE_MS, now_ms + 1)?.iter().any(|e| tools.contains(&e.tool));
-            if used_since {
+            for e in store.events_between(s.ts_ms + BEHIND_GRACE_MS, now_ms + 1)?.iter().filter(|e| tools.contains(&e.tool)) {
+                usage_since.add(e, cost_of(book, e).as_ref(), savings_of(book, e));
+            }
+            if usage_since.events > 0 {
                 state = LimitState::Behind;
             }
         }
@@ -452,7 +457,8 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
             Some(r) if r * 1000 > now_ms => r * 1000 - d,
             _ => now_ms - d,
         });
-        let used = if matches!(state, LimitState::Fresh | LimitState::Behind) { s.used_pct } else { None };
+        // project shares of a limit only make sense against a current reading
+        let used = if state == LimitState::Fresh { s.used_pct } else { None };
         let (usage, shares) = match start {
             Some(st) => window_usage(store, book, &projects, s.provider, st, now_ms, used)?,
             None => (Totals::default(), Vec::new()),
@@ -472,6 +478,7 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
             state,
             window_start_ms: start,
             window_usage: usage,
+            usage_since,
             projects: shares,
         });
     }
@@ -505,6 +512,7 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
             plan: None,
             accuracy: Accuracy::Estimated,
             state: LimitState::Fresh,
+            usage_since: Totals::default(),
             window_start_ms: Some(start),
             window_usage: usage,
             projects: shares,

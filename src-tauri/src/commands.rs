@@ -203,6 +203,7 @@ pub struct WidgetLimit {
     state: LimitState,
     accuracy: Accuracy,
     resets_at: Option<i64>,
+    observed_ms: Option<i64>,
 }
 
 #[derive(Serialize, Default)]
@@ -269,7 +270,15 @@ pub fn get_widget_data(state: State<AppState>) -> Res<WidgetData> {
         .map_err(err)?
         .into_iter()
         .filter(|l| providers.contains(&l.provider) && (l.window == "five_hour" || l.window == "seven_day"))
-        .map(|l| WidgetLimit { provider: l.provider, window: l.window, used_pct: l.used_pct, state: l.state, accuracy: l.accuracy, resets_at: l.resets_at })
+        .map(|l| WidgetLimit {
+            provider: l.provider,
+            window: l.window,
+            used_pct: l.used_pct,
+            state: l.state,
+            accuracy: l.accuracy,
+            resets_at: l.resets_at,
+            observed_ms: l.observed_ms,
+        })
         .collect();
     let mut provs: Vec<Provider> = providers.iter().copied().collect();
     provs.sort_by_key(|p| p.as_str());

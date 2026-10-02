@@ -120,6 +120,7 @@ export interface LimitView {
   state: LimitState
   window_start_ms: number | null
   window_usage: Totals
+  usage_since: Totals
   projects: ProjectShare[]
 }
 
@@ -134,7 +135,7 @@ export interface WidgetData {
   today: WidgetPeriod
   days7: WidgetPeriod
   month1: WidgetPeriod
-  limits: { provider: Provider; window: string; used_pct: number | null; state: LimitState; accuracy: Accuracy; resets_at: number | null }[]
+  limits: { provider: Provider; window: string; used_pct: number | null; state: LimitState; accuracy: Accuracy; resets_at: number | null; observed_ms: number | null }[]
   providers: Provider[]
   updated_ms: number
 }

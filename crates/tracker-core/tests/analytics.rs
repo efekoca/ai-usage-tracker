@@ -314,6 +314,7 @@ fn reading_followed_by_more_usage_is_marked_behind() {
     }
     let v = &limits_view(&store, &book, now, &[]).unwrap()[0];
     assert_eq!(v.state, LimitState::Behind);
-    // the reading stays visible as a lower bound
+    // the reading stays available, with what it does not include yet
     assert_eq!(v.used_pct, Some(6.0));
+    assert_eq!(v.usage_since.events, 1);
 }

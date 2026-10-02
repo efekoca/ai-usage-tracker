@@ -23,9 +23,11 @@
     const w = kind === 'limit_five_hour' ? 'five_hour' : 'seven_day'
     const l = data?.limits.find((x) => x.provider === p && x.window === w)
     if (!l) return null
-    const known = (l.state === 'fresh' || l.state === 'behind') && l.used_pct !== null
-    // 'behind' readings are lower bounds: usage happened after them
-    return { pct: known ? Math.max(0, Math.min(100, l.used_pct as number)) : null, min: l.state === 'behind' ? '≥' : '', resets: l.resets_at, estimated: l.accuracy === 'estimated', captured: l.accuracy === 'captured' }
+    const known = l.state === 'fresh' && l.used_pct !== null
+    // 'behind': used after the reading, so the current value is unknown; the last reading is
+    // shown only as "last N %", never as the current value
+    const last = l.state === 'behind' && l.used_pct !== null ? { pct: l.used_pct, ago: l.observed_ms ? fmtDuration(now - l.observed_ms) : '' } : null
+    return { pct: known ? Math.max(0, Math.min(100, l.used_pct as number)) : null, last, resets: l.resets_at, estimated: l.accuracy === 'estimated', captured: l.accuracy === 'captured' }
   }
   const level = (pct: number) => (pct >= ws.high_at ? 'var(--critical)' : pct >= ws.warn_at ? 'var(--serious)' : 'var(--w-accent)')
   const winShort = (k: WidgetItemKind) => (k === 'limit_five_hour' ? t('widget.5h') : t('widget.week'))
@@ -73,20 +75,20 @@
   {#if rows.length}
     {@const lead = rows[0]}
     {#if ws.limit_style === 'ring'}
-      <div class="ring" aria-label="{t(`provider.${p}`)} {rows.map((r) => `${winShort(r.k)} ${r.l.pct !== null ? r.l.min + fmtPct(r.l.pct) : '—'}`).join(', ')}">
+      <div class="ring" aria-label="{t(`provider.${p}`)} {rows.map((r) => `${winShort(r.k)} ${r.l.pct !== null ? fmtPct(r.l.pct) : r.l.last ? t('widget.lastReading', { pct: fmtPct(r.l.last.pct), t: r.l.last.ago }) : '—'}`).join(', ')}">
         <svg viewBox="0 0 40 40" aria-hidden="true">
           <circle cx="20" cy="20" r={R} class="track" />
           {#if lead.l.pct !== null}
             <circle cx="20" cy="20" r={R} class="arc" stroke={level(lead.l.pct)} stroke-dasharray="{(lead.l.pct / 100) * C} {C}" transform="rotate(-90 20 20)" />
           {/if}
-          <text x="20" y="20" dy="0.35em" text-anchor="middle">{lead.l.pct !== null ? lead.l.min + fmtDec(lead.l.pct) : '–'}</text>
+          <text x="20" y="20" dy="0.35em" text-anchor="middle">{lead.l.pct !== null ? fmtDec(lead.l.pct) : lead.l.last ? '?' : '–'}</text>
         </svg>
         <div class="rl">
           {#if ws.show_labels}<span class="pn">{t(`provider.${p}`)}</span>{/if}
           <span class="sub">
-            {winShort(lead.k)}{lead.l.estimated ? ' ≈' : ''}{ws.show_reset_time && lead.l.resets ? ` · ${fmtDuration(lead.l.resets * 1000 - now)}` : ''}
+            {winShort(lead.k)}{lead.l.estimated ? ' ≈' : ''}{lead.l.last ? ` · ${t('widget.lastShort', { pct: fmtPct(lead.l.last.pct) })}` : ws.show_reset_time && lead.l.resets ? ` · ${fmtDuration(lead.l.resets * 1000 - now)}` : ''}
             {#each rows.slice(1) as r (r.k)}
-              · {winShort(r.k)} <b class="num" style="color:{r.l.pct !== null && r.l.pct >= ws.warn_at ? level(r.l.pct) : 'inherit'}">{r.l.pct !== null ? r.l.min + fmtPct(r.l.pct) : '—'}</b>
+              · {winShort(r.k)} <b class="num" style="color:{r.l.pct !== null && r.l.pct >= ws.warn_at ? level(r.l.pct) : 'inherit'}">{r.l.pct !== null ? fmtPct(r.l.pct) : r.l.last ? '?' : '—'}</b>
             {/each}
           </span>
         </div>
@@ -97,7 +99,7 @@
         {#each rows as r (r.k)}
           <div class="bh">
             <span class="sub">{winShort(r.k)}{ws.show_reset_time && r.l.resets ? ` · ${fmtDuration(r.l.resets * 1000 - now)}` : ''}</span>
-            <span class="pv num">{r.l.pct !== null ? r.l.min + fmtPct(r.l.pct) : '—'}{r.l.estimated ? ' ≈' : ''}</span>
+            <span class="pv num">{r.l.pct !== null ? fmtPct(r.l.pct) : r.l.last ? '?' : '—'}{r.l.estimated ? ' ≈' : ''}</span>
           </div>
           <div class="bt"><span style="width:{r.l.pct ?? 0}%;background:{r.l.pct !== null ? level(r.l.pct) : 'transparent'}"></span></div>
         {/each}
@@ -108,7 +110,7 @@
         {#each rows as r, i (r.k)}
           {#if i > 0}<span class="sub">·</span>{/if}
           <span class="sub">{winShort(r.k)}</span>
-          <b class="num" style="color:{r.l.pct !== null && r.l.pct >= ws.warn_at ? level(r.l.pct) : 'inherit'}">{r.l.pct !== null ? r.l.min + fmtPct(r.l.pct) : '—'}</b>
+          <b class="num" style="color:{r.l.pct !== null && r.l.pct >= ws.warn_at ? level(r.l.pct) : 'inherit'}">{r.l.pct !== null ? fmtPct(r.l.pct) : r.l.last ? '?' : '—'}</b>
         {/each}
       </span>
     {/if}
