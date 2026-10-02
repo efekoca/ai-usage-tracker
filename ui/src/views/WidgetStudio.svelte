@@ -14,8 +14,18 @@
   let data = $state<WidgetData | null>(null)
   let backdrop: 'light' | 'dark' | 'photo' = $state('photo')
 
+  let fonts = $state<string[]>([])
+  let fontQuery = $state('')
   onMount(() => {
     api.widgetData().then((d) => (data = d))
+    api.listFonts().then((f) => (fonts = f)).catch(() => {})
+  })
+  // common Windows faces that suit small UI text; only the installed ones are listed
+  const SUGGESTED = ['Segoe UI Variable Display', 'Segoe UI', 'Aptos', 'Bahnschrift', 'Calibri', 'Cascadia Mono', 'Consolas', 'Georgia', 'Verdana', 'Arial']
+  const suggested = $derived(SUGGESTED.filter((f) => fonts.includes(f)))
+  const fontMatches = $derived.by(() => {
+    const q = fontQuery.trim().toLocaleLowerCase()
+    return q ? fonts.filter((f) => f.toLocaleLowerCase().includes(q)) : fonts
   })
 
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -56,6 +66,7 @@
       providers: [], primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '',
       corner_radius: 14, border: true, shadow: false, show_labels: true, show_reset_time: false, warn_at: 70, high_at: 90,
       always_on_top: true, lock_position: false, click_action: 'open_dashboard',
+      font_family: '', text_scale: 1, number_scale: 1, number_weight: 700, tabular_nums: true,
     }
     ws = d
     commit()
@@ -154,6 +165,55 @@
           <Toggle checked={ws[key]} label={t(`ws.${key}`)} onchange={(v) => set(key, v)} />
         </div>
       {/each}
+    </section>
+
+    <section class="card group">
+      <h2>{t('ws.type')}</h2>
+      <div class="item stack">
+        <div class="fhead">
+          <span>{t('ws.font')}</span>
+          <span class="subtle small current" style="font-family:{ws.font_family ? `'${ws.font_family}', var(--font)` : 'var(--font)'}">{ws.font_family || t('ws.font.app')}</span>
+        </div>
+        <input type="search" class="field" placeholder={t('ws.font.search')} aria-label={t('ws.font.search')} bind:value={fontQuery} />
+        <div class="fontlist" role="listbox" aria-label={t('ws.font')}>
+          {#snippet fontOption(name: string, label: string)}
+            <button role="option" aria-selected={ws.font_family === name} class:sel={ws.font_family === name} style="font-family:{name ? `'${name}', var(--font)` : 'var(--font)'}" onclick={() => set('font_family', name)}>
+              <span>{label}</span>
+              {#if ws.font_family === name}<Icon name="check" size={14} />{/if}
+            </button>
+          {/snippet}
+          {#if !fontQuery.trim()}
+            {@render fontOption('', t('ws.font.app'))}
+            {#if suggested.length}
+              <div class="fgh" role="presentation">{t('ws.font.suggested')}</div>
+              {#each suggested as f (f)}{@render fontOption(f, f)}{/each}
+            {/if}
+            {#if fonts.length}<div class="fgh" role="presentation">{t('ws.font.all', { n: fonts.length })}</div>{/if}
+          {/if}
+          {#each fontMatches as f (f)}{@render fontOption(f, f)}{/each}
+          {#if fontQuery.trim() && !fontMatches.length}<p class="subtle small none">{t('ws.font.none')}</p>{/if}
+        </div>
+      </div>
+      {#each [['text_scale', 0.8, 1.6, 0.05], ['number_scale', 0.6, 2, 0.05]] as const as [key, min, max, step] (key)}
+        <div class="item">
+          <span>{t(`ws.${key}`)}</span>
+          <div class="row slider">
+            <input type="range" {min} {max} {step} value={ws[key]} aria-label={t(`ws.${key}`)} oninput={(e) => set(key, Number(e.currentTarget.value))} />
+            <span class="num val">{fmtPct(ws[key] * 100)}</span>
+          </div>
+        </div>
+      {/each}
+      <div class="item">
+        <span>{t('ws.number_weight')}</span>
+        <div class="row slider">
+          <input type="range" min="300" max="900" step="100" value={ws.number_weight} aria-label={t('ws.number_weight')} aria-valuetext={t(`ws.weight.${ws.number_weight}`)} oninput={(e) => set('number_weight', Number(e.currentTarget.value))} />
+          <span class="val wname" style="font-weight:{ws.number_weight}">{t(`ws.weight.${ws.number_weight}`)}</span>
+        </div>
+      </div>
+      <div class="item">
+        <span>{t('ws.tabular_nums')}<span class="subtle small block">{t('ws.tabular_nums.help')}</span></span>
+        <Toggle checked={ws.tabular_nums} label={t('ws.tabular_nums')} onchange={(v) => set('tabular_nums', v)} />
+      </div>
     </section>
 
     <section class="card group">
@@ -309,10 +369,81 @@
     accent-color: var(--accent);
   }
   .val {
-    min-width: 48px;
+    min-width: 64px;
     text-align: right;
     color: var(--ink-2);
     font-size: 12.5px;
+  }
+  .item.stack {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .fhead {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+  }
+  .current {
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .fontlist {
+    max-height: 232px;
+    overflow-y: auto;
+    border: 0.5px solid var(--hairline);
+    border-radius: 10px;
+    padding: 4px;
+    background: var(--surface);
+  }
+  .fontlist button {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 7px 10px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--ink);
+    font-size: 14px;
+    text-align: left;
+    cursor: default;
+  }
+  .fontlist button:hover {
+    background: var(--surface-hover, var(--surface-press));
+  }
+  .fontlist button.sel {
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    color: var(--ink);
+  }
+  .fontlist button span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .fgh {
+    padding: 8px 10px 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .none {
+    padding: 8px 10px;
+    margin: 0;
+  }
+  .wname {
+    font-size: 13px;
+  }
+  .block {
+    display: block;
+    margin-top: 2px;
   }
   .swatchbtn {
     width: 24px;

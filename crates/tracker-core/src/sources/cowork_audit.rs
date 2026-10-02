@@ -40,7 +40,10 @@ pub fn parse_file(path: &Path, offset: u64) -> std::io::Result<ParseOutput> {
         }
         if !any {
             if let Some(kind) = str_at(info, "rateLimitType") {
-                let pct = (status.as_deref() == Some("rejected")).then_some(100.0);
+                // a warning carries its own utilization; a rejection means the window is full
+                let pct = f64_at(info, "utilization")
+                    .map(|u| if u <= 1.5 { u * 100.0 } else { u })
+                    .or_else(|| (status.as_deref() == Some("rejected")).then_some(100.0));
                 out.limits.push(snapshot(ts_ms, kind, pct, i64_at(info, "resetsAt"), status.clone()));
                 any = true;
             }
@@ -71,5 +74,33 @@ fn snapshot(ts_ms: i64, window: &str, used_pct: Option<f64>, resets_at: Option<i
         plan: None,
         source: SOURCE.into(),
         accuracy: Accuracy::Exact,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn warnings_keep_their_utilization_and_rejections_mean_full() {
+        let p = std::env::temp_dir().join(format!("aut-cowork-audit-{}.jsonl", std::process::id()));
+        std::fs::write(
+            &p,
+            concat!(
+                r#"{"type":"rate_limit_event","timestamp":"2026-08-24T10:00:00.000Z","rate_limit_info":{"status":"allowed_warning","rateLimitType":"seven_day","utilization":0.99,"resetsAt":1787900000}}"#, "\n",
+                r#"{"type":"rate_limit_event","timestamp":"2026-08-24T11:00:00.000Z","rate_limit_info":{"status":"rejected","rateLimitType":"five_hour","resetsAt":1787910000}}"#, "\n",
+                r#"{"type":"assistant","message":{"id":"m","usage":{"input_tokens":5}}}"#, "\n",
+            ),
+        )
+        .unwrap();
+        let out = parse_file(&p, 0).unwrap();
+        std::fs::remove_file(&p).ok();
+        let got: Vec<(&str, Option<f64>, Option<&str>)> = out.limits.iter().map(|l| (l.window.as_str(), l.used_pct, l.status.as_deref())).collect();
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].0, "seven_day");
+        assert!((got[0].1.unwrap() - 99.0).abs() < 1e-9);
+        assert_eq!(got[0].2, Some("allowed_warning"));
+        assert_eq!(got[1], ("five_hour", Some(100.0), Some("rejected")));
+        assert!(out.events.is_empty());
     }
 }

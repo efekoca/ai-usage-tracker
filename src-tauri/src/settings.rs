@@ -76,6 +76,16 @@ pub struct WidgetSettings {
     pub lock_position: bool,
     /// "open_dashboard" | "none"
     pub click_action: String,
+    /// CSS family name of an installed font; empty = the app font (Inter).
+    pub font_family: String,
+    /// Size factor for labels and small values, 0.8–1.6 (independent of `scale`).
+    pub text_scale: f64,
+    /// Size factor of the big number, 0.6–2.0.
+    pub number_scale: f64,
+    /// Weight of the big number and limit values, 300–900.
+    pub number_weight: u16,
+    /// Fixed-width digits so values do not jitter as they change.
+    pub tabular_nums: bool,
 }
 
 impl Default for WidgetSettings {
@@ -107,6 +117,11 @@ impl Default for WidgetSettings {
             always_on_top: true,
             lock_position: false,
             click_action: "open_dashboard".into(),
+            font_family: String::new(),
+            text_scale: 1.0,
+            number_scale: 1.0,
+            number_weight: 700,
+            tabular_nums: true,
         }
     }
 }
@@ -125,6 +140,19 @@ impl WidgetSettings {
         self.corner_radius = self.corner_radius.clamp(0.0, 28.0);
         self.warn_at = self.warn_at.clamp(1.0, 100.0);
         self.high_at = self.high_at.clamp(self.warn_at, 100.0);
+        let factor = |v: f64, lo: f64, hi: f64| if v.is_finite() { v.clamp(lo, hi) } else { 1.0 };
+        self.text_scale = factor(self.text_scale, 0.8, 1.6);
+        self.number_scale = factor(self.number_scale, 0.6, 2.0);
+        self.number_weight = self.number_weight.clamp(300, 900) / 100 * 100;
+        // the name is placed inside a CSS string; keep it a plain family name
+        self.font_family = self
+            .font_family
+            .chars()
+            .filter(|c| !matches!(c, '"' | '\'' | '\\' | ';' | '{' | '}' | '<' | '>'))
+            .take(80)
+            .collect::<String>()
+            .trim()
+            .to_string();
     }
 }
 
@@ -180,6 +208,9 @@ pub struct Settings {
     pub allow_config_updates: bool,
     /// Visual: show cost or tokens first.
     pub primary_metric: String,
+    /// Unpriced models whose warning the user dismissed; a model that becomes unpriced later
+    /// warns again.
+    pub dismissed_unpriced: Vec<String>,
 }
 
 impl Default for Settings {
@@ -200,6 +231,7 @@ impl Default for Settings {
             autostart: false,
             allow_config_updates: false,
             primary_metric: "tokens".into(),
+            dismissed_unpriced: Vec::new(),
         }
     }
 }

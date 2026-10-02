@@ -80,14 +80,10 @@ pub fn parse_logs(body: &Value) -> Vec<UsageEvent> {
                 }
                 let request_id = text(&a, "request_id").map(str::to_owned);
                 let session = text(&a, "session.id").map(str::to_owned);
-                let key = match (&request_id, &session, a.get("event.sequence")) {
-                    (Some(r), _, _) => format!("otel:{r}"),
-                    (None, Some(s), Some(seq)) => format!("otel:{s}:{seq}"),
-                    _ => match text(&a, "client_request_id") {
-                        Some(c) => format!("otel:c:{c}"),
-                        None => continue,
-                    },
-                };
+                // without the provider's request id the transcript copy of the same request could
+                // not be recognised, so the event would be counted twice: skip it
+                let Some(rid) = &request_id else { continue };
+                let key = format!("otel:{rid}");
                 let ts_ms = text(&a, "event.timestamp").and_then(parse_ts_ms).or_else(|| {
                     rec.get("timeUnixNano").map(any_value).and_then(|v| match v {
                         Value::String(s) => s.parse::<i64>().ok(),
@@ -275,5 +271,14 @@ mod tests {
     fn garbage_yields_nothing() {
         assert!(parse_logs(&json!({"resourceLogs": "nope"})).is_empty());
         assert!(parse_logs(&json!(null)).is_empty());
+    }
+
+    #[test]
+    fn requests_without_a_request_id_are_skipped() {
+        // the transcript copy could not be matched, so keeping it would count the request twice
+        let mut body = sample("req_x", "claude-haiku-4-5", 12);
+        let attrs = body["resourceLogs"][0]["scopeLogs"][0]["logRecords"][1]["attributes"].as_array_mut().unwrap();
+        attrs.retain(|a| a["key"] != "request_id");
+        assert!(parse_logs(&body).is_empty());
     }
 }

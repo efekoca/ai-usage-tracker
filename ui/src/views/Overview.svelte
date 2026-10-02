@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, toolColor } from '../lib/store.svelte'
+  import { app, saveSettings, toolColor } from '../lib/store.svelte'
   import { fmtCompact, fmtDate, fmtHour, fmtMoney, t, toolLabel, weekdayNames } from '../lib/i18n.svelte'
   import StatTile from '../components/StatTile.svelte'
   import Segmented from '../components/Segmented.svelte'
@@ -20,6 +20,12 @@
     app.limits.filter((l) => l.window === 'five_hour' || l.window === 'seven_day' || l.source === 'user_threshold'),
   )
   const hasClaude = $derived(toolsPresent.includes('claude_code'))
+  // models the user chose not to be warned about again; a newly unpriced model still warns
+  const unpriced = $derived((app.report?.unpriced_models ?? []).filter((m) => !(app.settings?.dismissed_unpriced ?? []).includes(m)))
+  function dismissUnpriced() {
+    const prev = app.settings?.dismissed_unpriced ?? []
+    saveSettings({ dismissed_unpriced: [...new Set([...prev, ...unpriced])] })
+  }
 </script>
 
 {#if !r}
@@ -30,12 +36,13 @@
     <p>{t('common.empty')}</p>
   </div>
 {:else}
-  {#if r.unpriced_models.length}
+  {#if unpriced.length}
     <div class="banner" role="status">
       <Icon name="info" size={16} />
-      <span>{t('overview.unpriced', { n: r.unpriced_models.length, models: r.unpriced_models.join(', ') })}</span>
+      <span>{t('overview.unpriced', { n: unpriced.length, models: unpriced.join(', ') })}</span>
       <span class="spacer"></span>
       <button class="btn" onclick={() => (app.view = 'settings')}>{t('overview.unpricedAction')}</button>
+      <button class="btn ghost dismiss" aria-label={t('overview.unpricedDismiss')} title={t('overview.unpricedDismiss')} onclick={dismissUnpriced}><Icon name="close" size={14} /></button>
     </div>
   {/if}
 
@@ -170,6 +177,13 @@
   .banner {
     margin-bottom: 16px;
     align-items: center;
+  }
+  .dismiss {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    justify-content: center;
+    margin-right: -6px;
   }
   .facts {
     display: flex;

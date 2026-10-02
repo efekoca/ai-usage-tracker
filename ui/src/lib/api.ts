@@ -49,6 +49,7 @@ export interface Totals {
   cost_usd: number
   unpriced_events: number
   unpriced_tokens: number
+  cache_read_with_writes: number
   cache_savings_usd: number
 }
 
@@ -93,7 +94,7 @@ export interface Report {
   by_accuracy: Record<string, number>
 }
 
-export type LimitState = 'fresh' | 'reset' | 'stale'
+export type LimitState = 'fresh' | 'reset' | 'stale' | 'behind'
 
 export interface ProjectShare {
   project_id: number | null
@@ -174,6 +175,11 @@ export interface WidgetSettings {
   always_on_top: boolean
   lock_position: boolean
   click_action: 'open_dashboard' | 'none'
+  font_family: string
+  text_scale: number
+  number_scale: number
+  number_weight: number
+  tabular_nums: boolean
 }
 
 export interface CaptureSettings {
@@ -218,6 +224,7 @@ export interface Settings {
   autostart: boolean
   allow_config_updates: boolean
   primary_metric: 'tokens' | 'cost'
+  dismissed_unpriced: string[]
 }
 
 export interface SourceInfo {
@@ -343,6 +350,7 @@ export const api = {
   captureStatus: () => invoke<CaptureStatus>('capture_status'),
   setCapture: (kind: 'codex' | 'statusline' | 'otel', enabled: boolean) => invoke<string>('set_capture', { kind, enabled }),
   placeWidget: (corner: string, remember = true) => invoke<void>('place_widget', { corner, remember }),
+  listFonts: () => invoke<string[]>('list_fonts'),
 }
 
 export function on<T>(event: string, cb: (payload: T) => void): Promise<UnlistenFn> {

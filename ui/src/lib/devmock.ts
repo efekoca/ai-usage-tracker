@@ -23,11 +23,13 @@ const settings: Settings = {
     items: (['primary', 'cost', 'limit_five_hour', 'limit_seven_day', 'tools', 'week_tokens', 'week_cost', 'month_cost', 'updated'] as const).map((k, i) => ({ kind: k, enabled: i < 4 })),
     providers: [], primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '', corner_radius: 14,
     border: true, shadow: false, show_labels: true, show_reset_time: false, warn_at: 70, high_at: 90, always_on_top: true, lock_position: false, click_action: 'open_dashboard',
+    font_family: '', text_scale: 1, number_scale: 1, number_weight: 700, tabular_nums: true,
   },
   capture: { codex_poll: false, codex_poll_minutes: 5, codex_path: '', statusline: false, otel: false, otel_port: 43180 },
   autostart: false,
   allow_config_updates: false,
   primary_metric: 'tokens',
+  dismissed_unpriced: [],
 }
 
 const day = 864e5
@@ -55,6 +57,7 @@ function totals(tokens: number, cost: number, unpriced = false): Totals {
     unpriced_events: unpriced ? 3 : 0,
     unpriced_tokens: unpriced ? tokens : 0,
     cache_savings_usd: unpriced ? 0 : cost * 0.9,
+    cache_read_with_writes: Math.round(cr * 0.9),
   }
 }
 
@@ -166,6 +169,8 @@ export function installMock() {
         }
         case 'place_widget':
           return null
+        case 'list_fonts':
+          return ['Arial', 'Bahnschrift', 'Calibri', 'Cascadia Mono', 'Consolas', 'Georgia', 'Segoe UI', 'Segoe UI Variable Display', 'Times New Roman', 'Verdana']
         case 'detect_sources':
           return [
             { id: 'claude_code', found: true, supported: true, roots: ['C:\\Users\\you\\.claude'], file_count: 27, enabled: true },

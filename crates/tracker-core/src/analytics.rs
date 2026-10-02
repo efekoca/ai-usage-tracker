@@ -33,8 +33,12 @@ pub struct Range {
 }
 
 impl Range {
-    pub fn previous(&self) -> Range {
-        Range { from_ms: self.from_ms - (self.to_ms - self.from_ms), to_ms: self.from_ms }
+    /// The same number of local calendar days right before this range (DST-safe: a day that
+    /// is 23 or 25 hours long still counts as one day).
+    pub fn previous<Tz: TimeZone>(&self, tz: &Tz) -> Range {
+        let first = local_date(tz, self.from_ms);
+        let days = (local_date(tz, self.to_ms - 1) - first).num_days().max(0) as u64 + 1;
+        Range { from_ms: start_of_day(tz, first - Days::new(days)), to_ms: self.from_ms }
     }
 }
 
@@ -60,7 +64,8 @@ pub fn period_range<Tz: TimeZone>(period: Period, tz: &Tz, now_ms: i64, first_ev
     match period {
         Period::Today => since(today),
         Period::Days7 => since(today - Days::new(6)),
-        Period::Month1 => since(months_back(1)),
+        // "last 30 days" (not a calendar month, which would be 28–31 days)
+        Period::Month1 => since(today - Days::new(29)),
         Period::Months3 => since(months_back(3)),
         Period::Months6 => since(months_back(6)),
         Period::Year1 => since(months_back(12)),
@@ -107,6 +112,9 @@ pub struct Totals {
     pub unpriced_tokens: u64,
     /// Net API-equivalent saving from prompt caching (reads minus write premium), priced part.
     pub cache_savings_usd: f64,
+    /// Cache reads from tools that also report cache writes (Claude). Reuse (read ÷ write) uses
+    /// this, since OpenAI caches implicitly and logs reads without any writes.
+    pub cache_read_with_writes: u64,
 }
 
 impl Totals {
@@ -115,6 +123,9 @@ impl Totals {
         self.cache_savings_usd += savings;
         self.tokens.add(&e.tokens);
         self.total_tokens += e.tokens.total();
+        if e.tool.provider() == Provider::Anthropic {
+            self.cache_read_with_writes += e.tokens.cache_read;
+        }
         match cost {
             Some(c) => {
                 self.cost.add(c);
@@ -251,7 +262,7 @@ pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filte
     }
 
     // previous period for the trend (same filter)
-    let prev_range = range.previous();
+    let prev_range = range.previous(tz);
     let mut previous = Totals::default();
     for e in store.events_between(prev_range.from_ms, prev_range.to_ms)?.iter().filter(|e| filter.matches(e)) {
         previous.add(e, cost_of(book, e).as_ref(), savings_of(book, e));
@@ -320,7 +331,14 @@ pub enum LimitState {
     Reset,
     /// No reset time known and the observation is older than one window.
     Stale,
+    /// Inside its window, but this provider was used after the reading: the real value is at
+    /// least the reading (use only grows until the window resets).
+    Behind,
 }
+
+/// Usage this long after a reading makes it `Behind` (a request and the reading it produced
+/// can be logged a little apart).
+const BEHIND_GRACE_MS: i64 = 2 * 60_000;
 
 /// User-defined budget for a window, used only when no real limit reading exists.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -418,16 +436,23 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
     for s in &snaps {
         let minutes = window_minutes(&s.window);
         let dur_ms = minutes.map(|m| m * 60_000);
-        let state = match (s.resets_at, dur_ms) {
+        let mut state = match (s.resets_at, dur_ms) {
             (Some(r), _) if r * 1000 <= now_ms => LimitState::Reset,
             (None, Some(d)) if now_ms - s.ts_ms > d => LimitState::Stale,
             _ => LimitState::Fresh,
         };
+        if state == LimitState::Fresh {
+            let tools = provider_tools(s.provider);
+            let used_since = store.events_between(s.ts_ms + BEHIND_GRACE_MS, now_ms + 1)?.iter().any(|e| tools.contains(&e.tool));
+            if used_since {
+                state = LimitState::Behind;
+            }
+        }
         let start = dur_ms.map(|d| match s.resets_at {
             Some(r) if r * 1000 > now_ms => r * 1000 - d,
             _ => now_ms - d,
         });
-        let used = if state == LimitState::Fresh { s.used_pct } else { None };
+        let used = if matches!(state, LimitState::Fresh | LimitState::Behind) { s.used_pct } else { None };
         let (usage, shares) = match start {
             Some(st) => window_usage(store, book, &projects, s.provider, st, now_ms, used)?,
             None => (Totals::default(), Vec::new()),
@@ -577,7 +602,13 @@ mod tests {
             None,
         );
         assert_eq!((custom.to_ms - custom.from_ms) / DAY_MS, 5);
-        assert_eq!(r.previous().to_ms, r.from_ms);
+        assert_eq!(r.previous(&tz).to_ms, r.from_ms);
+        assert_eq!(r.previous(&tz).to_ms - r.previous(&tz).from_ms, DAY_MS);
+        // the 30-day period is 30 days at the end of a long month too
+        let oct31 = tz.with_ymd_and_hms(2026, 10, 31, 12, 0, 0).unwrap().timestamp_millis();
+        let m = period_range(Period::Month1, &tz, oct31, None);
+        assert_eq!(local_date(&tz, m.from_ms).to_string(), "2026-10-02");
+        assert_eq!((m.to_ms - m.from_ms) / DAY_MS, 30);
     }
 
     #[test]

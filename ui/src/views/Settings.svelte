@@ -244,6 +244,13 @@
       </select>
       <button class="btn" onclick={addAlias} disabled={!aliasFrom || !aliasTo}><Icon name="plus" size={14} /></button>
     </div>
+    {#if s.dismissed_unpriced?.length}
+      <div class="list-row">
+        <span class="muted small">{t('settings.pricing.dismissed', { models: s.dismissed_unpriced.join(', ') })}</span>
+        <span class="spacer"></span>
+        <button class="btn ghost small" onclick={() => saveSettings({ dismissed_unpriced: [] })}>{t('settings.pricing.dismissedShow')}</button>
+      </div>
+    {/if}
 
     <div class="row wrap actions">
       {#each Object.entries(pricing.sources ?? {}) as [prov, url] (prov)}

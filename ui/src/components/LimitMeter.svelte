@@ -34,7 +34,9 @@
     return () => clearInterval(id)
   })
 
-  const known = $derived(lstate === 'fresh' && used !== null)
+  // 'behind': the provider was used after this reading, so the real value is at least this
+  const known = $derived((lstate === 'fresh' || lstate === 'behind') && used !== null)
+  const atLeast = $derived(lstate === 'behind')
   const pct = $derived(known ? Math.max(0, Math.min(100, used as number)) : 0)
   const level = $derived(!known ? 'unknown' : pct >= 100 ? 'full' : pct >= 90 ? 'high' : pct >= 70 ? 'warn' : 'ok')
   const icon = $derived(level === 'ok' ? 'check' : level === 'unknown' ? 'clock' : 'warning')
@@ -45,7 +47,7 @@
     <span class="name">{title || windowLabel(win)}</span>
     <span class="spacer"></span>
     {#if known}
-      <span class="pct num">{fmtPct(pct)}</span>
+      <span class="pct num">{atLeast ? '≥ ' : ''}{fmtPct(pct)}</span>
     {:else}
       <span class="pct subtle">—</span>
     {/if}
@@ -61,6 +63,8 @@
       <span class="subtle">{t('limits.state.reset')}</span>
     {:else if lstate === 'stale'}
       <span class="subtle">{t('limits.state.stale')}</span>
+    {:else if atLeast && observedMs}
+      <span class="subtle" title={t('limits.state.behind.help')}>{t('limits.state.behind', { t: fmtDuration(now - observedMs) })}</span>
     {:else if resetsAt}
       <span class="subtle" title={fmtTime(resetsAt * 1000)}>{t('limits.resetsIn', { t: fmtDuration(resetsAt * 1000 - now) })}</span>
     {:else if observedMs}

@@ -3,6 +3,7 @@
 
 mod capture;
 mod commands;
+mod fonts;
 mod settings;
 mod state;
 mod windows;
@@ -109,6 +110,7 @@ pub fn run() {
             commands::set_widget_visible,
             commands::widget_menu,
             commands::place_widget,
+            commands::list_fonts,
             commands::quit_app,
             commands::capture_status,
             commands::set_capture,

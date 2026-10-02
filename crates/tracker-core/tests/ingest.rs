@@ -301,3 +301,21 @@ fn a_session_that_changes_directory_stays_one_project() {
     assert!(names.contains(&("Site".to_string(), "C:/Work/Site".to_string())), "{names:?}");
     assert!(!names.iter().any(|(n, _)| n == "ui"));
 }
+
+#[test]
+fn a_pricing_modifier_on_a_later_copy_of_a_message_is_kept() {
+    let m = machine();
+    let p = m.home.join(".claude/projects/C--Work-fast/f.jsonl");
+    fs::create_dir_all(p.parent().unwrap()).unwrap();
+    // the first streaming copy has no speed; only the final copy says "fast"
+    let first = r#"{"type":"assistant","sessionId":"s-f","timestamp":"2026-09-05T10:00:00.000Z","cwd":"C:/Work/Fast","message":{"id":"msg_f1","model":"claude-opus-5-5","usage":{"input_tokens":10,"output_tokens":1}}}"#;
+    let last = r#"{"type":"assistant","sessionId":"s-f","timestamp":"2026-09-05T10:00:01.000Z","cwd":"C:/Work/Fast","message":{"id":"msg_f1","model":"claude-opus-5-5","usage":{"input_tokens":10,"output_tokens":50,"speed":"fast","service_tier":"standard","inference_geo":"us"}}}"#;
+    fs::write(&p, format!("{first}\n{last}\n")).unwrap();
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &m.env);
+    let row: (String, Option<String>, i64) = store
+        .conn()
+        .query_row("SELECT speed, inference_geo, output FROM usage_event WHERE key = 'cc:msg_f1'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap();
+    assert_eq!(row, ("fast".to_string(), Some("us".to_string()), 50));
+}

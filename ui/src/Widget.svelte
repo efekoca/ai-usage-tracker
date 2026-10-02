@@ -64,7 +64,11 @@
       }),
     ]
     const id = setInterval(load, 60_000)
+    // a web font that finishes loading late changes the size without any data change
+    const ro = new ResizeObserver(() => fit())
+    if (host) ro.observe(host)
     return () => {
+      ro.disconnect()
       clearInterval(id)
       subs.forEach((p) => p.then((u) => u()))
     }

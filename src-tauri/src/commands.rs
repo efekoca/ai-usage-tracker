@@ -455,6 +455,12 @@ pub fn set_widget_visible(app: AppHandle, state: State<AppState>, visible: bool)
     save_settings(app, state, s).map(|_| ())
 }
 
+/// Font families installed on this computer, for the widget's font picker.
+#[tauri::command]
+pub async fn list_fonts() -> Vec<String> {
+    crate::fonts::installed_families()
+}
+
 /// Snaps the widget to a corner. `remember` makes it the anchor it keeps while resizing.
 #[tauri::command]
 pub fn place_widget(app: AppHandle, state: State<AppState>, corner: String, remember: Option<bool>) -> Res<()> {

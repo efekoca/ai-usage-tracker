@@ -11,7 +11,8 @@
   const r = $derived(app.report)
   const prompt = (k: Tokens) => k.input + k.cache_read + k.cache_write
   const hit = (k: Tokens) => (prompt(k) > 0 ? (k.cache_read / prompt(k)) * 100 : null)
-  const reuse = (k: Tokens) => (k.cache_write > 0 ? k.cache_read / k.cache_write : null)
+  // reads ÷ writes over Claude only: OpenAI caches implicitly and logs no writes
+  const reuse = (x: { tokens: Tokens; cache_read_with_writes: number }) => (x.tokens.cache_write > 0 ? x.cache_read_with_writes / x.tokens.cache_write : null)
 
   let breakdown: 'model' | 'client' | 'project' = $state('model')
   const rows = $derived.by((): Group[] => {
@@ -40,7 +41,7 @@
   <section class="tiles card">
     <StatTile hero label={t('cache.hitRate')} hint={t('cache.hitRate.help')} value={fmtPct(hit(tk) ?? 0, 1)} current={hit(tk)} previous={hit(r.previous.tokens)} />
     <StatTile label={t('cache.savings')} hint={t('cache.savings.help')} value={fmtMoney(r.totals.cache_savings_usd)} current={r.totals.cache_savings_usd} previous={r.previous.cache_savings_usd} />
-    <StatTile label={t('cache.reuse')} hint={t('cache.reuse.help')} value={reuse(tk) !== null ? `${fmtDec(reuse(tk) ?? 0, 1)}×` : '—'} />
+    <StatTile label={t('cache.reuse')} hint={t('cache.reuse.help')} value={reuse(r.totals) !== null ? `${fmtDec(reuse(r.totals) ?? 0, 1)}×` : '—'} />
     <StatTile label={t('cache.promptTokens')} value={fmtCompact(prompt(tk))}>
       <span class="subtle">{t('cache.uncached')}: {fmtCompact(tk.input)}</span>
     </StatTile>
@@ -114,7 +115,7 @@
               <span class="minibar" aria-hidden="true"><span style="width:{h}%"></span></span>
               {fmtPct(h, 1)}
             </td>
-            <td class="num">{reuse(k) !== null ? `${fmtDec(reuse(k) ?? 0, 1)}×` : '—'}</td>
+            <td class="num">{reuse(g.totals) !== null ? `${fmtDec(reuse(g.totals) ?? 0, 1)}×` : '—'}</td>
             <td class="num" class:neg={g.totals.cache_savings_usd < 0}>{g.totals.unpriced_events === g.totals.events ? '—' : fmtMoney(g.totals.cache_savings_usd)}</td>
           </tr>
         {/each}

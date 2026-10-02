@@ -62,6 +62,12 @@ fn all_time_report_prices_every_known_model_and_flags_unknown_ones() {
     assert!(proj.contains(&"demo-app") && proj.contains(&"Cowork"));
     assert_eq!(r.by_accuracy.get("exact"), Some(&9));
     assert_eq!(r.heatmap.iter().flatten().sum::<u64>(), r.totals.total_tokens);
+
+    // reuse counts only reads from tools that report writes (Codex logs reads, never writes)
+    let claude_reads: u64 = r.by_tool.iter().filter(|g| g.key != "codex").map(|g| g.totals.tokens.cache_read).sum();
+    let codex_reads: u64 = r.by_tool.iter().filter(|g| g.key == "codex").map(|g| g.totals.tokens.cache_read).sum();
+    assert!(codex_reads > 0);
+    assert_eq!(r.totals.cache_read_with_writes, claude_reads);
 }
 
 #[test]
@@ -279,4 +285,35 @@ fn csv_export_masks_hidden_projects_and_leaves_unpriced_cost_empty() {
     let total: u64 = v.as_array().unwrap().iter().map(|r| r["events"].as_u64().unwrap()).sum();
     assert_eq!(total, 9);
     assert!(!String::from_utf8(daily).unwrap().contains("Cowork"));
+}
+
+#[test]
+fn reading_followed_by_more_usage_is_marked_behind() {
+    let mut store = Store::open_in_memory().unwrap();
+    let now = ms(2026, 10, 2, 12, 0);
+    {
+        let mut tx = store.transaction().unwrap();
+        tx.upsert_events(&[
+            // a minute after the reading: the same request, within the grace period
+            ev("same", now - 3_540_000, Tool::ClaudeCode, "claude-sonnet-5", r"C:\p\a", 1_000, 0),
+            // Codex use says nothing about the Claude window
+            ev("cx", now - 1_200_000, Tool::Codex, "gpt-5.6-terra", r"C:\p\a", 1_000, 0),
+        ])
+        .unwrap();
+        tx.insert_limits(&[snap(now - 3_600_000, Provider::Anthropic, Tool::ClaudeDesktop, "five_hour", 6.0, None, None, "claude_plan_history")])
+            .unwrap();
+        tx.commit().unwrap();
+    }
+    let book = PriceBook::default_book();
+    assert_eq!(limits_view(&store, &book, now, &[]).unwrap()[0].state, LimitState::Fresh);
+
+    {
+        let mut tx = store.transaction().unwrap();
+        tx.upsert_events(&[ev("later", now - 600_000, Tool::ClaudeCode, "claude-sonnet-5", r"C:\p\a", 1_000, 0)]).unwrap();
+        tx.commit().unwrap();
+    }
+    let v = &limits_view(&store, &book, now, &[]).unwrap()[0];
+    assert_eq!(v.state, LimitState::Behind);
+    // the reading stays visible as a lower bound
+    assert_eq!(v.used_pct, Some(6.0));
 }

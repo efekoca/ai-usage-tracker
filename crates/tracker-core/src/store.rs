@@ -94,6 +94,11 @@ const MIGRATIONS: &[&str] = &[
     r#"
     DELETE FROM file_checkpoint WHERE parser IN ('codex_rollout', 'cowork_jsonl');
     "#,
+    // v5: pricing modifiers (speed, tier, region) are kept from whichever copy of a message
+    // carries them, and audit warnings keep their utilization; re-read Claude logs once.
+    r#"
+    DELETE FROM file_checkpoint WHERE parser IN ('claude_code_jsonl', 'cowork_jsonl', 'cowork_audit');
+    "#,
 ];
 
 /// A captured row is hidden when the same request also exists as an exact (log) row.
@@ -105,7 +110,8 @@ const EVENT_COLUMNS: &str = "key, ts_ms, tool, client, model, project_id, sessio
     request_id";
 
 /// Merge rule for a repeated event key: field-wise maximum (streaming duplicates), earliest
-/// timestamp, and a log-derived (exact) copy upgrades a captured one.
+/// timestamp, pricing modifiers from whichever copy carries them (the first streaming copy of a
+/// Claude message has no `speed`), and a log-derived (exact) copy upgrades a captured one.
 const UPSERT_EVENT_TAIL: &str = "ON CONFLICT(key) DO UPDATE SET
     ts_ms = MIN(ts_ms, excluded.ts_ms),
     input = MAX(input, excluded.input),
@@ -116,6 +122,9 @@ const UPSERT_EVENT_TAIL: &str = "ON CONFLICT(key) DO UPDATE SET
     reasoning = MAX(reasoning, excluded.reasoning),
     request_input = MAX(request_input, excluded.request_input),
     web_search = MAX(web_search, excluded.web_search),
+    speed = COALESCE(excluded.speed, speed),
+    service_tier = COALESCE(excluded.service_tier, service_tier),
+    inference_geo = COALESCE(excluded.inference_geo, inference_geo),
     project_id = COALESCE(excluded.project_id, project_id),
     request_id = COALESCE(request_id, excluded.request_id),
     accuracy = CASE WHEN excluded.accuracy = 'exact' THEN 'exact' ELSE accuracy END";
@@ -495,7 +504,9 @@ impl StoreTx<'_> {
             "INSERT INTO limit_snapshot(ts_ms, provider, tool, account, limit_id, window, used_pct, resets_at, status,
                  plan, source, accuracy)
              VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
-             ON CONFLICT(source, account, limit_id, window, ts_ms) DO NOTHING",
+             ON CONFLICT(source, account, limit_id, window, ts_ms) DO UPDATE SET
+                 used_pct = COALESCE(used_pct, excluded.used_pct),
+                 resets_at = COALESCE(resets_at, excluded.resets_at)",
         )?;
         for l in limits {
             st.execute(params![
