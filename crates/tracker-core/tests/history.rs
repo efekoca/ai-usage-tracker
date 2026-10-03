@@ -1,7 +1,8 @@
 //! Limit history (windows from readings) and the plan advice built on it.
 
-use tracker_core::history::{build_windows, limit_history, plan_advice, AdviceKind, Reading};
-use tracker_core::model::{Accuracy, LimitSnapshot, Provider, Tool};
+use tracker_core::history::{add_local_usage, build_windows, limit_history, plan_advice, AdviceKind, Reading};
+use tracker_core::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool, UsageEvent};
+use tracker_core::pricing::PriceBook;
 use tracker_core::plans::PlansFile;
 use tracker_core::store::Store;
 
@@ -236,4 +237,61 @@ fn without_enough_days_or_a_plan_nothing_is_recommended() {
     assert_eq!(plan_advice(&h, Provider::Anthropic, Some("max20x"), &plans, NOW).kind, AdviceKind::Insufficient);
     assert_eq!(plan_advice(&h, Provider::Anthropic, None, &plans, NOW).kind, AdviceKind::NoPlan);
     assert_eq!(plan_advice(&h, Provider::Anthropic, Some("team_premium"), &plans, NOW).kind, AdviceKind::NotApplicable);
+}
+
+fn usage(key: &str, ts: i64, input: u64) -> UsageEvent {
+    UsageEvent {
+        key: key.into(),
+        ts_ms: ts,
+        tool: Tool::ClaudeCode,
+        client: None,
+        model: "claude-sonnet-5".into(),
+        project_path: None,
+        session_id: None,
+        tokens: Tokens { input, ..Default::default() },
+        request_input: input,
+        web_search_requests: 0,
+        speed: None,
+        service_tier: None,
+        inference_geo: None,
+        request_id: None,
+        accuracy: Accuracy::Exact,
+        source: "test".into(),
+        branch: None,
+        agent: None,
+        thread_id: None,
+    }
+}
+
+#[test]
+fn each_window_gets_the_local_use_inside_it_and_a_capacity_from_complete_windows() {
+    // two weekly windows watched to their end: 20 % for $2 of use, 40 % for $3
+    let w1 = NOW - 9 * DAY;
+    let w2 = NOW - 2 * DAY;
+    let mut store = store_with(vec![
+        snap(w1 - 2 * HOUR, Provider::Anthropic, "seven_day", 20.0, w1, None),
+        snap(w2 - 2 * HOUR, Provider::Anthropic, "seven_day", 40.0, w2, None),
+        // still running: never part of the capacity
+        snap(NOW - HOUR, Provider::Anthropic, "seven_day", 15.0, NOW + 5 * DAY, None),
+    ]);
+    let mut tx = store.transaction().unwrap();
+    // Sonnet 5 input: $2 per 1M
+    tx.upsert_events(&[
+        usage("u1", w1 - 3 * DAY, 1_000_000),
+        usage("u2", w1 - DAY, 0),
+        usage("u2b", w1 - DAY + 1, 0),
+        usage("u3", w2 - 4 * DAY, 1_500_000),
+        usage("u4", w1 - 8 * DAY, 1_000_000), // before the first window
+    ])
+    .unwrap();
+    tx.commit().unwrap();
+    let mut h = limit_history(&store, NOW, 28).unwrap();
+    add_local_usage(&mut h, &store, &PriceBook::default_book()).unwrap();
+    let s = h.series.iter().find(|s| s.window == "seven_day").unwrap();
+    let w: Vec<(u64, f64)> = s.windows.iter().map(|w| (w.local.requests, (w.local.cost_usd * 100.0).round() / 100.0)).collect();
+    assert_eq!(w, vec![(3, 2.0), (1, 3.0), (0, 0.0)]);
+    // $2 / 20 % × 100 = $10 and $3 / 40 % × 100 = $7.50 → median $8.75
+    let c = s.capacity.as_ref().unwrap();
+    assert_eq!(c.windows, 2);
+    assert!((c.median_usd - 8.75).abs() < 1e-9 && (c.min_usd - 7.5).abs() < 1e-9 && (c.max_usd - 10.0).abs() < 1e-9);
 }

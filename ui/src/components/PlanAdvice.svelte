@@ -105,7 +105,7 @@
       {#if a.kind === 'no_plan' && app.view !== 'limits'}<button class="btn ghost small" onclick={() => (app.view = 'limits')}>{t('nav.limits')}</button>{/if}
     </div>
   {:else if app.view !== 'limits'}
-    <div class="foot"><button class="btn ghost small" onclick={() => (app.view = 'limits')}><Icon name="chevron" size={13} />{t('advice.open')}</button></div>
+    <div class="foot"><button class="btn ghost small" onclick={() => { app.limitsTab = 'history'; app.view = 'limits' }}><Icon name="chevron" size={13} />{t('advice.open')}</button></div>
   {/if}
 </article>
 

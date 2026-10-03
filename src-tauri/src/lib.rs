@@ -203,6 +203,7 @@ pub fn run() {
             commands::get_agents_tools,
             commands::get_tips,
             commands::get_limit_history,
+            commands::get_day_detail,
             commands::hotkey_status,
             commands::set_hotkey,
             commands::update_status,

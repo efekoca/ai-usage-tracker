@@ -14,6 +14,9 @@
     ariaLabel,
     selected = null,
     onselect,
+    xLabel = (k: string) => fmtDate(k, 'short'),
+    labelStep = 0,
+    tipLabel = (k: string) => fmtDate(k, 'long'),
   }: {
     dates: string[]
     values: Record<string, number>[]
@@ -23,6 +26,11 @@
     ariaLabel: string
     selected?: string | null
     onselect?: (date: string) => void
+    /** Axis and tooltip labels for a column key (dates by default). */
+    xLabel?: (key: string) => string
+    tipLabel?: (key: string) => string
+    /** Label every n-th column (0 = as many as fit). */
+    labelStep?: number
   } = $props()
 
   let width = $state(600)
@@ -51,7 +59,7 @@
         .filter((seg) => seg.val > 0)
     }),
   )
-  const labelEvery = $derived(Math.max(1, Math.ceil(dates.length / Math.max(2, Math.floor(iw / 70)))))
+  const labelEvery = $derived(labelStep > 0 ? labelStep : Math.max(1, Math.ceil(dates.length / Math.max(2, Math.floor(iw / 70)))))
 
   function barPath(x0: number, top: number, bottom: number, w: number, round: boolean): string {
     const h = Math.max(0, bottom - top)
@@ -93,8 +101,8 @@
           onpointerleave={() => (hover = null)}
           onclick={() => onselect?.(dates[i])}
         />
-        {#if i % labelEvery === 0 || i === dates.length - 1}
-          <text class="axis" x={cx} y={ih + 18} text-anchor="middle">{fmtDate(dates[i], 'short')}</text>
+        {#if i % labelEvery === 0 || (labelStep === 0 && i === dates.length - 1)}
+          <text class="axis" x={cx} y={ih + 18} text-anchor="middle">{xLabel(dates[i])}</text>
         {/if}
       {/each}
       <line class="base" x1="0" x2={iw} y1={ih} y2={ih} />
@@ -103,7 +111,7 @@
   {#if hover !== null}
     {@const left = m.left + band * hover + band / 2}
     <div class="tip" style="left:{Math.min(Math.max(left, 90), width - 90)}px">
-      <div class="tip-date">{fmtDate(dates[hover], 'long')}</div>
+      <div class="tip-date">{tipLabel(dates[hover])}</div>
       {#each [...series].reverse() as s (s.key)}
         <div class="tip-row"><i style="background:{s.color}"></i><span>{s.label}</span><b class="num">{format(values[hover]?.[s.key] ?? 0)}</b></div>
       {/each}

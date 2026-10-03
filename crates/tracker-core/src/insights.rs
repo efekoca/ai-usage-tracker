@@ -638,6 +638,112 @@ pub fn agents_tools(store: &Store, book: &PriceBook, range: Range, filter: &Filt
     Ok(AgentsTools { agents, tools, tool_calls: total, filtered_by_session: by_session })
 }
 
+// ---------------------------------------------------------------- one day
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct HourPoint {
+    pub hour: u32,
+    pub tokens: u64,
+    pub cost_usd: f64,
+    pub events: u64,
+    /// Tokens per tool.
+    pub by_tool: BTreeMap<String, u64>,
+}
+
+/// The highest limit reading of the day for one window.
+#[derive(Debug, Clone, Serialize)]
+pub struct DayLimitPeak {
+    pub provider: Provider,
+    pub window: String,
+    pub peak_pct: f64,
+    pub at_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DayDetail {
+    pub date: String,
+    pub totals: Totals,
+    /// 24 local hours (a day with a DST change still has one entry per clock hour).
+    pub hourly: Vec<HourPoint>,
+    pub by_tool: Vec<crate::analytics::Group>,
+    pub by_model: Vec<crate::analytics::Group>,
+    pub by_project: Vec<crate::analytics::Group>,
+    pub sessions: u64,
+    pub first_ms: Option<i64>,
+    pub last_ms: Option<i64>,
+    pub limit_peaks: Vec<DayLimitPeak>,
+}
+
+fn groups(map: HashMap<String, (String, bool, Totals)>) -> Vec<crate::analytics::Group> {
+    let mut v: Vec<crate::analytics::Group> =
+        map.into_iter().map(|(key, (label, hidden, totals))| crate::analytics::Group { key, label, hidden, totals }).collect();
+    v.sort_by(|a, b| {
+        b.totals.cost_usd.total_cmp(&a.totals.cost_usd).then(b.totals.total_tokens.cmp(&a.totals.total_tokens)).then(a.key.cmp(&b.key))
+    });
+    v
+}
+
+/// Everything about one local calendar day: totals, the hours it was used in, tools, models,
+/// projects, sessions and the highest limit readings of the day.
+pub fn day_detail<Tz: TimeZone>(store: &Store, book: &PriceBook, date: NaiveDate, filter: &Filter, tz: &Tz) -> Result<DayDetail> {
+    use chrono::Timelike;
+    let from = crate::analytics::start_of_day(tz, date);
+    let to = crate::analytics::start_of_day(tz, date.succ_opt().unwrap_or(date));
+    let projects: HashMap<i64, ProjectRow> = store.projects()?.into_iter().map(|p| (p.id, p)).collect();
+    let mut totals = Totals::default();
+    let mut hourly: Vec<HourPoint> = (0..24).map(|h| HourPoint { hour: h, ..Default::default() }).collect();
+    let (mut by_tool, mut by_model, mut by_project) = (HashMap::new(), HashMap::new(), HashMap::new());
+    let mut sessions = std::collections::HashSet::new();
+    let (mut first, mut last) = (None::<i64>, None::<i64>);
+    for e in store.events_between(from, to)?.iter().filter(|e| filter.matches(e)) {
+        let i = input_of(e);
+        let cost = book.cost(&i);
+        let saving = book.cache_savings(&i).unwrap_or(0.0);
+        totals.add_event(e, cost.as_ref(), saving);
+        let put = |m: &mut HashMap<String, (String, bool, Totals)>, key: String, label: String, hidden: bool| {
+            m.entry(key).or_insert_with(|| (label, hidden, Totals::default())).2.add_event(e, cost.as_ref(), saving);
+        };
+        put(&mut by_tool, e.tool.as_str().into(), e.tool.as_str().into(), false);
+        put(&mut by_model, e.model.clone(), e.model.clone(), false);
+        match e.project_id.and_then(|id| projects.get(&id)) {
+            Some(p) => put(&mut by_project, p.id.to_string(), p.name.clone(), p.hidden),
+            None => put(&mut by_project, "none".into(), String::new(), false),
+        }
+        if let Some(local) = tz.timestamp_millis_opt(e.ts_ms).single() {
+            let h = &mut hourly[local.hour() as usize];
+            h.tokens += e.tokens.total();
+            h.cost_usd += cost.map(|c| c.total()).unwrap_or(0.0);
+            h.events += 1;
+            *h.by_tool.entry(e.tool.as_str().to_owned()).or_default() += e.tokens.total();
+        }
+        if let Some(s) = &e.session_id {
+            sessions.insert(format!("{}:{s}", e.tool.as_str()));
+        }
+        first = Some(first.map_or(e.ts_ms, |f| f.min(e.ts_ms)));
+        last = Some(last.map_or(e.ts_ms, |l| l.max(e.ts_ms)));
+    }
+    let mut peaks: BTreeMap<(Provider, String), (f64, i64)> = BTreeMap::new();
+    for s in store.limits_between(from, to)? {
+        let (Some(u), true) = (s.used_pct, s.window == "five_hour" || s.window == "seven_day") else { continue };
+        let p = peaks.entry((s.provider, s.window.clone())).or_insert((u, s.ts_ms));
+        if u > p.0 {
+            *p = (u, s.ts_ms);
+        }
+    }
+    Ok(DayDetail {
+        date: date.format("%Y-%m-%d").to_string(),
+        totals,
+        hourly,
+        by_tool: groups(by_tool),
+        by_model: groups(by_model),
+        by_project: groups(by_project),
+        sessions: sessions.len() as u64,
+        first_ms: first,
+        last_ms: last,
+        limit_peaks: peaks.into_iter().map(|((provider, window), (peak_pct, at_ms))| DayLimitPeak { provider, window, peak_pct, at_ms }).collect(),
+    })
+}
+
 // ---------------------------------------------------------------- limit forecast
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

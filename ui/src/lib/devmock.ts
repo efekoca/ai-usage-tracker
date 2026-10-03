@@ -271,16 +271,19 @@ function mockHistory() {
   })
   const codexWeek = week.map((w, i) => ({ ...w, peak_pct: [12, 20, 9, 31, 26, 18, 44, 7][i], full: false, full_at_ms: null, full_minutes: null, plan: 'plus' }))
   const codexFive = five.slice(0, 12).map((w, i) => ({ ...w, peak_pct: [8, 22, 15, 41, 5, 13, 29, 18, 9, 36, 12, 7][i], full: false, full_at_ms: null, full_minutes: null, plan: 'plus', complete: i % 3 !== 0, in_progress: false }))
+  // this computer's use inside each window, roughly in step with the peak
+  const withLocal = <T extends { peak_pct: number }>(list: T[], perPct: number) =>
+    list.map((w, i) => ({ ...w, local: { requests: Math.round(w.peak_pct * 9 + i), tokens: Math.round(w.peak_pct * 2.1e6), cost_usd: w.peak_pct * perPct * (0.85 + ((i * 7) % 5) / 15), unpriced_requests: 0 } }))
   const stats = (w: number, c: number, f: number, fm: number, pc: number | null, ps: number | null) => ({ windows: w, complete: c, full: f, full_minutes: fm, peak_complete: pc, peak_seen: ps })
   return {
     history: {
       from_ms: now - 56 * day,
       to_ms: now,
       series: [
-        { provider: 'anthropic', limit_id: '', window: 'five_hour', window_minutes: 300, windows: five },
-        { provider: 'anthropic', limit_id: '', window: 'seven_day', window_minutes: 10080, windows: week },
-        { provider: 'openai', limit_id: 'codex', window: 'five_hour', window_minutes: 300, windows: codexFive },
-        { provider: 'openai', limit_id: 'codex', window: 'seven_day', window_minutes: 10080, windows: codexWeek },
+        { provider: 'anthropic', limit_id: '', window: 'five_hour', window_minutes: 300, windows: withLocal(five, 0.21), capacity: { median_usd: 21.4, min_usd: 17.9, max_usd: 26.2, windows: 14 } },
+        { provider: 'anthropic', limit_id: '', window: 'seven_day', window_minutes: 10080, windows: withLocal(week, 1.6), capacity: { median_usd: 163, min_usd: 139, max_usd: 181, windows: 5 } },
+        { provider: 'openai', limit_id: 'codex', window: 'five_hour', window_minutes: 300, windows: withLocal(codexFive, 0.05), capacity: { median_usd: 4.9, min_usd: 3.8, max_usd: 6.1, windows: 6 } },
+        { provider: 'openai', limit_id: 'codex', window: 'seven_day', window_minutes: 10080, windows: withLocal(codexWeek, 0.3), capacity: null },
       ],
       observed_days: { anthropic: 26, openai: 14 },
     },
@@ -289,6 +292,35 @@ function mockHistory() {
       { provider: 'openai', kind: 'fits', plan: 'plus', suggested: null, strong: false, days: 28, observed_days: 14, five_hour: stats(12, 8, 0, 0, 41, 41), weekly: stats(4, 3, 0, 0, 44, 44), session_ratio: null, projected_five_hour: null, projected_weekly_if_same_ratio: null, suggested_has_no_five_hour: false, monthly_delta_usd: null },
     ],
     detected_plans: {},
+  }
+}
+
+function mockDay(date: string) {
+  const seedDay = Number(date.slice(-2))
+  const hourly = Array.from({ length: 24 }, (_, h) => {
+    const on = h >= 9 && h <= 23 && (h + seedDay) % 5 !== 0
+    const cc = on ? Math.round((1 + ((h * 13 + seedDay) % 7)) * 1.9e6) : 0
+    const cx = on && h % 3 === 0 ? Math.round(6e5 + (h % 4) * 2e5) : 0
+    return { hour: h, tokens: cc + cx, cost_usd: cc * 0.75e-6 + cx * 0.6e-6, events: Math.round((cc + cx) / 120000), by_tool: { ...(cc ? { claude_code: cc } : {}), ...(cx ? { codex: cx } : {}) } }
+  })
+  const tok = hourly.reduce((a, h) => a + h.tokens, 0)
+  const cost = hourly.reduce((a, h) => a + h.cost_usd, 0)
+  const g = (key: string, label: string, share: number, hidden = false) => ({ key, label, hidden, totals: totals(Math.round(tok * share), cost * share) })
+  return {
+    date,
+    totals: { ...totals(tok, cost), events: hourly.reduce((a, h) => a + h.events, 0) },
+    hourly,
+    by_tool: [g('claude_code', 'claude_code', 0.86), g('codex', 'codex', 0.14)],
+    by_model: [g('claude-opus-5-5', 'claude-opus-5-5', 0.62), g('claude-sonnet-5', 'claude-sonnet-5', 0.24), g('gpt-5.6-terra', 'gpt-5.6-terra', 0.14)],
+    by_project: [g('1', 'demo-app', 0.55), g('2', 'website', 0.3), g('5', '', 0.15, true)],
+    sessions: 6,
+    first_ms: new Date(date + 'T09:12:00').getTime(),
+    last_ms: new Date(date + 'T23:41:00').getTime(),
+    limit_peaks: [
+      { provider: 'anthropic', window: 'five_hour', peak_pct: seedDay % 4 === 0 ? 100 : 71, at_ms: new Date(date + 'T16:20:00').getTime() },
+      { provider: 'anthropic', window: 'seven_day', peak_pct: 44, at_ms: new Date(date + 'T23:30:00').getTime() },
+      { provider: 'openai', window: 'five_hour', peak_pct: 18, at_ms: new Date(date + 'T15:05:00').getTime() },
+    ],
   }
 }
 
@@ -374,6 +406,8 @@ export function installMock() {
           return mockTips()
         case 'get_limit_history':
           return mockHistory()
+        case 'get_day_detail':
+          return mockDay(String(a.date))
         case 'hotkey_status':
           return { hotkey: settings.widget.hotkey, error: null }
         case 'set_hotkey':

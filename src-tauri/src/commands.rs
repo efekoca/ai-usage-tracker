@@ -652,16 +652,19 @@ fn detected_plan(store: &tracker_core::store::Store, provider: Provider, plans: 
     }
 }
 
-/// The last eight weeks of limit windows, and plan advice from the last four.
+/// Limit windows of the last `days` days (default eight weeks) with this computer's use in
+/// each, and plan advice from the last four weeks.
 #[tauri::command]
-pub async fn get_limit_history(app: AppHandle) -> Res<LimitHistoryView> {
+pub async fn get_limit_history(app: AppHandle, days: Option<i64>) -> Res<LimitHistoryView> {
     let state = app.state::<AppState>();
     let settings = state.settings.read().unwrap().clone();
     let providers = enabled_providers(&settings);
     let store = state.store.lock().unwrap();
+    let book = state.book.read().unwrap();
     let now = now_ms();
-    let mut history = tracker_core::history::limit_history(&store, now, 56).map_err(err)?;
+    let mut history = tracker_core::history::limit_history(&store, now, days.unwrap_or(56).clamp(1, 3660)).map_err(err)?;
     history.series.retain(|s| providers.contains(&s.provider));
+    tracker_core::history::add_local_usage(&mut history, &store, &book).map_err(err)?;
     let advice_history = tracker_core::history::limit_history(&store, now, tracker_core::history::ADVICE_DAYS).map_err(err)?;
     let plans = tracker_core::plans::PlansFile::bundled();
     let mut detected_plans = std::collections::BTreeMap::new();
@@ -728,4 +731,22 @@ pub async fn check_update(app: AppHandle) -> Res<crate::updates::UpdateStatus> {
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Res<()> {
     crate::updates::install(&app).await
+}
+
+/// One local day in detail (`date` as YYYY-MM-DD).
+#[tauri::command]
+pub async fn get_day_detail(app: AppHandle, date: String, filter: Option<Filter>) -> Res<insights::DayDetail> {
+    let date = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d").map_err(err)?;
+    let state = app.state::<AppState>();
+    let hide_all = state.settings.read().unwrap().hide_project_names;
+    let store = state.store.lock().unwrap();
+    let book = state.book.read().unwrap();
+    let mut d = insights::day_detail(&store, &book, date, &filter.unwrap_or_default(), &chrono::Local).map_err(err)?;
+    for g in &mut d.by_project {
+        if hide_all || g.hidden {
+            g.label.clear();
+            g.hidden = true;
+        }
+    }
+    Ok(d)
 }

@@ -17,6 +17,8 @@ export const app = $state({
   error: '',
   scan: null as ScanStatus | null,
   update: null as UpdateStatus | null,
+  /** Limits page tab, so other pages can open the history directly. */
+  limitsTab: 'current' as 'current' | 'history',
   /** bumps whenever backend data changes, so views can refetch their own data */
   tick: 0,
 })

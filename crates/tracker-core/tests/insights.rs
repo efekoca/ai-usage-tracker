@@ -3,9 +3,9 @@
 
 use chrono::{FixedOffset, TimeZone};
 use tracker_core::analytics::{Filter, Range};
-use tracker_core::insights::{agents_tools, branches, compare_models, context_stats, forecast, plan_value, sessions, ForecastKind};
+use tracker_core::insights::{agents_tools, branches, compare_models, context_stats, day_detail, forecast, plan_value, sessions, ForecastKind};
 use tracker_core::tips::{cache_rebuilds, tips, Tip, Tips};
-use tracker_core::model::{Accuracy, Provider, Tokens, Tool, ToolCall, UsageEvent};
+use tracker_core::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
 use tracker_core::pricing::{CostInput, PriceBook};
 use tracker_core::store::Store;
 
@@ -454,4 +454,53 @@ fn large_prompts_are_reported_when_they_carry_most_of_the_cost() {
         }
         other => panic!("{other:?}"),
     }
+}
+
+// ---------------------------------------------------------------- one day
+
+#[test]
+fn a_day_is_split_by_local_hour_with_its_sessions_and_limit_peaks() {
+    let tz = FixedOffset::east_opt(3 * 3600).unwrap();
+    let at = |d: u32, h: u32, m: u32| tz.with_ymd_and_hms(2026, 9, d, h, m, 0).unwrap().timestamp_millis();
+    let mut s = store_with(&[
+        // 23:50 the evening before: another day
+        ev("d0", at(9, 23, 50), Tool::ClaudeCode, "claude-sonnet-5", Some("s0"), "C:/w/app", 1_000, 0, 0),
+        ev("d1", at(10, 0, 10), Tool::ClaudeCode, "claude-sonnet-5", Some("s1"), "C:/w/app", 1_000_000, 0, 0),
+        ev("d2", at(10, 0, 40), Tool::ClaudeCode, "claude-opus-5-5", Some("s1"), "C:/w/app", 10, 0, 0),
+        ev("d3", at(10, 14, 5), Tool::Codex, "gpt-5.6-terra", Some("x1"), "C:/w/site", 100, 0, 0),
+    ]);
+    let snap = |ts: i64, window: &str, used: f64| LimitSnapshot {
+        ts_ms: ts,
+        provider: Provider::Anthropic,
+        tool: Tool::ClaudeCode,
+        account: None,
+        limit_id: String::new(),
+        window: window.into(),
+        used_pct: Some(used),
+        resets_at: None,
+        status: None,
+        plan: None,
+        source: "test".into(),
+        accuracy: Accuracy::Exact,
+    };
+    let mut tx = s.transaction().unwrap();
+    tx.insert_limits(&[snap(at(10, 1, 0), "five_hour", 30.0), snap(at(10, 3, 0), "five_hour", 72.0), snap(at(10, 3, 0), "seven_day", 41.0), snap(at(11, 9, 0), "five_hour", 99.0)]).unwrap();
+    tx.commit().unwrap();
+
+    let date = chrono::NaiveDate::from_ymd_opt(2026, 9, 10).unwrap();
+    let d = day_detail(&s, &PriceBook::default_book(), date, &Filter::default(), &tz).unwrap();
+    assert_eq!(d.date, "2026-09-10");
+    assert_eq!(d.totals.events, 3);
+    assert_eq!(d.hourly.len(), 24);
+    assert_eq!((d.hourly[0].events, d.hourly[14].events, d.hourly[23].events), (2, 1, 0));
+    assert_eq!(d.hourly[0].by_tool["claude_code"], 1_000_010);
+    assert_eq!(d.sessions, 2);
+    assert_eq!((d.first_ms, d.last_ms), (Some(at(10, 0, 10)), Some(at(10, 14, 5))));
+    assert_eq!(d.by_model[0].key, "claude-sonnet-5", "most expensive first");
+    assert_eq!(d.by_project.len(), 2);
+    let peaks: Vec<(String, f64)> = d.limit_peaks.iter().map(|p| (p.window.clone(), p.peak_pct)).collect();
+    assert_eq!(peaks, vec![("five_hour".to_string(), 72.0), ("seven_day".to_string(), 41.0)]);
+    // a filter narrows the day like every other view
+    let only_codex = Filter { tools: vec![Tool::Codex], ..Default::default() };
+    assert_eq!(day_detail(&s, &PriceBook::default_book(), date, &only_codex, &tz).unwrap().totals.events, 1);
 }

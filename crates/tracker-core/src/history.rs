@@ -3,8 +3,9 @@
 //! and the plan advice is built only on those records and the ratios providers publish.
 
 use crate::analytics::window_minutes;
-use crate::model::{LimitSnapshot, Provider};
+use crate::model::{LimitSnapshot, Provider, Tool};
 use crate::plans::PlansFile;
+use crate::pricing::{CostInput, PriceBook};
 use crate::store::Store;
 use rusqlite::Result;
 use serde::Serialize;
@@ -46,6 +47,30 @@ pub struct WindowRecord {
     pub in_progress: bool,
     /// Plan named by the readings (Codex), when any.
     pub plan: Option<String>,
+    /// This computer's logged use of the provider inside the window (see [`add_local_usage`]).
+    pub local: LocalUsage,
+}
+
+/// Requests in this computer's logs inside a window. Use on other devices, the web or the
+/// desktop chat also fills the limit but is not here.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct LocalUsage {
+    pub requests: u64,
+    pub tokens: u64,
+    /// API-equivalent cost of the priced requests.
+    pub cost_usd: f64,
+    pub unpriced_requests: u64,
+}
+
+/// What a whole window held in API-equivalent terms, from windows where the local logs
+/// explain the reading: `local cost ÷ peak × 100`. A lower bound when the limit was also used
+/// elsewhere, so it is always labelled an estimate.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Capacity {
+    pub median_usd: f64,
+    pub min_usd: f64,
+    pub max_usd: f64,
+    pub windows: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -56,6 +81,8 @@ pub struct WindowSeries {
     pub window_minutes: i64,
     /// Oldest first.
     pub windows: Vec<WindowRecord>,
+    /// Filled by [`add_local_usage`].
+    pub capacity: Option<Capacity>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -113,7 +140,7 @@ pub fn limit_history(store: &Store, now_ms: i64, days: i64) -> Result<LimitHisto
                 .into_iter()
                 .filter(|w| w.resets_at_ms.unwrap_or(w.last_ms) >= from_ms)
                 .collect();
-            (!windows.is_empty()).then_some(WindowSeries { provider, limit_id, window, window_minutes: minutes, windows })
+            (!windows.is_empty()).then_some(WindowSeries { provider, limit_id, window, window_minutes: minutes, windows, capacity: None })
         })
         .collect();
     let observed_days = days_seen.into_iter().map(|(p, d)| (p, d.len() as u32)).collect();
@@ -234,7 +261,70 @@ fn record(items: &[&Reading], reset: Option<(i64, i64)>, dur_ms: i64, now_ms: i6
         complete,
         in_progress,
         plan,
+        local: LocalUsage::default(),
     }
+}
+
+// ---------------------------------------------------------------- local use per window
+
+/// A window's capacity is estimated only from readings this high: providers report whole
+/// percentages, so a low peak would carry a large rounding error.
+const CAPACITY_MIN_PEAK: f64 = 10.0;
+
+fn provider_tools(p: Provider) -> &'static [Tool] {
+    match p {
+        Provider::Anthropic => &[Tool::ClaudeCode],
+        Provider::OpenAI => &[Tool::Codex],
+    }
+}
+
+/// Sums this computer's logged use of each window's provider inside the window (start to its
+/// actual end, or first to last reading when the reset time is unknown), and estimates what a
+/// whole window holds from the windows watched to their end.
+pub fn add_local_usage(h: &mut LimitHistory, store: &Store, book: &PriceBook) -> Result<()> {
+    for s in &mut h.series {
+        let span = |w: &WindowRecord| (w.start_ms.unwrap_or(w.first_ms), w.end_ms.unwrap_or(w.last_ms + 1));
+        let (Some(from), Some(to)) = (s.windows.iter().map(|w| span(w).0).min(), s.windows.iter().map(|w| span(w).1).max()) else { continue };
+        let tools = provider_tools(s.provider);
+        let events: Vec<_> = store.events_between(from, to)?.into_iter().filter(|e| tools.contains(&e.tool)).collect();
+        for w in &mut s.windows {
+            let (a, b) = span(w);
+            let lo = events.partition_point(|e| e.ts_ms < a);
+            let hi = events.partition_point(|e| e.ts_ms < b);
+            let mut u = LocalUsage::default();
+            for e in &events[lo..hi] {
+                u.requests += 1;
+                u.tokens += e.tokens.total();
+                let input = CostInput {
+                    model: &e.model,
+                    tokens: &e.tokens,
+                    request_input: e.request_input,
+                    web_search_requests: e.web_search,
+                    speed: e.speed.as_deref(),
+                    inference_geo: e.inference_geo.as_deref(),
+                };
+                match book.cost(&input) {
+                    Some(c) => u.cost_usd += c.total(),
+                    None => u.unpriced_requests += 1,
+                }
+            }
+            w.local = u;
+        }
+        let mut per_window: Vec<f64> = s
+            .windows
+            .iter()
+            .filter(|w| w.complete && !w.in_progress && w.start_ms.is_some() && w.peak_pct >= CAPACITY_MIN_PEAK)
+            .filter(|w| w.local.cost_usd > 0.0 && w.local.unpriced_requests == 0)
+            .map(|w| w.local.cost_usd / w.peak_pct.min(100.0) * 100.0)
+            .collect();
+        per_window.sort_by(f64::total_cmp);
+        s.capacity = (!per_window.is_empty()).then(|| {
+            let n = per_window.len();
+            let median = if n % 2 == 1 { per_window[n / 2] } else { (per_window[n / 2 - 1] + per_window[n / 2]) / 2.0 };
+            Capacity { median_usd: median, min_usd: per_window[0], max_usd: per_window[n - 1], windows: n as u32 }
+        });
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------- plan advice

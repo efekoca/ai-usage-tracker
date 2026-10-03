@@ -59,11 +59,17 @@
 
 <header class="bar">
   <h1>{t('limits.title')}</h1>
+  <Segmented label={t('limits.title')} bind:value={app.limitsTab} options={[{ value: 'current', label: t('limits.tab.current') }, { value: 'history', label: t('limits.tab.history') }]} />
   <span class="spacer"></span>
-  <span class="subtle small" title={t('limits.mode.help')}>{t('limits.mode')}</span>
-  <Segmented label={t('limits.mode')} value={app.settings?.limit_display ?? 'used'} options={[{ value: 'used', label: t('limits.mode.used') }, { value: 'remaining', label: t('limits.mode.remaining') }]} onchange={(v) => saveSettings({ limit_display: v })} />
+  {#if app.limitsTab === 'current'}
+    <span class="subtle small" title={t('limits.mode.help')}>{t('limits.mode')}</span>
+    <Segmented label={t('limits.mode')} value={app.settings?.limit_display ?? 'used'} options={[{ value: 'used', label: t('limits.mode.used') }, { value: 'remaining', label: t('limits.mode.remaining') }]} onchange={(v) => saveSettings({ limit_display: v })} />
+  {/if}
 </header>
 
+{#if app.limitsTab === 'history'}
+  <LimitHistory />
+{:else}
 {#if plans}
   <section class="card plans">
     {#each providers as p (p)}
@@ -132,8 +138,6 @@
   {/each}
 </div>
 
-<LimitHistory {plans} />
-
 <section class="card">
   <h2>{t('limits.thresholds')}</h2>
   <p class="subtle small help">{t('limits.thresholds.help')}</p>
@@ -161,6 +165,8 @@
     <button class="btn" onclick={addThreshold}><Icon name="plus" size={14} />{t('limits.addThreshold')}</button>
   </div>
 </section>
+
+{/if}
 
 <style>
   .price {

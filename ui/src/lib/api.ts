@@ -506,6 +506,7 @@ export interface WindowRecord {
   complete: boolean
   in_progress: boolean
   plan: string | null
+  local: { requests: number; tokens: number; cost_usd: number; unpriced_requests: number }
 }
 export interface WindowSeries {
   provider: Provider
@@ -513,6 +514,8 @@ export interface WindowSeries {
   window: string
   window_minutes: number
   windows: WindowRecord[]
+  /** API-equivalent a whole window held, from windows the local logs explain (an estimate). */
+  capacity: { median_usd: number; min_usd: number; max_usd: number; windows: number } | null
 }
 export interface WindowStats {
   windows: number
@@ -543,6 +546,26 @@ export interface LimitHistoryView {
   history: { from_ms: number; to_ms: number; series: WindowSeries[]; observed_days: Record<string, number> }
   advice: PlanAdvice[]
   detected_plans: Record<string, string>
+}
+
+export interface HourPoint {
+  hour: number
+  tokens: number
+  cost_usd: number
+  events: number
+  by_tool: Record<string, number>
+}
+export interface DayDetail {
+  date: string
+  totals: Totals
+  hourly: HourPoint[]
+  by_tool: Group[]
+  by_model: Group[]
+  by_project: Group[]
+  sessions: number
+  first_ms: number | null
+  last_ms: number | null
+  limit_peaks: { provider: Provider; window: string; peak_pct: number; at_ms: number }[]
 }
 
 export interface HotkeyStatus {
@@ -604,7 +627,8 @@ export const api = {
   branches: (period: Period, filter?: Filter) => invoke<Branches>('get_branches', { period, filter }),
   agentsTools: (period: Period, filter?: Filter) => invoke<AgentsTools>('get_agents_tools', { period, filter }),
   tips: (period: Period, filter?: Filter) => invoke<Tips>('get_tips', { period, filter }),
-  limitHistory: () => invoke<LimitHistoryView>('get_limit_history'),
+  limitHistory: (days?: number) => invoke<LimitHistoryView>('get_limit_history', { days }),
+  dayDetail: (date: string, filter?: Filter) => invoke<DayDetail>('get_day_detail', { date, filter }),
   hotkeyStatus: () => invoke<HotkeyStatus>('hotkey_status'),
   setHotkey: (hotkey: string) => invoke<HotkeyStatus>('set_hotkey', { hotkey }),
   updateStatus: () => invoke<UpdateStatus>('update_status'),
