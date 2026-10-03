@@ -7,6 +7,7 @@
   import AccuracyBadge from '../components/AccuracyBadge.svelte'
   import Icon from '../components/Icon.svelte'
   import Segmented from '../components/Segmented.svelte'
+  import Select from '../components/Select.svelte'
   import LimitHistory from '../components/LimitHistory.svelte'
 
   let plans: PlansFile | null = $state(null)
@@ -75,10 +76,14 @@
     {#each providers as p (p)}
       <div class="plan-row">
         <label for="plan-{p}"><b>{plans.providers[p].label}</b> · {t('limits.plan')}</label>
-        <select id="plan-{p}" class="field" value={app.settings?.plans[p] ?? ''} onchange={(e) => setPlan(p, e.currentTarget.value)}>
-          <option value="">{t('onb.plan.none')}</option>
-          {#each plans.providers[p].plans as pl (pl.id)}<option value={pl.id}>{pl.name}{pl.relative ? ` (${pl.relative})` : ''}</option>{/each}
-        </select>
+        <Select
+          id="plan-{p}"
+          label="{plans.providers[p].label} · {t('limits.plan')}"
+          value={app.settings?.plans[p] ?? ''}
+          minWidth={200}
+          options={[{ value: '', label: t('onb.plan.none') }, ...plans.providers[p].plans.map((pl) => ({ value: pl.id, label: pl.name, sub: pl.relative }))]}
+          onchange={(v) => setPlan(p, v)}
+        />
         {#if planNote(p)}
           {@const pl = planNote(p)!}
           {#if pl.id !== 'api' && pl.monthly_usd !== 0}
@@ -150,17 +155,9 @@
     </div>
   {/each}
   <div class="add">
-    <select class="field" bind:value={draft.provider} aria-label={t('common.tool')}>
-      {#each providers as p (p)}<option value={p}>{t(`provider.${p}`)}</option>{/each}
-    </select>
-    <select class="field" bind:value={draft.window} aria-label={t('limits.title')}>
-      <option value="five_hour">{windowLabel('five_hour')}</option>
-      <option value="seven_day">{windowLabel('seven_day')}</option>
-    </select>
-    <select class="field" bind:value={draftKind} aria-label={t('metric.cost')}>
-      <option value="cost">{t('metric.cost')} (USD)</option>
-      <option value="tokens">{t('metric.tokens')}</option>
-    </select>
+    <Select label={t('common.tool')} value={draft.provider} options={providers.map((p) => ({ value: p, label: t(`provider.${p}`) }))} onchange={(v) => (draft.provider = v as Provider)} />
+    <Select label={t('limits.title')} value={draft.window} options={[{ value: 'five_hour', label: windowLabel('five_hour') }, { value: 'seven_day', label: windowLabel('seven_day') }]} onchange={(v) => (draft.window = v)} />
+    <Select label={t('metric.cost')} value={draftKind} options={[{ value: 'cost', label: `${t('metric.cost')} (USD)` }, { value: 'tokens', label: t('metric.tokens') }]} onchange={(v) => (draftKind = v as 'cost' | 'tokens')} />
     <input class="field" inputmode="decimal" bind:value={draftValue} placeholder={draftKind === 'cost' ? '50' : '5000000'} aria-label="value" />
     <button class="btn" onclick={addThreshold}><Icon name="plus" size={14} />{t('limits.addThreshold')}</button>
   </div>

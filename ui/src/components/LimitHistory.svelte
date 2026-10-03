@@ -5,9 +5,11 @@
   import { app } from '../lib/store.svelte'
   import { fmtCompact, fmtDateTime, fmtDuration, fmtInt, fmtMoney, fmtPct, i18n, t, windowLabel } from '../lib/i18n.svelte'
   import Segmented from './Segmented.svelte'
+  import Select from './Select.svelte'
   import StatTile from './StatTile.svelte'
   import AccuracyBadge from './AccuracyBadge.svelte'
   import Icon from './Icon.svelte'
+  import BarValue from './BarValue.svelte'
   import WindowHistory from './charts/WindowHistory.svelte'
 
   const DAY = 864e5
@@ -108,16 +110,16 @@
   </div>
   <div class="f">
     <span class="small muted">{t('history.filter.range')}</span>
-    <select class="field" bind:value={range} aria-label={t('history.filter.range')}>
-      {#each ranges as d (d)}<option value={d}>{t(`history.range.${d}`)}</option>{/each}
-    </select>
+    <Select label={t('history.filter.range')} value={String(range)} minWidth={150} options={ranges.map((d) => ({ value: String(d), label: t(`history.range.${d}`) }))} onchange={(v) => (range = Number(v))} />
   </div>
   <div class="f">
     <span class="small muted">{t('history.filter.status')}</span>
-    <Segmented
+    <Select
       label={t('history.filter.status')}
-      bind:value={status}
+      value={status}
+      minWidth={190}
       options={[{ value: 'all', label: t('history.status.all') }, { value: 'full', label: t('history.status.full') }, { value: 'high', label: t('history.status.high') }, { value: 'complete', label: t('history.status.complete') }]}
+      onchange={(v) => (status = v as typeof status)}
     />
   </div>
 </section>
@@ -206,7 +208,7 @@
             <th scope="col" class="num"><button class="sort" onclick={() => sortBy('toFull')}>{t('history.col.toFull')}{sortKey === 'toFull' ? (sortDesc ? ' ↓' : ' ↑') : ''}</button></th>
             <th scope="col" class="num">{t('history.col.fullFor')}</th>
             <th scope="col" class="num" title={t('history.localHelp')}><button class="sort" onclick={() => sortBy('local')}>{t('history.col.local')}{sortKey === 'local' ? (sortDesc ? ' ↓' : ' ↑') : ''}</button></th>
-            <th scope="col" class="num">{t('history.col.readings')}</th>
+            <th scope="col" class="num opt">{t('history.col.readings')}</th>
           </tr>
         </thead>
         <tbody>
@@ -219,9 +221,8 @@
                 {fmtDateTime(w.end_ms ?? w.resets_at_ms ?? w.last_ms)}
                 {#if early(w)}<span class="subtle small"> · {t('history.state.early')}</span>{/if}
               </td>
-              <td class="num peakcell">
-                <span class="minibar" aria-hidden="true"><span class:full={w.full} style="width:{w.peak_pct}%"></span></span>
-                {w.complete || w.full || w.in_progress ? '' : '≥ '}{fmtPct(w.peak_pct)}
+              <td class="num">
+                <BarValue pct={w.peak_pct} tone={w.full ? 'critical' : 'series'} text="{w.complete || w.full || w.in_progress ? '' : '≥ '}{fmtPct(w.peak_pct)}" />
               </td>
               <td><span class="state {st}"><i></i>{t(`history.state.${st}`)}</span></td>
               <td class="num">{toFull(w) === null ? '—' : fmtDuration(toFull(w)!)}</td>
@@ -229,7 +230,7 @@
               <td class="num">
                 {#if w.local.requests === 0}—{:else}{fmtCompact(w.local.tokens)} <span class="subtle">· {fmtMoney(w.local.cost_usd)}</span>{/if}
               </td>
-              <td class="num">{fmtInt(w.readings)}</td>
+              <td class="num opt">{fmtInt(w.readings)}</td>
             </tr>
           {/each}
         </tbody>
@@ -425,27 +426,6 @@
   .sort:hover {
     color: var(--ink);
   }
-  .peakcell {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
-  }
-  .minibar {
-    width: 54px;
-    height: 5px;
-    border-radius: 3px;
-    background: var(--surface-hover);
-    overflow: hidden;
-  }
-  .minibar span {
-    display: block;
-    height: 100%;
-    background: var(--s1);
-  }
-  .minibar span.full {
-    background: var(--critical);
-  }
   .state {
     display: inline-flex;
     align-items: center;
@@ -466,5 +446,16 @@
   }
   .state.running i {
     opacity: 0.55;
+  }
+  /* narrow windows: tighter cells, secondary columns hidden */
+  @media (max-width: 1100px) {
+    th,
+    td {
+      padding-left: 8px;
+      padding-right: 8px;
+    }
+    .opt {
+      display: none;
+    }
   }
 </style>

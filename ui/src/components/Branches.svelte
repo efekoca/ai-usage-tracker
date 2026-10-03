@@ -4,6 +4,7 @@
   import { app, setFilter, toolColor } from '../lib/store.svelte'
   import { fmtCompact, fmtDateTime, fmtInt, fmtMoney, fmtPct, t, toolLabel } from '../lib/i18n.svelte'
   import Icon from './Icon.svelte'
+  import BarValue from './BarValue.svelte'
 
   let data = $state<Branches | null>(null)
   $effect(() => {
@@ -35,7 +36,7 @@
           <tr>
             <th scope="col">{t('branches.col.project')}</th>
             <th scope="col">{t('branches.col.branch')}</th>
-            <th scope="col">{t('branches.col.tools')}</th>
+            <th scope="col" class="opt">{t('branches.col.tools')}</th>
             <th scope="col" class="num">{t('branches.col.sessions')}</th>
             <th scope="col" class="num">{t('branches.col.requests')}</th>
             <th scope="col" class="num">{t('metric.tokens')}</th>
@@ -57,7 +58,7 @@
               <td>
                 {#if r.branch}<code>{r.branch}</code>{:else if r.branch_hidden}<span class="subtle">{t('branches.hidden')}</span>{:else}<span class="subtle" title={t('branches.noneHelp')}>{t('branches.none')}</span>{/if}
               </td>
-              <td>
+              <td class="opt">
                 <span class="tools" aria-label={r.tools.map(toolLabel).join(', ')}>{#each r.tools as tool (tool)}<i class="dot" style="background:{toolColor[tool]}" title={toolLabel(tool)}></i>{/each}</span>
               </td>
               <td class="num">{fmtInt(r.sessions)}</td>
@@ -66,7 +67,7 @@
               <td class="num">
                 {#if r.totals.unpriced_events === r.totals.events}<span class="subtle" title={t('overview.unpricedAction')}>—</span>{:else}{fmtMoney(r.totals.cost_usd)}{/if}
               </td>
-              <td class="num share"><span class="minibar" aria-hidden="true"><span style="width:{(r.totals.cost_usd / total) * 100}%"></span></span>{fmtPct((r.totals.cost_usd / total) * 100, 1)}</td>
+              <td class="num"><BarValue pct={(r.totals.cost_usd / total) * 100} text={fmtPct((r.totals.cost_usd / total) * 100, 1)} /></td>
               <td class="num subtle">{fmtDateTime(r.last_ms)}</td>
             </tr>
           {/each}
@@ -159,22 +160,15 @@
     text-align: right;
     font-variant-numeric: tabular-nums;
   }
-  .share {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
-  }
-  .minibar {
-    width: 44px;
-    height: 5px;
-    border-radius: 3px;
-    background: var(--surface-hover);
-    overflow: hidden;
-  }
-  .minibar span {
-    display: block;
-    height: 100%;
-    background: var(--accent);
+  /* narrow windows: tighter cells, secondary columns hidden */
+  @media (max-width: 1100px) {
+    th,
+    td {
+      padding-left: 8px;
+      padding-right: 8px;
+    }
+    .opt {
+      display: none;
+    }
   }
 </style>

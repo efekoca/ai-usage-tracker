@@ -89,10 +89,10 @@
     <nav class="sidebar" aria-label="Navigation">
       <div class="brand">
         <img src="/app-icon.png" alt="" width="22" height="22" />
-        <span>{t('app.name')}</span>
+        <span class="label">{t('app.name')}</span>
       </div>
       {#each nav as group (group.section)}
-        <div class="section">{t(group.section)}</div>
+        <div class="section"><span class="label">{t(group.section)}</span></div>
         <ul role="list">
           {#each group.items as item (item.id)}
             <li>
@@ -101,11 +101,12 @@
                 class:active={app.view === item.id}
                 aria-current={app.view === item.id ? 'page' : undefined}
                 tabindex={app.view === item.id ? 0 : -1}
+                title={t(`nav.${item.id}`)}
                 onclick={() => (app.view = item.id)}
                 onkeydown={navKey}
               >
                 <Icon name={item.icon} size={17} />
-                <span>{t(`nav.${item.id}`)}</span>
+                <span class="label">{t(`nav.${item.id}`)}</span>
               </button>
             </li>
           {/each}
@@ -163,7 +164,7 @@
   }
   .shell {
     display: grid;
-    grid-template-columns: 228px 1fr;
+    grid-template-columns: 228px minmax(0, 1fr);
     height: 100%;
   }
   .sidebar {
@@ -254,6 +255,48 @@
     flex: 1;
     overflow-y: auto;
     padding: 6px 28px 32px;
+  }
+  /* narrow windows: the sidebar keeps only its icons (names stay as tooltips and for screen
+     readers), giving the page about 170 px more */
+  @media (max-width: 1100px) {
+    .shell {
+      grid-template-columns: 60px minmax(0, 1fr);
+    }
+    .sidebar {
+      padding: 14px 8px;
+    }
+    .sidebar .label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
+    .brand {
+      justify-content: center;
+      padding: 4px 0 10px;
+    }
+    .section {
+      height: 0;
+      padding: 0;
+      margin: 10px 6px;
+      border-top: 0.5px solid var(--hairline);
+    }
+    li button {
+      justify-content: center;
+      padding: 0;
+      height: 36px;
+    }
+    .scan .small {
+      display: none;
+    }
+    .scan {
+      padding: 8px 4px;
+    }
+    .page {
+      padding: 6px 20px 28px;
+    }
   }
   .banner.update {
     align-items: center;

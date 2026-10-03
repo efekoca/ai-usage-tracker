@@ -7,6 +7,7 @@
   import HourHeatmap from '../components/charts/HourHeatmap.svelte'
   import Icon from '../components/Icon.svelte'
   import CompareModels from '../components/CompareModels.svelte'
+  import BarValue from '../components/BarValue.svelte'
   import AgentsTools from '../components/AgentsTools.svelte'
 
   let metric: 'tokens' | 'cost' = $state(app.settings?.primary_metric ?? 'tokens')
@@ -52,10 +53,7 @@
                 {fmtMoney(g.totals.cost_usd)}
               {/if}
             </td>
-            <td class="num share">
-              <span class="minibar" aria-hidden="true"><span style="width:{(v / total) * 100}%"></span></span>
-              {fmtPct((v / total) * 100, 1)}
-            </td>
+            <td class="num"><BarValue pct={(v / total) * 100} text={fmtPct((v / total) * 100, 1)} /></td>
           </tr>
         {/each}
       </tbody>
@@ -155,24 +153,6 @@
     text-align: right;
     font-variant-numeric: tabular-nums;
   }
-  .share {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
-  }
-  .minibar {
-    width: 44px;
-    height: 5px;
-    border-radius: 3px;
-    background: var(--surface-hover);
-    overflow: hidden;
-  }
-  .minibar span {
-    display: block;
-    height: 100%;
-    background: var(--accent);
-  }
   .unpriced {
     display: inline-flex;
     gap: 4px;
@@ -189,5 +169,13 @@
   .costs .sum td {
     color: var(--ink);
     font-weight: 600;
+  }
+  /* narrow windows: tighter cells */
+  @media (max-width: 1100px) {
+    th,
+    td {
+      padding-left: 8px;
+      padding-right: 8px;
+    }
   }
 </style>

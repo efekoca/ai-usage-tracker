@@ -6,7 +6,7 @@ type Dict = Record<string, string>
 const tr: Dict = {
   'app.name': 'AI Usage Tracker',
   'nav.overview': 'Genel bakış',
-  'nav.daily': 'Günler',
+  'nav.daily': 'Günlük',
   'nav.breakdown': 'Dağılım',
   'nav.limits': 'Limitler',
   'nav.projects': 'Projeler',
@@ -92,7 +92,7 @@ const tr: Dict = {
   'overview.unpricedDismiss': 'Bu uyarıyı bir daha gösterme',
   'overview.excludesAux': 'Claude Code kayıtları yalnızca ana model çağrılarını içerir; arka plandaki yardımcı çağrılar (ör. web araması özetleme) dahil değildir.',
 
-  'daily.title': 'Günler',
+  'daily.title': 'Günlük',
   'daily.calendar': 'Takvim',
   'daily.table': 'Tablo',
   'daily.date': 'Tarih',
@@ -242,6 +242,8 @@ const tr: Dict = {
   'common.save': 'Kaydet',
   'common.cancel': 'Vazgeç',
   'common.close': 'Kapat',
+  'common.search': 'Ara',
+  'common.noResults': 'Sonuç yok',
   'common.remove': 'Kaldır',
   'common.on': 'Açık',
   'common.off': 'Kapalı',
@@ -273,7 +275,7 @@ const tr: Dict = {
 
   "nav.sessions": "Oturumlar",
   "nav.context": "Bağlam",
-  "days.title": "Günler",
+  "days.title": "Günlük",
   "days.metric.events": "İstek",
   "days.peak": "En yoğun gün",
   "days.perActive": "Aktif gün başına",
@@ -808,7 +810,7 @@ const tr: Dict = {
 const en: Dict = {
   'app.name': 'AI Usage Tracker',
   'nav.overview': 'Overview',
-  'nav.daily': 'Days',
+  'nav.daily': 'Daily',
   'nav.breakdown': 'Breakdown',
   'nav.limits': 'Limits',
   'nav.projects': 'Projects',
@@ -894,7 +896,7 @@ const en: Dict = {
   'overview.unpricedDismiss': "Don't show this warning again",
   'overview.excludesAux': 'Claude Code logs contain the main model calls only; background helper calls (e.g. web-search summarisation) are not included.',
 
-  'daily.title': 'Days',
+  'daily.title': 'Daily',
   'daily.calendar': 'Calendar',
   'daily.table': 'Table',
   'daily.date': 'Date',
@@ -1044,6 +1046,8 @@ const en: Dict = {
   'common.save': 'Save',
   'common.cancel': 'Cancel',
   'common.close': 'Close',
+  'common.search': 'Search',
+  'common.noResults': 'No results',
   'common.remove': 'Remove',
   'common.on': 'On',
   'common.off': 'Off',
@@ -1075,7 +1079,7 @@ const en: Dict = {
 
   "nav.sessions": "Sessions",
   "nav.context": "Context",
-  "days.title": "Days",
+  "days.title": "Daily",
   "days.metric.events": "Requests",
   "days.peak": "Busiest day",
   "days.perActive": "Per active day",

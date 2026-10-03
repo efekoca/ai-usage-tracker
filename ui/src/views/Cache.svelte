@@ -7,6 +7,7 @@
   import AreaChart from '../components/charts/AreaChart.svelte'
   import Segmented from '../components/Segmented.svelte'
   import Icon from '../components/Icon.svelte'
+  import BarValue from '../components/BarValue.svelte'
 
   const r = $derived(app.report)
   const prompt = (k: Tokens) => k.input + k.cache_read + k.cache_write
@@ -111,10 +112,7 @@
             <td class="num">{fmtCompact(prompt(k))}</td>
             <td class="num">{fmtCompact(k.cache_read)}</td>
             <td class="num">{fmtCompact(k.cache_write)}</td>
-            <td class="num hitcell">
-              <span class="minibar" aria-hidden="true"><span style="width:{h}%"></span></span>
-              {fmtPct(h, 1)}
-            </td>
+            <td class="num"><BarValue pct={h} tone="teal" text={fmtPct(h, 1)} /></td>
             <td class="num">{reuse(g.totals) !== null ? `${fmtDec(reuse(g.totals) ?? 0, 1)}×` : '—'}</td>
             <td class="num" class:neg={g.totals.cache_savings_usd < 0}>{g.totals.unpriced_events === g.totals.events ? '—' : fmtMoney(g.totals.cache_savings_usd)}</td>
           </tr>
@@ -138,6 +136,9 @@
     grid-template-columns: 1.3fr 1fr 1fr 1fr;
     gap: 24px;
   }
+  .tiles > :global(*) {
+    min-width: 0;
+  }
   @media (max-width: 1000px) {
     .tiles {
       grid-template-columns: 1fr 1fr;
@@ -145,12 +146,15 @@
   }
   .grid2 {
     display: grid;
-    grid-template-columns: 1fr 1.2fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
     gap: 16px;
   }
-  @media (max-width: 960px) {
+  .grid2 > section {
+    min-width: 0;
+  }
+  @media (max-width: 1000px) {
     .grid2 {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
     }
   }
   .mixbar {
@@ -239,24 +243,6 @@
   tbody tr:last-child th {
     border-bottom: 0;
   }
-  .hitcell {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
-  }
-  .minibar {
-    width: 44px;
-    height: 5px;
-    border-radius: 3px;
-    background: var(--surface-hover);
-    overflow: hidden;
-  }
-  .minibar span {
-    display: block;
-    height: 100%;
-    background: var(--s3);
-  }
   .neg {
     color: var(--bad-ink);
   }
@@ -265,5 +251,13 @@
     gap: 6px;
     align-items: flex-start;
     max-width: 820px;
+  }
+  /* narrow windows: tighter cells */
+  @media (max-width: 1100px) {
+    th,
+    td {
+      padding-left: 8px;
+      padding-right: 8px;
+    }
   }
 </style>

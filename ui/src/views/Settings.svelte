@@ -5,6 +5,7 @@
   import { api, type HotkeyStatus, type PricingFile } from '../lib/api'
   import { fmtDate, fmtDateTime, fmtInt, fmtPct, t, windowLabel } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
+  import Select from '../components/Select.svelte'
   import Toggle from '../components/Toggle.svelte'
   import Icon from '../components/Icon.svelte'
   import ReportCard from '../components/ReportCard.svelte'
@@ -195,11 +196,7 @@
   <h2>{t('settings.general')}</h2>
   <div class="item">
     <span>{t('settings.language')}</span>
-    <select class="field" value={s.language} onchange={(e) => saveSettings({ language: e.currentTarget.value as 'system' | 'tr' | 'en' })}>
-      <option value="system">{t('settings.language.system')}</option>
-      <option value="tr">Türkçe</option>
-      <option value="en">English</option>
-    </select>
+    <Select label={t('settings.language')} value={s.language} minWidth={170} options={[{ value: 'system', label: t('settings.language.system') }, { value: 'tr', label: 'Türkçe' }, { value: 'en', label: 'English' }]} onchange={(v) => saveSettings({ language: v as 'system' | 'tr' | 'en' })} />
   </div>
   <div class="item">
     <span>{t('settings.theme')}</span>
@@ -220,9 +217,7 @@
   <div class="item">
     <div><span>{t('settings.currency')}</span><div class="subtle small">{t('settings.currency.help')}</div></div>
     <div class="row">
-      <select class="field" value={s.currency} onchange={(e) => saveSettings({ currency: e.currentTarget.value })}>
-        {#each ['USD', 'TRY', 'EUR', 'GBP'] as c (c)}<option value={c}>{c}</option>{/each}
-      </select>
+      <Select label={t('settings.currency')} value={s.currency} minWidth={110} options={['USD', 'TRY', 'EUR', 'GBP'].map((c) => ({ value: c, label: c }))} onchange={(v) => saveSettings({ currency: v })} />
       {#if s.currency !== 'USD'}
         <label class="row small muted">{t('settings.fxRate')}
           <input class="field rate" inputmode="decimal" value={String(s.fx_rate)} onchange={(e) => { const n = num(e.currentTarget.value); if (n) saveSettings({ fx_rate: n }) }} />
@@ -277,10 +272,14 @@
   </div>
   <div class="item">
     <span>{t('settings.tray.limit')}</span>
-    <select class="field" value={s.tray.limit} disabled={!s.tray.show_percent} onchange={(e) => saveSettings({ tray: { ...s.tray, limit: e.currentTarget.value } })}>
-      <option value="auto">{t('settings.tray.auto')}</option>
-      {#each trayLimits as [p, w] (p + w)}<option value="{p}:{w}">{t(`provider.${p}`)} · {windowLabel(w)}</option>{/each}
-    </select>
+    <Select
+      label={t('settings.tray.limit')}
+      value={s.tray.limit}
+      disabled={!s.tray.show_percent}
+      minWidth={220}
+      options={[{ value: 'auto', label: t('settings.tray.auto') }, ...trayLimits.map(([p, w]) => ({ value: `${p}:${w}`, label: `${t(`provider.${p}`)} · ${windowLabel(w)}` }))]}
+      onchange={(v) => saveSettings({ tray: { ...s.tray, limit: v } })}
+    />
   </div>
 </section>
 
@@ -392,15 +391,9 @@
       </div>
     {/each}
     <div class="row wrap">
-      <select class="field" bind:value={aliasFrom} aria-label={t('common.model')}>
-        <option value="">—</option>
-        {#each unpriced as m (m)}<option value={m}>{m}</option>{/each}
-      </select>
+      <Select label={t('common.model')} bind:value={aliasFrom} minWidth={190} searchable placeholder="—" options={unpriced.map((m) => ({ value: m, label: m }))} />
       <span class="muted small">{t('settings.pricing.aliasAs')}</span>
-      <select class="field" bind:value={aliasTo} aria-label={t('common.model')}>
-        <option value="">—</option>
-        {#each pricing.models as m (m.id)}<option value={m.id}>{m.id}</option>{/each}
-      </select>
+      <Select label={t('common.model')} bind:value={aliasTo} minWidth={190} searchable placeholder="—" options={pricing.models.map((m) => ({ value: m.id, label: m.id }))} />
       <button class="btn" onclick={addAlias} disabled={!aliasFrom || !aliasTo}><Icon name="plus" size={14} /></button>
     </div>
     {#if s.dismissed_unpriced?.length}

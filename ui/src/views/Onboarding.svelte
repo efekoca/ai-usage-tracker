@@ -4,6 +4,7 @@
   import { api, type PlansFile, type Provider, type SourceId, type SourceInfo } from '../lib/api'
   import { i18n, t } from '../lib/i18n.svelte'
   import Toggle from '../components/Toggle.svelte'
+  import Select from '../components/Select.svelte'
   import Icon from '../components/Icon.svelte'
 
   let sources: SourceInfo[] = $state([])
@@ -48,11 +49,7 @@
       <img src="/app-icon.png" alt="" width="56" height="56" />
       <h1>{t('onb.welcome')}</h1>
       <p class="muted lead">{t('onb.lead')}</p>
-      <select class="field lang" value={app.settings?.language ?? 'system'} aria-label={t('settings.language')} onchange={(e) => saveSettings({ language: e.currentTarget.value as 'system' | 'tr' | 'en' })}>
-        <option value="system">{t('settings.language.system')}</option>
-        <option value="tr">Türkçe</option>
-        <option value="en">English</option>
-      </select>
+      <div class="lang"><Select label={t('settings.language')} value={app.settings?.language ?? 'system'} minWidth={170} options={[{ value: 'system', label: t('settings.language.system') }, { value: 'tr', label: 'Türkçe' }, { value: 'en', label: 'English' }]} onchange={(v) => saveSettings({ language: v as 'system' | 'tr' | 'en' })} /></div>
     </div>
 
     <section class="card">
@@ -83,10 +80,7 @@
         {#each providers as p (p)}
           <div class="list-row">
             <span class="grow">{plans.providers[p].label}</span>
-            <select class="field" bind:value={chosen[p]} aria-label={plans.providers[p].label}>
-              <option value="">{t('onb.plan.none')}</option>
-              {#each plans.providers[p].plans as pl (pl.id)}<option value={pl.id}>{pl.name}</option>{/each}
-            </select>
+            <Select label={plans.providers[p].label} bind:value={chosen[p]} minWidth={200} options={[{ value: '', label: t('onb.plan.none') }, ...plans.providers[p].plans.map((pl) => ({ value: pl.id, label: pl.name, sub: pl.relative }))]} />
           </div>
         {/each}
         <p class="subtle small note">{plans.notes[i18n.lang]}</p>

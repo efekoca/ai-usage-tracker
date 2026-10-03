@@ -6,6 +6,7 @@
   import { fmtCompact, fmtInt, fmtMoney, fmtPct, has, t, toolLabel } from '../lib/i18n.svelte'
   import Segmented from './Segmented.svelte'
   import Icon from './Icon.svelte'
+  import BarValue from './BarValue.svelte'
 
   let data = $state<AgentsTools | null>(null)
   $effect(() => {
@@ -95,7 +96,7 @@
                   {#if a.totals.unpriced_events === a.totals.events && a.totals.events > 0 && data.agents.some((x) => x.tool === tool && x.totals.cost_usd > 0)}
                     <td class="num subtle" title={t('overview.unpricedAction')}>—</td>
                   {:else}
-                    <td class="num share"><span class="minibar" aria-hidden="true"><span style="width:{share * 100}%"></span></span>{fmtPct(share * 100, 1)}</td>
+                    <td class="num"><BarValue pct={share * 100} text={fmtPct(share * 100, 1)} /></td>
                   {/if}
                 </tr>
               {/each}
@@ -137,7 +138,7 @@
                   {#if n.sub}<span class="subtle small sub">{n.sub}</span>{/if}
                 </th>
                 <td class="num">{fmtInt(r.calls)}</td>
-                <td class="num share"><span class="minibar" aria-hidden="true"><span style="width:{(r.calls / Math.max(1, totalCalls)) * 100}%"></span></span>{fmtPct((r.calls / Math.max(1, totalCalls)) * 100, 1)}</td>
+                <td class="num"><BarValue pct={(r.calls / Math.max(1, totalCalls)) * 100} text={fmtPct((r.calls / Math.max(1, totalCalls)) * 100, 1)} /></td>
                 <td class="num">
                   {#if r.known === 0}<span class="subtle small" title={t('tools.errorsHelp')}>{t('tools.noOutcome')}</span>{:else}{fmtPct((r.failed / r.known) * 100, 1)} <span class="subtle small">({fmtInt(r.failed)})</span>{/if}
                 </td>
@@ -234,24 +235,6 @@
   .num {
     text-align: right;
     font-variant-numeric: tabular-nums;
-  }
-  .share {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
-  }
-  .minibar {
-    width: 44px;
-    height: 5px;
-    border-radius: 3px;
-    background: var(--surface-hover);
-    overflow: hidden;
-  }
-  .minibar span {
-    display: block;
-    height: 100%;
-    background: var(--accent);
   }
   .unpriced {
     display: inline-flex;

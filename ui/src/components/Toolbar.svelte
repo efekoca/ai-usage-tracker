@@ -4,6 +4,7 @@
   import { t, toolLabel } from '../lib/i18n.svelte'
   import { api, type Period, type Tool } from '../lib/api'
   import Segmented from './Segmented.svelte'
+  import Select from './Select.svelte'
   import Icon from './Icon.svelte'
 
   type Kind = Period['kind']
@@ -51,24 +52,22 @@
   <div class="sub filters">
     <label>
       {t('common.tool')}
-      <select class="field" value={app.filter.tools?.[0] ?? ''} onchange={(e) => setFilter({ ...app.filter, tools: e.currentTarget.value ? [e.currentTarget.value as Tool] : [] })}>
-        <option value="">{t('common.all')}</option>
-        {#each tools as tl (tl)}<option value={tl}>{toolLabel(tl)}</option>{/each}
-      </select>
+      <Select label={t('common.tool')} value={app.filter.tools?.[0] ?? ''} minWidth={140} options={[{ value: '', label: t('common.all') }, ...tools.map((tl) => ({ value: tl, label: toolLabel(tl) }))]} onchange={(v) => setFilter({ ...app.filter, tools: v ? [v as Tool] : [] })} />
     </label>
     <label>
       {t('common.model')}
-      <select class="field" value={app.filter.models?.[0] ?? ''} onchange={(e) => setFilter({ ...app.filter, models: e.currentTarget.value ? [e.currentTarget.value] : [] })}>
-        <option value="">{t('common.all')}</option>
-        {#each models as m (m)}<option value={m}>{m}</option>{/each}
-      </select>
+      <Select label={t('common.model')} value={app.filter.models?.[0] ?? ''} minWidth={180} searchable options={[{ value: '', label: t('common.all') }, ...models.map((m) => ({ value: m, label: m }))]} onchange={(v) => setFilter({ ...app.filter, models: v ? [v] : [] })} />
     </label>
     <label>
       {t('common.project')}
-      <select class="field" value={String(app.filter.projects?.[0] ?? '')} onchange={(e) => setFilter({ ...app.filter, projects: e.currentTarget.value ? [Number(e.currentTarget.value)] : [] })}>
-        <option value="">{t('common.all')}</option>
-        {#each projects as p (p.id)}<option value={String(p.id)}>{p.hidden ? `${t('projects.hidden')} #${p.id}` : p.name}</option>{/each}
-      </select>
+      <Select
+        label={t('common.project')}
+        value={String(app.filter.projects?.[0] ?? '')}
+        minWidth={180}
+        searchable
+        options={[{ value: '', label: t('common.all') }, ...projects.map((p) => ({ value: String(p.id), label: p.hidden ? `${t('projects.hidden')} #${p.id}` : p.name }))]}
+        onchange={(v) => setFilter({ ...app.filter, projects: v ? [Number(v)] : [] })}
+      />
     </label>
     {#if activeFilters}
       <button class="btn ghost" onclick={() => setFilter({})}>{t('common.clear')}</button>
@@ -101,7 +100,13 @@
     align-items: center;
     gap: 8px;
   }
-  .filters select {
-    max-width: 220px;
+  @media (max-width: 1100px) {
+    .bar {
+      padding: 18px 20px 10px;
+    }
+    .sub {
+      padding: 0 20px 12px;
+    }
   }
+
 </style>

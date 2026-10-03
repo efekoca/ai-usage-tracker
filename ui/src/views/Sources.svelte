@@ -115,7 +115,7 @@
 
 <CapturePanel />
 
-<div class="banner"><Icon name="clock" size={16} />{t('sources.retention')}</div>
+<div class="banner retention"><Icon name="clock" size={16} />{t('sources.retention')}</div>
 
 <style>
   .bar {
@@ -192,5 +192,8 @@
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+  .retention {
+    margin-top: 16px;
   }
 </style>

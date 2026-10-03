@@ -50,7 +50,7 @@
         <li class:mine={used.has(r.model)}>
           <span class="name">
             <i class="sw" style="background:var(--{r.provider === 'openai' ? 's1' : 's2'})"></i>
-            {r.model}
+            <span class="mn" title={r.model}>{r.model}</span>
             {#if used.has(r.model)}<span class="tag">{t('compare.used')}</span>{/if}
           </span>
           <span class="bar" aria-hidden="true">
@@ -138,6 +138,12 @@
     border-radius: 999px;
     background: var(--surface-press);
     color: var(--ink-2);
+    flex: none;
+  }
+  .mn {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .bar {
     position: relative;
@@ -199,6 +205,12 @@
   }
   .spacer {
     flex: 1;
+  }
+  @media (max-width: 1100px) {
+    li {
+      grid-template-columns: minmax(150px, 1.3fr) minmax(40px, 1.5fr) 80px 110px;
+      gap: 10px;
+    }
   }
   @media (max-width: 760px) {
     li {
