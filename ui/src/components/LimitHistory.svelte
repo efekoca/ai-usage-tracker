@@ -50,6 +50,10 @@
   const visible = $derived(showAll ? rows : rows.slice(0, 30))
   const keyOf = (p: Provider, w: WindowRecord) => `${p}:${w.first_ms}:${w.resets_at_ms ?? 0}`
   const kept = $derived(new Set(rows.map((w) => keyOf(w.provider, w))))
+  // every chart spans the chosen period ("all" starts at the first window shown)
+  const chartFrom = $derived(
+    range >= 3650 && all.length ? Math.min(...all.map(startOf)) : (view?.history.to_ms ?? Date.now()) - range * DAY,
+  )
 
   const stats = $derived.by(() => {
     const peaks = rows.map((w) => w.peak_pct).sort((a, b) => a - b)
@@ -164,7 +168,7 @@
           {#if series.length > 1}<h3>{t(`provider.${s.provider}`)}</h3>{/if}
           <WindowHistory
             windows={shownW}
-            fromMs={Math.max(view.history.to_ms - range * DAY, Math.min(view.history.to_ms - DAY, ...s.windows.map(startOf)))}
+            fromMs={chartFrom}
             toMs={view.history.to_ms}
             height={190}
             ariaLabel="{t(`provider.${s.provider}`)} · {windowLabel(win)}"

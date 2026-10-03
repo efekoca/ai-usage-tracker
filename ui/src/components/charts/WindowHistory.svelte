@@ -67,7 +67,7 @@
         <rect class="hit" x={b.x0 - 3} y="0" width={b.bw + 6} height={ih} role="presentation" onpointerenter={() => (hover = i)} onpointerleave={() => (hover = null)} />
       {/each}
       {#each ticks as tk, i (tk)}
-        <text class="axis" x={x(tk)} y={ih + 16} text-anchor={i === 0 ? 'start' : i === ticks.length - 1 ? 'end' : 'middle'}>{fmtDate(tk, 'short')}</text>
+        <text class="axis" x={x(tk)} y={ih + 16} text-anchor={i === 0 ? 'start' : i === ticks.length - 1 ? 'end' : 'middle'}>{toMs - fromMs < 3 * 864e5 ? fmtDateTime(tk) : fmtDate(tk, 'short')}</text>
       {/each}
       <line class="base" x1="0" x2={iw} y1={ih} y2={ih} />
     </g>
