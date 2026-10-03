@@ -11,12 +11,18 @@
 //!   instead of diffing totals.
 //! * `payload.rate_limits`: `primary`/`secondary` `{used_percent, window_minutes, resets_at}`,
 //!   `plan_type`, `limit_id`. Windows are classified by `window_minutes`, not by slot.
+//! * `session_meta.payload.git.branch`: the branch when the session started in a repository.
+//! * Subagent rollouts (e.g. the `guardian` auto-review) have `source: {"subagent": …}` and
+//!   `parent_thread_id`; their requests count toward the parent session.
+//! * `event_msg` `item_completed` records each action the agent ran: `CommandExecution`
+//!   (`status`, `exit_code`), `FileChange` (`status`), `McpToolCall` (`server`, `tool`,
+//!   `status`), `WebSearch`, `Extension` (`kind`), `ImageView`. Only names and outcomes are kept.
 //!
 //! De-dup key: `cx:<session id>:<byte offset of the line>`. Rollouts are append-only, so the
 //! key is stable across re-reads and when a file is moved to `archived_sessions`.
 
 use super::{f64_at, i64_at, read_jsonl_from, str_at, u64_at, ParseOutput};
-use crate::model::{parse_ts_ms, window_name, Accuracy, LimitSnapshot, Provider, Tokens, Tool, UsageEvent};
+use crate::model::{parse_ts_ms, window_name, Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::Path;
@@ -24,13 +30,20 @@ use std::path::Path;
 pub const SOURCE: &str = "codex_rollout";
 
 #[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 struct State {
+    /// This rollout's own thread id.
     session_id: Option<String>,
     cwd: Option<String>,
     originator: Option<String>,
     model: Option<String>,
     last_total: Option<String>,
     cli_version: Option<String>,
+    branch: Option<String>,
+    /// Subagent type when this rollout is a subagent's.
+    agent: Option<String>,
+    /// The session that started this subagent.
+    parent: Option<String>,
 }
 
 pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<ParseOutput> {
@@ -59,6 +72,13 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
                 st.cwd = str_at(p, "cwd").map(str::to_owned).or(st.cwd.take());
                 st.originator = str_at(p, "originator").map(str::to_owned).or(st.originator.take());
                 st.cli_version = str_at(p, "cli_version").map(str::to_owned).or(st.cli_version.take());
+                if let Some(b) = p.get("git").and_then(|g| str_at(g, "branch")).map(str::trim).filter(|b| !b.is_empty()) {
+                    st.branch = Some(b.to_owned());
+                }
+                if let Some(src) = p.get("source") {
+                    st.agent = subagent_label(src);
+                }
+                st.parent = str_at(p, "parent_thread_id").filter(|s| !s.is_empty()).map(str::to_owned).or(st.parent.take());
                 out.lines_recognised += 1;
             }
             "turn_context" => {
@@ -91,6 +111,14 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
                     out.lines_recognised += 1;
                 }
             }
+            "event_msg" if str_at(p, "type") == Some("item_completed") => {
+                if let (Some(item), Some(ts_ms)) = (p.get("item"), str_at(v, "timestamp").and_then(parse_ts_ms))
+                    && let Some(call) = action(&st, path, line.offset, ts_ms, item)
+                {
+                    out.tool_calls.push(call);
+                    out.lines_recognised += 1;
+                }
+            }
             _ => {}
         }
     }
@@ -101,15 +129,26 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
     Ok(out)
 }
 
+/// This rollout's thread id (the de-dup key part), and the session its usage counts toward:
+/// the parent for a subagent, itself otherwise.
+fn ids(st: &State, path: &Path) -> (String, String) {
+    let thread = st.session_id.clone().unwrap_or_else(|| path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default());
+    let session = match (&st.agent, &st.parent) {
+        (Some(_), Some(parent)) => parent.clone(),
+        _ => thread.clone(),
+    };
+    (thread, session)
+}
+
 fn event(st: &State, path: &Path, offset: u64, ts_ms: i64, last: &Value) -> UsageEvent {
     let input_all = u64_at(last, "input_tokens");
     let cached = u64_at(last, "cached_input_tokens");
     let cache_write = u64_at(last, "cache_write_input_tokens");
     let output = u64_at(last, "output_tokens");
     let reasoning = u64_at(last, "reasoning_output_tokens").min(output);
-    let session = st.session_id.clone().unwrap_or_else(|| path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default());
+    let (thread, session) = ids(st, path);
     UsageEvent {
-        key: format!("cx:{session}:{offset}"),
+        key: format!("cx:{thread}:{offset}"),
         ts_ms,
         tool: Tool::Codex,
         client: st.originator.clone(),
@@ -132,7 +171,60 @@ fn event(st: &State, path: &Path, offset: u64, ts_ms: i64, last: &Value) -> Usag
         request_id: None,
         accuracy: Accuracy::Exact,
         source: SOURCE.into(),
+        branch: st.branch.clone(),
+        agent: st.agent.clone(),
+        thread_id: st.agent.is_some().then_some(thread),
     }
+}
+
+/// `{"subagent": "review"}`, `{"subagent": {"other": "guardian"}}`,
+/// `{"subagent": {"thread_spawn": {…, "agent_role": "explorer"}}}` → the subagent's type.
+/// A plain source (`"cli"`, `"vscode"`, …) is the main agent.
+fn subagent_label(source: &Value) -> Option<String> {
+    let sub = source.get("subagent")?;
+    let label = match sub {
+        Value::String(s) => s.clone(),
+        Value::Object(o) => match (o.get("other"), o.get("thread_spawn")) {
+            (Some(Value::String(s)), _) => s.clone(),
+            (_, Some(spawn)) => str_at(spawn, "agent_role").unwrap_or("thread_spawn").to_owned(),
+            _ => o.keys().next().cloned().unwrap_or_default(),
+        },
+        _ => String::new(),
+    };
+    let label = label.trim();
+    Some(if label.is_empty() { "subagent".to_owned() } else { label.to_owned() })
+}
+
+/// One completed action (command, file change, MCP tool call, web search, …) by name and
+/// outcome. Messages, reasoning and compaction items are not actions and are skipped.
+fn action(st: &State, path: &Path, offset: u64, ts_ms: i64, item: &Value) -> Option<ToolCall> {
+    let status = str_at(item, "status");
+    let (name, failed) = match str_at(item, "type")? {
+        // a non-zero exit code counts as an error, as Claude Code reports it for its shell
+        "CommandExecution" => ("shell".to_owned(), Some(status == Some("failed") || i64_at(item, "exit_code").is_some_and(|c| c != 0))),
+        "FileChange" => ("apply_patch".to_owned(), Some(matches!(status, Some("failed" | "declined")))),
+        "McpToolCall" => {
+            let server = str_at(item, "server").unwrap_or("unknown");
+            let tool = str_at(item, "tool").unwrap_or("unknown");
+            let is_error = item.get("result").and_then(|r| r.get("isError")).and_then(Value::as_bool) == Some(true);
+            (format!("mcp__{server}__{tool}"), Some(status == Some("failed") || is_error))
+        }
+        "WebSearch" => ("web_search".to_owned(), None),
+        "Extension" => (str_at(item, "kind").map(|k| k.replace('.', "_")).unwrap_or_else(|| "extension".into()), None),
+        "ImageView" => ("view_image".to_owned(), None),
+        _ => return None,
+    };
+    let (thread, session) = ids(st, path);
+    Some(ToolCall {
+        key: format!("cxt:{thread}:{offset}"),
+        ts_ms,
+        tool: Tool::Codex,
+        session_id: Some(session),
+        project_path: st.cwd.clone(),
+        agent: st.agent.clone(),
+        name,
+        failed,
+    })
 }
 
 fn rate_limits(rl: &Value, ts_ms: i64, out: &mut Vec<LimitSnapshot>) {

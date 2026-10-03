@@ -342,3 +342,152 @@ fn a_subagent_started_in_a_sub_directory_belongs_to_the_session_project() {
     let n: i64 = store.conn().query_row("SELECT count(*) FROM usage_event WHERE key = 'cc:msg_agent' AND project_id IS NOT NULL", [], |r| r.get(0)).unwrap();
     assert_eq!(n, 1, "the subagent transcript is read");
 }
+
+// ---------------------------------------------------------------- branches, subagents, tools
+
+fn claude_line(kind: &str, session: &str, id: &str, extra: &str, content: &str) -> String {
+    let message = if kind == "assistant" {
+        format!(r#"{{"id":"{id}","model":"claude-sonnet-5","content":{content},"usage":{{"input_tokens":1,"output_tokens":1}}}}"#)
+    } else {
+        format!(r#"{{"role":"user","content":{content}}}"#)
+    };
+    format!(r#"{{"type":"{kind}","sessionId":"{session}","timestamp":"2026-09-05T10:00:00.000Z","cwd":"C:/Work/Repo"{extra},"message":{message}}}"#)
+}
+
+#[test]
+fn claude_branch_subagent_and_tool_calls_are_recorded_without_content() {
+    let m = machine();
+    let dir = m.home.join(".claude/projects/C--Work-Repo");
+    fs::create_dir_all(dir.join("s-t/subagents")).unwrap();
+    let branch = r#","gitBranch":"feature/login""#;
+    let main = [
+        claude_line("assistant", "s-t", "msg_t1", branch, r#"[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"secret"}}]"#),
+        claude_line("user", "s-t", "", branch, r#"[{"type":"tool_result","tool_use_id":"toolu_1","is_error":true,"content":"secret"}]"#),
+        claude_line("assistant", "s-t", "msg_t2", branch, r#"[{"type":"tool_use","id":"toolu_2","name":"mcp__browser__navigate","input":{}}]"#),
+        claude_line("user", "s-t", "", branch, r#"[{"type":"tool_result","tool_use_id":"toolu_2","content":"ok"}]"#),
+        // outside a repository the branch is empty
+        claude_line("assistant", "s-t", "msg_t3", r#","gitBranch":"""#, "[]"),
+    ];
+    fs::write(dir.join("s-t.jsonl"), main.join("\n") + "\n").unwrap();
+    // a resumed session copies the first call and its result
+    fs::write(dir.join("s-copy.jsonl"), format!("{}\n{}\n", main[0].replace("\"s-t\"", "\"s-copy\""), main[1])).unwrap();
+    let sub = claude_line(
+        "assistant",
+        "s-t",
+        "msg_t4",
+        r#","gitBranch":"feature/login","isSidechain":true,"agentId":"agent-7","attributionAgent":"Explore""#,
+        r#"[{"type":"tool_use","id":"toolu_3","name":"Grep","input":{}}]"#,
+    );
+    fs::write(dir.join("s-t/subagents/agent-7.jsonl"), sub + "\n").unwrap();
+
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &m.env);
+    type Row = (Option<String>, Option<String>, Option<String>, Option<String>);
+    let row = |key: &str| -> Row {
+        store
+            .conn()
+            .query_row("SELECT branch, agent, thread_id, session_id FROM usage_event WHERE key = ?1", [key], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            })
+            .unwrap()
+    };
+    assert_eq!(row("cc:msg_t2"), (Some("feature/login".into()), None, None, Some("s-t".into())));
+    assert_eq!(row("cc:msg_t3").0, None, "no branch outside a repository");
+    assert_eq!(row("cc:msg_t4"), (Some("feature/login".into()), Some("Explore".into()), Some("agent-7".into()), Some("s-t".into())));
+
+    let calls: Vec<(String, String, Option<String>, Option<i64>)> = {
+        let mut st = store.conn().prepare("SELECT key, name, agent, failed FROM tool_call ORDER BY key").unwrap();
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap().map(Result::unwrap).collect()
+    };
+    assert_eq!(
+        calls,
+        vec![
+            ("cct:toolu_1".into(), "Bash".into(), None, Some(1)),
+            ("cct:toolu_2".into(), "mcp__browser__navigate".into(), None, Some(0)),
+            ("cct:toolu_3".into(), "Grep".into(), Some("Explore".into()), None),
+        ],
+        "one row per call however often it was copied; outcome from tool_result"
+    );
+    // nothing of the call's input or output is stored anywhere
+    let dump: String = store
+        .conn()
+        .query_row("SELECT group_concat(key || name || COALESCE(agent,'') || COALESCE(session_id,''), '|') FROM tool_call", [], |r| r.get(0))
+        .unwrap();
+    assert!(!dump.contains("secret"));
+    let projects: i64 = store.conn().query_row("SELECT count(*) FROM tool_call WHERE project_id IS NULL", [], |r| r.get(0)).unwrap();
+    assert_eq!(projects, 0, "tool calls belong to the session's project");
+}
+
+#[test]
+fn codex_subagents_count_toward_their_parent_and_actions_are_recorded() {
+    let m = machine();
+    let dir = m.home.join(".codex/sessions/2026/09/05");
+    fs::create_dir_all(&dir).unwrap();
+    let name = "rollout-2026-09-05T10-00-00-0199aaaa-bbbb-7ccc-8ddd-eeeeffff0009.jsonl";
+    let lines = [
+        r#"{"timestamp":"2026-09-05T10:00:00.000Z","type":"session_meta","payload":{"id":"0199aaaa-bbbb-7ccc-8ddd-eeeeffff0009","cwd":"C:\\Work\\Repo","originator":"codex_cli_rs","source":"cli","git":{"commit_hash":"abc","branch":"main","repository_url":"https://example.invalid/r.git"}}}"#,
+        r#"{"timestamp":"2026-09-05T10:00:01.000Z","type":"turn_context","payload":{"model":"gpt-5.6-sol"}}"#,
+        r#"{"timestamp":"2026-09-05T10:00:02.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"output_tokens":1},"last_token_usage":{"input_tokens":10,"output_tokens":1}}}}"#,
+        r#"{"timestamp":"2026-09-05T10:00:03.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"i1","command":["secret"],"status":"failed","exit_code":1}}}"#,
+        r#"{"timestamp":"2026-09-05T10:00:04.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"FileChange","id":"i2","status":"completed","changes":{}}}}"#,
+        r#"{"timestamp":"2026-09-05T10:00:05.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"i3","server":"node_repl","tool":"js","status":"completed","result":{"isError":false}}}}"#,
+        r#"{"timestamp":"2026-09-05T10:00:06.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"Extension","id":"i4","kind":"web.search","query":"secret"}}}"#,
+        r#"{"timestamp":"2026-09-05T10:00:07.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"Reasoning","id":"i5","summary_text":["secret"]}}}"#,
+    ];
+    fs::write(dir.join(name), lines.join("\n") + "\n").unwrap();
+
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &m.env);
+    // the fixture's guardian rollout counts toward its parent session
+    let (session, agent, thread): (String, Option<String>, Option<String>) = store
+        .conn()
+        .query_row(
+            "SELECT session_id, agent, thread_id FROM usage_event WHERE key LIKE 'cx:0199aaaa-bbbb-7ccc-8ddd-eeeeffff0002:%'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(session, "0199aaaa-bbbb-7ccc-8ddd-eeeeffff0001");
+    assert_eq!(agent.as_deref(), Some("guardian"));
+    assert_eq!(thread.as_deref(), Some("0199aaaa-bbbb-7ccc-8ddd-eeeeffff0002"));
+    let branch: Option<String> = store
+        .conn()
+        .query_row("SELECT branch FROM usage_event WHERE key LIKE 'cx:0199aaaa-bbbb-7ccc-8ddd-eeeeffff0009:%'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(branch.as_deref(), Some("main"));
+
+    let calls: Vec<(String, Option<i64>)> = {
+        let mut st = store.conn().prepare("SELECT name, failed FROM tool_call WHERE tool = 'codex' ORDER BY ts_ms").unwrap();
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(Result::unwrap).collect()
+    };
+    assert_eq!(
+        calls,
+        vec![("shell".into(), Some(1)), ("apply_patch".into(), Some(0)), ("mcp__node_repl__js".into(), Some(0)), ("web_search".into(), None)]
+    );
+}
+
+#[test]
+fn rows_read_before_this_version_learn_their_subagent_session_on_the_next_read() {
+    let m = machine();
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &m.env);
+    // what an older version stored: the subagent's own id as the session, no agent or thread
+    store
+        .conn()
+        .execute(
+            "UPDATE usage_event SET session_id = '0199aaaa-bbbb-7ccc-8ddd-eeeeffff0002', agent = NULL, thread_id = NULL, branch = NULL
+             WHERE key LIKE 'cx:0199aaaa-bbbb-7ccc-8ddd-eeeeffff0002:%'",
+            [],
+        )
+        .unwrap();
+    store.conn().execute("DELETE FROM file_checkpoint", []).unwrap();
+    run(&mut store, &m.env);
+    let (session, agent): (String, Option<String>) = store
+        .conn()
+        .query_row("SELECT session_id, agent FROM usage_event WHERE key LIKE 'cx:0199aaaa-bbbb-7ccc-8ddd-eeeeffff0002:%'", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .unwrap();
+    assert_eq!((session.as_str(), agent.as_deref()), ("0199aaaa-bbbb-7ccc-8ddd-eeeeffff0001", Some("guardian")));
+    assert_eq!(sums(&store, "codex").events, 5, "re-reading adds nothing");
+}

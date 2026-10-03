@@ -4,6 +4,7 @@
   import { fmtCompact, fmtMoney, fmtPct, t } from '../lib/i18n.svelte'
   import Toggle from '../components/Toggle.svelte'
   import Icon from '../components/Icon.svelte'
+  import Branches from '../components/Branches.svelte'
 
   let rows: ProjectRow[] = $state([])
   $effect(() => {
@@ -67,6 +68,8 @@
     </div>
   {/if}
 </section>
+
+<Branches />
 
 <style>
   .help {

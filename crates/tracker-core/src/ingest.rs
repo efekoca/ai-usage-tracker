@@ -107,6 +107,8 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<Vec<S
     let mut tx = store.transaction().map_err(|e| e.to_string())?;
     tx.upsert_events(&out.events).map_err(|e| e.to_string())?;
     tx.insert_limits(&out.limits).map_err(|e| e.to_string())?;
+    tx.upsert_tool_calls(&out.tool_calls).map_err(|e| e.to_string())?;
+    tx.apply_tool_results(&out.tool_results).map_err(|e| e.to_string())?;
     tx.set_checkpoint(
         &key,
         &f.file_id,

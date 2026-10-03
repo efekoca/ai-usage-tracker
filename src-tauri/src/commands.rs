@@ -69,8 +69,10 @@ pub fn get_settings(state: State<AppState>) -> Settings {
 pub fn save_settings(app: AppHandle, state: State<AppState>, settings: Settings) -> Res<Settings> {
     let old = state.settings.read().unwrap().clone();
     let mut settings = settings;
-    // capture switches change only through set_capture (they edit files outside the app)
+    // capture switches change only through set_capture (they edit files outside the app), the
+    // shortcut only through set_hotkey (it must register first)
     settings.capture = old.capture.clone();
+    settings.widget.hotkey = old.widget.hotkey.clone();
     settings.widget.normalize();
     settings.save(&state.store.lock().unwrap())?;
     *state.settings.write().unwrap() = settings.clone();
@@ -89,6 +91,7 @@ pub fn save_settings(app: AppHandle, state: State<AppState>, settings: Settings)
         crate::capture::wake_readers(&app);
     }
     let _ = app.emit("settings-changed", &settings);
+    crate::tray::refresh_soon();
     Ok(settings)
 }
 
@@ -164,7 +167,7 @@ pub fn get_report(state: State<AppState>, period: Period, filter: Option<Filter>
     Ok(r)
 }
 
-fn enabled_providers(s: &Settings) -> HashSet<Provider> {
+pub(crate) fn enabled_providers(s: &Settings) -> HashSet<Provider> {
     let mut p = HashSet::new();
     for src in &s.enabled_sources {
         match src {
@@ -371,7 +374,7 @@ pub fn reset_pricing(app: AppHandle, state: State<AppState>) -> Res<()> {
     Ok(())
 }
 
-pub const PLANS_JSON: &str = include_str!("../../config/plans.json");
+pub const PLANS_JSON: &str = tracker_core::plans::DEFAULT_PLANS_JSON;
 
 #[tauri::command]
 pub fn get_plans() -> serde_json::Value {
@@ -592,4 +595,137 @@ pub fn report_ready(state: State<AppState>) {
 pub fn open_last_report(state: State<AppState>) -> Res<()> {
     let path = state.last_report.lock().unwrap().clone().ok_or("no report yet")?;
     std::process::Command::new("explorer").arg(path).spawn().map(|_| ()).map_err(err)
+}
+
+// ------------------------------------------------------------------ branches, agents, tips, limit history
+
+#[tauri::command]
+pub async fn get_branches(app: AppHandle, period: Period, filter: Option<Filter>) -> Res<insights::Branches> {
+    let state = app.state::<AppState>();
+    let hide_all = state.settings.read().unwrap().hide_project_names;
+    let store = state.store.lock().unwrap();
+    let book = state.book.read().unwrap();
+    let mut r = insights::branches(&store, &book, range_for(&store, period)?, &filter.unwrap_or_default()).map_err(err)?;
+    for b in &mut r.rows {
+        if hide_all || b.hidden {
+            b.project.clear();
+            b.hidden = true;
+            // a branch name can say as much as the project's (a client, a feature)
+            b.branch_hidden = b.branch.take().is_some();
+        }
+    }
+    Ok(r)
+}
+
+#[tauri::command]
+pub async fn get_agents_tools(app: AppHandle, period: Period, filter: Option<Filter>) -> Res<insights::AgentsTools> {
+    let state = app.state::<AppState>();
+    let store = state.store.lock().unwrap();
+    let book = state.book.read().unwrap();
+    insights::agents_tools(&store, &book, range_for(&store, period)?, &filter.unwrap_or_default()).map_err(err)
+}
+
+#[tauri::command]
+pub async fn get_tips(app: AppHandle, period: Period, filter: Option<Filter>) -> Res<tracker_core::tips::Tips> {
+    let state = app.state::<AppState>();
+    let store = state.store.lock().unwrap();
+    let book = state.book.read().unwrap();
+    tracker_core::tips::tips(&store, &book, range_for(&store, period)?, &filter.unwrap_or_default()).map_err(err)
+}
+
+#[derive(Serialize)]
+pub struct LimitHistoryView {
+    history: tracker_core::history::LimitHistory,
+    advice: Vec<tracker_core::history::PlanAdvice>,
+    /// Plans taken from the readings because none was chosen (provider → plan id).
+    detected_plans: std::collections::BTreeMap<String, String>,
+}
+
+/// The plan a provider's newest readings name, when it maps to exactly one plan in the list:
+/// Codex names it exactly; Claude says "max" for both Max plans, so only "pro" is taken.
+fn detected_plan(store: &tracker_core::store::Store, provider: Provider, plans: &tracker_core::plans::PlansFile) -> Option<String> {
+    let newest = store.latest_limits().ok()?.into_iter().filter(|s| s.provider == provider && s.plan.is_some()).max_by_key(|s| s.ts_ms)?;
+    let plan = newest.plan?;
+    match provider {
+        Provider::OpenAI => plans.find(provider, &plan).map(|p| p.id.clone()),
+        Provider::Anthropic => (plan == "pro").then_some(plan),
+    }
+}
+
+/// The last eight weeks of limit windows, and plan advice from the last four.
+#[tauri::command]
+pub async fn get_limit_history(app: AppHandle) -> Res<LimitHistoryView> {
+    let state = app.state::<AppState>();
+    let settings = state.settings.read().unwrap().clone();
+    let providers = enabled_providers(&settings);
+    let store = state.store.lock().unwrap();
+    let now = now_ms();
+    let mut history = tracker_core::history::limit_history(&store, now, 56).map_err(err)?;
+    history.series.retain(|s| providers.contains(&s.provider));
+    let advice_history = tracker_core::history::limit_history(&store, now, tracker_core::history::ADVICE_DAYS).map_err(err)?;
+    let plans = tracker_core::plans::PlansFile::bundled();
+    let mut detected_plans = std::collections::BTreeMap::new();
+    let mut ordered: Vec<Provider> = providers.into_iter().collect();
+    ordered.sort();
+    let advice = ordered
+        .into_iter()
+        .map(|p| {
+            let chosen = settings.plans.get(p.as_str()).filter(|id| !id.is_empty()).cloned();
+            let plan = chosen.or_else(|| {
+                let d = detected_plan(&store, p, &plans)?;
+                detected_plans.insert(p.as_str().to_owned(), d.clone());
+                Some(d)
+            });
+            tracker_core::history::plan_advice(&advice_history, p, plan.as_deref(), &plans, now)
+        })
+        .collect();
+    Ok(LimitHistoryView { history, advice, detected_plans })
+}
+
+// ------------------------------------------------------------------ shortcut & updates
+
+#[derive(Serialize)]
+pub struct HotkeyStatus {
+    hotkey: String,
+    error: Option<String>,
+}
+
+#[tauri::command]
+pub fn hotkey_status(state: State<AppState>) -> HotkeyStatus {
+    HotkeyStatus { hotkey: state.settings.read().unwrap().widget.hotkey.clone(), error: state.hotkey_error.lock().unwrap().clone() }
+}
+
+/// Registers `hotkey` (empty = none) and saves it. A combination another program owns is
+/// refused and the previous one stays.
+#[tauri::command]
+pub async fn set_hotkey(app: AppHandle, hotkey: String) -> Res<HotkeyStatus> {
+    let hotkey: String = hotkey.trim().chars().take(64).collect();
+    let state = app.state::<AppState>();
+    let old = state.settings.read().unwrap().widget.hotkey.clone();
+    if let Err(e) = crate::hotkey::apply(&app, &hotkey) {
+        let _ = crate::hotkey::apply(&app, &old);
+        return Err(e);
+    }
+    let mut s = state.settings.read().unwrap().clone();
+    s.widget.hotkey = hotkey;
+    s.save(&state.store.lock().unwrap())?;
+    *state.settings.write().unwrap() = s.clone();
+    let _ = app.emit("settings-changed", &s);
+    crate::tray::refresh_soon();
+    Ok(hotkey_status(state))
+}
+
+#[tauri::command]
+pub fn update_status(app: AppHandle) -> crate::updates::UpdateStatus {
+    crate::updates::status(&app)
+}
+
+#[tauri::command]
+pub async fn check_update(app: AppHandle) -> Res<crate::updates::UpdateStatus> {
+    crate::updates::check(&app).await
+}
+
+#[tauri::command]
+pub async fn install_update(app: AppHandle) -> Res<()> {
+    crate::updates::install(&app).await
 }

@@ -2,8 +2,8 @@
   import { ask, open, save } from '@tauri-apps/plugin-dialog'
   import { onMount } from 'svelte'
   import { app, refresh, saveSettings } from '../lib/store.svelte'
-  import { api, type PricingFile } from '../lib/api'
-  import { fmtDate, fmtInt, t } from '../lib/i18n.svelte'
+  import { api, type HotkeyStatus, type PricingFile } from '../lib/api'
+  import { fmtDate, fmtDateTime, fmtInt, fmtPct, t, windowLabel } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
   import Toggle from '../components/Toggle.svelte'
   import Icon from '../components/Icon.svelte'
@@ -27,9 +27,84 @@
     pricingDirty = false
   }
   onMount(async () => {
+    hk = await api.hotkeyStatus().catch(() => null)
     await loadPricing()
     models = await api.models()
   })
+
+  // ---- widget shortcut: press the combination to record it
+  const DEFAULT_HOTKEY = 'Ctrl+Alt+Shift+W'
+  let hk: HotkeyStatus | null = $state(null)
+  let recording = $state(false)
+  let hkError = $state('')
+  const NAMED: Record<string, string> = {
+    Space: 'Space', ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right', Home: 'Home', End: 'End',
+    PageUp: 'PageUp', PageDown: 'PageDown', Insert: 'Insert', Delete: 'Delete', Backquote: 'Backquote', Minus: 'Minus',
+    Equal: 'Equal', BracketLeft: 'BracketLeft', BracketRight: 'BracketRight', Backslash: 'Backslash', Semicolon: 'Semicolon',
+    Quote: 'Quote', Comma: 'Comma', Period: 'Period', Slash: 'Slash', Pause: 'Pause', PrintScreen: 'PrintScreen',
+  }
+  /** The key as the shortcut parser names it (by physical position, so the layout does not matter). */
+  function keyName(code: string): string | null {
+    if (/^Key[A-Z]$/.test(code)) return code.slice(3)
+    if (/^Digit\d$/.test(code)) return code.slice(5)
+    if (/^F([1-9]|1\d|2[0-4])$/.test(code)) return code
+    if (/^Numpad\d$/.test(code)) return code
+    return NAMED[code] ?? null
+  }
+  function onRecordKey(e: KeyboardEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    const mods = [e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Super'].filter(Boolean) as string[]
+    if (e.key === 'Escape' && mods.length === 0) {
+      recording = false
+      hkError = ''
+      return
+    }
+    if (['Control', 'Alt', 'Shift', 'Meta', 'AltGraph'].includes(e.key)) return // wait for the main key
+    const key = keyName(e.code)
+    if (!key) return
+    if (mods.length === 0) {
+      hkError = t('settings.hotkey.err.hotkey_needs_modifier')
+      return
+    }
+    setHotkey([...mods, key].join('+'))
+  }
+  async function setHotkey(v: string) {
+    try {
+      hk = await api.setHotkey(v)
+      if (app.settings) app.settings = { ...app.settings, widget: { ...app.settings.widget, hotkey: hk.hotkey } }
+      hkError = ''
+      recording = false
+      flash(t('settings.hotkey.saved'))
+    } catch (e) {
+      hkError = String(e) === 'hotkey_needs_modifier' ? t('settings.hotkey.err.hotkey_needs_modifier') : t('settings.hotkey.err.taken')
+    }
+  }
+  const keycaps = (v: string) => v.split('+').map((k) => (k === 'Super' ? 'Win' : k))
+
+  // ---- updates
+  const upd = $derived(app.update)
+  let checking = $state(false)
+  async function checkNow() {
+    checking = true
+    try {
+      app.update = await api.checkUpdate()
+    } catch (e) {
+      app.update = await api.updateStatus().catch(() => app.update)
+    } finally {
+      checking = false
+    }
+  }
+  async function installNow(v: string) {
+    if (!(await ask(t('settings.updates.confirm', { v }), { title: t('settings.updates'), kind: 'info' }))) return
+    await guard(() => api.installUpdate())
+  }
+  const trayLimits = [
+    ['anthropic', 'five_hour'],
+    ['anthropic', 'seven_day'],
+    ['openai', 'five_hour'],
+    ['openai', 'seven_day'],
+  ] as const
   const unpriced = $derived(models.filter((m) => pricing && !pricing.models.some((x) => x.id === m || x.aliases?.includes(m)) && !(m in (pricing.user_aliases ?? {}))))
 
   function flash(msg: string) {
@@ -167,6 +242,85 @@
     <div><span>{t('ws.title')}</span><div class="subtle small">{t('settings.widget.studio')}</div></div>
     <button class="btn" onclick={() => (app.view = 'widget')}><Icon name="widget" size={15} />{t('ws.open')}</button>
   </div>
+  <div class="item">
+    <div>
+      <span>{t('settings.hotkey')}</span>
+      <div class="subtle small">{t('settings.hotkey.help')}</div>
+      {#if hkError || hk?.error}<div class="small err" role="alert">{hkError || t('settings.hotkey.err.taken')}</div>{/if}
+    </div>
+    <div class="row wrap end">
+      {#if recording}
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <div class="recorder" tabindex="0" role="textbox" aria-label={t('settings.hotkey.record')} onkeydown={onRecordKey} onblur={() => (recording = false)} {@attach (el: HTMLElement) => el.focus()}>
+          {t('settings.hotkey.record')}
+        </div>
+      {:else if s.widget.hotkey}
+        <span class="keys" aria-label={s.widget.hotkey}>{#each keycaps(s.widget.hotkey) as k, i (i)}<kbd>{k}</kbd>{/each}</span>
+      {:else}
+        <span class="subtle small">{t('settings.hotkey.none')}</span>
+      {/if}
+      {#if !recording}
+        <button class="btn" onclick={() => { hkError = ''; recording = true }}><Icon name="keyboard" size={15} />{t('settings.hotkey.change')}</button>
+        {#if s.widget.hotkey}<button class="btn ghost" onclick={() => setHotkey('')}>{t('settings.hotkey.clear')}</button>{/if}
+        {#if s.widget.hotkey !== DEFAULT_HOTKEY}<button class="btn ghost" onclick={() => setHotkey(DEFAULT_HOTKEY)}>{t('settings.hotkey.reset')}</button>{/if}
+      {/if}
+    </div>
+  </div>
+</section>
+
+<section class="card group">
+  <h2>{t('settings.tray')}</h2>
+  <p class="subtle small prose">{t('settings.tray.help')}</p>
+  <div class="item">
+    <div><span>{t('settings.tray.show')}</span><div class="subtle small">{t('settings.tray.showHelp', { warn: fmtPct(s.widget.warn_at), high: fmtPct(s.widget.high_at) })}</div></div>
+    <Toggle checked={s.tray.show_percent} label={t('settings.tray.show')} onchange={(v) => saveSettings({ tray: { ...s.tray, show_percent: v } })} />
+  </div>
+  <div class="item">
+    <span>{t('settings.tray.limit')}</span>
+    <select class="field" value={s.tray.limit} disabled={!s.tray.show_percent} onchange={(e) => saveSettings({ tray: { ...s.tray, limit: e.currentTarget.value } })}>
+      <option value="auto">{t('settings.tray.auto')}</option>
+      {#each trayLimits as [p, w] (p + w)}<option value="{p}:{w}">{t(`provider.${p}`)} · {windowLabel(w)}</option>{/each}
+    </select>
+  </div>
+</section>
+
+<section class="card group">
+  <h2>{t('settings.updates')}</h2>
+  {#if upd && !upd.configured}
+    <p class="subtle small prose">{t('settings.updates.notConfigured')} {t('settings.updates.version', { v: upd.current })}</p>
+  {:else if upd}
+    <div class="item">
+      <div><span>{t('settings.updates.auto')}</span><div class="subtle small">{t('settings.updates.autoHelp')}</div></div>
+      <Toggle checked={s.update_check} label={t('settings.updates.auto')} onchange={(v) => saveSettings({ update_check: v })} />
+    </div>
+    <div class="item">
+      <div>
+        <span>{t('settings.updates.version', { v: upd.current })}</span>
+        <div class="subtle small" role="status">
+          {#if upd.installing}
+            {t('settings.updates.installing', { pct: upd.total ? fmtPct((upd.downloaded / upd.total) * 100) : '…' })}
+          {:else if upd.available}
+            {t('settings.updates.available', { v: upd.available.version })}{upd.available.notes ? ` · ${upd.available.notes}` : ''}
+          {:else if upd.last_error}
+            {t('settings.updates.error', { e: upd.last_error })}
+          {:else if upd.last_check_ms}
+            {t('settings.updates.upToDate', { t: fmtDateTime(upd.last_check_ms) })}
+          {:else}
+            {t('settings.updates.never')}
+          {/if}
+        </div>
+        {#if upd.installing && upd.total}
+          <div class="progress" aria-hidden="true"><span style="width:{(upd.downloaded / upd.total) * 100}%"></span></div>
+        {/if}
+      </div>
+      <div class="row">
+        {#if upd.available && !upd.installing}
+          <button class="btn primary" onclick={() => installNow(upd.available!.version)}><Icon name="download" size={15} />{t('settings.updates.install')}</button>
+        {/if}
+        <button class="btn" onclick={checkNow} disabled={checking || upd.checking || upd.installing}><Icon name="refresh" size={15} />{checking || upd.checking ? t('settings.updates.checking') : t('settings.updates.check')}</button>
+      </div>
+    </div>
+  {/if}
 </section>
 
 <section class="card group">
@@ -410,5 +564,45 @@
   }
   .danger-text {
     color: var(--bad-ink);
+  }
+  .end {
+    justify-content: flex-end;
+  }
+  .err {
+    color: var(--bad-ink);
+    margin-top: 4px;
+  }
+  .keys {
+    display: inline-flex;
+    gap: 4px;
+  }
+  kbd {
+    font: 600 12px/1 var(--font);
+    padding: 5px 7px;
+    border-radius: 6px;
+    background: var(--surface-2);
+    border: 0.5px solid var(--hairline-strong);
+    box-shadow: 0 1px 0 var(--hairline-strong);
+  }
+  .recorder {
+    font-size: 13px;
+    padding: 7px 12px;
+    border-radius: 8px;
+    border: 1px dashed var(--accent);
+    color: var(--ink-2);
+    outline: none;
+  }
+  .progress {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--surface-hover);
+    margin-top: 6px;
+    overflow: hidden;
+    max-width: 320px;
+  }
+  .progress span {
+    display: block;
+    height: 100%;
+    background: var(--accent);
   }
 </style>

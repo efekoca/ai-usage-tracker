@@ -67,6 +67,8 @@
       corner_radius: 14, border: true, shadow: false, show_labels: true, show_reset_time: false, warn_at: 70, high_at: 90,
       always_on_top: true, lock_position: false, click_action: 'open_dashboard',
       font_family: '', text_scale: 1, number_scale: 1, number_weight: 700, tabular_nums: true,
+      // the shortcut changes only in Settings (it must register first)
+      hotkey: ws.hotkey,
     }
     ws = d
     commit()

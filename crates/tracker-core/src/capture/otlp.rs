@@ -117,6 +117,9 @@ pub fn parse_logs(body: &Value) -> Vec<UsageEvent> {
                     request_id,
                     accuracy: Accuracy::Captured,
                     source: SOURCE.into(),
+                    branch: None,
+                    agent: None,
+                    thread_id: None,
                 });
             }
         }

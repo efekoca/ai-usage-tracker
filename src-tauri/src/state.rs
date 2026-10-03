@@ -40,6 +40,9 @@ pub struct AppState {
     pub report_ready: Mutex<Option<std::sync::mpsc::Sender<()>>>,
     /// The PDF saved last, which the UI may ask to open.
     pub last_report: Mutex<Option<PathBuf>>,
+    pub updates: Mutex<crate::updates::UpdateStatus>,
+    /// Why the widget shortcut could not be registered, if it could not.
+    pub hotkey_error: Mutex<Option<String>>,
 }
 
 impl AppState {

@@ -16,6 +16,9 @@
   import WidgetStudio from './views/WidgetStudio.svelte'
   import Sessions from './views/Sessions.svelte'
   import Context from './views/Context.svelte'
+  import Tips from './views/Tips.svelte'
+  import { ask } from '@tauri-apps/plugin-dialog'
+  import { api } from './lib/api'
 
   let failed = $state('')
   let page: HTMLDivElement | undefined = $state()
@@ -31,6 +34,7 @@
   const nav: { section: string; items: { id: View; icon: string }[] }[] = [
     { section: 'nav.section.usage', items: [
       { id: 'overview', icon: 'overview' },
+      { id: 'tips', icon: 'tips' },
       { id: 'daily', icon: 'daily' },
       { id: 'breakdown', icon: 'breakdown' },
       { id: 'sessions', icon: 'sessions' },
@@ -45,7 +49,19 @@
       { id: 'settings', icon: 'settings' },
     ] },
   ]
-  const withToolbar: View[] = ['overview', 'daily', 'breakdown', 'sessions', 'cache', 'context', 'projects']
+  const withToolbar: View[] = ['overview', 'tips', 'daily', 'breakdown', 'sessions', 'cache', 'context', 'projects']
+
+  // a newer signed release found by the update check; dismissed for this run only
+  let updateDismissed = $state('')
+  const update = $derived(app.update?.available && app.update.available.version !== updateDismissed ? app.update.available : null)
+  async function installUpdate(v: string) {
+    if (!(await ask(t('settings.updates.confirm', { v }), { title: t('settings.updates'), kind: 'info' }))) return
+    try {
+      await api.installUpdate()
+    } catch (e) {
+      app.error = String(e)
+    }
+  }
 
   function navKey(e: KeyboardEvent) {
     const flat = nav.flatMap((s) => s.items.map((i) => i.id))
@@ -111,7 +127,18 @@
         {#if app.error}
           <div class="banner" role="alert"><Icon name="warning" size={16} />{t('common.error', { e: app.error })}</div>
         {/if}
+        {#if update && app.view !== 'settings'}
+          <div class="banner update" role="status">
+            <Icon name="download" size={16} />
+            <span>{t('update.banner', { v: update.version })}</span>
+            <span class="grow"></span>
+            <button class="btn ghost small" onclick={() => (app.view = 'settings')}>{t('update.banner.details')}</button>
+            <button class="btn primary small" disabled={app.update?.installing} onclick={() => installUpdate(update.version)}>{t('update.banner.install')}</button>
+            <button class="btn ghost small" aria-label={t('common.close')} onclick={() => (updateDismissed = update.version)}><Icon name="close" size={14} /></button>
+          </div>
+        {/if}
         {#if app.view === 'overview'}<Overview />
+        {:else if app.view === 'tips'}<Tips />
         {:else if app.view === 'daily'}<Daily />
         {:else if app.view === 'breakdown'}<Breakdown />
         {:else if app.view === 'limits'}<Limits />
@@ -227,5 +254,11 @@
     flex: 1;
     overflow-y: auto;
     padding: 6px 28px 32px;
+  }
+  .banner.update {
+    align-items: center;
+  }
+  .grow {
+    flex: 1;
   }
 </style>

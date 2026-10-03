@@ -23,7 +23,7 @@ const settings: Settings = {
     items: (['primary', 'cost', 'limit_five_hour', 'limit_seven_day', 'tools', 'week_tokens', 'week_cost', 'month_cost', 'updated'] as const).map((k, i) => ({ kind: k, enabled: i < 4 })),
     providers: [], primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '', corner_radius: 14,
     border: true, shadow: false, show_labels: true, show_reset_time: false, warn_at: 70, high_at: 90, always_on_top: true, lock_position: false, click_action: 'open_dashboard',
-    font_family: '', text_scale: 1, number_scale: 1, number_weight: 700, tabular_nums: true,
+    font_family: '', text_scale: 1, number_scale: 1, number_weight: 700, tabular_nums: true, hotkey: 'Ctrl+Alt+Shift+W',
   },
   capture: { codex_poll: true, codex_poll_minutes: 5, codex_path: '', statusline: false, otel: false, otel_port: 43180, claude_poll: true, claude_poll_minutes: 5, claude_path: '' },
   autostart: false,
@@ -34,6 +34,8 @@ const settings: Settings = {
   plan_prices: {},
   weekly_report_auto: false,
   weekly_report_dir: '',
+  tray: { show_percent: true, limit: 'auto' },
+  update_check: true,
 }
 
 const day = 864e5
@@ -198,6 +200,100 @@ function mockPlanValue() {
   }
 }
 
+function mockBranches() {
+  const row = (pid: number, branch: string | null, share: number, sessions: number, tools: string[], ago: number) => ({
+    project_id: pid, project: pid === 5 ? '' : projects[pid - 1], hidden: pid === 5, branch: pid === 5 ? null : branch, branch_hidden: pid === 5 && branch !== null, totals: totals(Math.round(402_000_000 * share), 288 * share), sessions, tools,
+    first_ms: Date.now() - (ago + 3) * day, last_ms: Date.now() - ago * day,
+  })
+  return {
+    rows: [
+      row(1, 'main', 0.31, 9, ['claude_code', 'codex'], 0),
+      row(1, 'feature/limit-history', 0.18, 4, ['claude_code'], 0.2),
+      row(2, 'main', 0.14, 6, ['claude_code'], 1),
+      row(3, null, 0.11, 7, ['claude_code'], 2),
+      row(1, 'fix/tray-icon', 0.08, 2, ['codex'], 3),
+      row(4, 'develop', 0.07, 3, ['claude_code'], 5),
+      row(5, 'main', 0.04, 1, ['claude_code'], 9),
+    ],
+    events_with_branch: 1120,
+    events_without_branch: 160,
+  }
+}
+
+function mockAgentsTools() {
+  const t = (tool: string, name: string, calls: number, known: number, failed: number, sub: number) => ({ tool, name, calls, known, failed, by_subagents: sub })
+  return {
+    agents: [
+      { tool: 'claude_code', agent: null, totals: totals(310_000_000, 251.2), runs: 0, sessions: 31 },
+      { tool: 'claude_code', agent: 'general-purpose', totals: totals(28_000_000, 19.4), runs: 14, sessions: 6 },
+      { tool: 'claude_code', agent: 'Explore', totals: totals(9_000_000, 4.1), runs: 9, sessions: 4 },
+      { tool: 'codex', agent: null, totals: totals(52_000_000, 13.3), runs: 0, sessions: 12 },
+      { tool: 'codex', agent: 'guardian', totals: { ...totals(1_200_000, 0, true), events: 40, unpriced_events: 40 }, runs: 5, sessions: 3 },
+    ],
+    tools: [
+      t('claude_code', 'Bash', 1180, 1176, 41, 160), t('claude_code', 'Edit', 402, 402, 3, 0), t('claude_code', 'Read', 360, 358, 6, 120),
+      t('codex', 'shell', 310, 310, 84, 0), t('claude_code', 'Write', 141, 141, 2, 0), t('claude_code', 'mcp__Claude_Browser__navigate', 96, 96, 9, 0),
+      t('codex', 'apply_patch', 88, 88, 1, 0), t('claude_code', 'Grep', 64, 64, 1, 30), t('claude_code', 'WebSearch', 37, 37, 0, 21),
+      t('codex', 'mcp__node_repl__js', 33, 33, 4, 0), t('codex', 'web_search', 19, 0, 0, 0), t('claude_code', 'TaskUpdate', 17, 17, 0, 0),
+    ],
+    tool_calls: 2747,
+    filtered_by_session: false,
+  }
+}
+
+function mockTips() {
+  return {
+    tips: [
+      { kind: 'cache_rebuild', requests: 9, sessions: 6, tokens: 1_480_000, extra_usd: 11.42, cost_share_pct: 4.0 },
+      { kind: 'long_context', requests: 22, extra_usd: 6.84, cost_share_pct: 2.4, models: ['gpt-5.6-terra'] },
+      { kind: 'large_contexts', requests: 840, requests_pct: 71.2, cost_usd: 241.3, cost_share_pct: 83.8, threshold: 100_000 },
+      { kind: 'tool_errors', tool: 'codex', name: 'shell', calls: 310, failed: 84, rate_pct: 27.1 },
+    ],
+    requests: 1180,
+    cost_usd: 288.1,
+    tool_calls: 2747,
+  }
+}
+
+function mockHistory() {
+  const now = Date.now()
+  const H = 3600e3
+  const five = Array.from({ length: 24 }, (_, i) => {
+    const reset = now - (27 - i) * day + ((i * 7) % 10) * H
+    const peak = [18, 44, 63, 100, 37, 22, 81, 55, 12, 100, 47, 28, 66, 39, 91, 24, 51, 33, 70, 15, 58, 42, 100, 31][i]
+    return { start_ms: reset - 5 * H, resets_at_ms: reset, end_ms: reset, first_ms: reset - 4.5 * H, last_ms: reset - (i % 4 === 1 ? 2 * H : 0.2 * H), peak_pct: peak, readings: 30, full: peak >= 99.5, full_at_ms: peak >= 99.5 ? reset - H : null, full_minutes: peak >= 99.5 ? 60 : null, complete: peak >= 99.5 || i % 4 !== 1, in_progress: false, plan: null }
+  })
+  five[five.length - 1] = { ...five[five.length - 1], resets_at_ms: now + 2 * H, end_ms: now + 2 * H, start_ms: now - 3 * H, last_ms: now - 0.1 * H, in_progress: true, complete: false, full: false, full_at_ms: null, full_minutes: null, peak_pct: 31 }
+  const week = Array.from({ length: 8 }, (_, i) => {
+    const reset = now - (7 - i) * 7 * day + 2 * day
+    const peak = [34, 52, 61, 100, 47, 58, 72, 41][i]
+    return { start_ms: reset - 7 * day, resets_at_ms: reset, end_ms: reset, first_ms: reset - 6.8 * day, last_ms: reset - (i === 2 ? 2 * day : 0.3 * day), peak_pct: peak, readings: 400, full: peak >= 99.5, full_at_ms: peak >= 99.5 ? reset - 9 * H : null, full_minutes: peak >= 99.5 ? 540 : null, complete: i !== 2, in_progress: i === 7, plan: null }
+  })
+  const codexWeek = week.map((w, i) => ({ ...w, peak_pct: [12, 20, 9, 31, 26, 18, 44, 7][i], full: false, full_at_ms: null, full_minutes: null, plan: 'plus' }))
+  const codexFive = five.slice(0, 12).map((w, i) => ({ ...w, peak_pct: [8, 22, 15, 41, 5, 13, 29, 18, 9, 36, 12, 7][i], full: false, full_at_ms: null, full_minutes: null, plan: 'plus', complete: i % 3 !== 0, in_progress: false }))
+  const stats = (w: number, c: number, f: number, fm: number, pc: number | null, ps: number | null) => ({ windows: w, complete: c, full: f, full_minutes: fm, peak_complete: pc, peak_seen: ps })
+  return {
+    history: {
+      from_ms: now - 56 * day,
+      to_ms: now,
+      series: [
+        { provider: 'anthropic', limit_id: '', window: 'five_hour', window_minutes: 300, windows: five },
+        { provider: 'anthropic', limit_id: '', window: 'seven_day', window_minutes: 10080, windows: week },
+        { provider: 'openai', limit_id: 'codex', window: 'five_hour', window_minutes: 300, windows: codexFive },
+        { provider: 'openai', limit_id: 'codex', window: 'seven_day', window_minutes: 10080, windows: codexWeek },
+      ],
+      observed_days: { anthropic: 26, openai: 14 },
+    },
+    advice: [
+      { provider: 'anthropic', kind: 'upgrade', plan: 'max5x', suggested: 'max20x', strong: false, days: 28, observed_days: 26, five_hour: stats(24, 18, 3, 180, 100, 100), weekly: stats(4, 3, 1, 540, 100, 100), session_ratio: 4, projected_five_hour: null, projected_weekly_if_same_ratio: null, suggested_has_no_five_hour: false, monthly_delta_usd: 100 },
+      { provider: 'openai', kind: 'fits', plan: 'plus', suggested: null, strong: false, days: 28, observed_days: 14, five_hour: stats(12, 8, 0, 0, 41, 41), weekly: stats(4, 3, 0, 0, 44, 44), session_ratio: null, projected_five_hour: null, projected_weekly_if_same_ratio: null, suggested_has_no_five_hour: false, monthly_delta_usd: null },
+    ],
+    detected_plans: {},
+  }
+}
+
+const update = { current: '0.2.0', configured: true, checking: false, last_check_ms: Date.now() - 3600e3, last_error: null, available: null as null | { version: string; notes: string | null; date: string | null }, installing: false, downloaded: 0, total: null }
+
 const pricing = {
   schema_version: 1,
   updated_at: '2026-10-02',
@@ -214,7 +310,7 @@ export function installMock() {
       const a = args as Record<string, unknown>
       switch (cmd) {
         case 'app_info':
-          return { version: '0.1.0', data_dir: 'C:\\Users\\you\\AppData\\Local\\AIUsageTracker', pricing_origin: 'bundled', pricing_updated_at: '2026-10-02', supports_mica: false, accent_color: null, started_hidden: false, reports_dir: 'C:\Users\you\Documents\AI Usage Tracker' }
+          return { version: '0.2.0', data_dir: 'C:\\Users\\you\\AppData\\Local\\AIUsageTracker', pricing_origin: 'bundled', pricing_updated_at: '2026-10-02', supports_mica: false, accent_color: null, started_hidden: false, reports_dir: 'C:\Users\you\Documents\AI Usage Tracker' }
         case 'get_settings':
           return settings
         case 'save_settings':
@@ -270,6 +366,25 @@ export function installMock() {
           return { file: pricing, origin: 'bundled' }
         case 'get_plans':
           return plansJson
+        case 'get_branches':
+          return mockBranches()
+        case 'get_agents_tools':
+          return mockAgentsTools()
+        case 'get_tips':
+          return mockTips()
+        case 'get_limit_history':
+          return mockHistory()
+        case 'hotkey_status':
+          return { hotkey: settings.widget.hotkey, error: null }
+        case 'set_hotkey':
+          settings.widget.hotkey = String(a.hotkey)
+          return { hotkey: settings.widget.hotkey, error: null }
+        case 'update_status':
+          return update
+        case 'check_update':
+          update.last_check_ms = Date.now()
+          update.available = new URLSearchParams(location.search).get('update') === '1' ? { version: '0.3.0', notes: 'Bug fixes', date: null } : null
+          return update
         default:
           return null
       }

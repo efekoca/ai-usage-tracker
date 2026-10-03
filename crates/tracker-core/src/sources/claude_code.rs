@@ -13,9 +13,13 @@
 //!   non-alphanumeric character replaced by `-`. Subagent transcripts
 //!   (`projects/<dir>/<session>/subagents/*.jsonl`) start in whatever directory the agent was in,
 //!   so the project is anchored to the launch directory that folder name encodes.
+//! * Lines inside a git repository carry `gitBranch`. Subagent lines are `isSidechain: true`
+//!   with the agent's id (`agentId`) and type (`attributionAgent`, newer versions).
+//! * Tool calls are `tool_use` content blocks (one block per line); the outcome is the matching
+//!   `tool_result` block (`is_error`) in a later user line. Only names and outcomes are kept.
 
 use super::{read_jsonl_from, str_at, u64_at, i64_at, ParseOutput};
-use crate::model::{parse_ts_ms, Accuracy, LimitSnapshot, Provider, Tokens, Tool, UsageEvent};
+use crate::model::{parse_ts_ms, Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -79,16 +83,22 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
             root_cwd = str_at(v, "cwd").filter(|s| !s.is_empty()).map(|c| launch_dir(c, folder.as_deref()));
         }
         let mut recognised = false;
+        // each Cowork session runs in its own scratch folder; group them as one project
+        let project = if ctx.client_override == Some("cowork") { Some("Cowork".to_owned()) } else { root_cwd.clone() };
         if let Some(mut ev) = usage_event(v, ctx) {
-            if ctx.client_override == Some("cowork") {
-                // each Cowork session runs in its own scratch folder; group them as one project
-                ev.project_path = Some("Cowork".into());
-            } else if root_cwd.is_some() {
-                ev.project_path = root_cwd.clone();
+            if project.is_some() {
+                ev.project_path = project.clone();
             }
             out.events.push(ev);
             recognised = true;
         }
+        for mut call in tool_calls(v) {
+            if project.is_some() {
+                call.project_path = project.clone();
+            }
+            out.tool_calls.push(call);
+        }
+        out.tool_results.extend(tool_results(v));
         if let Some(ls) = quota_limit(v, ctx) {
             out.limits.push(ls);
             recognised = true;
@@ -152,6 +162,7 @@ pub(crate) fn usage_event(v: &Value, ctx: &ClaudeCtx) -> Option<UsageEvent> {
     let ts_ms = str_at(v, "timestamp").and_then(parse_ts_ms)?;
     let web_search = usage.get("server_tool_use").map(|s| u64_at(s, "web_search_requests")).unwrap_or(0) as u32;
 
+    let (agent, thread_id) = subagent(v);
     Some(UsageEvent {
         key,
         ts_ms,
@@ -169,7 +180,69 @@ pub(crate) fn usage_event(v: &Value, ctx: &ClaudeCtx) -> Option<UsageEvent> {
         request_id: str_at(v, "requestId").map(str::to_owned),
         accuracy: Accuracy::Exact,
         source: ctx.source.to_owned(),
+        branch: branch(v),
+        agent,
+        thread_id,
     })
+}
+
+/// `gitBranch` as written on every line inside a repository (empty outside one).
+fn branch(v: &Value) -> Option<String> {
+    str_at(v, "gitBranch").map(str::trim).filter(|b| !b.is_empty()).map(str::to_owned)
+}
+
+/// Subagent lines are marked `isSidechain` and carry the agent's id and, in newer versions,
+/// its type (`attributionAgent`). Returns (agent type, agent id).
+fn subagent(v: &Value) -> (Option<String>, Option<String>) {
+    if v.get("isSidechain").and_then(Value::as_bool) != Some(true) {
+        return (None, None);
+    }
+    let kind = str_at(v, "attributionAgent").map(str::trim).filter(|s| !s.is_empty()).unwrap_or("subagent");
+    (Some(kind.to_owned()), str_at(v, "agentId").map(str::to_owned))
+}
+
+/// Tool calls in an assistant line: their names only, keyed by the tool-use id so copies of
+/// a message (streaming duplicates, resumed sessions) count once.
+fn tool_calls(v: &Value) -> Vec<ToolCall> {
+    if str_at(v, "type") != Some("assistant") {
+        return Vec::new();
+    }
+    let Some(blocks) = v.get("message").and_then(|m| m.get("content")).and_then(Value::as_array) else { return Vec::new() };
+    let Some(ts_ms) = str_at(v, "timestamp").and_then(parse_ts_ms) else { return Vec::new() };
+    let (agent, _) = subagent(v);
+    blocks
+        .iter()
+        .filter(|b| matches!(str_at(b, "type"), Some("tool_use" | "server_tool_use")))
+        .filter_map(|b| {
+            let (id, name) = (str_at(b, "id")?, str_at(b, "name")?.trim());
+            (!name.is_empty()).then(|| ToolCall {
+                key: format!("cct:{id}"),
+                ts_ms,
+                tool: Tool::ClaudeCode,
+                session_id: str_at(v, "sessionId").map(str::to_owned),
+                project_path: str_at(v, "cwd").map(str::to_owned),
+                agent: agent.clone(),
+                name: name.to_owned(),
+                failed: None,
+            })
+        })
+        .collect()
+}
+
+/// Tool results in a user line: whether each call returned an error (`is_error`).
+fn tool_results(v: &Value) -> Vec<(String, bool)> {
+    if str_at(v, "type") != Some("user") {
+        return Vec::new();
+    }
+    let Some(blocks) = v.get("message").and_then(|m| m.get("content")).and_then(Value::as_array) else { return Vec::new() };
+    blocks
+        .iter()
+        .filter(|b| str_at(b, "type") == Some("tool_result"))
+        .filter_map(|b| {
+            let id = str_at(b, "tool_use_id")?;
+            Some((format!("cct:{id}"), b.get("is_error").and_then(Value::as_bool).unwrap_or(false)))
+        })
+        .collect()
 }
 
 fn quota_limit(v: &Value, ctx: &ClaudeCtx) -> Option<LimitSnapshot> {

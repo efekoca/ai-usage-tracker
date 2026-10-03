@@ -6,7 +6,7 @@ pub mod claude_plan;
 pub mod codex;
 pub mod cowork_audit;
 
-use crate::model::{LimitSnapshot, UsageEvent};
+use crate::model::{LimitSnapshot, ToolCall, UsageEvent};
 use serde_json::Value;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
@@ -47,6 +47,9 @@ impl ParserKind {
 pub struct ParseOutput {
     pub events: Vec<UsageEvent>,
     pub limits: Vec<LimitSnapshot>,
+    pub tool_calls: Vec<ToolCall>,
+    /// Outcomes that arrive after their call (`(call key, failed)`); applied to stored calls.
+    pub tool_results: Vec<(String, bool)>,
     /// Human-readable, content-free warnings (line numbers / offsets only).
     pub warnings: Vec<String>,
     /// Byte offset up to which the file has been fully consumed.

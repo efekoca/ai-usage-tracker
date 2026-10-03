@@ -7,6 +7,7 @@
   import AccuracyBadge from '../components/AccuracyBadge.svelte'
   import Icon from '../components/Icon.svelte'
   import Segmented from '../components/Segmented.svelte'
+  import LimitHistory from '../components/LimitHistory.svelte'
 
   let plans: PlansFile | null = $state(null)
   onMount(async () => {
@@ -130,6 +131,8 @@
     </section>
   {/each}
 </div>
+
+<LimitHistory {plans} />
 
 <section class="card">
   <h2>{t('limits.thresholds')}</h2>

@@ -1,8 +1,8 @@
 // Dashboard state shared across views (Svelte 5 runes).
-import { api, on, type AppInfo, type Filter, type LimitView, type Period, type Report, type ScanStatus, type Settings } from './api'
+import { api, on, type AppInfo, type Filter, type LimitView, type Period, type Report, type ScanStatus, type Settings, type UpdateStatus } from './api'
 import { i18n, resolveLang } from './i18n.svelte'
 
-export type View = 'overview' | 'daily' | 'breakdown' | 'sessions' | 'cache' | 'context' | 'limits' | 'projects' | 'sources' | 'widget' | 'settings'
+export type View = 'overview' | 'tips' | 'daily' | 'breakdown' | 'sessions' | 'cache' | 'context' | 'limits' | 'projects' | 'sources' | 'widget' | 'settings'
 
 export const app = $state({
   ready: false,
@@ -16,6 +16,7 @@ export const app = $state({
   loading: false,
   error: '',
   scan: null as ScanStatus | null,
+  update: null as UpdateStatus | null,
   /** bumps whenever backend data changes, so views can refetch their own data */
   tick: 0,
 })
@@ -97,6 +98,14 @@ export async function init() {
   await on<ScanStatus>('scan-finished', (s) => {
     app.scan = s
   })
+  await on<UpdateStatus>('update-status', (u) => {
+    app.update = u
+  })
+  // the tray menu's "update" item opens the settings
+  await on<View>('navigate', (v) => {
+    app.view = v
+  })
+  app.update = await api.updateStatus().catch(() => null)
   // follow OS light/dark switches live
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => app.tick++)
   // limit states (reset/stale, countdowns) move with time

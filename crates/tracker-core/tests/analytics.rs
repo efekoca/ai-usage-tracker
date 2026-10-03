@@ -130,6 +130,9 @@ fn ev(key: &str, ts: i64, tool: Tool, model: &str, project: &str, input: u64, ou
         request_id: None,
         accuracy: Accuracy::Exact,
         source: "test".into(),
+        branch: None,
+        agent: None,
+        thread_id: None,
     }
 }
 

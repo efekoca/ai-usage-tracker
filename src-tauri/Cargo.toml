@@ -20,11 +20,16 @@ tauri-plugin-log = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-global-shortcut = "2"
+# signed updates from the project's release page (checked only when a release location is set)
+tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = "0.4"
 chrono = "0.4"
 notify = "8"
+# already used by Tauri's async runtime; only its timer is needed here
+tokio = { version = "1", features = ["time"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_Foundation", "Win32_System_Registry", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi"] }

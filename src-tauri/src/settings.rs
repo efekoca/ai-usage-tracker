@@ -86,6 +86,9 @@ pub struct WidgetSettings {
     pub number_weight: u16,
     /// Fixed-width digits so values do not jitter as they change.
     pub tabular_nums: bool,
+    /// System-wide shortcut that shows or hides the widget (`Ctrl+Alt+Shift+W` style);
+    /// empty = none.
+    pub hotkey: String,
 }
 
 impl Default for WidgetSettings {
@@ -122,6 +125,7 @@ impl Default for WidgetSettings {
             number_scale: 1.0,
             number_weight: 700,
             tabular_nums: true,
+            hotkey: DEFAULT_HOTKEY.into(),
         }
     }
 }
@@ -153,6 +157,28 @@ impl WidgetSettings {
             .collect::<String>()
             .trim()
             .to_string();
+        self.hotkey = self.hotkey.trim().chars().take(64).collect();
+    }
+}
+
+/// Four keys, so it does not take a combination another program or an AltGr character
+/// (Ctrl+Alt on many keyboard layouts) is likely to need.
+pub const DEFAULT_HOTKEY: &str = "Ctrl+Alt+Shift+W";
+
+/// The tray icon's live percentage.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct TraySettings {
+    /// Draw the percentage into the tray icon (otherwise the app icon).
+    pub show_percent: bool,
+    /// Which limit: "auto" (the fullest current one) or "<provider>:<window>",
+    /// e.g. "anthropic:five_hour".
+    pub limit: String,
+}
+
+impl Default for TraySettings {
+    fn default() -> Self {
+        TraySettings { show_percent: true, limit: "auto".into() }
     }
 }
 
@@ -231,6 +257,11 @@ pub struct Settings {
     pub weekly_report_auto: bool,
     /// Folder for those PDFs; empty = Documents\AI Usage Tracker.
     pub weekly_report_dir: String,
+    pub tray: TraySettings,
+    /// Look for a signed update on the project's release page at start and every few hours.
+    /// Only the version file is downloaded; nothing is sent. Has no effect until the build
+    /// names a release location.
+    pub update_check: bool,
 }
 
 impl Default for Settings {
@@ -256,6 +287,8 @@ impl Default for Settings {
             plan_prices: Default::default(),
             weekly_report_auto: false,
             weekly_report_dir: String::new(),
+            tray: TraySettings::default(),
+            update_check: true,
         }
     }
 }
@@ -304,5 +337,13 @@ mod tests {
         assert!(s.capture.claude_poll);
         assert!(!s.capture.codex_poll, "an explicit choice is kept");
         assert_eq!(s.limit_display, "used");
+        assert!(s.tray.show_percent && s.update_check);
+        assert_eq!(s.widget.hotkey, DEFAULT_HOTKEY);
+    }
+
+    #[test]
+    fn a_cleared_hotkey_stays_cleared() {
+        let s: Settings = serde_json::from_str(r#"{"widget":{"hotkey":""}}"#).unwrap();
+        assert_eq!(s.widget.hotkey, "");
     }
 }

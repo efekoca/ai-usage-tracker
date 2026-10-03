@@ -1,12 +1,11 @@
 //! Main window (created on demand and destroyed on close to free WebView memory), the
-//! always-on-top widget, its native context menu, the tray icon and full-screen auto-hide.
+//! always-on-top widget, its native context menu, menu handling and full-screen auto-hide.
 
 use crate::settings::Settings;
 use crate::state::AppState;
 use crate::worker::Msg;
 use std::sync::atomic::Ordering;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::window::{Effect, EffectsBuilder};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
@@ -315,6 +314,11 @@ pub fn handle_menu(app: &AppHandle, id: &str) {
             return;
         }
         "tray:rescan" => return state.worker.send(Msg::Scan),
+        "tray:update" => {
+            show_main(app);
+            let _ = app.emit("navigate", "settings");
+            return;
+        }
         "w:hide" => s.widget.visible = false,
         "tray:widget" => s.widget.visible = !s.widget.visible,
         "w:autohide" => s.widget.auto_hide_fullscreen = !s.widget.auto_hide_fullscreen,
@@ -342,36 +346,7 @@ pub fn handle_menu(app: &AppHandle, id: &str) {
     *state.settings.write().unwrap() = s.clone();
     apply_widget_settings(app, &s);
     let _ = app.emit("settings-changed", &s);
-}
-
-// ------------------------------------------------------------------ tray
-
-pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
-    let s = app.state::<AppState>().settings.read().unwrap().clone();
-    let tr = s.language == "tr" || (s.language == "system" && system_is_turkish());
-    let t = |en: &'static str, tr_: &'static str| if tr { tr_ } else { en };
-    let menu = Menu::with_items(
-        app,
-        &[
-            &MenuItem::with_id(app, "tray:open", t("Open dashboard", "Paneli aç"), true, None::<&str>)?,
-            &MenuItem::with_id(app, "tray:widget", t("Show/hide widget", "Widget'ı göster/gizle"), true, None::<&str>)?,
-            &MenuItem::with_id(app, "tray:rescan", t("Rescan now", "Şimdi tara"), true, None::<&str>)?,
-            &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, "app:quit", t("Quit", "Çık"), true, None::<&str>)?,
-        ],
-    )?;
-    let mut b = TrayIconBuilder::with_id("main-tray").tooltip("AI Usage Tracker").menu(&menu).show_menu_on_left_click(false);
-    if let Some(icon) = app.default_window_icon() {
-        b = b.icon(icon.clone());
-    }
-    b.on_menu_event(|app, e| handle_menu(app, e.id().as_ref()))
-        .on_tray_icon_event(|tray, e| {
-            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e {
-                show_main(tray.app_handle());
-            }
-        })
-        .build(app)?;
-    Ok(())
+    crate::tray::refresh_soon();
 }
 
 // ------------------------------------------------------------------ autostart

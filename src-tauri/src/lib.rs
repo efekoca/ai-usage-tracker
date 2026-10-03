@@ -4,9 +4,12 @@
 mod capture;
 mod commands;
 mod fonts;
+mod hotkey;
 mod pdf;
 mod settings;
 mod state;
+mod tray;
+mod updates;
 mod windows;
 mod worker;
 
@@ -104,6 +107,8 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| windows::show_main(app)))
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--autostart"])))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_log::Builder::new()
                 .clear_targets()
@@ -134,9 +139,14 @@ pub fn run() {
                 started_hidden,
                 report_ready: Mutex::new(None),
                 last_report: Mutex::new(None),
+                updates: Mutex::new(updates::UpdateStatus::default()),
+                hotkey_error: Mutex::new(None),
             });
             worker::start(app.handle().clone(), db_path, rx);
-            windows::build_tray(app.handle())?;
+            tray::build(app.handle())?;
+            tray::start(app.handle().clone());
+            // a combination another program owns is reported in settings, not fatal
+            let _ = hotkey::apply(app.handle(), &settings.widget.hotkey);
             if !started_hidden || !settings.onboarded {
                 windows::show_main(app.handle());
             }
@@ -144,6 +154,7 @@ pub fn run() {
             windows::start_fullscreen_watch(app.handle().clone());
             capture::start(app.handle());
             pdf::start_weekly(app.handle().clone());
+            updates::start(app.handle().clone());
             log::info!("started v{}", app.package_info().version);
             Ok(())
         })
@@ -188,6 +199,15 @@ pub fn run() {
             commands::quit_app,
             commands::capture_status,
             commands::set_capture,
+            commands::get_branches,
+            commands::get_agents_tools,
+            commands::get_tips,
+            commands::get_limit_history,
+            commands::hotkey_status,
+            commands::set_hotkey,
+            commands::update_status,
+            commands::check_update,
+            commands::install_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while building AI Usage Tracker");

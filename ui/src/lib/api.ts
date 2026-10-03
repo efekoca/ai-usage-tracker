@@ -182,6 +182,7 @@ export interface WidgetSettings {
   number_scale: number
   number_weight: number
   tabular_nums: boolean
+  hotkey: string
 }
 
 export interface CaptureSettings {
@@ -237,6 +238,8 @@ export interface Settings {
   plan_prices: Record<string, number>
   weekly_report_auto: boolean
   weekly_report_dir: string
+  tray: { show_percent: boolean; limit: string }
+  update_check: boolean
 }
 
 export interface SourceInfo {
@@ -312,6 +315,8 @@ export interface PlanDef {
   name: string
   windows: string[]
   relative?: string
+  ladder?: number
+  session_multiple?: number
   note?: { en: string; tr: string }
   source: string
   /** Monthly list price in USD; null when the plan has no fixed price. */
@@ -432,6 +437,130 @@ export interface PlanValue {
   providers: ProviderValue[]
 }
 
+export interface BranchRow {
+  project_id: number | null
+  project: string
+  hidden: boolean
+  branch: string | null
+  branch_hidden: boolean
+  totals: Totals
+  sessions: number
+  tools: Tool[]
+  first_ms: number
+  last_ms: number
+}
+export interface Branches {
+  rows: BranchRow[]
+  events_with_branch: number
+  events_without_branch: number
+}
+
+export interface AgentRow {
+  tool: Tool
+  agent: string | null
+  totals: Totals
+  runs: number
+  sessions: number
+}
+export interface ToolRow {
+  tool: Tool
+  name: string
+  calls: number
+  known: number
+  failed: number
+  by_subagents: number
+}
+export interface AgentsTools {
+  agents: AgentRow[]
+  tools: ToolRow[]
+  tool_calls: number
+  filtered_by_session: boolean
+}
+
+export type Tip =
+  | { kind: 'cache_rebuild'; requests: number; sessions: number; tokens: number; extra_usd: number; cost_share_pct: number }
+  | { kind: 'long_context'; requests: number; extra_usd: number; cost_share_pct: number; models: string[] }
+  | { kind: 'fast_mode'; requests: number; extra_usd: number; cost_share_pct: number }
+  | { kind: 'residency'; requests: number; extra_usd: number; cost_share_pct: number }
+  | { kind: 'large_contexts'; requests: number; requests_pct: number; cost_usd: number; cost_share_pct: number; threshold: number }
+  | { kind: 'tool_errors'; tool: Tool; name: string; calls: number; failed: number; rate_pct: number }
+export interface Tips {
+  tips: Tip[]
+  requests: number
+  cost_usd: number
+  tool_calls: number
+}
+
+export interface WindowRecord {
+  start_ms: number | null
+  resets_at_ms: number | null
+  /** The reset, or earlier when a newer window started first (an early reset). */
+  end_ms: number | null
+  first_ms: number
+  last_ms: number
+  peak_pct: number
+  readings: number
+  full: boolean
+  full_at_ms: number | null
+  full_minutes: number | null
+  complete: boolean
+  in_progress: boolean
+  plan: string | null
+}
+export interface WindowSeries {
+  provider: Provider
+  limit_id: string
+  window: string
+  window_minutes: number
+  windows: WindowRecord[]
+}
+export interface WindowStats {
+  windows: number
+  complete: number
+  full: number
+  full_minutes: number
+  peak_complete: number | null
+  peak_seen: number | null
+}
+export type AdviceKind = 'no_plan' | 'not_applicable' | 'insufficient' | 'upgrade' | 'at_top' | 'downgrade' | 'fits'
+export interface PlanAdvice {
+  provider: Provider
+  kind: AdviceKind
+  plan: string | null
+  suggested: string | null
+  strong: boolean
+  days: number
+  observed_days: number
+  five_hour: WindowStats
+  weekly: WindowStats
+  session_ratio: number | null
+  projected_five_hour: number | null
+  projected_weekly_if_same_ratio: number | null
+  suggested_has_no_five_hour: boolean
+  monthly_delta_usd: number | null
+}
+export interface LimitHistoryView {
+  history: { from_ms: number; to_ms: number; series: WindowSeries[]; observed_days: Record<string, number> }
+  advice: PlanAdvice[]
+  detected_plans: Record<string, string>
+}
+
+export interface HotkeyStatus {
+  hotkey: string
+  error: string | null
+}
+export interface UpdateStatus {
+  current: string
+  configured: boolean
+  checking: boolean
+  last_check_ms: number | null
+  last_error: string | null
+  available: { version: string; notes: string | null; date: string | null } | null
+  installing: boolean
+  downloaded: number
+  total: number | null
+}
+
 export const api = {
   appInfo: () => invoke<AppInfo>('app_info'),
   getSettings: () => invoke<Settings>('get_settings'),
@@ -472,6 +601,15 @@ export const api = {
   setCapture: (kind: 'claude' | 'codex' | 'statusline' | 'otel', enabled: boolean) => invoke<string>('set_capture', { kind, enabled }),
   placeWidget: (corner: string, remember = true) => invoke<void>('place_widget', { corner, remember }),
   listFonts: () => invoke<string[]>('list_fonts'),
+  branches: (period: Period, filter?: Filter) => invoke<Branches>('get_branches', { period, filter }),
+  agentsTools: (period: Period, filter?: Filter) => invoke<AgentsTools>('get_agents_tools', { period, filter }),
+  tips: (period: Period, filter?: Filter) => invoke<Tips>('get_tips', { period, filter }),
+  limitHistory: () => invoke<LimitHistoryView>('get_limit_history'),
+  hotkeyStatus: () => invoke<HotkeyStatus>('hotkey_status'),
+  setHotkey: (hotkey: string) => invoke<HotkeyStatus>('set_hotkey', { hotkey }),
+  updateStatus: () => invoke<UpdateStatus>('update_status'),
+  checkUpdate: () => invoke<UpdateStatus>('check_update'),
+  installUpdate: () => invoke<void>('install_update'),
 }
 
 export function on<T>(event: string, cb: (payload: T) => void): Promise<UnlistenFn> {

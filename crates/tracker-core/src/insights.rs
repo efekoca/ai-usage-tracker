@@ -437,6 +437,207 @@ pub fn plan_value<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, t
     Ok(PlanValue { range, dates: dates.iter().map(|d| d.format("%Y-%m-%d").to_string()).collect(), providers })
 }
 
+// ---------------------------------------------------------------- branches
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BranchRow {
+    pub project_id: Option<i64>,
+    pub project: String,
+    pub hidden: bool,
+    /// `None`: outside a repository, or the tool did not report a branch.
+    pub branch: Option<String>,
+    /// The project's name is hidden, so its branch names are too (they can name clients or
+    /// features); set by the caller that masks names.
+    pub branch_hidden: bool,
+    pub totals: Totals,
+    pub sessions: u64,
+    pub tools: Vec<Tool>,
+    pub first_ms: i64,
+    pub last_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Branches {
+    /// Most expensive first.
+    pub rows: Vec<BranchRow>,
+    pub events_with_branch: u64,
+    pub events_without_branch: u64,
+}
+
+/// Usage per project and git branch. The same branch name in two projects is two rows.
+pub fn branches(store: &Store, book: &PriceBook, range: Range, filter: &Filter) -> Result<Branches> {
+    let projects: HashMap<i64, ProjectRow> = store.projects()?.into_iter().map(|p| (p.id, p)).collect();
+    struct Acc {
+        totals: Totals,
+        sessions: std::collections::HashSet<String>,
+        tools: std::collections::BTreeSet<&'static str>,
+        first: i64,
+        last: i64,
+    }
+    let mut map: HashMap<(Option<i64>, Option<String>), Acc> = HashMap::new();
+    let (mut with, mut without) = (0u64, 0u64);
+    for e in store.events_between(range.from_ms, range.to_ms)?.iter().filter(|e| filter.matches(e)) {
+        if e.branch.is_some() {
+            with += 1;
+        } else {
+            without += 1;
+        }
+        let a = map.entry((e.project_id, e.branch.clone())).or_insert_with(|| Acc {
+            totals: Totals::default(),
+            sessions: Default::default(),
+            tools: Default::default(),
+            first: e.ts_ms,
+            last: e.ts_ms,
+        });
+        add(&mut a.totals, book, e);
+        if let Some(s) = &e.session_id {
+            a.sessions.insert(format!("{}:{s}", e.tool.as_str()));
+        }
+        a.tools.insert(e.tool.as_str());
+        a.first = a.first.min(e.ts_ms);
+        a.last = a.last.max(e.ts_ms);
+    }
+    let mut rows: Vec<BranchRow> = map
+        .into_iter()
+        .map(|((project_id, branch), a)| {
+            let (project, hidden) = project_label(&projects, project_id);
+            BranchRow {
+                project_id,
+                project,
+                hidden,
+                branch,
+                branch_hidden: false,
+                sessions: a.sessions.len() as u64,
+                tools: a.tools.iter().filter_map(|t| Tool::parse(t)).collect(),
+                first_ms: a.first,
+                last_ms: a.last,
+                totals: a.totals,
+            }
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        b.totals
+            .cost_usd
+            .total_cmp(&a.totals.cost_usd)
+            .then(b.totals.total_tokens.cmp(&a.totals.total_tokens))
+            .then(a.project.cmp(&b.project))
+            .then(a.branch.cmp(&b.branch))
+    });
+    Ok(Branches { rows, events_with_branch: with, events_without_branch: without })
+}
+
+// ---------------------------------------------------------------- subagents and tools
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AgentRow {
+    pub tool: Tool,
+    /// `None`: the main conversation.
+    pub agent: Option<String>,
+    pub totals: Totals,
+    /// Separate subagent runs (conversations); 0 for the main conversation.
+    pub runs: u64,
+    pub sessions: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolRow {
+    pub tool: Tool,
+    pub name: String,
+    pub calls: u64,
+    /// Calls whose outcome the log records.
+    pub known: u64,
+    pub failed: u64,
+    /// Calls made by subagents.
+    pub by_subagents: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AgentsTools {
+    /// Per tool, main conversation first, then subagent types by cost.
+    pub agents: Vec<AgentRow>,
+    /// Most used first.
+    pub tools: Vec<ToolRow>,
+    pub tool_calls: u64,
+    /// The model or client filter applies to tool calls through their sessions.
+    pub filtered_by_session: bool,
+}
+
+/// How much of the usage subagents made, and which tools were called how often.
+pub fn agents_tools(store: &Store, book: &PriceBook, range: Range, filter: &Filter) -> Result<AgentsTools> {
+    let events: Vec<EventRow> = store.events_between(range.from_ms, range.to_ms)?.into_iter().filter(|e| filter.matches(e)).collect();
+    struct Acc {
+        totals: Totals,
+        runs: std::collections::HashSet<String>,
+        sessions: std::collections::HashSet<String>,
+    }
+    let mut acc: BTreeMap<(&'static str, Option<String>), Acc> = BTreeMap::new();
+    for e in &events {
+        let a = acc
+            .entry((e.tool.as_str(), e.agent.clone()))
+            .or_insert_with(|| Acc { totals: Totals::default(), runs: Default::default(), sessions: Default::default() });
+        add(&mut a.totals, book, e);
+        if let Some(t) = &e.thread_id {
+            a.runs.insert(t.clone());
+        }
+        if let Some(s) = &e.session_id {
+            a.sessions.insert(s.clone());
+        }
+    }
+    let mut agents: Vec<AgentRow> = acc
+        .into_iter()
+        .filter_map(|((tool, agent), a)| {
+            Some(AgentRow { tool: Tool::parse(tool)?, runs: a.runs.len() as u64, sessions: a.sessions.len() as u64, agent, totals: a.totals })
+        })
+        .collect();
+    agents.sort_by(|a, b| {
+        a.tool
+            .as_str()
+            .cmp(b.tool.as_str())
+            .then(a.agent.is_some().cmp(&b.agent.is_some()))
+            .then(b.totals.cost_usd.total_cmp(&a.totals.cost_usd))
+            .then(b.totals.total_tokens.cmp(&a.totals.total_tokens))
+    });
+
+    // tool calls carry no model or client: with such a filter, keep the calls of the sessions
+    // the filtered requests belong to
+    let by_session = !filter.models.is_empty() || !filter.clients.is_empty();
+    let sessions: std::collections::HashSet<(&'static str, &str)> =
+        events.iter().filter_map(|e| e.session_id.as_deref().map(|s| (e.tool.as_str(), s))).collect();
+    let mut tools: BTreeMap<(&'static str, String), ToolRow> = BTreeMap::new();
+    let mut total = 0u64;
+    for c in store.tool_calls_between(range.from_ms, range.to_ms)? {
+        if !filter.tools.is_empty() && !filter.tools.contains(&c.tool) {
+            continue;
+        }
+        if !filter.projects.is_empty() && !c.project_id.is_some_and(|p| filter.projects.contains(&p)) {
+            continue;
+        }
+        if by_session && !c.session_id.as_deref().is_some_and(|s| sessions.contains(&(c.tool.as_str(), s))) {
+            continue;
+        }
+        total += 1;
+        let r = tools.entry((c.tool.as_str(), c.name.clone())).or_insert_with(|| ToolRow {
+            tool: c.tool,
+            name: c.name.clone(),
+            calls: 0,
+            known: 0,
+            failed: 0,
+            by_subagents: 0,
+        });
+        r.calls += 1;
+        if let Some(f) = c.failed {
+            r.known += 1;
+            r.failed += u64::from(f);
+        }
+        if c.agent.is_some() {
+            r.by_subagents += 1;
+        }
+    }
+    let mut tools: Vec<ToolRow> = tools.into_values().collect();
+    tools.sort_by(|a, b| b.calls.cmp(&a.calls).then(a.tool.as_str().cmp(b.tool.as_str())).then(a.name.cmp(&b.name)));
+    Ok(AgentsTools { agents, tools, tool_calls: total, filtered_by_session: by_session })
+}
+
 // ---------------------------------------------------------------- limit forecast
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

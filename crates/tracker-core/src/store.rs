@@ -1,7 +1,7 @@
 //! Local SQLite archive (`%LOCALAPPDATA%\AIUsageTracker\tracker.db`). Records stay here even
 //! after the source tools delete or rotate their logs. No content columns exist by design.
 
-use crate::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool, UsageEvent};
+use crate::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -103,6 +103,31 @@ const MIGRATIONS: &[&str] = &[
     r#"
     DELETE FROM file_checkpoint WHERE parser = 'claude_code_jsonl';
     "#,
+    // v7: git branch, subagent type and subagent thread per request, and tool calls by name
+    // (never their input or output). Claude and Codex logs are re-read once to fill them in;
+    // rows whose logs are gone keep NULL (unknown).
+    r#"
+    ALTER TABLE usage_event ADD COLUMN branch TEXT;
+    ALTER TABLE usage_event ADD COLUMN agent TEXT;
+    ALTER TABLE usage_event ADD COLUMN thread_id TEXT;
+    CREATE TABLE tool_call (
+        key        TEXT PRIMARY KEY,
+        ts_ms      INTEGER NOT NULL,
+        tool       TEXT NOT NULL,
+        session_id TEXT,
+        project_id INTEGER REFERENCES project(id),
+        agent      TEXT,
+        name       TEXT NOT NULL,
+        failed     INTEGER
+    );
+    CREATE INDEX tool_call_ts ON tool_call(ts_ms);
+    DELETE FROM file_checkpoint WHERE parser IN ('claude_code_jsonl', 'cowork_jsonl', 'codex_rollout');
+    "#,
+    // v8: an older build that opens a v7 database re-reads the logs without filling the v7
+    // columns and saves its checkpoints again; read once more so they are filled.
+    r#"
+    DELETE FROM file_checkpoint WHERE parser IN ('claude_code_jsonl', 'cowork_jsonl', 'codex_rollout');
+    "#,
 ];
 
 /// A captured row is hidden when the same request also exists as an exact (log) row.
@@ -111,11 +136,14 @@ const NOT_SUPERSEDED: &str = "NOT (u.accuracy = 'captured' AND u.request_id IS N
 
 const EVENT_COLUMNS: &str = "key, ts_ms, tool, client, model, project_id, session_id, input, cache_read, cache_write,
     cache_write_1h, output, reasoning, request_input, web_search, speed, service_tier, inference_geo, accuracy, source,
-    request_id";
+    request_id, branch, agent, thread_id";
 
 /// Merge rule for a repeated event key: field-wise maximum (streaming duplicates), earliest
 /// timestamp, pricing modifiers from whichever copy carries them (the first streaming copy of a
 /// Claude message has no `speed`), and a log-derived (exact) copy upgrades a captured one.
+/// Branch, subagent and thread are kept once known; a row that learns it belongs to a subagent
+/// thread also takes that copy's session (a Codex subagent counts toward its parent session).
+/// SQLite evaluates every right-hand side against the old row, so the order does not matter.
 const UPSERT_EVENT_TAIL: &str = "ON CONFLICT(key) DO UPDATE SET
     ts_ms = MIN(ts_ms, excluded.ts_ms),
     input = MAX(input, excluded.input),
@@ -131,7 +159,11 @@ const UPSERT_EVENT_TAIL: &str = "ON CONFLICT(key) DO UPDATE SET
     inference_geo = COALESCE(excluded.inference_geo, inference_geo),
     project_id = COALESCE(excluded.project_id, project_id),
     request_id = COALESCE(request_id, excluded.request_id),
-    accuracy = CASE WHEN excluded.accuracy = 'exact' THEN 'exact' ELSE accuracy END";
+    accuracy = CASE WHEN excluded.accuracy = 'exact' THEN 'exact' ELSE accuracy END,
+    branch = COALESCE(branch, excluded.branch),
+    agent = COALESCE(agent, excluded.agent),
+    session_id = CASE WHEN thread_id IS NULL AND excluded.thread_id IS NOT NULL THEN excluded.session_id ELSE session_id END,
+    thread_id = COALESCE(thread_id, excluded.thread_id)";
 
 pub struct Store {
     conn: Connection,
@@ -162,6 +194,21 @@ pub struct EventRow {
     pub speed: Option<String>,
     pub inference_geo: Option<String>,
     pub accuracy: Accuracy,
+    pub branch: Option<String>,
+    pub agent: Option<String>,
+    pub thread_id: Option<String>,
+}
+
+/// A tool call as read back for analysis.
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolCallRow {
+    pub ts_ms: i64,
+    pub tool: Tool,
+    pub session_id: Option<String>,
+    pub project_id: Option<i64>,
+    pub agent: Option<String>,
+    pub name: String,
+    pub failed: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -243,7 +290,8 @@ impl Store {
         let mut st = self.conn.prepare_cached(
             &format!(
                 "SELECT ts_ms, tool, client, model, project_id, session_id, input, cache_read, cache_write,
-                        cache_write_1h, output, reasoning, request_input, web_search, speed, inference_geo, accuracy
+                        cache_write_1h, output, reasoning, request_input, web_search, speed, inference_geo, accuracy,
+                        branch, agent, thread_id
                  FROM usage_event u WHERE ts_ms >= ?1 AND ts_ms < ?2 AND {NOT_SUPERSEDED} ORDER BY ts_ms"
             ),
         )?;
@@ -270,6 +318,30 @@ impl Store {
                 speed: r.get(14)?,
                 inference_geo: r.get(15)?,
                 accuracy: Accuracy::parse(&acc),
+                branch: r.get(17)?,
+                agent: r.get(18)?,
+                thread_id: r.get(19)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// Tool calls with `from_ms <= ts < to_ms`.
+    pub fn tool_calls_between(&self, from_ms: i64, to_ms: i64) -> Result<Vec<ToolCallRow>> {
+        let mut st = self.conn.prepare_cached(
+            "SELECT ts_ms, tool, session_id, project_id, agent, name, failed FROM tool_call
+             WHERE ts_ms >= ?1 AND ts_ms < ?2 ORDER BY ts_ms",
+        )?;
+        let rows = st.query_map(params![from_ms, to_ms], |r| {
+            let tool: String = r.get(1)?;
+            Ok(ToolCallRow {
+                ts_ms: r.get(0)?,
+                tool: Tool::parse(&tool).unwrap_or(Tool::ClaudeCode),
+                session_id: r.get(2)?,
+                project_id: r.get(3)?,
+                agent: r.get(4)?,
+                name: r.get(5)?,
+                failed: r.get::<_, Option<i64>>(6)?.map(|f| f != 0),
             })
         })?;
         rows.collect()
@@ -341,7 +413,8 @@ impl Store {
     /// Removes projects that no longer have any usage (e.g. after re-assignment).
     pub fn prune_projects(&self) -> Result<usize> {
         self.conn.execute(
-            "DELETE FROM project WHERE id NOT IN (SELECT DISTINCT project_id FROM usage_event WHERE project_id IS NOT NULL)",
+            "DELETE FROM project WHERE id NOT IN (SELECT DISTINCT project_id FROM usage_event WHERE project_id IS NOT NULL)
+               AND id NOT IN (SELECT DISTINCT project_id FROM tool_call WHERE project_id IS NOT NULL)",
             [],
         )
     }
@@ -349,7 +422,8 @@ impl Store {
     /// Deletes every usage record, snapshot and checkpoint (settings are kept).
     pub fn wipe_data(&self) -> Result<()> {
         self.conn.execute_batch(
-            "BEGIN; DELETE FROM usage_event; DELETE FROM limit_snapshot; DELETE FROM file_checkpoint; DELETE FROM project; COMMIT; VACUUM;",
+            "BEGIN; DELETE FROM usage_event; DELETE FROM tool_call; DELETE FROM limit_snapshot; DELETE FROM file_checkpoint;
+             DELETE FROM project; COMMIT; VACUUM;",
         )
     }
 
@@ -362,8 +436,9 @@ impl Store {
             if theirs == 0 || theirs as usize > MIGRATIONS.len() {
                 return Err(rusqlite::Error::InvalidQuery);
             }
-            // backups made before v2 have no request_id column
+            // backups made before v2 have no request_id column, before v7 no branch/agent/thread
             let their_req = if theirs >= 2 { "e.request_id" } else { "NULL" };
+            let their_v7 = if theirs >= 7 { "e.branch, e.agent, e.thread_id" } else { "NULL, NULL, NULL" };
             let tx = self.conn.unchecked_transaction()?;
             tx.execute(
                 "INSERT INTO project(path, name, hidden) SELECT path, name, hidden FROM other.project WHERE true
@@ -375,7 +450,7 @@ impl Store {
                     "INSERT INTO usage_event({EVENT_COLUMNS})
                      SELECT e.key, e.ts_ms, e.tool, e.client, e.model, p.id, e.session_id, e.input, e.cache_read,
                             e.cache_write, e.cache_write_1h, e.output, e.reasoning, e.request_input, e.web_search,
-                            e.speed, e.service_tier, e.inference_geo, e.accuracy, e.source, {their_req}
+                            e.speed, e.service_tier, e.inference_geo, e.accuracy, e.source, {their_req}, {their_v7}
                      FROM other.usage_event e
                      LEFT JOIN other.project op ON op.id = e.project_id
                      LEFT JOIN main.project p ON p.path = op.path
@@ -392,6 +467,18 @@ impl Store {
                  ON CONFLICT(source, account, limit_id, window, ts_ms) DO NOTHING",
                 [],
             )?;
+            if theirs >= 7 {
+                tx.execute(
+                    "INSERT INTO tool_call(key, ts_ms, tool, session_id, project_id, agent, name, failed)
+                     SELECT c.key, c.ts_ms, c.tool, c.session_id, p.id, c.agent, c.name, c.failed
+                     FROM other.tool_call c
+                     LEFT JOIN other.project op ON op.id = c.project_id
+                     LEFT JOIN main.project p ON p.path = op.path
+                     WHERE true
+                     ON CONFLICT(key) DO UPDATE SET failed = COALESCE(failed, excluded.failed)",
+                    [],
+                )?;
+            }
             tx.commit()?;
             Ok((events, limits))
         })();
@@ -473,7 +560,7 @@ impl StoreTx<'_> {
             };
             let mut st = self.tx.prepare_cached(&format!(
                 "INSERT INTO usage_event({EVENT_COLUMNS})
-                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)
                  {UPSERT_EVENT_TAIL}"
             ))?;
             st.execute(params![
@@ -498,7 +585,40 @@ impl StoreTx<'_> {
                 e.accuracy.as_str(),
                 e.source,
                 e.request_id,
+                e.branch,
+                e.agent,
+                e.thread_id,
             ])?;
+        }
+        Ok(())
+    }
+
+    /// Inserts tool calls; a repeated key (copies of a message) keeps the known outcome.
+    pub fn upsert_tool_calls(&mut self, calls: &[ToolCall]) -> Result<()> {
+        for c in calls {
+            let pid = match &c.project_path {
+                Some(p) if !p.is_empty() => Some(self.project_id(p)?),
+                _ => None,
+            };
+            let mut st = self.tx.prepare_cached(
+                "INSERT INTO tool_call(key, ts_ms, tool, session_id, project_id, agent, name, failed)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8)
+                 ON CONFLICT(key) DO UPDATE SET
+                     ts_ms = MIN(ts_ms, excluded.ts_ms),
+                     project_id = COALESCE(excluded.project_id, project_id),
+                     agent = COALESCE(agent, excluded.agent),
+                     failed = COALESCE(excluded.failed, failed)",
+            )?;
+            st.execute(params![c.key, c.ts_ms, c.tool.as_str(), c.session_id, pid, c.agent, c.name, c.failed.map(i64::from)])?;
+        }
+        Ok(())
+    }
+
+    /// Records outcomes that arrived after their calls (Claude's `tool_result` lines).
+    pub fn apply_tool_results(&mut self, results: &[(String, bool)]) -> Result<()> {
+        let mut st = self.tx.prepare_cached("UPDATE tool_call SET failed = ?2 WHERE key = ?1")?;
+        for (key, failed) in results {
+            st.execute(params![key, i64::from(*failed)])?;
         }
         Ok(())
     }

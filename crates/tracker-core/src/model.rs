@@ -158,6 +158,31 @@ pub struct UsageEvent {
     pub accuracy: Accuracy,
     /// Parser that produced the record (`claude_code_jsonl`, `codex_rollout`, …).
     pub source: String,
+    /// Git branch the tool reported for this request (Claude Code: per request; Codex: at the
+    /// start of the session). `None` outside a repository or when the tool does not say.
+    pub branch: Option<String>,
+    /// Subagent type when a subagent made the request (`general-purpose`, `guardian`, …);
+    /// `None` for the main conversation.
+    pub agent: Option<String>,
+    /// The subagent's own conversation id. `session_id` is always the parent session, so a
+    /// subagent's requests count toward the session that started it.
+    pub thread_id: Option<String>,
+}
+
+/// One tool call or tool action, by name only (never its input or output).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToolCall {
+    /// Globally unique de-duplication key (`cct:<tool_use id>`, `cxt:<thread>:<offset>`).
+    pub key: String,
+    pub ts_ms: i64,
+    pub tool: Tool,
+    pub session_id: Option<String>,
+    pub project_path: Option<String>,
+    pub agent: Option<String>,
+    /// Tool name as the tool reports it (`Bash`, `Edit`, `mcp__<server>__<tool>`, `shell`, …).
+    pub name: String,
+    /// Whether the call returned an error, when the log says (`None` = not known yet).
+    pub failed: Option<bool>,
 }
 
 /// A point-in-time reading of a plan limit window.

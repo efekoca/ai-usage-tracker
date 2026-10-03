@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "AI Usage Tracker",
   "mainBinaryName": "ai-usage-tracker",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "io.aiusagetracker.app",
   "build": {
     "frontendDist": "../ui/dist",
@@ -52,6 +52,15 @@
         "displayLanguageSelector": false,
         "installerHooks": "./installer-hooks.nsh"
       }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYzRTQxMDgwQkZGNjU0QjUKUldTMVZQYS9nQkRrWStJM2ZtRnV3U2VQbWJ6ME1oNGp6eUlzN3FkZGtETVNxQjNKekJUa3lBVmkK",
+      "windows": {
+        "installMode": "passive"
+      },
+      "requireSignedVersion": true
     }
   }
 }

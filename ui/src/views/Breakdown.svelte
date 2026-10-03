@@ -7,6 +7,7 @@
   import HourHeatmap from '../components/charts/HourHeatmap.svelte'
   import Icon from '../components/Icon.svelte'
   import CompareModels from '../components/CompareModels.svelte'
+  import AgentsTools from '../components/AgentsTools.svelte'
 
   let metric: 'tokens' | 'cost' = $state(app.settings?.primary_metric ?? 'tokens')
   const r = $derived(app.report)
@@ -88,6 +89,8 @@
       </table>
     </section>
   </div>
+
+  <AgentsTools />
 
   <section class="card">
     <h2>{t('breakdown.hours')}</h2>
