@@ -219,6 +219,11 @@ fn plus_users_hitting_the_five_hour_limit_are_told_pro_has_none() {
     }
     // a window recorded under another plan is not counted
     v.push(snap(NOW - 2 * DAY - HOUR, Provider::OpenAI, "five_hour", 100.0, NOW - 2 * DAY, Some("go")));
+    // readings on enough days for any advice
+    for d in 1..=8 {
+        let reset = NOW - d * DAY - 8 * HOUR;
+        v.push(snap(reset - HOUR, Provider::OpenAI, "five_hour", 10.0, reset, Some("plus")));
+    }
     let h = limit_history(&store_with(v), NOW, 28).unwrap();
     let a = plan_advice(&h, Provider::OpenAI, Some("plus"), &PlansFile::bundled(), NOW);
     assert_eq!(a.kind, AdviceKind::Upgrade);
@@ -235,6 +240,34 @@ fn without_enough_days_or_a_plan_nothing_is_recommended() {
     assert_eq!(plan_advice(&h, Provider::Anthropic, Some("max20x"), &plans, NOW).kind, AdviceKind::Insufficient);
     assert_eq!(plan_advice(&h, Provider::Anthropic, None, &plans, NOW).kind, AdviceKind::NoPlan);
     assert_eq!(plan_advice(&h, Provider::Anthropic, Some("team_premium"), &plans, NOW).kind, AdviceKind::NotApplicable);
+
+    // three five-hour windows filled on one day are still too little to recommend anything
+    let v: Vec<LimitSnapshot> = (0..3).map(|k| snap(NOW - (k * 6 + 1) * HOUR, Provider::Anthropic, "five_hour", 100.0, NOW - k * 6 * HOUR, Some("max"))).collect();
+    let h = limit_history(&store_with(v), NOW, 28).unwrap();
+    let a = plan_advice(&h, Provider::Anthropic, Some("max5x"), &plans, NOW);
+    assert_eq!((a.kind, a.five_hour.full, a.suggested.as_deref()), (AdviceKind::Insufficient, 3, None));
+}
+
+#[test]
+fn claude_windows_from_another_plan_do_not_count() {
+    let mut v = Vec::new();
+    // Max now, at 10 % on ten days
+    for d in 1..=10 {
+        let reset = NOW - d * DAY;
+        v.push(snap(reset - 10 * MIN, Provider::Anthropic, "five_hour", 10.0, reset, Some("max")));
+    }
+    // filled three times while still on Pro
+    for d in 20..23 {
+        let reset = NOW - d * DAY;
+        v.push(snap(reset - 10 * MIN, Provider::Anthropic, "five_hour", 100.0, reset, Some("pro")));
+    }
+    let h = limit_history(&store_with(v), NOW, 28).unwrap();
+    let plans = PlansFile::bundled();
+    let max = plan_advice(&h, Provider::Anthropic, Some("max5x"), &plans, NOW);
+    assert_eq!((max.five_hour.windows, max.five_hour.full), (10, 0));
+    assert_ne!(max.kind, AdviceKind::Upgrade);
+    let pro = plan_advice(&h, Provider::Anthropic, Some("pro"), &plans, NOW);
+    assert_eq!((pro.kind, pro.five_hour.full), (AdviceKind::Upgrade, 3));
 }
 
 fn usage(key: &str, ts: i64, input: u64) -> UsageEvent {
@@ -292,4 +325,23 @@ fn each_window_gets_the_local_use_inside_it_and_a_capacity_from_complete_windows
     let c = s.capacity.as_ref().unwrap();
     assert_eq!(c.windows, 2);
     assert!((c.median_usd - 8.75).abs() < 1e-9 && (c.min_usd - 7.5).abs() < 1e-9 && (c.max_usd - 10.0).abs() < 1e-9);
+}
+
+#[test]
+fn capacity_pairs_the_peak_with_the_use_up_to_that_reading() {
+    // 50 % read with $1 of use; $1 more after the reading, before the window ended
+    let w = NOW - 2 * DAY;
+    let mut store = store_with(vec![snap(w - 2 * HOUR, Provider::Anthropic, "seven_day", 50.0, w, None)]);
+    let mut tx = store.transaction().unwrap();
+    tx.upsert_events(&[usage("before", w - 3 * DAY, 500_000), usage("after", w - HOUR, 500_000)]).unwrap();
+    tx.commit().unwrap();
+    let mut h = limit_history(&store, NOW, 28).unwrap();
+    add_local_usage(&mut h, &store, &PriceBook::default_book()).unwrap();
+    let s = h.series.iter().find(|s| s.window == "seven_day").unwrap();
+    assert_eq!(s.windows[0].peak_ms, w - 2 * HOUR);
+    // the window's own use still counts everything inside it
+    assert_eq!(s.windows[0].local.requests, 2);
+    assert!((s.windows[0].local.cost_usd - 2.0).abs() < 1e-9);
+    // $1 at 50 %, not $2
+    assert!((s.capacity.as_ref().unwrap().median_usd - 2.0).abs() < 1e-9);
 }

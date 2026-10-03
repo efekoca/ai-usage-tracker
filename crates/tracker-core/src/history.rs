@@ -2,8 +2,8 @@
 //! becomes one record (how full it got, whether it filled, whether it was watched to its end),
 //! and the plan advice is built only on those records and the ratios providers publish.
 
-use crate::analytics::window_minutes;
-use crate::model::{LimitSnapshot, Provider, Tool};
+use crate::analytics::{counts_toward, window_minutes};
+use crate::model::{LimitSnapshot, Provider};
 use crate::plans::PlansFile;
 use crate::pricing::{CostInput, PriceBook};
 use crate::store::Store;
@@ -34,6 +34,7 @@ pub struct WindowRecord {
     pub last_ms: i64,
     /// Highest reading. When `complete` is false the window may have gone higher unseen.
     pub peak_pct: f64,
+    pub peak_ms: i64,
     pub readings: u32,
     pub full: bool,
     pub full_at_ms: Option<i64>,
@@ -60,8 +61,7 @@ pub struct LocalUsage {
 }
 
 /// What a whole window held in API-equivalent terms, from windows where the local logs
-/// explain the reading: `local cost ÷ peak × 100`. A lower bound when the limit was also used
-/// elsewhere, so it is always labelled an estimate.
+/// explain the reading: `local cost up to the peak reading ÷ peak × 100`, always an estimate.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Capacity {
     pub median_usd: f64,
@@ -222,6 +222,7 @@ fn record(items: &[&Reading], reset: Option<(i64, i64)>, dur_ms: i64, now_ms: i6
     let first = items.iter().map(|r| r.ts_ms).min().unwrap_or(now_ms);
     let last = items.iter().map(|r| r.ts_ms).max().unwrap_or(now_ms);
     let peak = items.iter().map(|r| r.used).fold(0.0, f64::max);
+    let peak_ms = items.iter().filter(|r| r.used >= peak).map(|r| r.ts_ms).min().unwrap_or(first);
     let full_at = items.iter().filter(|r| r.used >= FULL_PCT).map(|r| r.ts_ms).min();
     let in_progress = match reset {
         Some((_, end)) => end > now_ms,
@@ -248,6 +249,7 @@ fn record(items: &[&Reading], reset: Option<(i64, i64)>, dur_ms: i64, now_ms: i6
         first_ms: first,
         last_ms: last,
         peak_pct: peak,
+        peak_ms,
         readings: items.len() as u32,
         full: full_at.is_some(),
         full_at_ms: full_at,
@@ -266,13 +268,6 @@ fn record(items: &[&Reading], reset: Option<(i64, i64)>, dur_ms: i64, now_ms: i6
 /// percentages, so a low peak would carry a large rounding error.
 const CAPACITY_MIN_PEAK: f64 = 10.0;
 
-fn provider_tools(p: Provider) -> &'static [Tool] {
-    match p {
-        Provider::Anthropic => &[Tool::ClaudeCode],
-        Provider::OpenAI => &[Tool::Codex],
-    }
-}
-
 /// Sums this computer's logged use of each window's provider inside the window (start to its
 /// actual end, or first to last reading when the reset time is unknown), and estimates what a
 /// whole window holds from the windows watched to their end.
@@ -280,16 +275,15 @@ pub fn add_local_usage(h: &mut LimitHistory, store: &Store, book: &PriceBook) ->
     for s in &mut h.series {
         let span = |w: &WindowRecord| (w.start_ms.unwrap_or(w.first_ms), w.end_ms.unwrap_or(w.last_ms + 1));
         let (Some(from), Some(to)) = (s.windows.iter().map(|w| span(w).0).min(), s.windows.iter().map(|w| span(w).1).max()) else { continue };
-        let tools = provider_tools(s.provider);
-        let events: Vec<_> = store.events_between(from, to)?.into_iter().filter(|e| tools.contains(&e.tool)).collect();
+        let events: Vec<_> = store.events_between(from, to)?.into_iter().filter(|e| counts_toward(s.provider, &s.window, e)).collect();
+        // the peak reading is compared with the use up to that reading, not with later use
+        let mut at_peak: Vec<LocalUsage> = Vec::new();
         for w in &mut s.windows {
             let (a, b) = span(w);
             let lo = events.partition_point(|e| e.ts_ms < a);
             let hi = events.partition_point(|e| e.ts_ms < b);
-            let mut u = LocalUsage::default();
+            let (mut u, mut p) = (LocalUsage::default(), LocalUsage::default());
             for e in &events[lo..hi] {
-                u.requests += 1;
-                u.tokens += e.tokens.total();
                 let input = CostInput {
                     model: &e.model,
                     tokens: &e.tokens,
@@ -298,19 +292,26 @@ pub fn add_local_usage(h: &mut LimitHistory, store: &Store, book: &PriceBook) ->
                     speed: e.speed.as_deref(),
                     inference_geo: e.inference_geo.as_deref(),
                 };
-                match book.cost(&input) {
-                    Some(c) => u.cost_usd += c.total(),
-                    None => u.unpriced_requests += 1,
+                let cost = book.cost(&input).map(|c| c.total());
+                for x in std::iter::once(&mut u).chain((e.ts_ms <= w.peak_ms).then_some(&mut p)) {
+                    x.requests += 1;
+                    x.tokens += e.tokens.total();
+                    match cost {
+                        Some(c) => x.cost_usd += c,
+                        None => x.unpriced_requests += 1,
+                    }
                 }
             }
             w.local = u;
+            at_peak.push(p);
         }
         let mut per_window: Vec<f64> = s
             .windows
             .iter()
-            .filter(|w| w.complete && !w.in_progress && w.start_ms.is_some() && w.peak_pct >= CAPACITY_MIN_PEAK)
-            .filter(|w| w.local.cost_usd > 0.0 && w.local.unpriced_requests == 0)
-            .map(|w| w.local.cost_usd / w.peak_pct.min(100.0) * 100.0)
+            .zip(&at_peak)
+            .filter(|(w, _)| w.complete && !w.in_progress && w.start_ms.is_some() && w.peak_pct >= CAPACITY_MIN_PEAK)
+            .filter(|(_, p)| p.cost_usd > 0.0 && p.unpriced_requests == 0)
+            .map(|(w, p)| p.cost_usd / w.peak_pct.min(100.0) * 100.0)
             .collect();
         per_window.sort_by(f64::total_cmp);
         s.capacity = (!per_window.is_empty()).then(|| {
@@ -329,7 +330,7 @@ pub enum AdviceKind {
     NoPlan,
     /// Team, enterprise, API or an unknown plan: nothing to compare.
     NotApplicable,
-    /// Too few days of readings to say anything beyond the limits that filled.
+    /// Too few days of readings for any recommendation.
     Insufficient,
     /// Limits filled in the period; a larger plan exists.
     Upgrade,
@@ -418,7 +419,10 @@ fn stats(history: &LimitHistory, provider: Provider, window: &str, plan_filter: 
 pub fn plan_advice(history: &LimitHistory, provider: Provider, plan_id: Option<&str>, plans: &PlansFile, now_ms: i64) -> PlanAdvice {
     let since = now_ms - ADVICE_DAYS * DAY_MS;
     // Codex readings name the plan exactly; Claude's say only "max", which fits both Max plans
-    let filter = if provider == Provider::OpenAI { plan_id } else { None };
+    let filter = plan_id.map(|id| match provider {
+        Provider::Anthropic if id.starts_with("max") => "max",
+        _ => id,
+    });
     let mut a = PlanAdvice {
         provider,
         kind: AdviceKind::NoPlan,
@@ -445,6 +449,10 @@ pub fn plan_advice(history: &LimitHistory, provider: Provider, plan_id: Option<&
         _ => None,
     };
 
+    if a.observed_days < MIN_DAYS {
+        a.kind = AdviceKind::Insufficient;
+        return a;
+    }
     if a.weekly.full >= 1 || a.five_hour.full >= 3 {
         a.strong = a.weekly.full >= 2 || a.five_hour.full >= 6;
         match plans.above(provider, current) {
@@ -460,10 +468,6 @@ pub fn plan_advice(history: &LimitHistory, provider: Provider, plan_id: Option<&
             }
             None => a.kind = AdviceKind::AtTop,
         }
-        return a;
-    }
-    if a.observed_days < MIN_DAYS {
-        a.kind = AdviceKind::Insufficient;
         return a;
     }
     a.kind = AdviceKind::Fits;

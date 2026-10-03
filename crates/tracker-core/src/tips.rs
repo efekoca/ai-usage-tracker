@@ -22,8 +22,7 @@ pub const TOOL_ERROR_RATE: f64 = 0.25;
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Tip {
-    /// Claude: after a pause longer than the cache lifetime the whole context was written to
-    /// the cache again. `extra_usd` = what those writes cost beyond reading the same tokens.
+    /// Claude: context cached before a pause longer than the cache lifetime, written again.
     CacheRebuild { requests: u64, sessions: u64, tokens: u64, extra_usd: f64, cost_share_pct: f64 },
     /// Requests over a model's long-context threshold; `extra_usd` = the tier's surcharge.
     LongContext { requests: u64, extra_usd: f64, cost_share_pct: f64, models: Vec<String> },
@@ -32,7 +31,8 @@ pub enum Tip {
     /// Data residency (e.g. US-only inference); `extra_usd` = the regional surcharge.
     Residency { requests: u64, extra_usd: f64, cost_share_pct: f64 },
     LargeContexts { requests: u64, requests_pct: f64, cost_usd: f64, cost_share_pct: f64, threshold: u64 },
-    ToolErrors { tool: Tool, name: String, calls: u64, failed: u64, rate_pct: f64 },
+    /// `rate_pct` = `failed` ÷ `known`, not ÷ `calls`.
+    ToolErrors { tool: Tool, name: String, calls: u64, known: u64, failed: u64, rate_pct: f64 },
 }
 
 impl Tip {
@@ -90,15 +90,14 @@ pub struct Rebuilds {
 
 /// Claude requests that wrote their whole context to the cache again after a pause longer
 /// than the cache lifetime (5 minutes, or an hour for conversations writing 1-hour entries).
-/// A request counts when at least 40 % of its prompt was written again (the shared system
-/// prompt usually stays cached, the conversation after it does not). The first request of a
-/// conversation, a model switch (the cache is per model) and small prompts are not counted.
-/// `extra_usd` is what those writes cost beyond reading the same tokens from a warm cache.
+/// Only what the previous request had cached counts, once it is at least 40 % of the prompt
+/// (the shared system prompt usually stays cached, the conversation after it does not).
 pub fn cache_rebuilds(events: &[EventRow], book: &PriceBook) -> Rebuilds {
-    let mut threads: HashMap<(&str, &str), Vec<&EventRow>> = HashMap::new();
+    // the cache is per model, so each model's requests in a conversation are a sequence of their own
+    let mut threads: HashMap<(&str, &str, &str), Vec<&EventRow>> = HashMap::new();
     for e in events.iter().filter(|e| e.tool.provider() == Provider::Anthropic) {
         if let Some(s) = e.session_id.as_deref() {
-            threads.entry((s, e.thread_id.as_deref().unwrap_or(""))).or_default().push(e);
+            threads.entry((s, e.thread_id.as_deref().unwrap_or(""), e.model.as_str())).or_default().push(e);
         }
     }
     let mut r = Rebuilds::default();
@@ -109,19 +108,26 @@ pub fn cache_rebuilds(events: &[EventRow], book: &PriceBook) -> Rebuilds {
             let (prev, cur) = (w[0], w[1]);
             let ttl = if prev.tokens.cache_write_1h > 0 || cur.tokens.cache_write_1h > 0 { 60 * MIN_MS } else { 5 * MIN_MS };
             let t = &cur.tokens;
+            let prev_cached = (prev.tokens.cache_read + prev.tokens.cache_write).min(prev.request_input);
+            let rewritten = prev_cached.min(cur.request_input).saturating_sub(t.cache_read).min(t.cache_write);
             let rebuilt = cur.ts_ms - prev.ts_ms >= ttl
-                && prev.model == cur.model
                 && cur.request_input >= REBUILD_MIN_PROMPT
-                && t.cache_write * 5 >= cur.request_input * 2;
+                && rewritten * 5 >= cur.request_input * 2;
             if !rebuilt {
                 continue;
             }
-            let warm = Tokens { cache_read: t.cache_read + t.cache_write, cache_write: 0, cache_write_1h: 0, ..*t };
+            let still_written = t.cache_write - rewritten;
+            let warm = Tokens {
+                cache_read: t.cache_read + rewritten,
+                cache_write: still_written,
+                cache_write_1h: t.cache_write_1h.min(still_written),
+                ..*t
+            };
             let (Some(actual), Some(if_warm)) = (cost(book, &input_of(cur)), cost(book, &CostInput { tokens: &warm, ..input_of(cur) })) else {
                 continue;
             };
             r.requests += 1;
-            r.tokens += t.cache_write;
+            r.tokens += rewritten;
             r.extra_usd += actual - if_warm;
             sessions.insert(key.0);
         }
@@ -231,7 +237,7 @@ pub fn tips(store: &Store, book: &PriceBook, range: Range, filter: &Filter) -> R
         let mut flagged: Vec<Tip> = per
             .into_iter()
             .filter(|(_, (_, _, known, failed))| *known >= TOOL_MIN_CALLS && (*failed as f64) / (*known as f64) >= TOOL_ERROR_RATE)
-            .map(|((_, name), (tool, calls, known, failed))| Tip::ToolErrors { tool, name, calls, failed, rate_pct: pct(failed as f64, known as f64) })
+            .map(|((_, name), (tool, calls, known, failed))| Tip::ToolErrors { tool, name, calls, known, failed, rate_pct: pct(failed as f64, known as f64) })
             .collect();
         flagged.sort_by(|a, b| match (a, b) {
             (Tip::ToolErrors { failed: x, .. }, Tip::ToolErrors { failed: y, .. }) => y.cmp(x),

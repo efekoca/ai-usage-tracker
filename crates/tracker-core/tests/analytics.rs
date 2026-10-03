@@ -60,11 +60,12 @@ fn all_time_report_prices_every_known_model_and_flags_unknown_ones() {
     assert_eq!(r.by_accuracy.get("exact"), Some(&9));
     assert_eq!(r.heatmap.iter().flatten().sum::<u64>(), r.totals.total_tokens);
 
-    // reuse counts only reads from tools that report writes (Codex logs reads, never writes)
-    let claude_reads: u64 = r.by_tool.iter().filter(|g| g.key != "codex").map(|g| g.totals.tokens.cache_read).sum();
-    let codex_reads: u64 = r.by_tool.iter().filter(|g| g.key == "codex").map(|g| g.totals.tokens.cache_read).sum();
-    assert!(codex_reads > 0);
-    assert_eq!(r.totals.cache_read_with_writes, claude_reads);
+    // reuse counts Claude and the Codex models whose requests log cache writes
+    let logs_writes = |g: &&tracker_core::analytics::Group| g.key.starts_with("claude") || g.totals.tokens.cache_write > 0;
+    let counted: u64 = r.by_model.iter().filter(logs_writes).map(|g| g.totals.tokens.cache_read).sum();
+    let skipped: u64 = r.by_model.iter().filter(|g| !logs_writes(g)).map(|g| g.totals.tokens.cache_read).sum();
+    assert!(skipped > 0);
+    assert_eq!(r.totals.cache_read_with_writes, counted);
 }
 
 #[test]
@@ -289,17 +290,17 @@ fn csv_export_masks_hidden_projects_and_leaves_unpriced_cost_empty() {
 fn reading_followed_by_more_usage_is_marked_behind() {
     let mut store = Store::open_in_memory().unwrap();
     let now = ms(2026, 10, 2, 12, 0);
+    let read_at = now - 3_600_000;
     {
         let mut tx = store.transaction().unwrap();
         tx.upsert_events(&[
-            // within the grace period after the reading
-            ev("same", now - 3_300_000, Tool::ClaudeCode, "claude-sonnet-5", r"C:\p\a", 1_000, 0),
+            // before the reading: already in it
+            ev("before", read_at - 60_000, Tool::ClaudeCode, "claude-sonnet-5", r"C:\p\a", 1_000, 0),
             // Codex use says nothing about the Claude window
             ev("cx", now - 1_200_000, Tool::Codex, "gpt-5.6-terra", r"C:\p\a", 1_000, 0),
         ])
         .unwrap();
-        tx.insert_limits(&[snap(now - 3_600_000, Provider::Anthropic, Tool::ClaudeDesktop, "five_hour", 6.0, None, None, "claude_plan_history")])
-            .unwrap();
+        tx.insert_limits(&[snap(read_at, Provider::Anthropic, Tool::ClaudeDesktop, "five_hour", 6.0, None, None, "claude_plan_history")]).unwrap();
         tx.commit().unwrap();
     }
     let book = PriceBook::default_book();
@@ -307,12 +308,141 @@ fn reading_followed_by_more_usage_is_marked_behind() {
 
     {
         let mut tx = store.transaction().unwrap();
-        tx.upsert_events(&[ev("later", now - 600_000, Tool::ClaudeCode, "claude-sonnet-5", r"C:\p\a", 1_000, 0)]).unwrap();
+        // five minutes after the reading: not in it, however long ago the reading was
+        tx.upsert_events(&[ev("soon", read_at + 300_000, Tool::ClaudeCode, "claude-sonnet-5", r"C:\p\a", 1_000_000, 0)]).unwrap();
         tx.commit().unwrap();
     }
+    // while the reading is recent a refresh is expected, so it still counts as current
+    assert_eq!(limits_view(&store, &book, read_at + 360_000, &[]).unwrap()[0].state, LimitState::Fresh);
     let v = &limits_view(&store, &book, now, &[]).unwrap()[0];
     assert_eq!(v.state, LimitState::Behind);
     // the reading stays available, with what it does not include yet
     assert_eq!(v.used_pct, Some(6.0));
-    assert_eq!(v.usage_since.events, 1);
+    assert_eq!((v.usage_since.events, v.usage_since.tokens.input), (1, 1_000_000));
+
+    // a newer reading includes that use
+    {
+        let mut tx = store.transaction().unwrap();
+        tx.insert_limits(&[snap(now - 60_000, Provider::Anthropic, Tool::ClaudeDesktop, "five_hour", 30.0, None, None, "claude_plan_history")]).unwrap();
+        tx.commit().unwrap();
+    }
+    let v = &limits_view(&store, &book, now, &[]).unwrap()[0];
+    assert_eq!((v.state, v.used_pct, v.usage_since.events), (LimitState::Fresh, Some(30.0), 0));
+}
+
+#[test]
+fn an_old_reading_inside_its_window_is_only_the_last_known_value() {
+    let mut store = Store::open_in_memory().unwrap();
+    let now = ms(2026, 10, 2, 12, 0);
+    let day = 86_400_000;
+    {
+        let mut tx = store.transaction().unwrap();
+        // read six days ago, no local use since: the web or another device may have used it
+        tx.insert_limits(&[
+            snap(now - 6 * day, Provider::Anthropic, Tool::ClaudeCode, "seven_day", 40.0, Some((now + day) / 1000), None, "claude_usage"),
+            snap(now - 3 * 3_600_000, Provider::Anthropic, Tool::ClaudeCode, "five_hour", 20.0, Some((now + 3_600_000) / 1000), None, "claude_usage"),
+        ])
+        .unwrap();
+        tx.commit().unwrap();
+    }
+    let views = limits_view(&store, &PriceBook::default_book(), now, &[]).unwrap();
+    let week = views.iter().find(|v| v.window == "seven_day").unwrap();
+    assert_eq!((week.state, week.used_pct, week.usage_since.events), (LimitState::Behind, Some(40.0), 0));
+    assert!(week.forecast.is_none());
+    let five = views.iter().find(|v| v.window == "five_hour").unwrap();
+    assert_eq!(five.state, LimitState::Fresh);
+    assert!(five.forecast.is_some());
+}
+
+#[test]
+fn per_model_windows_count_only_their_model_family() {
+    let mut store = Store::open_in_memory().unwrap();
+    let now = ms(2026, 10, 2, 12, 0);
+    {
+        let mut tx = store.transaction().unwrap();
+        tx.upsert_events(&[
+            ev("o", now - 3_600_000, Tool::ClaudeCode, "claude-opus-5", r"C:\p\a", 1_000, 0),
+            ev("s", now - 3_000_000, Tool::ClaudeCode, "claude-sonnet-5", r"C:\p\b", 9_000, 0),
+            ev("s2", now - 1_200_000, Tool::ClaudeCode, "claude-sonnet-5", r"C:\p\b", 9_000, 0),
+        ])
+        .unwrap();
+        tx.insert_limits(&[snap(now - 1_800_000, Provider::Anthropic, Tool::ClaudeCode, "seven_day_opus", 30.0, Some((now + 86_400_000) / 1000), None, "claude_usage")])
+            .unwrap();
+        tx.commit().unwrap();
+    }
+    let v = &limits_view(&store, &PriceBook::default_book(), now, &[]).unwrap()[0];
+    // Sonnet use after the reading does not make the Opus window outdated
+    assert_eq!(v.state, LimitState::Fresh);
+    assert_eq!(v.window_usage.events, 1);
+    assert_eq!(v.projects.len(), 1);
+    assert!((v.projects[0].share - 1.0).abs() < 1e-9);
+}
+
+#[test]
+fn unpriced_use_keeps_its_share_of_a_limit() {
+    let mut store = Store::open_in_memory().unwrap();
+    let now = ms(2026, 10, 2, 12, 0);
+    {
+        let mut tx = store.transaction().unwrap();
+        tx.upsert_events(&[
+            ev("a", now - 3_600_000, Tool::Codex, "gpt-5.6-terra", r"C:\p\a", 1_000, 0),
+            ev("b", now - 3_000_000, Tool::Codex, "codex-auto-review", r"C:\p\b", 3_000, 0),
+        ])
+        .unwrap();
+        tx.insert_limits(&[snap(now - 60_000, Provider::OpenAI, Tool::Codex, "five_hour", 40.0, Some((now + 3_600_000) / 1000), None, "codex_rollout")])
+            .unwrap();
+        tx.commit().unwrap();
+    }
+    let v = &limits_view(&store, &PriceBook::default_book(), now, &[]).unwrap()[0];
+    // by tokens, since a cost share would give the unpriced project nothing
+    assert_eq!(v.projects.len(), 2);
+    assert!((v.projects[0].share - 0.75).abs() < 1e-9);
+    assert!((v.projects[0].estimated_pct.unwrap() - 30.0).abs() < 1e-9);
+}
+
+#[test]
+fn custom_ranges_are_ordered_bounded_and_never_overflow() {
+    use chrono::NaiveDate;
+    use tracker_core::analytics::MAX_RANGE_DAYS;
+    let now = ms(2026, 10, 2, 12, 0);
+    let day = 86_400_000;
+    let d = |y, m, dd| NaiveDate::from_ymd_opt(y, m, dd).unwrap();
+    let r = period_range(Period::Custom { from: d(2026, 9, 5), to: d(2026, 9, 5) }, &tz(), now, None);
+    assert_eq!(r.to_ms - r.from_ms, day);
+    let r = period_range(Period::Custom { from: d(2026, 9, 5), to: d(2026, 9, 1) }, &tz(), now, None);
+    assert_eq!(r.to_ms - r.from_ms, 5 * day);
+    // far too wide: the newest ten years are kept
+    let r = period_range(Period::Custom { from: d(1900, 1, 1), to: d(2026, 9, 30) }, &tz(), now, None);
+    assert_eq!((r.to_ms - r.from_ms) / day, MAX_RANGE_DAYS as i64);
+    assert_eq!(r.to_ms, period_range(Period::Custom { from: d(2026, 9, 30), to: d(2026, 9, 30) }, &tz(), now, None).to_ms);
+    for (a, b) in [(NaiveDate::MIN, NaiveDate::MAX), (NaiveDate::MAX, NaiveDate::MAX), (NaiveDate::MIN, NaiveDate::MIN)] {
+        let r = period_range(Period::Custom { from: a, to: b }, &tz(), now, None);
+        assert!(r.from_ms < r.to_ms && (r.to_ms - r.from_ms) / day <= MAX_RANGE_DAYS as i64);
+        let store = Store::open_in_memory().unwrap();
+        let rep = report(&store, &PriceBook::default_book(), r, &Filter::default(), &tz()).unwrap();
+        assert!(rep.daily.len() as u64 <= MAX_RANGE_DAYS);
+    }
+    // an event far in the past does not stretch "all time" without bound
+    let r = period_range(Period::All, &tz(), now, Some(ms(1971, 1, 1, 0, 0)));
+    assert_eq!((r.to_ms - r.from_ms) / day, MAX_RANGE_DAYS as i64);
+}
+
+#[test]
+fn cache_reuse_counts_codex_models_that_log_their_writes() {
+    let mut store = Store::open_in_memory().unwrap();
+    let now = ms(2026, 10, 2, 12, 0);
+    let cached = |key: &str, model: &str, read: u64, write: u64| {
+        let mut e = ev(key, now - 3_600_000, Tool::Codex, model, r"C:\p\a", 100, 10);
+        e.tokens.cache_read = read;
+        e.tokens.cache_write = write;
+        e
+    };
+    {
+        let mut tx = store.transaction().unwrap();
+        tx.upsert_events(&[cached("w", "gpt-6-sol", 0, 1_000), cached("r", "gpt-6-sol", 4_000, 0), cached("old", "gpt-5.3-codex", 9_000, 0)]).unwrap();
+        tx.commit().unwrap();
+    }
+    let range = Range { from_ms: now - 86_400_000, to_ms: now };
+    let r = report(&store, &PriceBook::default_book(), range, &Filter::default(), &tz()).unwrap();
+    assert_eq!((r.totals.cache_read_with_writes, r.totals.cache_write_with_reads), (4_000, 1_000));
 }

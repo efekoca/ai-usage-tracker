@@ -166,7 +166,10 @@ where
 
 /// RFC 4180 quoting; also neutralises spreadsheet formula injection.
 fn csv(s: &str) -> String {
-    let s = if s.starts_with(['=', '+', '-', '@']) { format!("'{s}") } else { s.to_owned() };
+    // spreadsheets skip leading blanks and accept full-width operators before a formula
+    let lead = s.trim_start_matches(|c: char| c.is_whitespace() || c.is_control());
+    let formula = s.starts_with(['\t', '\r']) || lead.starts_with(['=', '+', '-', '@', '＝', '＋', '－', '＠']);
+    let s = if formula { format!("'{s}") } else { s.to_owned() };
     if s.contains([',', '"', '\n', '\r']) { format!("\"{}\"", s.replace('"', "\"\"")) } else { s }
 }
 
@@ -180,5 +183,12 @@ mod tests {
         assert_eq!(csv("say \"hi\""), "\"say \"\"hi\"\"\"");
         assert_eq!(csv("=cmd()"), "'=cmd()");
         assert_eq!(csv("plain"), "plain");
+        assert_eq!(csv("  =1+1"), "'  =1+1");
+        assert_eq!(csv("\u{1}@SUM(A1)"), "'\u{1}@SUM(A1)");
+        assert_eq!(csv("＝cmd()"), "'＝cmd()");
+        assert_eq!(csv("－1"), "'－1");
+        assert_eq!(csv("\tx"), "'\tx");
+        assert_eq!(csv("\rx"), "\"'\rx\"");
+        assert_eq!(csv("a-b"), "a-b");
     }
 }

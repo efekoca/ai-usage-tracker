@@ -80,11 +80,12 @@ impl Accuracy {
             Accuracy::Captured => "captured",
         }
     }
+    /// An unrecognised value is never trusted as exact.
     pub fn parse(s: &str) -> Accuracy {
         match s {
-            "estimated" => Accuracy::Estimated,
+            "exact" => Accuracy::Exact,
             "captured" => Accuracy::Captured,
-            _ => Accuracy::Exact,
+            _ => Accuracy::Estimated,
         }
     }
 }
@@ -217,4 +218,18 @@ pub fn window_name(minutes: i64) -> String {
 
 pub fn parse_ts_ms(s: &str) -> Option<i64> {
     chrono::DateTime::parse_from_rfc3339(s).ok().map(|d| d.timestamp_millis())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_accuracy_is_not_exact() {
+        for a in [Accuracy::Exact, Accuracy::Estimated, Accuracy::Captured] {
+            assert_eq!(Accuracy::parse(a.as_str()), a);
+        }
+        assert_eq!(Accuracy::parse("EXACT"), Accuracy::Estimated);
+        assert_eq!(Accuracy::parse(""), Accuracy::Estimated);
+    }
 }

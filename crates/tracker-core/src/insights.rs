@@ -389,17 +389,16 @@ pub struct PlanValue {
 }
 
 /// API-equivalent cost per provider over `range`, with a daily running total (unfiltered).
+/// Over 401 days only the newest are shown; earlier use starts the first day's running total.
 pub fn plan_value<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, tz: &Tz) -> Result<PlanValue> {
-    let first = local_date(tz, range.from_ms);
     let last = local_date(tz, range.to_ms - 1);
+    let first = local_date(tz, range.from_ms).max(last.checked_sub_days(chrono::Days::new(400)).unwrap_or(last));
     let mut dates = Vec::new();
     let mut d = first;
     while d <= last {
         dates.push(d);
-        d = d.succ_opt().unwrap_or(d);
-        if dates.len() > 400 {
-            break;
-        }
+        let Some(next) = d.succ_opt() else { break };
+        d = next;
     }
     let idx: HashMap<NaiveDate, usize> = dates.iter().enumerate().map(|(i, d)| (*d, i)).collect();
     let mut acc: BTreeMap<Provider, (Totals, Vec<f64>)> = BTreeMap::new();
@@ -407,7 +406,9 @@ pub fn plan_value<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, t
         let p = e.tool.provider();
         let entry = acc.entry(p).or_insert_with(|| (Totals::default(), vec![0.0; dates.len()]));
         add(&mut entry.0, book, &e);
-        if let (Some(c), Some(&i)) = (book.cost(&input_of(&e)), idx.get(&local_date(tz, e.ts_ms))) {
+        let date = local_date(tz, e.ts_ms);
+        let i = idx.get(&date).copied().or_else(|| (date < first && !dates.is_empty()).then_some(0));
+        if let (Some(c), Some(i)) = (book.cost(&input_of(&e)), i) {
             entry.1[i] += c.total();
         }
     }

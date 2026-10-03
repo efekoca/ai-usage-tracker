@@ -14,6 +14,8 @@ pub struct PricingFile {
     pub updated_at: String,
     #[serde(default = "usd")]
     pub currency: String,
+    #[serde(default = "per_million")]
+    pub unit: String,
     #[serde(default)]
     pub sources: HashMap<String, String>,
     #[serde(default)]
@@ -26,6 +28,10 @@ pub struct PricingFile {
 
 fn usd() -> String {
     "USD".into()
+}
+
+fn per_million() -> String {
+    "per_million_tokens".into()
 }
 
 /// USD per million tokens.
@@ -108,6 +114,61 @@ pub enum PricingError {
     Parse(#[from] serde_json::Error),
     #[error("unsupported pricing schema version {0}")]
     Schema(u32),
+    #[error("invalid pricing entry: {0}")]
+    Invalid(String),
+}
+
+fn check_rate(what: &str, v: f64) -> Result<(), PricingError> {
+    if v.is_finite() && v >= 0.0 { Ok(()) } else { Err(PricingError::Invalid(format!("{what} must be a finite non-negative number, got {v}"))) }
+}
+
+fn check_rates(id: &str, r: &Rates) -> Result<(), PricingError> {
+    check_rate(&format!("{id}.input"), r.input)?;
+    check_rate(&format!("{id}.output"), r.output)?;
+    for (name, v) in [("cache_read", r.cache_read), ("cache_write_5m", r.cache_write_5m), ("cache_write_1h", r.cache_write_1h)] {
+        if let Some(v) = v {
+            check_rate(&format!("{id}.{name}"), v)?;
+        }
+    }
+    Ok(())
+}
+
+/// Costs are computed in USD per million tokens, so any other unit or currency is refused.
+fn validate(file: &PricingFile) -> Result<(), PricingError> {
+    if file.currency != "USD" {
+        return Err(PricingError::Invalid(format!("currency must be USD, got {}", file.currency)));
+    }
+    if file.unit != "per_million_tokens" {
+        return Err(PricingError::Invalid(format!("unit must be per_million_tokens, got {}", file.unit)));
+    }
+    let mut names = std::collections::HashSet::new();
+    for m in &file.models {
+        let id = m.id.trim();
+        if id.is_empty() {
+            return Err(PricingError::Invalid("model with an empty id".into()));
+        }
+        for name in std::iter::once(&m.id).chain(&m.aliases) {
+            if !names.insert(name.to_ascii_lowercase()) {
+                return Err(PricingError::Invalid(format!("{name} names more than one model")));
+            }
+        }
+        check_rates(id, &m.rates)?;
+        if let Some(lc) = &m.long_context {
+            check_rates(&format!("{id}.long_context"), &lc.rates)?;
+        }
+        for (k, v) in m.speed_multipliers.iter().chain(&m.geo_multipliers) {
+            check_rate(&format!("{id} multiplier {k}"), *v)?;
+        }
+        if let Some(v) = m.web_search_per_1k {
+            check_rate(&format!("{id}.web_search_per_1k"), v)?;
+        }
+    }
+    for (alias, target) in &file.user_aliases {
+        if !names.contains(&target.to_ascii_lowercase()) {
+            return Err(PricingError::Invalid(format!("user alias {alias} points to unknown model {target}")));
+        }
+    }
+    Ok(())
 }
 
 pub struct PriceBook {
@@ -125,6 +186,7 @@ impl PriceBook {
         if file.schema_version != 1 {
             return Err(PricingError::Schema(file.schema_version));
         }
+        validate(&file)?;
         let mut index = HashMap::new();
         for (i, m) in file.models.iter().enumerate() {
             index.insert(m.id.to_ascii_lowercase(), i);
@@ -329,5 +391,36 @@ mod tests {
     #[test]
     fn rejects_unknown_schema() {
         assert!(PriceBook::from_json(r#"{"schema_version":2,"updated_at":"x","models":[]}"#).is_err());
+    }
+
+    #[test]
+    fn rejects_rates_and_files_it_cannot_price_correctly() {
+        let edit = |f: &dyn Fn(&mut PricingFile)| {
+            let mut file: PricingFile = serde_json::from_str(DEFAULT_PRICING_JSON).unwrap();
+            f(&mut file);
+            PriceBook::from_json(&serde_json::to_string(&file).unwrap())
+        };
+        assert!(edit(&|_| {}).is_ok());
+        assert!(matches!(edit(&|f| f.models[0].rates.input = -1.0), Err(PricingError::Invalid(_))));
+        assert!(edit(&|f| f.models[0].rates.cache_read = Some(-0.1)).is_err());
+        assert!(edit(&|f| f.models[0].long_context = Some(LongContext { threshold: 1, rates: Rates { input: 1.0, output: -2.0, ..Default::default() } })).is_err());
+        assert!(edit(&|f| {
+            f.models[0].speed_multipliers.insert("fast".into(), -2.0);
+        })
+        .is_err());
+        assert!(edit(&|f| f.models[0].web_search_per_1k = Some(-10.0)).is_err());
+        assert!(edit(&|f| f.currency = "EUR".into()).is_err());
+        assert!(edit(&|f| f.unit = "per_token".into()).is_err());
+        assert!(edit(&|f| {
+            let id = f.models[0].id.to_ascii_uppercase();
+            f.models[1].aliases.push(id);
+        })
+        .is_err());
+        assert!(edit(&|f| {
+            f.user_aliases.insert("my-model".into(), "no-such-model".into());
+        })
+        .is_err());
+        // a file without a unit (older copies) is per million tokens
+        assert!(PriceBook::from_json(r#"{"schema_version":1,"updated_at":"x","models":[]}"#).is_ok());
     }
 }

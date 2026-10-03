@@ -249,6 +249,24 @@ fn plan_value_runs_a_daily_total_per_provider() {
 }
 
 #[test]
+fn a_long_plan_value_range_keeps_its_newest_days_and_the_whole_total() {
+    let tz = FixedOffset::east_opt(3 * 3600).unwrap();
+    let from = tz.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap().timestamp_millis();
+    let to = tz.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap().timestamp_millis();
+    let s = store_with(&[
+        // before the days shown: part of the first day's running total
+        ev("o1", from + HOUR, Tool::ClaudeCode, "claude-sonnet-5", Some("s"), "C:/w/app", 1_000_000, 0, 0),
+        ev("o2", to - HOUR, Tool::ClaudeCode, "claude-sonnet-5", Some("s"), "C:/w/app", 500_000, 0, 0),
+    ]);
+    let v = plan_value(&s, &PriceBook::default_book(), Range { from_ms: from, to_ms: to }, &tz).unwrap();
+    assert_eq!(v.dates.len(), 401);
+    assert_eq!(v.dates.last().map(String::as_str), Some("2026-05-31"));
+    let a = &v.providers[0];
+    assert!(close(a.cost_usd, 3.0));
+    assert!(close(a.cumulative[0], 2.0) && close(*a.cumulative.last().unwrap(), a.cost_usd));
+}
+
+#[test]
 fn branches_are_per_project_and_requests_without_one_are_kept_apart() {
     let t = ms(2026, 9, 10, 9, 0);
     let s = store_with(&[
@@ -364,6 +382,27 @@ fn a_context_rewritten_after_the_cache_expired_is_priced_against_a_warm_read() {
 }
 
 #[test]
+fn only_the_context_cached_before_counts_as_rebuilt() {
+    let t = ms(2026, 9, 10, 9, 0);
+    let s = store_with(&[
+        // 100K cached (1-hour writes)
+        ev("p0", t, Tool::ClaudeCode, "claude-opus-5-5", Some("s"), "C:/w/app", 1, 0, 10).cache_write(100_000, 100_000),
+        // an advisor on another model in between has its own cache
+        ev("p0a", t + MIN, Tool::ClaudeCode, "claude-fable-5-1", Some("s"), "C:/w/app", 30_000, 0, 1_000),
+        // two hours later 200K, all written: only the earlier 100K was warm
+        ev("p1", t + 2 * HOUR, Tool::ClaudeCode, "claude-opus-5-5", Some("s"), "C:/w/app", 1, 0, 10).cache_write(200_000, 200_000),
+        // a pasted 150K document on top of a 10K cached prompt is new content, not a rebuild
+        ev("q0", t, Tool::ClaudeCode, "claude-opus-5-5", Some("q"), "C:/w/app", 1, 0, 10).cache_write(10_000, 10_000),
+        ev("q1", t + 2 * HOUR, Tool::ClaudeCode, "claude-opus-5-5", Some("q"), "C:/w/app", 1, 0, 10).cache_write(160_000, 160_000),
+    ]);
+    let evs = s.events_between(0, i64::MAX / 2).unwrap();
+    let r = cache_rebuilds(&evs, &PriceBook::default_book());
+    assert_eq!((r.requests, r.sessions, r.tokens), (1, 1, 100_000));
+    // Opus 5.5: 1-hour write $8, read $0.20 per 1M
+    assert!(close(r.extra_usd, 100_000.0 * (8.0 - 0.2) / 1e6), "{}", r.extra_usd);
+}
+
+#[test]
 fn price_tier_surcharges_are_measured_against_the_standard_rate() {
     let t = ms(2026, 9, 10, 9, 0);
     let s = store_with(&[
@@ -414,7 +453,7 @@ fn small_amounts_and_rare_tool_errors_make_no_tip() {
     let r = tips(&s, &PriceBook::default_book(), all(), &Filter::default()).unwrap();
     assert_eq!(tip_kinds(&r), vec!["tool_errors"]);
     match &r.tips[0] {
-        Tip::ToolErrors { name, calls, failed, rate_pct, .. } => assert_eq!((name.as_str(), *calls, *failed, *rate_pct), ("Bash", 20, 6, 30.0)),
+        Tip::ToolErrors { name, calls, known, failed, rate_pct, .. } => assert_eq!((name.as_str(), *calls, *known, *failed, *rate_pct), ("Bash", 20, 20, 6, 30.0)),
         other => panic!("{other:?}"),
     }
     assert_eq!(r.tool_calls, 45);

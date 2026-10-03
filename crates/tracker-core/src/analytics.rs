@@ -5,7 +5,7 @@ use crate::pricing::{Cost, CostInput, PriceBook};
 use crate::store::{EventRow, ProjectRow, Store};
 use chrono::{Datelike, Days, Months, NaiveDate, TimeZone, Timelike};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub type Result<T> = std::result::Result<T, rusqlite::Error>;
 
@@ -35,7 +35,7 @@ impl Range {
     pub fn previous<Tz: TimeZone>(&self, tz: &Tz) -> Range {
         let first = local_date(tz, self.from_ms);
         let days = (local_date(tz, self.to_ms - 1) - first).num_days().max(0) as u64 + 1;
-        Range { from_ms: start_of_day(tz, first - Days::new(days)), to_ms: self.from_ms }
+        Range { from_ms: start_of_day(tz, first.checked_sub_days(Days::new(days)).unwrap_or(first)), to_ms: self.from_ms }
     }
 }
 
@@ -53,11 +53,15 @@ pub fn local_date<Tz: TimeZone>(tz: &Tz, ms: i64) -> NaiveDate {
     tz.timestamp_millis_opt(ms).single().map(|d| d.date_naive()).unwrap_or_default()
 }
 
+/// Ten years, so the dense daily series stays bounded.
+pub const MAX_RANGE_DAYS: u64 = 3660;
+
 pub fn period_range<Tz: TimeZone>(period: Period, tz: &Tz, now_ms: i64, first_event_ms: Option<i64>) -> Range {
     let today = local_date(tz, now_ms);
     let end = start_of_day(tz, today + Days::new(1));
     let since = |d: NaiveDate| Range { from_ms: start_of_day(tz, d), to_ms: end };
     let months_back = |m: u32| today.checked_sub_months(Months::new(m)).map(|d| d + Days::new(1)).unwrap_or(today);
+    let oldest = |last: NaiveDate| last - Days::new(MAX_RANGE_DAYS - 1);
     match period {
         Period::Today => since(today),
         Period::Days7 => since(today - Days::new(6)),
@@ -66,10 +70,11 @@ pub fn period_range<Tz: TimeZone>(period: Period, tz: &Tz, now_ms: i64, first_ev
         Period::Months3 => since(months_back(3)),
         Period::Months6 => since(months_back(6)),
         Period::Year1 => since(months_back(12)),
-        Period::All => since(first_event_ms.map(|ms| local_date(tz, ms)).unwrap_or(today).min(today)),
+        Period::All => since(first_event_ms.map(|ms| local_date(tz, ms)).unwrap_or(today).min(today).max(oldest(today))),
         Period::Custom { from, to } => {
-            let (a, b) = if from <= to { (from, to) } else { (to, from) };
-            Range { from_ms: start_of_day(tz, a), to_ms: start_of_day(tz, b + Days::new(1)) }
+            let bounds = |d: NaiveDate| d.clamp(NaiveDate::from_ymd_opt(1970, 1, 1).unwrap(), NaiveDate::from_ymd_opt(9999, 12, 30).unwrap());
+            let (a, b) = (bounds(from.min(to)), bounds(from.max(to)));
+            Range { from_ms: start_of_day(tz, a.max(oldest(b))), to_ms: start_of_day(tz, b + Days::new(1)) }
         }
     }
 }
@@ -107,9 +112,10 @@ pub struct Totals {
     pub unpriced_tokens: u64,
     /// Net API-equivalent saving from prompt caching (reads minus write premium), priced part.
     pub cache_savings_usd: f64,
-    /// Cache reads from tools that also report cache writes (Claude). Reuse (read ÷ write) uses
-    /// this, since OpenAI caches implicitly and logs reads without any writes.
+    /// Reads and writes of requests whose model logs its cache writes: Claude always, an OpenAI
+    /// model only when its requests in the period report any (older Codex logs carry reads only).
     pub cache_read_with_writes: u64,
+    pub cache_write_with_reads: u64,
 }
 
 impl Totals {
@@ -119,12 +125,17 @@ impl Totals {
     }
 
     fn add(&mut self, e: &EventRow, cost: Option<&Cost>, savings: f64) {
+        self.add_counted(e, cost, savings, e.tool.provider() == Provider::Anthropic)
+    }
+
+    fn add_counted(&mut self, e: &EventRow, cost: Option<&Cost>, savings: f64, reuse: bool) {
         self.events += 1;
         self.cache_savings_usd += savings;
         self.tokens.add(&e.tokens);
         self.total_tokens += e.tokens.total();
-        if e.tool.provider() == Provider::Anthropic {
+        if reuse {
             self.cache_read_with_writes += e.tokens.cache_read;
+            self.cache_write_with_reads += e.tokens.cache_write;
         }
         match cost {
             Some(c) => {
@@ -207,6 +218,11 @@ fn savings_of(book: &PriceBook, e: &EventRow) -> f64 {
     book.cache_savings(&input_of(e)).unwrap_or(0.0)
 }
 
+fn cache_writers<'a>(events: impl Iterator<Item = &'a EventRow>) -> impl Fn(&EventRow) -> bool {
+    let models: HashSet<String> = events.filter(|e| e.tokens.cache_write > 0).map(|e| e.model.clone()).collect();
+    move |e| e.tool.provider() == Provider::Anthropic || models.contains(&e.model)
+}
+
 fn sorted_groups(map: HashMap<String, (String, bool, Totals)>) -> Vec<Group> {
     let mut v: Vec<Group> =
         map.into_iter().map(|(key, (label, hidden, totals))| Group { key, label, hidden, totals }).collect();
@@ -230,12 +246,14 @@ pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filte
     let mut unpriced = BTreeMap::new();
     let mut by_accuracy = BTreeMap::new();
 
+    let writers = cache_writers(events.iter().filter(|e| filter.matches(e)));
     for e in events.iter().filter(|e| filter.matches(e)) {
         let c = cost_of(book, e);
         let sv = savings_of(book, e);
-        totals.add(e, c.as_ref(), sv);
+        let reuse = writers(e);
+        totals.add_counted(e, c.as_ref(), sv, reuse);
         let add = |m: &mut HashMap<String, (String, bool, Totals)>, key: String, label: String, hidden: bool| {
-            m.entry(key).or_insert_with(|| (label, hidden, Totals::default())).2.add(e, c.as_ref(), sv);
+            m.entry(key).or_insert_with(|| (label, hidden, Totals::default())).2.add_counted(e, c.as_ref(), sv, reuse);
         };
         add(&mut by_tool, e.tool.as_str().into(), e.tool.as_str().into(), false);
         let client = e.client.clone().unwrap_or_else(|| "unknown".into());
@@ -252,7 +270,7 @@ pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filte
 
         if let Some(local) = tz.timestamp_millis_opt(e.ts_ms).single() {
             let d = days.entry(local.date_naive()).or_default();
-            d.0.add(e, c.as_ref(), sv);
+            d.0.add_counted(e, c.as_ref(), sv, reuse);
             *d.1.entry(e.tool.as_str().to_owned()).or_insert(0) += e.tokens.total();
             *d.2.entry(e.tool.as_str().to_owned()).or_insert(0.0) += c.as_ref().map(Cost::total).unwrap_or(0.0);
             heat[local.weekday().num_days_from_monday() as usize][local.hour() as usize] += e.tokens.total();
@@ -261,8 +279,10 @@ pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filte
 
     let prev_range = range.previous(tz);
     let mut previous = Totals::default();
-    for e in store.events_between(prev_range.from_ms, prev_range.to_ms)?.iter().filter(|e| filter.matches(e)) {
-        previous.add(e, cost_of(book, e).as_ref(), savings_of(book, e));
+    let prev_events = store.events_between(prev_range.from_ms, prev_range.to_ms)?;
+    let prev_writers = cache_writers(prev_events.iter().filter(|e| filter.matches(e)));
+    for e in prev_events.iter().filter(|e| filter.matches(e)) {
+        previous.add_counted(e, cost_of(book, e).as_ref(), savings_of(book, e), prev_writers(e));
     }
 
     // dense daily series over the whole range
@@ -284,7 +304,8 @@ pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filte
             cache_write: t.tokens.cache_write,
             cache_savings_usd: t.cache_savings_usd,
         });
-        d = d + Days::new(1);
+        let Some(next) = d.succ_opt() else { break };
+        d = next;
     }
     let days_in_range = daily.len() as u32;
     let active_days = daily.iter().filter(|p| p.events > 0).count() as u32;
@@ -326,15 +347,14 @@ pub enum LimitState {
     Reset,
     /// No reset time known and the observation is older than one window.
     Stale,
-    /// Inside its window, but this provider was used after the reading: the real value is at
-    /// least the reading (use only grows until the window resets).
+    /// Used after the reading, or the reading is over a day old: the real value is at least the reading.
     Behind,
 }
 
-/// Usage this long after a reading makes it `Behind`. Live readers refresh every few minutes
-/// (Claude's usage service limits how often it is asked), so a reading this recent still counts
-/// as current; older readings followed by use are shown as outdated.
+/// Live readers refresh every few minutes, so a reading this recent still counts as current.
 pub const BEHIND_GRACE_MS: i64 = 10 * 60_000;
+/// Use on another device or the web fills the same limit without reaching the local logs.
+pub const MAX_FRESH_AGE_MS: i64 = 24 * 3_600_000;
 
 /// User-defined budget for a window, used only when no real limit reading exists.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -353,7 +373,7 @@ pub struct ProjectShare {
     pub name: String,
     pub hidden: bool,
     pub totals: Totals,
-    /// Fraction (0–1) of the window's usage, by API-equivalent cost (tokens if unpriced).
+    /// Fraction (0–1) of the window's usage, by cost (by tokens if any request is unpriced).
     pub share: f64,
     /// `share × used_pct` — always an estimate.
     pub estimated_pct: Option<f64>,
@@ -400,6 +420,15 @@ fn provider_tools(p: Provider) -> &'static [Tool] {
     }
 }
 
+pub(crate) fn counts_toward(provider: Provider, window: &str, e: &EventRow) -> bool {
+    let family = match window {
+        "seven_day_opus" => Some("opus"),
+        "seven_day_sonnet" => Some("sonnet"),
+        _ => None,
+    };
+    provider_tools(provider).contains(&e.tool) && family.is_none_or(|f| e.model.to_ascii_lowercase().contains(f))
+}
+
 pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[Threshold]) -> Result<Vec<LimitView>> {
     // newest reading per (provider, limit_id, window) across all sources: Claude's desktop
     // history, Cowork and Claude Code readings describe the same account-wide pool
@@ -443,11 +472,13 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
         };
         let mut usage_since = Totals::default();
         if state == LimitState::Fresh {
-            let tools = provider_tools(s.provider);
-            for e in store.events_between(s.ts_ms + BEHIND_GRACE_MS, now_ms + 1)?.iter().filter(|e| tools.contains(&e.tool)) {
-                usage_since.add(e, cost_of(book, e).as_ref(), savings_of(book, e));
+            let age = now_ms - s.ts_ms;
+            if age >= BEHIND_GRACE_MS {
+                for e in store.events_between(s.ts_ms + 1, now_ms + 1)?.iter().filter(|e| counts_toward(s.provider, &s.window, e)) {
+                    usage_since.add(e, cost_of(book, e).as_ref(), savings_of(book, e));
+                }
             }
-            if usage_since.events > 0 {
+            if usage_since.events > 0 || age > MAX_FRESH_AGE_MS {
                 state = LimitState::Behind;
             }
         }
@@ -462,7 +493,7 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
             _ => None,
         };
         let (usage, shares) = match start {
-            Some(st) => window_usage(store, book, &projects, s.provider, st, now_ms, used)?,
+            Some(st) => window_usage(store, book, &projects, s.provider, &s.window, st, now_ms, used)?,
             None => (Totals::default(), Vec::new()),
         };
         out.push(LimitView {
@@ -493,7 +524,7 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
         }
         let Some(minutes) = window_minutes(&t.window) else { continue };
         let start = now_ms - minutes * 60_000;
-        let (usage, mut shares) = window_usage(store, book, &projects, t.provider, start, now_ms, None)?;
+        let (usage, mut shares) = window_usage(store, book, &projects, t.provider, &t.window, start, now_ms, None)?;
         let pct = match (t.cost_usd, t.tokens) {
             (Some(c), _) if c > 0.0 => Some(usage.cost_usd / c * 100.0),
             (_, Some(n)) if n > 0 => Some(usage.total_tokens as f64 / n as f64 * 100.0),
@@ -532,25 +563,26 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
     Ok(out)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn window_usage(
     store: &Store,
     book: &PriceBook,
     projects: &HashMap<i64, ProjectRow>,
     provider: Provider,
+    window: &str,
     from_ms: i64,
     to_ms: i64,
     used_pct: Option<f64>,
 ) -> Result<(Totals, Vec<ProjectShare>)> {
-    let tools = provider_tools(provider);
     let mut total = Totals::default();
     let mut per: HashMap<Option<i64>, Totals> = HashMap::new();
-    for e in store.events_between(from_ms, to_ms + 1)?.iter().filter(|e| tools.contains(&e.tool)) {
+    for e in store.events_between(from_ms, to_ms + 1)?.iter().filter(|e| counts_toward(provider, window, e)) {
         let c = cost_of(book, e);
         let sv = savings_of(book, e);
         total.add(e, c.as_ref(), sv);
         per.entry(e.project_id).or_default().add(e, c.as_ref(), sv);
     }
-    let by_cost = total.cost_usd > 0.0;
+    let by_cost = total.cost_usd > 0.0 && total.unpriced_events == 0;
     let mut shares: Vec<ProjectShare> = per
         .into_iter()
         .map(|(pid, t)| {

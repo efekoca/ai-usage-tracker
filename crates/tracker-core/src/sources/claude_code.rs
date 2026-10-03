@@ -5,7 +5,8 @@
 //!   once per content block, so the same `message.id` appears several times; intermediate
 //!   streaming copies can carry smaller output counts or zeroed top-level usage while
 //!   `usage.iterations[]` holds the real values. We therefore take the field-wise maximum
-//!   of the top-level usage and the iteration sum, and the store merges duplicates with max.
+//!   of the top-level usage and the sum of the response's own iterations, and the store merges
+//!   duplicates with max. Advisor iterations are separate events priced as their own model.
 //! * Resumed/forked sessions copy earlier messages into a new file → de-dup must be global.
 //! * `model: "<synthetic>"` lines are client-side error placeholders with zero usage.
 //! * `quotaLimits` appears on a line when a plan limit rejected the request.
@@ -84,7 +85,7 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
         let mut recognised = false;
         // each Cowork session runs in its own scratch folder; group them as one project
         let project = if ctx.client_override == Some("cowork") { Some("Cowork".to_owned()) } else { root_cwd.clone() };
-        if let Some(mut ev) = usage_event(v, ctx) {
+        for mut ev in usage_events(v, ctx) {
             if project.is_some() {
                 ev.project_path = project.clone();
             }
@@ -126,63 +127,98 @@ fn usage_tokens(u: &Value) -> Tokens {
     }
 }
 
-pub(crate) fn usage_event(v: &Value, ctx: &ClaudeCtx) -> Option<UsageEvent> {
+fn prompt_size(t: &Tokens) -> u64 {
+    t.input + t.cache_read + t.cache_write
+}
+
+fn consulted_model(it: &Value) -> Option<&str> {
+    (str_at(it, "type") == Some("advisor_message")).then(|| str_at(it, "model").unwrap_or("unknown"))
+}
+
+/// Every iteration re-sends the conversation, so the prompt size is the largest one, not the sum.
+pub(crate) fn usage_events(v: &Value, ctx: &ClaudeCtx) -> Vec<UsageEvent> {
     if str_at(v, "type") != Some("assistant") {
-        return None;
+        return Vec::new();
     }
-    let msg = v.get("message")?;
-    let usage = msg.get("usage")?.as_object()?;
-    let usage = Value::Object(usage.clone());
+    let Some(msg) = v.get("message") else { return Vec::new() };
+    let Some(usage) = msg.get("usage").filter(|u| u.is_object()) else { return Vec::new() };
     let model = str_at(msg, "model").unwrap_or("unknown");
     if model == "<synthetic>" || v.get("isApiErrorMessage").and_then(Value::as_bool) == Some(true) {
-        return None;
+        return Vec::new();
     }
-
-    let mut tokens = usage_tokens(&usage);
-    if let Some(iters) = usage.get("iterations").and_then(Value::as_array) {
-        let mut sum = Tokens::default();
-        for it in iters {
-            sum.add(&usage_tokens(it));
-        }
-        // iteration objects don't carry thinking details; keep the top-level figure
-        sum.reasoning = tokens.reasoning;
-        tokens = tokens.max(&sum);
-    }
-    tokens.cache_write_1h = tokens.cache_write_1h.min(tokens.cache_write);
-    tokens.reasoning = tokens.reasoning.min(tokens.output);
-
     let key = if let Some(id) = str_at(msg, "id") {
         format!("cc:{id}")
     } else if let Some(rid) = str_at(v, "requestId") {
         format!("ccr:{rid}")
+    } else if let Some(uuid) = str_at(v, "uuid") {
+        format!("ccu:{uuid}")
     } else {
-        format!("ccu:{}", str_at(v, "uuid")?)
+        return Vec::new();
     };
-    let ts_ms = str_at(v, "timestamp").and_then(parse_ts_ms)?;
-    let web_search = usage.get("server_tool_use").map(|s| u64_at(s, "web_search_requests")).unwrap_or(0) as u32;
+    let Some(ts_ms) = str_at(v, "timestamp").and_then(parse_ts_ms) else { return Vec::new() };
+
+    let mut tokens = usage_tokens(usage);
+    let mut prompt = prompt_size(&tokens);
+    let mut consulted: Vec<(&str, Tokens, u64)> = Vec::new();
+    if let Some(iters) = usage.get("iterations").and_then(Value::as_array) {
+        let (mut own, mut own_prompt) = (Tokens::default(), 0);
+        for it in iters.iter().filter(|it| it.is_object()) {
+            let t = usage_tokens(it);
+            match consulted_model(it) {
+                None => {
+                    own.add(&t);
+                    own_prompt = own_prompt.max(prompt_size(&t));
+                }
+                Some(m) => match consulted.iter_mut().find(|c| c.0 == m) {
+                    Some(c) => {
+                        c.1.add(&t);
+                        c.2 = c.2.max(prompt_size(&t));
+                    }
+                    None => consulted.push((m, t, prompt_size(&t))),
+                },
+            }
+        }
+        // iteration objects don't carry thinking details; keep the top-level figure
+        own.reasoning = tokens.reasoning;
+        tokens = tokens.max(&own);
+        if own_prompt > 0 {
+            prompt = own_prompt;
+        }
+    }
 
     let (agent, thread_id) = subagent(v);
-    Some(UsageEvent {
-        key,
-        ts_ms,
-        tool: Tool::ClaudeCode,
-        client: ctx.client_override.map(str::to_owned).or_else(|| str_at(v, "entrypoint").map(str::to_owned)),
-        model: model.to_owned(),
-        project_path: str_at(v, "cwd").map(str::to_owned),
-        session_id: str_at(v, "sessionId").map(str::to_owned),
-        request_input: tokens.input + tokens.cache_read + tokens.cache_write,
-        tokens,
-        web_search_requests: web_search,
-        speed: str_at(&usage, "speed").map(str::to_owned),
-        service_tier: str_at(&usage, "service_tier").map(str::to_owned),
-        inference_geo: str_at(&usage, "inference_geo").map(str::to_owned),
-        request_id: str_at(v, "requestId").map(str::to_owned),
-        accuracy: Accuracy::Exact,
-        source: ctx.source.to_owned(),
-        branch: branch(v),
-        agent,
-        thread_id,
-    })
+    let event = |key: String, model: &str, mut tokens: Tokens, request_input: u64| {
+        tokens.cache_write_1h = tokens.cache_write_1h.min(tokens.cache_write);
+        tokens.reasoning = tokens.reasoning.min(tokens.output);
+        UsageEvent {
+            key,
+            ts_ms,
+            tool: Tool::ClaudeCode,
+            client: ctx.client_override.map(str::to_owned).or_else(|| str_at(v, "entrypoint").map(str::to_owned)),
+            model: model.to_owned(),
+            project_path: str_at(v, "cwd").map(str::to_owned),
+            session_id: str_at(v, "sessionId").map(str::to_owned),
+            request_input,
+            tokens,
+            web_search_requests: 0,
+            speed: None,
+            service_tier: str_at(usage, "service_tier").map(str::to_owned),
+            inference_geo: str_at(usage, "inference_geo").map(str::to_owned),
+            request_id: str_at(v, "requestId").map(str::to_owned),
+            accuracy: Accuracy::Exact,
+            source: ctx.source.to_owned(),
+            branch: branch(v),
+            agent: agent.clone(),
+            thread_id: thread_id.clone(),
+        }
+    };
+    let mut out = vec![UsageEvent {
+        web_search_requests: usage.get("server_tool_use").map(|s| u64_at(s, "web_search_requests")).unwrap_or(0) as u32,
+        speed: str_at(usage, "speed").map(str::to_owned),
+        ..event(key.clone(), model, tokens, prompt)
+    }];
+    out.extend(consulted.into_iter().map(|(m, t, p)| event(format!("{key}:{m}"), m, t, p)));
+    out
 }
 
 /// `gitBranch` as written on every line inside a repository (empty outside one).
@@ -278,5 +314,64 @@ mod tests {
     fn versions_compare_numerically() {
         assert!(version_gt("2.1.280", "2.1.97"));
         assert!(!version_gt("2.1.9", "2.1.10"));
+    }
+
+    fn line(usage: Value) -> Value {
+        json!({"type": "assistant", "sessionId": "s", "requestId": "req_1", "timestamp": "2026-09-01T08:00:00.000Z",
+               "message": {"id": "msg_1", "model": "claude-sonnet-5", "usage": usage}})
+    }
+
+    fn events(usage: Value) -> Vec<UsageEvent> {
+        usage_events(&line(usage), &ClaudeCtx { client_override: None, source: "test" })
+    }
+
+    #[test]
+    fn advisor_iterations_are_a_separate_event_of_their_own_model() {
+        // the documented shape: top-level totals hold the executor iterations only
+        let ev = events(json!({
+            "input_tokens": 1760, "cache_read_input_tokens": 412, "cache_creation_input_tokens": 0, "output_tokens": 531,
+            "server_tool_use": {"web_search_requests": 1},
+            "iterations": [
+                {"type": "message", "input_tokens": 412, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0, "output_tokens": 89},
+                {"type": "advisor_message", "model": "claude-opus-5", "input_tokens": 823, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0, "output_tokens": 1612},
+                {"type": "advisor_message", "model": "claude-opus-5", "input_tokens": 900, "cache_read_input_tokens": 800, "cache_creation_input_tokens": 0, "output_tokens": 400},
+                {"type": "message", "input_tokens": 1348, "cache_read_input_tokens": 412, "cache_creation_input_tokens": 0, "output_tokens": 442},
+                "not an iteration"
+            ]
+        }));
+        assert_eq!(ev.len(), 2);
+        let (exec, adv) = (&ev[0], &ev[1]);
+        assert_eq!((exec.key.as_str(), exec.model.as_str()), ("cc:msg_1", "claude-sonnet-5"));
+        assert_eq!(exec.tokens, Tokens { input: 1760, cache_read: 412, output: 531, ..Default::default() });
+        assert_eq!(exec.request_input, 1348 + 412, "the largest single prompt, not the sum");
+        assert_eq!(exec.web_search_requests, 1);
+        assert_eq!((adv.key.as_str(), adv.model.as_str()), ("cc:msg_1:claude-opus-5", "claude-opus-5"));
+        assert_eq!(adv.tokens, Tokens { input: 1723, cache_read: 800, output: 2012, ..Default::default() });
+        assert_eq!((adv.request_input, adv.web_search_requests), (1700, 0));
+        assert_eq!((adv.session_id.as_deref(), adv.request_id.as_deref()), (Some("s"), Some("req_1")));
+    }
+
+    #[test]
+    fn executor_only_iterations_keep_one_event_and_the_largest_prompt() {
+        // two 120K prompts: neither request was over 200K
+        let it = json!({"type": "message", "input_tokens": 1000, "cache_read_input_tokens": 119_000, "cache_creation_input_tokens": 0, "output_tokens": 10});
+        let ev = events(json!({"input_tokens": 0, "output_tokens": 0, "iterations": [it.clone(), it]}));
+        assert_eq!(ev.len(), 1);
+        assert_eq!(ev[0].tokens, Tokens { input: 2000, cache_read: 238_000, output: 20, ..Default::default() });
+        assert_eq!(ev[0].request_input, 120_000);
+        // without iterations the top-level usage is the single prompt
+        let ev = events(json!({"input_tokens": 5, "cache_read_input_tokens": 2000, "cache_creation_input_tokens": 1000, "output_tokens": 10}));
+        assert_eq!((ev.len(), ev[0].request_input), (1, 3005));
+    }
+
+    #[test]
+    fn an_advisor_iteration_without_a_model_is_left_unpriced() {
+        let ev = events(json!({
+            "input_tokens": 10, "output_tokens": 5,
+            "iterations": [{"type": "message", "input_tokens": 10, "output_tokens": 5}, {"type": "advisor_message", "input_tokens": 300, "output_tokens": 50}]
+        }));
+        assert_eq!(ev.len(), 2);
+        assert_eq!(ev[0].tokens.input, 10);
+        assert_eq!((ev[1].model.as_str(), ev[1].tokens.input), ("unknown", 300));
     }
 }
