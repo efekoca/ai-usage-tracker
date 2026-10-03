@@ -203,13 +203,13 @@
   .spacer {
     flex: 1;
   }
-  @media (max-width: 1100px) {
+  @container main (max-width: 1040px) {
     li {
       grid-template-columns: minmax(150px, 1.3fr) minmax(40px, 1.5fr) 80px 110px;
       gap: 10px;
     }
   }
-  @media (max-width: 760px) {
+  @container main (max-width: 700px) {
     li {
       grid-template-columns: 1fr 80px;
     }

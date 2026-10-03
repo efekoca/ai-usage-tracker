@@ -112,6 +112,8 @@
     color: var(--ink-2);
     font-weight: 500;
     font-size: 12px;
+    white-space: normal;
+    vertical-align: bottom;
   }
   tbody th {
     font-weight: 500;
@@ -159,7 +161,7 @@
     text-align: right;
     font-variant-numeric: tabular-nums;
   }
-  @media (max-width: 1100px) {
+  @container main (max-width: 1040px) {
     th,
     td {
       padding-left: 8px;

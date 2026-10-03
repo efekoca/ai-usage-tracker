@@ -148,7 +148,7 @@
     grid-template-columns: 1.4fr 1fr 1fr 1fr;
     gap: 24px;
   }
-  @media (max-width: 1000px) {
+  @container main (max-width: 940px) {
     .tiles {
       grid-template-columns: 1fr 1fr;
     }
@@ -168,7 +168,7 @@
     grid-template-columns: 1fr 1fr;
     gap: 16px;
   }
-  @media (max-width: 960px) {
+  @container main (max-width: 900px) {
     .grid2 {
       grid-template-columns: 1fr;
     }

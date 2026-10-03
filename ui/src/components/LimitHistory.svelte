@@ -264,7 +264,7 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 24px;
   }
-  @media (max-width: 1000px) {
+  @container main (max-width: 940px) {
     .tiles {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -299,7 +299,7 @@
     align-items: start;
     margin-bottom: 16px;
   }
-  @media (max-width: 1100px) {
+  @container main (max-width: 1040px) {
     .grid {
       grid-template-columns: minmax(0, 1fr);
     }
@@ -405,6 +405,8 @@
     color: var(--ink-2);
     font-weight: 500;
     font-size: 12px;
+    white-space: normal;
+    vertical-align: bottom;
   }
   tbody tr:last-child td {
     border-bottom: 0;
@@ -419,6 +421,7 @@
     padding: 0;
     font: inherit;
     color: inherit;
+    text-align: inherit;
     cursor: pointer;
   }
   .sort:hover {
@@ -445,7 +448,7 @@
   .state.running i {
     opacity: 0.55;
   }
-  @media (max-width: 1100px) {
+  @container main (max-width: 1040px) {
     th,
     td {
       padding-left: 8px;

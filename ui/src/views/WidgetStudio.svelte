@@ -273,7 +273,7 @@
     gap: 16px;
     align-items: start;
   }
-  @media (max-width: 1240px) {
+  @container main (max-width: 1040px) {
     .studio {
       grid-template-columns: 1fr;
     }

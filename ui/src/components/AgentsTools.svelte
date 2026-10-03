@@ -200,9 +200,14 @@
     color: var(--ink-2);
     font-weight: 500;
     font-size: 12px;
+    white-space: normal;
+    vertical-align: bottom;
   }
   tbody th {
     font-weight: 500;
+  }
+  tbody:last-child tr:last-child > * {
+    border-bottom: 0;
   }
   tbody th.main {
     font-weight: 600;

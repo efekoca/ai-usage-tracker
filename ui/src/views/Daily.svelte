@@ -280,7 +280,7 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 24px;
   }
-  @media (max-width: 1000px) {
+  @container main (max-width: 940px) {
     .tiles {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -291,7 +291,7 @@
     gap: 16px;
     align-items: start;
   }
-  @media (max-width: 1100px) {
+  @container main (max-width: 1040px) {
     .grid {
       grid-template-columns: minmax(0, 1fr);
     }
@@ -345,7 +345,7 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 18px;
   }
-  @media (max-width: 760px) {
+  @container main (max-width: 700px) {
     .lists {
       grid-template-columns: minmax(0, 1fr);
     }

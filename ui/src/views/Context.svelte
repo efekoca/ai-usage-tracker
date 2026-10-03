@@ -122,7 +122,7 @@
     gap: 8px;
     margin-bottom: 16px;
   }
-  @media (max-width: 1000px) {
+  @container main (max-width: 940px) {
     .tiles {
       grid-template-columns: 1fr 1fr;
     }
@@ -133,7 +133,7 @@
     gap: 16px;
     margin-bottom: 16px;
   }
-  @media (max-width: 1000px) {
+  @container main (max-width: 940px) {
     .grid2 {
       grid-template-columns: 1fr;
     }
@@ -162,7 +162,8 @@
     font-weight: 500;
     color: var(--ink-2);
     font-size: 12px;
-    white-space: nowrap;
+    white-space: normal;
+    vertical-align: bottom;
   }
   tbody th {
     font-weight: 500;

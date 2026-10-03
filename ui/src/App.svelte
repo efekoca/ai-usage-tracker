@@ -21,6 +21,18 @@
   import { api } from './lib/api'
 
   let failed = $state('')
+
+  // short incremental scans run every few seconds while a tool writes; only a long one is worth showing
+  const scanning = $derived(!!(app.scan?.running && app.scan.total > 0))
+  let showScan = $state(false)
+  $effect(() => {
+    if (!scanning) {
+      showScan = false
+      return
+    }
+    const timer = setTimeout(() => (showScan = true), 1000)
+    return () => clearTimeout(timer)
+  })
   let page: HTMLDivElement | undefined = $state()
   $effect(() => {
     void app.view
@@ -112,7 +124,7 @@
         </ul>
       {/each}
       <div class="spacer"></div>
-      {#if app.scan?.running && app.scan.total > 0}
+      {#if showScan && app.scan}
         <div class="scan" role="status">
           <div class="small muted">{t('sources.scanning', { done: app.scan.done, total: app.scan.total })}</div>
           <div class="progress"><span style="width:{(app.scan.done / Math.max(1, app.scan.total)) * 100}%"></span></div>
@@ -245,6 +257,7 @@
     transition: width 200ms linear;
   }
   .content {
+    container: main / inline-size;
     display: flex;
     flex-direction: column;
     min-width: 0;

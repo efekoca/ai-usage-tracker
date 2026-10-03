@@ -99,7 +99,7 @@
     align-items: center;
     gap: 8px;
   }
-  @media (max-width: 1100px) {
+  @container main (max-width: 1040px) {
     .bar {
       padding: 18px 20px 10px;
     }

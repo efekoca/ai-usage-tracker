@@ -138,7 +138,7 @@ fn scan(app: &AppHandle, store: &mut Store) {
     for (path, e) in &report.errors {
         log::warn!("ingest error in {}: {e}", redact_home(path));
     }
-    let changed = report.new_events() > 0 || report.limits_after != report.limits_before || report.files_read > 0;
+    let changed = report.new_events() > 0 || report.limits_after != report.limits_before || report.records_written > 0;
     {
         let mut st = state.status.lock().unwrap();
         st.running = false;

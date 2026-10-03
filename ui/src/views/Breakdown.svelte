@@ -116,7 +116,7 @@
     grid-template-columns: 1fr 1fr;
     gap: 16px;
   }
-  @media (max-width: 960px) {
+  @container main (max-width: 900px) {
     .grid2 {
       grid-template-columns: 1fr;
     }
@@ -141,6 +141,8 @@
     color: var(--ink-2);
     font-weight: 500;
     font-size: 12px;
+    white-space: normal;
+    vertical-align: bottom;
   }
   tbody th {
     font-weight: 500;
@@ -170,7 +172,7 @@
     color: var(--ink);
     font-weight: 600;
   }
-  @media (max-width: 1100px) {
+  @container main (max-width: 1040px) {
     th,
     td {
       padding-left: 8px;

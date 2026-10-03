@@ -8,6 +8,12 @@
   import Icon from './Icon.svelte'
   import { i18n, t } from '../lib/i18n.svelte'
 
+  // outside any container-query ancestor (which would anchor position: fixed) and outside the label
+  function portal(node: HTMLElement) {
+    document.body.appendChild(node)
+    return { destroy: () => node.remove() }
+  }
+
   let {
     value = $bindable(''),
     options,
@@ -206,6 +212,7 @@
 
 {#if open}
   <div
+    use:portal
     id="{uid}-pop"
     class="pop"
     class:up={pos.up}

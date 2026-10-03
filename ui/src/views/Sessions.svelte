@@ -227,7 +227,7 @@
     gap: 8px;
     margin-bottom: 16px;
   }
-  @media (max-width: 900px) {
+  @container main (max-width: 840px) {
     .tiles {
       grid-template-columns: 1fr 1fr;
     }
@@ -340,7 +340,7 @@
     grid-template-columns: 1.2fr 1fr;
     gap: 24px;
   }
-  @media (max-width: 900px) {
+  @container main (max-width: 840px) {
     .grid {
       grid-template-columns: 1fr;
     }

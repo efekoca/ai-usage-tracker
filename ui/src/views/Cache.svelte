@@ -138,7 +138,7 @@
   .tiles > :global(*) {
     min-width: 0;
   }
-  @media (max-width: 1000px) {
+  @container main (max-width: 940px) {
     .tiles {
       grid-template-columns: 1fr 1fr;
     }
@@ -151,7 +151,7 @@
   .grid2 > section {
     min-width: 0;
   }
-  @media (max-width: 1000px) {
+  @container main (max-width: 940px) {
     .grid2 {
       grid-template-columns: minmax(0, 1fr);
     }
@@ -230,6 +230,8 @@
     color: var(--ink-2);
     font-weight: 500;
     font-size: 12px;
+    white-space: normal;
+    vertical-align: bottom;
   }
   tbody th {
     font-weight: 500;
@@ -251,7 +253,7 @@
     align-items: flex-start;
     max-width: 820px;
   }
-  @media (max-width: 1100px) {
+  @container main (max-width: 1040px) {
     th,
     td {
       padding-left: 8px;

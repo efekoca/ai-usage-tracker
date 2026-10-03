@@ -119,10 +119,8 @@
                 <dt>{t('value.apiEq')}</dt>
                 <dd class="num">{fmtMoney(r.cost)}</dd>
                 <dt>{t('value.planShare')}</dt>
-                <dd class="num">
-                  {fmtMoney(r.share ?? 0)}
-                  <span class="subtle small">· {fmtMoney(r.price.usd)}/{i18n.lang === 'tr' ? 'ay' : 'mo'} {r.price.custom ? t('value.customPrice') : t('value.listPrice')}</span>
-                </dd>
+                <dd class="num">{fmtMoney(r.share ?? 0)}</dd>
+                <dd class="note subtle small">{fmtMoney(r.price.usd)}/{i18n.lang === 'tr' ? 'ay' : 'mo'} {r.price.custom ? t('value.customPrice') : t('value.listPrice')}</dd>
               </dl>
             </div>
             <svg class="spark" viewBox="0 0 {W} {H}" preserveAspectRatio="none" role="img"
@@ -202,6 +200,8 @@
     min-width: 84px;
   }
   dl {
+    flex: 1;
+    min-width: 0;
     margin: 0;
     display: grid;
     grid-template-columns: auto 1fr;
@@ -214,6 +214,12 @@
   dd {
     margin: 0;
     text-align: right;
+    white-space: nowrap;
+  }
+  dd.note {
+    grid-column: 1 / -1;
+    white-space: normal;
+    margin-top: -1px;
   }
   .spark {
     width: 100%;
