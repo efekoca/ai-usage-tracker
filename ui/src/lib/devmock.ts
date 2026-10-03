@@ -324,7 +324,7 @@ function mockDay(date: string) {
   }
 }
 
-const update = { current: '0.2.0', configured: true, checking: false, last_check_ms: Date.now() - 3600e3, last_error: null, available: null as null | { version: string; notes: string | null; date: string | null }, installing: false, downloaded: 0, total: null }
+const update = { current: '0.2.3', configured: true, checking: false, last_check_ms: Date.now() - 3600e3, last_error: null, available: null as null | { version: string; notes: string | null; date: string | null }, installing: false, downloaded: 0, total: null }
 
 const pricing = {
   schema_version: 1,
@@ -342,7 +342,7 @@ export function installMock() {
       const a = args as Record<string, unknown>
       switch (cmd) {
         case 'app_info':
-          return { version: '0.2.0', data_dir: 'C:\\Users\\you\\AppData\\Local\\AIUsageTracker', pricing_origin: 'bundled', pricing_updated_at: '2026-10-02', supports_mica: false, accent_color: null, started_hidden: false, reports_dir: 'C:\Users\you\Documents\AI Usage Tracker' }
+          return { version: '0.2.3', data_dir: 'C:\\Users\\you\\AppData\\Local\\AIUsageTracker', pricing_origin: 'bundled', pricing_updated_at: '2026-10-02', supports_mica: false, accent_color: null, started_hidden: false, reports_dir: 'C:\\Users\\you\\Documents\\AI Usage Tracker' }
         case 'get_settings':
           return settings
         case 'save_settings':
@@ -367,7 +367,7 @@ export function installMock() {
           return { today: per(18_400_000, 12.84), days7: per(96_000_000, 71.3), month1: per(402_000_000, 288.1), limits: limits().map((l) => ({ provider: l.provider, window: l.window, used_pct: l.used_pct, state: l.state, accuracy: l.accuracy, resets_at: l.resets_at, observed_ms: l.observed_ms })), providers: ['anthropic', 'openai'], updated_ms: Date.now() - 60000 }
         }
         case 'capture_status':
-          return { claude_poll: settings.capture.claude_poll, claude: { binary: 'C:/claude.exe', last_ok_ms: Date.now() - 40000, last_error: null }, claude_candidates_found: true, codex_poll: settings.capture.codex_poll, codex: { binary: 'C:/codex.exe', last_ok_ms: Date.now() - 120000, last_error: null }, codex_candidates_found: true, statusline: settings.capture.statusline, statusline_file: 'C:\Users\you\.claude\settings.json', statusline_chained: false, statusline_last_ms: Date.now() - 30000, otel: settings.capture.otel, otel_port: 43180, otel_listening: settings.capture.otel, otel_events: 42, otel_last_ms: Date.now() - 5000, otel_error: null, settings_file: 'C:\Users\you\.claude\settings.json' }
+          return { claude_poll: settings.capture.claude_poll, claude: { binary: 'C:/claude.exe', last_ok_ms: Date.now() - 40000, last_error: null }, claude_candidates_found: true, codex_poll: settings.capture.codex_poll, codex: { binary: 'C:/codex.exe', last_ok_ms: Date.now() - 120000, last_error: null }, codex_candidates_found: true, statusline: settings.capture.statusline, statusline_file: 'C:\\Users\\you\\.claude\\settings.json', statusline_chained: false, statusline_last_ms: Date.now() - 30000, otel: settings.capture.otel, otel_port: 43180, otel_listening: settings.capture.otel, otel_events: 42, otel_last_ms: Date.now() - 5000, otel_error: null, settings_file: 'C:\\Users\\you\\.claude\\settings.json' }
         case 'set_capture': {
           const k = a.kind as 'claude' | 'codex' | 'statusline' | 'otel'
           if (k === 'codex') settings.capture.codex_poll = !!a.enabled

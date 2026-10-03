@@ -9,3 +9,15 @@ node_modules/
 .env
 .vscode/
 /local/
+
+# only source code goes into the repository: no reports, plans or documents
+/docs/
+.claude/
+
+# local databases, logs and keys must never be committed
+*.db-wal
+*.db-shm
+*.sqlite-*
+*.key
+*.pem
+.tauri/
