@@ -30,6 +30,32 @@ pub fn rotated_file(data_dir: &Path) -> PathBuf {
 fn last_file(data_dir: &Path) -> PathBuf {
     capture_dir(data_dir).join("statusline.last.json")
 }
+fn paused_file(data_dir: &Path) -> PathBuf {
+    capture_dir(data_dir).join("paused")
+}
+
+/// While paused the bridge still shows the status line but records nothing.
+pub fn set_paused(data_dir: &Path, paused: bool) -> std::io::Result<()> {
+    if paused {
+        fs::create_dir_all(capture_dir(data_dir))?;
+        fs::write(paused_file(data_dir), b"")
+    } else {
+        match fs::remove_file(paused_file(data_dir)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        }
+    }
+}
+
+pub fn delete_records(data_dir: &Path) -> std::io::Result<()> {
+    for p in [capture_file(data_dir), rotated_file(data_dir), last_file(data_dir)] {
+        match fs::remove_file(&p) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+    }
+    Ok(())
+}
 
 /// Extracts only the limit windows. Returns `None` when the input has no `rate_limits`
 /// (non-subscribers, or before the first API response of a session).
@@ -46,6 +72,9 @@ pub fn extract_windows(input: &Value) -> Option<Map<String, Value>> {
 /// Appends the windows to the capture file when they changed (or after a heartbeat).
 /// Returns whether a line was written. Never panics on I/O problems.
 pub fn record(data_dir: &Path, windows: &Map<String, Value>, now_ms: i64) -> bool {
+    if paused_file(data_dir).exists() {
+        return false;
+    }
     let _ = fs::create_dir_all(capture_dir(data_dir));
     let last: Option<Value> = fs::read_to_string(last_file(data_dir)).ok().and_then(|s| serde_json::from_str(&s).ok());
     let same = last.as_ref().and_then(|l| l.get("windows")) == Some(&Value::Object(windows.clone()));
@@ -150,5 +179,20 @@ mod tests {
         assert_eq!(out.limits.len(), 6);
         assert!(out.limits.iter().all(|l| l.accuracy == Accuracy::Captured && l.source == SOURCE));
         assert_eq!(out.limits.last().unwrap().used_pct, Some(41.2));
+    }
+
+    #[test]
+    fn a_paused_bridge_records_nothing_and_records_can_be_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        let w = extract_windows(&input()).unwrap();
+        assert!(record(dir.path(), &w, 1_000));
+        delete_records(dir.path()).unwrap();
+        assert!(!capture_file(dir.path()).exists());
+        set_paused(dir.path(), true).unwrap();
+        assert!(!record(dir.path(), &w, 2_000));
+        assert!(!capture_file(dir.path()).exists());
+        set_paused(dir.path(), false).unwrap();
+        set_paused(dir.path(), false).unwrap();
+        assert!(record(dir.path(), &w, 3_000));
     }
 }

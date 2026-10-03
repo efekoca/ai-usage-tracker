@@ -5,12 +5,17 @@
   ; an update also runs the old uninstaller (with /UPDATE); keep capture settings then
   ${If} $UpdateMode <> 1
   ${AndIf} ${FileExists} "$INSTDIR\ai-usage-tracker.exe"
-    ExecWait '"$INSTDIR\ai-usage-tracker.exe" --revert-capture'
+    ExecWait '"$INSTDIR\ai-usage-tracker.exe" --revert-capture' $0
+    ${If} $0 <> 0
+      MessageBox MB_OK|MB_ICONEXCLAMATION "AI Usage Tracker could not undo all of its changes to Claude Code's settings.json (the status line or the telemetry export to 127.0.0.1). Please remove them yourself (usually in %USERPROFILE%\.claude\settings.json)." /SD IDOK
+    ${EndIf}
   ${EndIf}
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
+  ; the app writes its start-with-Windows entry for the current user only
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "AI Usage Tracker"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" "AI Usage Tracker"
   ${If} $DeleteAppDataCheckboxState = 1
     RMDir /r "$LOCALAPPDATA\AIUsageTracker"
   ${EndIf}

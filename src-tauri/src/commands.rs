@@ -8,7 +8,7 @@ use serde::Serialize;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use tracker_core::analytics::{self, Filter, LimitState, LimitView, Period, Report};
 use tracker_core::discovery::{self, Env, SourceId, SourceStatus};
 use tracker_core::export::{self, Format, Granularity};
@@ -58,17 +58,31 @@ pub fn get_settings(state: State<AppState>) -> Settings {
     state.settings.read().unwrap().clone()
 }
 
+/// Commands that change state or reveal what settings hide answer only the dashboard window.
+fn main_only(w: &WebviewWindow) -> Res<()> {
+    if w.label() == windows::MAIN { Ok(()) } else { Err("not_allowed".into()) }
+}
+
 #[tauri::command]
-pub fn save_settings(app: AppHandle, state: State<AppState>, settings: Settings) -> Res<Settings> {
+pub fn save_settings(app: AppHandle, window: WebviewWindow, state: State<AppState>, settings: Settings) -> Res<Settings> {
+    main_only(&window)?;
+    save_settings_inner(&app, &state, settings)
+}
+
+fn save_settings_inner(app: &AppHandle, state: &AppState, settings: Settings) -> Res<Settings> {
+    let store = state.db();
     let old = state.settings.read().unwrap().clone();
     let mut settings = settings;
     // capture changes only via set_capture (it edits files outside the app), the shortcut only
-    // via set_hotkey (it must register first)
+    // via set_hotkey (it must register first); a page's widget position can predate the last drag
     settings.capture = old.capture.clone();
     settings.widget.hotkey = old.widget.hotkey.clone();
-    settings.widget.normalize();
-    settings.save(&state.store.lock().unwrap())?;
+    settings.widget.x = old.widget.x;
+    settings.widget.y = old.widget.y;
+    settings.widget.anchor = old.widget.anchor.clone();
+    settings.save(&store)?;
     *state.settings.write().unwrap() = settings.clone();
+    drop(store);
 
     if old.enabled_sources != settings.enabled_sources
         || serde_json::to_string(&old.extra_paths).ok() != serde_json::to_string(&settings.extra_paths).ok()
@@ -77,11 +91,13 @@ pub fn save_settings(app: AppHandle, state: State<AppState>, settings: Settings)
         state.worker.send(Msg::Reconfigure);
     }
     if old.autostart != settings.autostart {
-        windows::apply_autostart(&app, settings.autostart);
+        windows::apply_autostart(settings.autostart, true);
     }
-    windows::apply_widget_settings(&app, &settings);
-    if settings.onboarded && (!old.onboarded || old.enabled_sources != settings.enabled_sources) {
-        crate::capture::wake_readers(&app);
+    windows::apply_widget_settings(app, &settings);
+    if settings.onboarded && !old.onboarded {
+        crate::capture::resume(app);
+    } else if settings.onboarded && old.enabled_sources != settings.enabled_sources {
+        crate::capture::wake_readers(app);
     }
     let _ = app.emit("settings-changed", &settings);
     crate::tray::refresh_soon();
@@ -124,7 +140,7 @@ pub struct ParserWarning {
 
 #[tauri::command]
 pub fn parser_warnings(state: State<AppState>) -> Res<Vec<ParserWarning>> {
-    let rows = state.store.lock().unwrap().files_with_warnings().map_err(err)?;
+    let rows = state.db().files_with_warnings().map_err(err)?;
     Ok(rows.into_iter().map(|(path, parser, count, last)| ParserWarning { path, parser, count, last }).collect())
 }
 
@@ -150,7 +166,7 @@ fn mask_limits(v: &mut [LimitView], hide_all: bool) {
 
 #[tauri::command]
 pub fn get_report(state: State<AppState>, period: Period, filter: Option<Filter>) -> Res<Report> {
-    let store = state.store.lock().unwrap();
+    let store = state.db();
     let book = state.book.read().unwrap();
     let range = analytics::period_range(period, &chrono::Local, now_ms(), store.first_event_ms().map_err(err)?);
     let mut r = analytics::report(&store, &book, range, &filter.unwrap_or_default(), &chrono::Local).map_err(err)?;
@@ -177,7 +193,7 @@ pub(crate) fn enabled_providers(s: &Settings) -> HashSet<Provider> {
 #[tauri::command]
 pub fn get_limits(state: State<AppState>) -> Res<Vec<LimitView>> {
     let settings = state.settings.read().unwrap().clone();
-    let store = state.store.lock().unwrap();
+    let store = state.db();
     let book = state.book.read().unwrap();
     let providers = enabled_providers(&settings);
     let mut v: Vec<LimitView> = analytics::limits_view(&store, &book, now_ms(), &settings.thresholds)
@@ -263,7 +279,7 @@ fn widget_period(
 pub fn get_widget_data(state: State<AppState>) -> Res<WidgetData> {
     let settings = state.settings.read().unwrap().clone();
     let providers = enabled_providers(&settings);
-    let store = state.store.lock().unwrap();
+    let store = state.db();
     let book = state.book.read().unwrap();
     let now = now_ms();
     let limits = analytics::limits_view(&store, &book, now, &settings.thresholds)
@@ -295,7 +311,7 @@ pub fn get_widget_data(state: State<AppState>) -> Res<WidgetData> {
 #[tauri::command]
 pub fn list_projects(state: State<AppState>) -> Res<Vec<ProjectRow>> {
     let hide = state.settings.read().unwrap().hide_project_names;
-    let mut v = state.store.lock().unwrap().projects().map_err(err)?;
+    let mut v = state.db().projects().map_err(err)?;
     for p in &mut v {
         if hide || p.hidden {
             p.name.clear();
@@ -308,20 +324,22 @@ pub fn list_projects(state: State<AppState>) -> Res<Vec<ProjectRow>> {
 
 /// Unmasked: the settings screen is where the user chooses what to hide.
 #[tauri::command]
-pub fn list_projects_for_settings(state: State<AppState>) -> Res<Vec<ProjectRow>> {
-    state.store.lock().unwrap().projects().map_err(err)
+pub fn list_projects_for_settings(window: WebviewWindow, state: State<AppState>) -> Res<Vec<ProjectRow>> {
+    main_only(&window)?;
+    state.db().projects().map_err(err)
 }
 
 #[tauri::command]
-pub fn set_project_hidden(app: AppHandle, state: State<AppState>, id: i64, hidden: bool) -> Res<()> {
-    state.store.lock().unwrap().set_project_hidden(id, hidden).map_err(err)?;
+pub fn set_project_hidden(window: WebviewWindow, app: AppHandle, state: State<AppState>, id: i64, hidden: bool) -> Res<()> {
+    main_only(&window)?;
+    state.db().set_project_hidden(id, hidden).map_err(err)?;
     let _ = app.emit("data-changed", ());
     Ok(())
 }
 
 #[tauri::command]
 pub fn list_models(state: State<AppState>) -> Res<Vec<String>> {
-    let store = state.store.lock().unwrap();
+    let store = state.db();
     let mut st = store.conn().prepare("SELECT DISTINCT model FROM usage_event ORDER BY model").map_err(err)?;
     let rows = st.query_map([], |r| r.get::<_, String>(0)).map_err(err)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(err)
@@ -339,7 +357,8 @@ pub fn get_pricing(state: State<AppState>) -> PricingInfo {
 }
 
 #[tauri::command]
-pub fn save_pricing(app: AppHandle, state: State<AppState>, file: PricingFile) -> Res<()> {
+pub fn save_pricing(window: WebviewWindow, app: AppHandle, state: State<AppState>, file: PricingFile) -> Res<()> {
+    main_only(&window)?;
     let json = serde_json::to_string_pretty(&file).map_err(err)?;
     let book = PriceBook::from_json(&json).map_err(err)?; // validate before writing
     std::fs::write(state.user_pricing_path(), json).map_err(err)?;
@@ -350,7 +369,8 @@ pub fn save_pricing(app: AppHandle, state: State<AppState>, file: PricingFile) -
 }
 
 #[tauri::command]
-pub fn reset_pricing(app: AppHandle, state: State<AppState>) -> Res<()> {
+pub fn reset_pricing(window: WebviewWindow, app: AppHandle, state: State<AppState>) -> Res<()> {
+    main_only(&window)?;
     let p = state.user_pricing_path();
     if p.exists() {
         std::fs::remove_file(&p).map_err(err)?;
@@ -371,6 +391,7 @@ pub fn get_plans() -> serde_json::Value {
 
 #[tauri::command]
 pub fn export_data(
+    window: WebviewWindow,
     state: State<AppState>,
     path: PathBuf,
     period: Period,
@@ -378,21 +399,32 @@ pub fn export_data(
     granularity: Granularity,
     format: Format,
 ) -> Res<usize> {
+    main_only(&window)?;
     let hide = state.settings.read().unwrap().hide_project_names;
-    let store = state.store.lock().unwrap();
+    let store = state.db();
     let book = state.book.read().unwrap();
     let range = analytics::period_range(period, &chrono::Local, now_ms(), store.first_event_ms().map_err(err)?);
     let mut f = std::io::BufWriter::new(std::fs::File::create(&path).map_err(err)?);
-    // UTF-8 BOM so Excel opens Turkish characters correctly
-    if format == Format::Csv {
-        std::io::Write::write_all(&mut f, b"\xEF\xBB\xBF").map_err(err)?;
+    let result = (|| {
+        // UTF-8 BOM so Excel opens Turkish characters correctly
+        if format == Format::Csv {
+            std::io::Write::write_all(&mut f, b"\xEF\xBB\xBF").map_err(err)?;
+        }
+        let n = export::export(&store, &book, range, &filter.unwrap_or_default(), &chrono::Local, granularity, format, hide, &mut f).map_err(err)?;
+        // the last buffered write and the disk's answer are errors too; dropping would hide them
+        f.into_inner().map_err(|e| e.error().to_string())?.sync_all().map_err(err)?;
+        Ok(n)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&path);
     }
-    export::export(&store, &book, range, &filter.unwrap_or_default(), &chrono::Local, granularity, format, hide, &mut f).map_err(err)
+    result
 }
 
 #[tauri::command]
-pub fn backup_database(state: State<AppState>, path: PathBuf) -> Res<()> {
-    state.store.lock().unwrap().backup_to(&path).map_err(err)
+pub fn backup_database(window: WebviewWindow, state: State<AppState>, path: PathBuf) -> Res<()> {
+    main_only(&window)?;
+    state.db().backup_to(&path).map_err(err)
 }
 
 #[derive(Serialize)]
@@ -402,11 +434,12 @@ pub struct ImportResult {
 }
 
 #[tauri::command]
-pub fn import_database(app: AppHandle, state: State<AppState>, path: PathBuf) -> Res<ImportResult> {
+pub fn import_database(window: WebviewWindow, app: AppHandle, state: State<AppState>, path: PathBuf) -> Res<ImportResult> {
+    main_only(&window)?;
     if path == state.db_path {
         return Err("cannot import the live database into itself".into());
     }
-    let (events, limits) = state.store.lock().unwrap().merge_from(&path).map_err(|e| match e {
+    let (events, limits) = state.db().merge_from(&path).map_err(|e| match e {
         tracker_core::rusqlite::Error::InvalidQuery => "not an AI Usage Tracker database".to_string(),
         e => e.to_string(),
     })?;
@@ -415,16 +448,37 @@ pub fn import_database(app: AppHandle, state: State<AppState>, path: PathBuf) ->
 }
 
 /// Returns to onboarding so nothing is re-imported until the user confirms sources again.
+/// Async: waiting for a running scan or limit read must not block the window.
 #[tauri::command]
-pub fn wipe_all_data(app: AppHandle, state: State<AppState>) -> Res<()> {
-    let mut s = state.settings.read().unwrap().clone();
-    s.onboarded = false;
-    {
-        let store = state.store.lock().unwrap();
-        store.wipe_data().map_err(err)?;
-        s.save(&store)?;
+pub async fn wipe_all_data(window: WebviewWindow, app: AppHandle) -> Res<()> {
+    main_only(&window)?;
+    let state = app.state::<AppState>();
+    if let Err(e) = crate::capture::pause(&app) {
+        crate::capture::resume(&app);
+        return Err(err(e));
     }
-    *state.settings.write().unwrap() = s.clone();
+    let wiped = (|| {
+        let _writers = state.writers.write().unwrap_or_else(|e| e.into_inner());
+        let mut s = state.settings.read().unwrap().clone();
+        s.onboarded = false;
+        {
+            let store = state.db();
+            store.wipe_data().map_err(err)?;
+            s.save(&store)?;
+            *state.settings.write().unwrap() = s.clone();
+        }
+        tracker_core::capture::statusline::delete_records(&state.data_dir).map_err(err)?;
+        Ok::<_, String>(s)
+    })();
+    let s = match wiped {
+        Ok(s) => s,
+        Err(e) => {
+            if state.settings.read().unwrap().onboarded {
+                crate::capture::resume(&app);
+            }
+            return Err(e);
+        }
+    };
     state.worker.send(Msg::Reconfigure);
     let _ = app.emit("settings-changed", &s);
     let _ = app.emit("data-changed", ());
@@ -432,16 +486,18 @@ pub fn wipe_all_data(app: AppHandle, state: State<AppState>) -> Res<()> {
 }
 
 #[tauri::command]
-pub fn open_data_folder(state: State<AppState>) -> Res<()> {
-    std::process::Command::new("explorer").arg(&state.data_dir).spawn().map(|_| ()).map_err(err)
+pub fn open_data_folder(window: WebviewWindow, state: State<AppState>) -> Res<()> {
+    main_only(&window)?;
+    std::process::Command::new(crate::system_exe("explorer.exe")).arg(&state.data_dir).spawn().map(|_| ()).map_err(err)
 }
 
 #[tauri::command]
-pub fn open_url(url: String) -> Res<()> {
+pub fn open_url(window: WebviewWindow, url: String) -> Res<()> {
+    main_only(&window)?;
     if !url.starts_with("https://") {
         return Err("only https links can be opened".into());
     }
-    std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).spawn().map(|_| ()).map_err(err)
+    std::process::Command::new(crate::system_exe(r"System32\rundll32.exe")).args(["url.dll,FileProtocolHandler", &url]).spawn().map(|_| ()).map_err(err)
 }
 
 #[tauri::command]
@@ -450,10 +506,11 @@ pub fn open_main(app: AppHandle) {
 }
 
 #[tauri::command]
-pub fn set_widget_visible(app: AppHandle, state: State<AppState>, visible: bool) -> Res<()> {
+pub fn set_widget_visible(window: WebviewWindow, app: AppHandle, state: State<AppState>, visible: bool) -> Res<()> {
+    main_only(&window)?;
     let mut s = state.settings.read().unwrap().clone();
     s.widget.visible = visible;
-    save_settings(app, state, s).map(|_| ())
+    save_settings_inner(&app, &state, s).map(|_| ())
 }
 
 #[tauri::command]
@@ -467,14 +524,9 @@ pub fn place_widget(app: AppHandle, state: State<AppState>, corner: String, reme
     if let Some(w) = tauri::Manager::get_webview_window(&app, windows::WIDGET) {
         windows::place_widget(&w, &corner);
     }
-    if remember.unwrap_or(true) {
-        let mut s = state.settings.read().unwrap().clone();
-        if s.widget.anchor != corner {
-            s.widget.anchor = corner;
-            s.save(&state.store.lock().unwrap())?;
-            *state.settings.write().unwrap() = s.clone();
-            let _ = app.emit("settings-changed", &s);
-        }
+    if remember.unwrap_or(true) && state.settings.read().unwrap().widget.anchor != corner {
+        let s = state.update_settings(|s| s.widget.anchor = corner)?;
+        let _ = app.emit("settings-changed", &s);
     }
     Ok(())
 }
@@ -491,12 +543,16 @@ pub fn capture_status(app: AppHandle) -> crate::capture::CaptureStatus {
 
 /// Async: enabling Codex runs one limit read (up to ~20 s) and must not block the UI thread.
 #[tauri::command]
-pub async fn set_capture(app: AppHandle, kind: String, enabled: bool) -> Res<String> {
+pub async fn set_capture(window: WebviewWindow, app: AppHandle, kind: String, enabled: bool) -> Res<String> {
+    main_only(&window)?;
     crate::capture::set(&app, &kind, enabled)
 }
 
 #[tauri::command]
-pub fn quit_app(app: AppHandle, state: State<AppState>) {
+pub fn quit_app(window: WebviewWindow, app: AppHandle, state: State<AppState>) {
+    if main_only(&window).is_err() {
+        return;
+    }
     state.quitting.store(true, Ordering::SeqCst);
     state.worker.send(Msg::Shutdown);
     app.exit(0);
@@ -513,7 +569,7 @@ fn range_for(store: &tracker_core::store::Store, period: Period) -> Res<analytic
 pub async fn get_sessions(app: AppHandle, period: Period, filter: Option<Filter>) -> Res<insights::Sessions> {
     let state = app.state::<AppState>();
     let hide_all = state.settings.read().unwrap().hide_project_names;
-    let store = state.store.lock().unwrap();
+    let store = state.db();
     let book = state.book.read().unwrap();
     let mut r = insights::sessions(&store, &book, range_for(&store, period)?, &filter.unwrap_or_default()).map_err(err)?;
     for s in &mut r.sessions {
@@ -528,7 +584,7 @@ pub async fn get_sessions(app: AppHandle, period: Period, filter: Option<Filter>
 #[tauri::command]
 pub async fn compare_models(app: AppHandle, period: Period, filter: Option<Filter>) -> Res<insights::ModelCompare> {
     let state = app.state::<AppState>();
-    let store = state.store.lock().unwrap();
+    let store = state.db();
     let book = state.book.read().unwrap();
     insights::compare_models(&store, &book, range_for(&store, period)?, &filter.unwrap_or_default()).map_err(err)
 }
@@ -536,7 +592,7 @@ pub async fn compare_models(app: AppHandle, period: Period, filter: Option<Filte
 #[tauri::command]
 pub async fn context_stats(app: AppHandle, period: Period, filter: Option<Filter>) -> Res<insights::ContextStats> {
     let state = app.state::<AppState>();
-    let store = state.store.lock().unwrap();
+    let store = state.db();
     let book = state.book.read().unwrap();
     insights::context_stats(&store, &book, range_for(&store, period)?, &filter.unwrap_or_default(), &chrono::Local).map_err(err)
 }
@@ -544,39 +600,44 @@ pub async fn context_stats(app: AppHandle, period: Period, filter: Option<Filter
 #[tauri::command]
 pub async fn plan_value(app: AppHandle) -> Res<insights::PlanValue> {
     let state = app.state::<AppState>();
-    let store = state.store.lock().unwrap();
+    let store = state.db();
     let book = state.book.read().unwrap();
     insights::plan_value(&store, &book, range_for(&store, Period::Month1)?, &chrono::Local).map_err(err)
 }
 
 /// `from` and `to` are inclusive local days.
 #[tauri::command]
-pub async fn export_report(app: AppHandle, from: String, to: String, path: PathBuf) -> Res<()> {
+pub async fn export_report(window: WebviewWindow, app: AppHandle, from: String, to: String, path: PathBuf) -> Res<()> {
+    main_only(&window)?;
     crate::pdf::render(&app, &from, &to, &path)?;
     *app.state::<AppState>().last_report.lock().unwrap() = Some(path);
     Ok(())
 }
 
-/// Called by the report page once its data and charts are in place.
+/// `!ok`: the page's data failed, so the export fails instead of printing the error page.
 #[tauri::command]
-pub fn report_ready(state: State<AppState>) {
+pub fn report_ready(window: WebviewWindow, state: State<AppState>, ok: bool) {
+    if window.label() != crate::pdf::LABEL {
+        return;
+    }
     if let Some(tx) = state.report_ready.lock().unwrap().take() {
-        let _ = tx.send(());
+        let _ = tx.send(ok);
     }
 }
 
 /// Opens only the PDF this app saved last, never an arbitrary path.
 #[tauri::command]
-pub fn open_last_report(state: State<AppState>) -> Res<()> {
+pub fn open_last_report(window: WebviewWindow, state: State<AppState>) -> Res<()> {
+    main_only(&window)?;
     let path = state.last_report.lock().unwrap().clone().ok_or("no report yet")?;
-    std::process::Command::new("explorer").arg(path).spawn().map(|_| ()).map_err(err)
+    std::process::Command::new(crate::system_exe("explorer.exe")).arg(path).spawn().map(|_| ()).map_err(err)
 }
 
 #[tauri::command]
 pub async fn get_branches(app: AppHandle, period: Period, filter: Option<Filter>) -> Res<insights::Branches> {
     let state = app.state::<AppState>();
     let hide_all = state.settings.read().unwrap().hide_project_names;
-    let store = state.store.lock().unwrap();
+    let store = state.db();
     let book = state.book.read().unwrap();
     let mut r = insights::branches(&store, &book, range_for(&store, period)?, &filter.unwrap_or_default()).map_err(err)?;
     for b in &mut r.rows {
@@ -593,7 +654,7 @@ pub async fn get_branches(app: AppHandle, period: Period, filter: Option<Filter>
 #[tauri::command]
 pub async fn get_agents_tools(app: AppHandle, period: Period, filter: Option<Filter>) -> Res<insights::AgentsTools> {
     let state = app.state::<AppState>();
-    let store = state.store.lock().unwrap();
+    let store = state.db();
     let book = state.book.read().unwrap();
     insights::agents_tools(&store, &book, range_for(&store, period)?, &filter.unwrap_or_default()).map_err(err)
 }
@@ -601,7 +662,7 @@ pub async fn get_agents_tools(app: AppHandle, period: Period, filter: Option<Fil
 #[tauri::command]
 pub async fn get_tips(app: AppHandle, period: Period, filter: Option<Filter>) -> Res<tracker_core::tips::Tips> {
     let state = app.state::<AppState>();
-    let store = state.store.lock().unwrap();
+    let store = state.db();
     let book = state.book.read().unwrap();
     tracker_core::tips::tips(&store, &book, range_for(&store, period)?, &filter.unwrap_or_default()).map_err(err)
 }
@@ -629,7 +690,7 @@ pub async fn get_limit_history(app: AppHandle, days: Option<i64>) -> Res<LimitHi
     let state = app.state::<AppState>();
     let settings = state.settings.read().unwrap().clone();
     let providers = enabled_providers(&settings);
-    let store = state.store.lock().unwrap();
+    let store = state.db();
     let book = state.book.read().unwrap();
     let now = now_ms();
     let mut history = tracker_core::history::limit_history(&store, now, days.unwrap_or(56).clamp(1, 3660)).map_err(err)?;
@@ -668,7 +729,8 @@ pub fn hotkey_status(state: State<AppState>) -> HotkeyStatus {
 
 /// Empty clears the shortcut; one owned by another program is refused and the old one restored.
 #[tauri::command]
-pub async fn set_hotkey(app: AppHandle, hotkey: String) -> Res<HotkeyStatus> {
+pub async fn set_hotkey(window: WebviewWindow, app: AppHandle, hotkey: String) -> Res<HotkeyStatus> {
+    main_only(&window)?;
     let hotkey: String = hotkey.trim().chars().take(64).collect();
     let state = app.state::<AppState>();
     let old = state.settings.read().unwrap().widget.hotkey.clone();
@@ -676,10 +738,7 @@ pub async fn set_hotkey(app: AppHandle, hotkey: String) -> Res<HotkeyStatus> {
         let _ = crate::hotkey::apply(&app, &old);
         return Err(e);
     }
-    let mut s = state.settings.read().unwrap().clone();
-    s.widget.hotkey = hotkey;
-    s.save(&state.store.lock().unwrap())?;
-    *state.settings.write().unwrap() = s.clone();
+    let s = state.update_settings(|s| s.widget.hotkey = hotkey)?;
     let _ = app.emit("settings-changed", &s);
     crate::tray::refresh_soon();
     Ok(hotkey_status(state))
@@ -691,12 +750,14 @@ pub fn update_status(app: AppHandle) -> crate::updates::UpdateStatus {
 }
 
 #[tauri::command]
-pub async fn check_update(app: AppHandle) -> Res<crate::updates::UpdateStatus> {
+pub async fn check_update(window: WebviewWindow, app: AppHandle) -> Res<crate::updates::UpdateStatus> {
+    main_only(&window)?;
     crate::updates::check(&app).await
 }
 
 #[tauri::command]
-pub async fn install_update(app: AppHandle) -> Res<()> {
+pub async fn install_update(window: WebviewWindow, app: AppHandle) -> Res<()> {
+    main_only(&window)?;
     crate::updates::install(&app).await
 }
 
@@ -705,7 +766,7 @@ pub async fn get_day_detail(app: AppHandle, date: String, filter: Option<Filter>
     let date = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d").map_err(err)?;
     let state = app.state::<AppState>();
     let hide_all = state.settings.read().unwrap().hide_project_names;
-    let store = state.store.lock().unwrap();
+    let store = state.db();
     let book = state.book.read().unwrap();
     let mut d = insights::day_detail(&store, &book, date, &filter.unwrap_or_default(), &chrono::Local).map_err(err)?;
     for g in &mut d.by_project {

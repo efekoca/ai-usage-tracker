@@ -14,16 +14,25 @@ use crate::discovery::{claude_config_roots, Env, ExtraPaths};
 use crate::model::{parse_ts_ms, Accuracy, LimitSnapshot, Provider, Tool};
 use crate::sources::{f64_at, str_at};
 use serde_json::{json, Value};
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 pub const SOURCE: &str = "claude_code_usage";
 
 /// Windows read from the answer; per-model buckets are left out (they change names often).
 const WINDOWS: [&str; 4] = ["five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet"];
+
+/// Documented opt-outs (code.claude.com/docs/en/data-usage), so a limit read neither reports
+/// anything nor updates the install; `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` covers more.
+pub const QUIET_ENV: [(&str, &str); 5] = [
+    ("DISABLE_TELEMETRY", "1"),
+    ("DISABLE_ERROR_REPORTING", "1"),
+    ("DISABLE_FEEDBACK_COMMAND", "1"),
+    ("CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY", "1"),
+    ("DISABLE_AUTOUPDATER", "1"),
+];
 
 /// Where a usable `claude` binary may live, best first: an explicit path, the native
 /// installer, PATH, the npm package, then the copy the Claude desktop app keeps for its Code tab.
@@ -35,11 +44,7 @@ pub fn candidates(env: &Env, configured: Option<&Path>) -> Vec<PathBuf> {
     if let Some(h) = &env.home {
         v.push(h.join(".local").join("bin").join("claude.exe"));
     }
-    if let Some(path) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&path) {
-            v.push(dir.join("claude.exe"));
-        }
-    }
+    v.extend(super::path_dirs().into_iter().map(|d| d.join("claude.exe")));
     if let Some(r) = &env.roaming {
         v.push(r.join("npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe"));
         // newest version folder first
@@ -141,7 +146,8 @@ pub fn query(bin: &Path, work_dir: &Path, config_dir: Option<&Path>, timeout: Du
     .current_dir(work_dir)
     .stdin(Stdio::piped())
     .stdout(Stdio::piped())
-    .stderr(Stdio::null());
+    .stderr(Stdio::null())
+    .envs(QUIET_ENV);
     if let Some(dir) = config_dir {
         cmd.env("CLAUDE_CONFIG_DIR", dir);
     }
@@ -154,16 +160,7 @@ pub fn query(bin: &Path, work_dir: &Path, config_dir: Option<&Path>, timeout: Du
     let mut child = cmd.spawn().map_err(|e| fail(format!("cannot start claude: {e}")))?;
     let mut stdin = child.stdin.take().ok_or_else(|| fail("no stdin".into()))?;
     let stdout = child.stdout.take().ok_or_else(|| fail("no stdout".into()))?;
-    let (tx, rx) = mpsc::channel::<Value>();
-    std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            if let Ok(v) = serde_json::from_str::<Value>(&line)
-                && tx.send(v).is_err()
-            {
-                break;
-            }
-        }
-    });
+    let rx = super::json_lines(stdout);
     let result = (|| {
         let req = json!({"type": "control_request", "request_id": "aut-usage", "request": {"subtype": "get_usage", "skip_behaviors": true}});
         writeln!(stdin, "{req}").and_then(|_| stdin.flush()).map_err(|e| fail(format!("claude closed its input: {e}")))?;

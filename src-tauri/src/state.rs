@@ -4,7 +4,7 @@ use crate::worker::Worker;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Mutex, RwLock};
+use std::sync::{Mutex, MutexGuard, RwLock};
 use tracker_core::pricing::PriceBook;
 use tracker_core::store::Store;
 
@@ -32,10 +32,11 @@ pub struct AppState {
     pub status: Mutex<ScanStatus>,
     pub worker: Worker,
     pub capture: CaptureRuntime,
+    /// Exclusive for "delete all data", so nothing read before a wipe is written after it.
+    pub writers: RwLock<()>,
     pub quitting: AtomicBool,
     pub started_hidden: bool,
-    /// Signalled by the hidden report page when it is ready to print.
-    pub report_ready: Mutex<Option<std::sync::mpsc::Sender<()>>>,
+    pub report_ready: Mutex<Option<std::sync::mpsc::Sender<bool>>>,
     pub last_report: Mutex<Option<PathBuf>>,
     pub updates: Mutex<crate::updates::UpdateStatus>,
     pub hotkey_error: Mutex<Option<String>>,
@@ -44,6 +45,21 @@ pub struct AppState {
 impl AppState {
     pub fn user_pricing_path(&self) -> PathBuf {
         self.data_dir.join("pricing.json")
+    }
+
+    /// An open transaction rolls back on drop, so a poisoned lock still holds a consistent SQLite.
+    pub fn db(&self) -> MutexGuard<'_, Store> {
+        self.store.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Holds the store for the whole read-change-save, so concurrent updates cannot undo each other.
+    pub fn update_settings(&self, f: impl FnOnce(&mut Settings)) -> Result<Settings, String> {
+        let store = self.db();
+        let mut s = self.settings.read().unwrap().clone();
+        f(&mut s);
+        s.save(&store)?;
+        *self.settings.write().unwrap() = s.clone();
+        Ok(s)
     }
 }
 

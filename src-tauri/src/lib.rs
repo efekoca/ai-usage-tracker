@@ -54,8 +54,17 @@ fn relaunched_outside_package() -> bool {
     }
     let _ = std::fs::write(&marker, b"");
     let Ok(exe) = std::env::current_exe() else { return false };
-    let explorer = std::env::var_os("SystemRoot").map(|r| std::path::PathBuf::from(r).join("explorer.exe")).unwrap_or_else(|| "explorer.exe".into());
-    std::process::Command::new(explorer).arg(exe).spawn().is_ok()
+    std::process::Command::new(system_exe("explorer.exe")).arg(exe).spawn().is_ok()
+}
+
+/// By full path, so PATH and the current folder play no part in which file runs.
+pub(crate) fn system_exe(relative: &str) -> std::path::PathBuf {
+    std::env::var_os("SystemRoot")
+        .or_else(|| std::env::var_os("windir"))
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows"))
+        .join(relative)
 }
 
 #[cfg(windows)]
@@ -97,7 +106,6 @@ pub fn run() {
     let app = tauri::Builder::default()
         // must be registered first: a second launch just focuses the running instance
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| windows::show_main(app)))
-        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--autostart"])))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -128,6 +136,7 @@ pub fn run() {
                 worker,
                 capture: capture::CaptureRuntime::new(),
                 quitting: AtomicBool::new(false),
+                writers: RwLock::new(()),
                 started_hidden,
                 report_ready: Mutex::new(None),
                 last_report: Mutex::new(None),
@@ -143,6 +152,10 @@ pub fn run() {
                 windows::show_main(app.handle());
             }
             windows::apply_widget_settings(app.handle(), &settings);
+            if settings.autostart {
+                // rewrites an entry made by an older version (unquoted path) and follows a moved exe
+                windows::apply_autostart(true, false);
+            }
             windows::start_fullscreen_watch(app.handle().clone());
             capture::start(app.handle());
             pdf::start_weekly(app.handle().clone());

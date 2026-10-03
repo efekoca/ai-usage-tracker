@@ -287,13 +287,17 @@ impl Settings {
         }
     }
 
-    pub fn save(&self, store: &Store) -> Result<(), String> {
-        let mut s = self.clone();
-        s.widget.normalize();
-        if !(s.fx_rate.is_finite() && s.fx_rate > 0.0) {
-            s.fx_rate = 1.0;
+    pub fn normalize(&mut self) {
+        self.widget.normalize();
+        if !(self.fx_rate.is_finite() && self.fx_rate > 0.0) {
+            self.fx_rate = 1.0;
         }
-        store.set_setting(KEY, &serde_json::to_string(&s).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+    }
+
+    /// Normalizes in place first, so what callers keep and publish is exactly what was stored.
+    pub fn save(&mut self, store: &Store) -> Result<(), String> {
+        self.normalize();
+        store.set_setting(KEY, &serde_json::to_string(self).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
     }
 }
 
@@ -317,6 +321,18 @@ mod tests {
         assert_eq!(s.limit_display, "used");
         assert!(s.tray.show_percent && s.update_check);
         assert_eq!(s.widget.hotkey, DEFAULT_HOTKEY);
+    }
+
+    #[test]
+    fn saving_normalizes_the_object_that_is_kept() {
+        let store = Store::open_in_memory().unwrap();
+        let mut s = Settings { fx_rate: f64::NAN, ..Settings::default() };
+        s.widget.opacity = 5.0;
+        s.save(&store).unwrap();
+        assert_eq!(s.fx_rate, 1.0);
+        assert_eq!(s.widget.opacity, 1.0);
+        let stored = Settings::load(&store);
+        assert_eq!(serde_json::to_value(&stored).unwrap(), serde_json::to_value(&s).unwrap());
     }
 
     #[test]

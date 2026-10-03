@@ -14,10 +14,12 @@ use tracker_core::store::Store;
 
 const DEBOUNCE: Duration = Duration::from_millis(1500);
 const SAFETY_RESCAN: Duration = Duration::from_secs(300);
+const REWATCH_GAP: Duration = Duration::from_secs(30);
 
 pub enum Msg {
     Scan,
     Reconfigure,
+    WatchFailed,
     Shutdown,
 }
 
@@ -58,6 +60,7 @@ fn run(app: AppHandle, db_path: PathBuf, rx: std::sync::mpsc::Receiver<Msg>, tx:
     let mut watched: Vec<(PathBuf, bool)> = Vec::new();
     let mut pending = true;
     let mut rewatch = true;
+    let mut last_watch = Instant::now();
 
     loop {
         if rewatch {
@@ -66,6 +69,7 @@ fn run(app: AppHandle, db_path: PathBuf, rx: std::sync::mpsc::Receiver<Msg>, tx:
             if roots != watched || watcher.is_none() {
                 watcher = make_watcher(&roots, tx.clone());
                 watched = roots;
+                last_watch = Instant::now();
             }
             rewatch = false;
         }
@@ -75,6 +79,7 @@ fn run(app: AppHandle, db_path: PathBuf, rx: std::sync::mpsc::Receiver<Msg>, tx:
                 match rx.recv_timeout(left) {
                     Ok(Msg::Shutdown) => return,
                     Ok(Msg::Reconfigure) => rewatch = true,
+                    Ok(Msg::WatchFailed) => watch_failed(&mut watcher, &mut rewatch, &last_watch),
                     Ok(Msg::Scan) | Err(RecvTimeoutError::Timeout) => {}
                     Err(RecvTimeoutError::Disconnected) => return,
                 }
@@ -85,6 +90,10 @@ fn run(app: AppHandle, db_path: PathBuf, rx: std::sync::mpsc::Receiver<Msg>, tx:
         }
         match rx.recv_timeout(SAFETY_RESCAN) {
             Ok(Msg::Scan) => pending = true,
+            Ok(Msg::WatchFailed) => {
+                watch_failed(&mut watcher, &mut rewatch, &last_watch);
+                pending = true;
+            }
             Ok(Msg::Reconfigure) => {
                 rewatch = true;
                 pending = true;
@@ -101,6 +110,8 @@ fn run(app: AppHandle, db_path: PathBuf, rx: std::sync::mpsc::Receiver<Msg>, tx:
 
 fn scan(app: &AppHandle, store: &mut Store) {
     let state = app.state::<AppState>();
+    // "delete all data" waits for a running scan; one that waited for it sees onboarding undone
+    let _writing = state.writers.read().unwrap_or_else(|e| e.into_inner());
     let settings = state.settings.read().unwrap().clone();
     if !settings.onboarded {
         return; // nothing is read until the user confirms sources in onboarding
@@ -108,8 +119,9 @@ fn scan(app: &AppHandle, store: &mut Store) {
     let enabled: HashSet<SourceId> = settings.enabled_sources.iter().copied().collect();
     let mut files = discovery::enumerate_files(&Env::from_system(), &settings.extra_paths, &enabled);
     // this app's own status-line capture (older rotated file first)
+    let own_capture = enabled.contains(&SourceId::ClaudeCode) && settings.capture.statusline;
     for p in [statusline::rotated_file(&state.data_dir), statusline::capture_file(&state.data_dir)] {
-        if p.is_file() {
+        if own_capture && p.is_file() {
             files.push(DiscoveredFile { file_id: discovery::file_identity(&p), path: p, parser: ParserKind::StatuslineCapture, source: SourceId::ClaudeCode });
         }
     }
@@ -205,11 +217,13 @@ fn is_relevant(p: &Path) -> bool {
 }
 
 fn make_watcher(roots: &[(PathBuf, bool)], tx: Sender<Msg>) -> Option<notify::RecommendedWatcher> {
-    let mut w = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-        if let Ok(ev) = res
-            && ev.paths.iter().any(|p| is_relevant(p))
-        {
+    let mut w = notify::recommended_watcher(move |res: notify::Result<notify::Event>| match res {
+        Ok(ev) if ev.paths.iter().any(|p| is_relevant(p)) => {
             let _ = tx.send(Msg::Scan);
+        }
+        Ok(_) => {}
+        Err(_) => {
+            let _ = tx.send(Msg::WatchFailed);
         }
     })
     .map_err(|e| log::warn!("file watcher unavailable, falling back to periodic scans: {e}"))
@@ -221,4 +235,12 @@ fn make_watcher(roots: &[(PathBuf, bool)], tx: Sender<Msg>) -> Option<notify::Re
         }
     }
     Some(w)
+}
+
+/// Rebuilt at most once per [`REWATCH_GAP`], so a persistent error cannot spin.
+fn watch_failed(watcher: &mut Option<notify::RecommendedWatcher>, rewatch: &mut bool, last_watch: &Instant) {
+    if last_watch.elapsed() >= REWATCH_GAP && watcher.take().is_some() {
+        log::warn!("file watcher reported an error; rebuilding it");
+        *rewatch = true;
+    }
 }

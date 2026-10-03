@@ -21,7 +21,7 @@ pub fn render(app: &AppHandle, from: &str, to: &str, out: &Path) -> Result<(), S
     if let Some(w) = app.get_webview_window(LABEL) {
         let _ = w.destroy();
     }
-    let (tx, rx) = mpsc::channel::<()>();
+    let (tx, rx) = mpsc::channel::<bool>();
     *app.state::<AppState>().report_ready.lock().unwrap() = Some(tx);
     let win = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App(format!("report.html?from={from}&to={to}").into()))
         .title("AI Usage Tracker report")
@@ -30,14 +30,26 @@ pub fn render(app: &AppHandle, from: &str, to: &str, out: &Path) -> Result<(), S
         .inner_size(820.0, 1160.0)
         .build()
         .map_err(|e| e.to_string())?;
+    let partial = partial_path(out);
     let result = (|| {
-        // the page says when its data is in and its charts have laid out
-        rx.recv_timeout(Duration::from_secs(45)).map_err(|_| "report_timeout".to_string())?;
-        print_to_pdf(&win, out)
+        if !rx.recv_timeout(Duration::from_secs(45)).map_err(|_| "report_timeout".to_string())? {
+            return Err("report_data_failed".to_string());
+        }
+        // printed beside the target, so a failed render never leaves a broken PDF in its place
+        print_to_pdf(&win, &partial)?;
+        std::fs::rename(&partial, out).map_err(|e| e.to_string())
     })();
     let _ = win.destroy();
     *app.state::<AppState>().report_ready.lock().unwrap() = None;
+    if result.is_err() {
+        let _ = std::fs::remove_file(&partial);
+    }
     result
+}
+
+fn partial_path(out: &Path) -> PathBuf {
+    let stem = out.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    out.with_file_name(format!("{stem}.partial-{}.pdf", std::process::id()))
 }
 
 pub fn default_dir(app: &AppHandle) -> Option<PathBuf> {
@@ -143,5 +155,14 @@ mod tests {
         assert_eq!(last_full_week(d(2026, 10, 5)), (d(2026, 9, 28), d(2026, 10, 4)));
         // Sunday still belongs to the current week
         assert_eq!(last_full_week(d(2026, 10, 4)), (d(2026, 9, 21), d(2026, 9, 27)));
+    }
+
+    #[test]
+    fn the_partial_file_sits_beside_the_target_under_another_name() {
+        let out = Path::new(r"C:\r\AI-Usage_2026-09-21_2026-09-27.pdf");
+        let p = partial_path(out);
+        assert_eq!(p.parent(), out.parent());
+        assert_ne!(p, out);
+        assert_eq!(p.extension().unwrap(), "pdf");
     }
 }

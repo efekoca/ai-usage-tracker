@@ -5,12 +5,12 @@ use crate::state::AppState;
 use serde::Serialize;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
-use tracker_core::capture::claude_settings::{self as cs, CaptureState, RevertOutcome};
+use tracker_core::capture::claude_settings::{self as cs, RevertOutcome};
 use tracker_core::capture::{claude_usage, codex_limits, otlp, statusline};
 use tracker_core::discovery::{self, Env, SourceId};
 use tracker_core::store::Store;
@@ -29,6 +29,8 @@ pub struct CaptureRuntime {
     codex_wake: Mutex<Option<Sender<()>>>,
     pub claude: Mutex<PollStatus>,
     claude_wake: Mutex<Option<Sender<()>>>,
+    /// Bumped by "delete all data": a limit read started before it is not stored.
+    wipes: AtomicU64,
 }
 
 impl CaptureRuntime {
@@ -40,6 +42,7 @@ impl CaptureRuntime {
             codex_wake: Mutex::new(None),
             claude: Mutex::new(PollStatus::default()),
             claude_wake: Mutex::new(None),
+            wipes: AtomicU64::new(0),
         }
     }
 }
@@ -93,12 +96,18 @@ pub fn git_bash() -> Option<PathBuf> {
 
 /// Must work under both Git Bash and PowerShell, whichever Claude Code uses.
 pub fn statusline_command(exe: &Path) -> String {
+    quoted_command(&exe.to_string_lossy(), short_path(exe).as_deref(), git_bash().is_some())
+}
+
+/// Single quotes: inside double quotes both shells would still expand `$` and backticks.
+fn quoted_command(full: &str, short: Option<&str>, bash: bool) -> String {
     let fwd = |s: &str| s.replace('\\', "/");
-    if let Some(short) = short_path(exe).filter(|s| !s.contains(' ')) {
-        return format!("{} --statusline", fwd(&short));
+    let plain = |s: &str| s.chars().all(|c| c.is_ascii_alphanumeric() || "/:._-~".contains(c));
+    if let Some(short) = short.map(fwd).filter(|s| plain(s)) {
+        return format!("{short} --statusline");
     }
-    let full = fwd(&exe.to_string_lossy());
-    if git_bash().is_some() { format!("\"{full}\" --statusline") } else { format!("& \"{full}\" --statusline") }
+    let full = fwd(full);
+    if bash { format!("'{}' --statusline", full.replace('\'', r"'\''")) } else { format!("& '{}' --statusline", full.replace('\'', "''")) }
 }
 
 /// Run by Claude Code as its status-line command; chains to the user's previous one if any.
@@ -114,7 +123,7 @@ pub fn statusline_main() -> i32 {
     let state = cs::load_state(&data_dir);
     let previous = state.statusline.and_then(|s| s.previous);
     let out = match previous.as_ref().and_then(|p| p.get("command")).and_then(|c| c.as_str()) {
-        Some(cmd) => run_chained(cmd, &input).unwrap_or_default(),
+        Some(cmd) => run_chained(cmd, input).unwrap_or_default(),
         None => statusline::render_default(windows.as_ref()),
     };
     let mut stdout = std::io::stdout();
@@ -123,8 +132,11 @@ pub fn statusline_main() -> i32 {
     0
 }
 
-fn run_chained(cmd: &str, input: &[u8]) -> Option<String> {
+/// I/O goes through helper threads, so a stalled child or its descendants cannot outlast the deadline.
+fn run_chained(cmd: &str, input: Vec<u8>) -> Option<String> {
     use std::process::{Command, Stdio};
+    const DEADLINE: Duration = Duration::from_secs(5);
+    const MAX_OUT: u64 = 64 * 1024;
     let mut c = match git_bash() {
         Some(bash) => {
             let mut c = Command::new(bash);
@@ -132,7 +144,7 @@ fn run_chained(cmd: &str, input: &[u8]) -> Option<String> {
             c
         }
         None => {
-            let mut c = Command::new("powershell.exe");
+            let mut c = Command::new(crate::system_exe(r"System32\WindowsPowerShell\v1.0\powershell.exe"));
             c.args(["-NoProfile", "-NonInteractive", "-Command", cmd]);
             c
         }
@@ -145,48 +157,47 @@ fn run_chained(cmd: &str, input: &[u8]) -> Option<String> {
     }
     let mut child = c.spawn().ok()?;
     if let Some(mut si) = child.stdin.take() {
-        let _ = si.write_all(input);
+        std::thread::spawn(move || {
+            let _ = si.write_all(&input);
+        });
     }
-    let mut out = String::new();
-    let mut so = child.stdout.take()?;
-    let reader = std::thread::spawn(move || {
-        let _ = so.read_to_string(&mut out);
-        out
+    let so = child.stdout.take()?;
+    let (tx, rx) = channel::<Vec<u8>>();
+    std::thread::spawn(move || {
+        let mut out = Vec::new();
+        let _ = so.take(MAX_OUT).read_to_end(&mut out);
+        let _ = tx.send(out);
     });
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
-            _ => {
-                let _ = child.kill();
-                break;
-            }
-        }
+    let out = rx.recv_timeout(DEADLINE).ok();
+    let left = Instant::now() + Duration::from_millis(200);
+    while matches!(child.try_wait(), Ok(None)) && Instant::now() < left {
+        std::thread::sleep(Duration::from_millis(20));
     }
-    reader.join().ok()
+    if matches!(child.try_wait(), Ok(None)) {
+        let _ = child.kill();
+    }
+    out.map(|o| String::from_utf8_lossy(&o).into_owned())
 }
 
 /// `--revert-capture`, run by the uninstaller: undoes every change made outside the app's folder.
 pub fn revert_all_main() -> i32 {
     let Some(data_dir) = tracker_core::store::default_data_dir() else { return 0 };
-    let mut state = cs::load_state(&data_dir);
-    if let Some(ch) = state.statusline.take() {
-        let _ = cs::revert_statusline(&ch);
-    }
-    if let Some(ch) = state.otel.take() {
-        let _ = cs::revert_otel(&ch);
-    }
-    let _ = cs::save_state(&data_dir, &state);
+    let mut state = match cs::read_state(&data_dir) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("ai-usage-tracker: {e}");
+            return 2;
+        }
+    };
+    let statusline_ok = cs::uninstall_statusline(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: status line: {e}")).is_ok();
+    let otel_ok = cs::uninstall_otel(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: telemetry: {e}")).is_ok();
     if let Ok(store) = Store::open(&data_dir.join("tracker.db")) {
         let mut s = Settings::load(&store);
-        s.capture.statusline = false;
-        s.capture.otel = false;
-        s.capture.codex_poll = false;
-        s.capture.claude_poll = false;
+        s.capture.statusline &= !statusline_ok;
+        s.capture.otel &= !otel_ok;
         let _ = s.save(&store);
     }
-    0
+    if statusline_ok && otel_ok { 0 } else { 1 }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -240,7 +251,7 @@ pub fn status(app: &AppHandle) -> CaptureStatus {
 
 fn codex_binary(s: &Settings) -> Option<PathBuf> {
     let configured = (!s.capture.codex_path.trim().is_empty()).then(|| PathBuf::from(s.capture.codex_path.trim()));
-    codex_limits::find_codex(&Env::from_system(), &s.extra_paths, configured.as_deref())
+    codex_limits::find_codex(&Env::from_system(), configured.as_deref())
 }
 
 fn claude_binary(s: &Settings) -> Option<PathBuf> {
@@ -258,11 +269,7 @@ fn read_claude(state: &AppState, s: &Settings, bin: &Path) -> Result<Vec<tracker
 }
 
 fn persist(app: &AppHandle, f: impl FnOnce(&mut Settings)) -> Result<Settings, String> {
-    let state = app.state::<AppState>();
-    let mut s = state.settings.read().unwrap().clone();
-    f(&mut s);
-    s.save(&state.store.lock().unwrap())?;
-    *state.settings.write().unwrap() = s.clone();
+    let s = app.state::<AppState>().update_settings(f)?;
     let _ = app.emit("settings-changed", &s);
     Ok(s)
 }
@@ -275,16 +282,62 @@ fn outcome_text(o: RevertOutcome) -> &'static str {
     }
 }
 
+fn managed_settings() -> Vec<serde_json::Value> {
+    let mut docs = std::env::var_os("ProgramFiles").map(|p| cs::managed_files(Path::new(&p))).unwrap_or_default();
+    docs.extend(policy_values().iter().filter_map(|s| serde_json::from_str(s).ok()));
+    docs
+}
+
+#[cfg(windows)]
+fn policy_values() -> Vec<String> {
+    use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ};
+    let key: Vec<u16> = "SOFTWARE\\Policies\\ClaudeCode\0".encode_utf16().collect();
+    let val: Vec<u16> = "Settings\0".encode_utf16().collect();
+    let flags = RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ;
+    let mut out = Vec::new();
+    for root in [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {
+        let mut size = 0u32;
+        // SAFETY: size query, then a read into a buffer of the reported size.
+        let rc = unsafe { RegGetValueW(root, key.as_ptr(), val.as_ptr(), flags, std::ptr::null_mut(), std::ptr::null_mut(), &mut size) };
+        if rc != 0 || size == 0 {
+            continue;
+        }
+        let mut buf = vec![0u16; (size as usize).div_ceil(2)];
+        let rc = unsafe { RegGetValueW(root, key.as_ptr(), val.as_ptr(), flags, std::ptr::null_mut(), buf.as_mut_ptr().cast(), &mut size) };
+        if rc == 0 {
+            let n = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+            out.push(String::from_utf16_lossy(&buf[..n]));
+        }
+    }
+    out
+}
+
+#[cfg(not(windows))]
+fn policy_values() -> Vec<String> {
+    Vec::new()
+}
+
+fn code(e: cs::SettingsError) -> String {
+    match e {
+        cs::SettingsError::TelemetryConflict(k) => format!("telemetry_settings_conflict:{k}"),
+        cs::SettingsError::Unparseable(d) => format!("settings_unparseable:{d}"),
+        cs::SettingsError::Changed => "settings_changed".into(),
+        cs::SettingsError::StateUnreadable(d) => format!("state_unreadable:{d}"),
+        cs::SettingsError::Io(e) => e.to_string(),
+    }
+}
+
 pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
     let state = app.state::<AppState>();
     let data_dir = state.data_dir.clone();
     let settings = state.settings.read().unwrap().clone();
-    let mut cstate: CaptureState = cs::load_state(&data_dir);
+    let read_state = || cs::read_state(&data_dir).map_err(code);
     match (kind, on) {
         ("codex", true) => {
             let bin = codex_binary(&settings).ok_or("codex_not_found")?;
+            let epoch = state.capture.wipes.load(Ordering::SeqCst);
             let snaps = codex_limits::query(&bin, Duration::from_secs(20), now_ms())?;
-            store_limits(&state.db_path, &snaps)?;
+            store_limits(&state, epoch, &snaps)?;
             *state.capture.codex.lock().unwrap() =
                 PollStatus { binary: Some(bin.to_string_lossy().into_owned()), last_ok_ms: Some(now_ms()), last_error: None };
             persist(app, |s| s.capture.codex_poll = true)?;
@@ -298,8 +351,9 @@ pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
         }
         ("claude", true) => {
             let bin = claude_binary(&settings).ok_or("claude_not_found")?;
+            let epoch = state.capture.wipes.load(Ordering::SeqCst);
             match read_claude(&state, &settings, &bin) {
-                Ok(snaps) => store_limits(&state.db_path, &snaps)?,
+                Ok(snaps) => store_limits(&state, epoch, &snaps)?,
                 // signed in, just asked too soon: the next cycle reads the limits
                 Err(e) if e == "claude_throttled" => {}
                 Err(e) => return Err(e),
@@ -316,25 +370,21 @@ pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
             Ok("disabled".into())
         }
         ("statusline", true) => {
+            let mut cstate = read_state()?;
             if cstate.statusline.is_some() {
                 persist(app, |s| s.capture.statusline = true)?;
                 return Ok("already".into());
             }
             let exe = std::env::current_exe().map_err(|e| e.to_string())?;
             let file = claude_settings_file(&settings);
-            let ch = cs::install_statusline(&file, &data_dir, &statusline_command(&exe), now_ms()).map_err(|e| e.to_string())?;
-            let chained = ch.previous.is_some();
-            cstate.statusline = Some(ch);
-            cs::save_state(&data_dir, &cstate).map_err(|e| e.to_string())?;
+            let ch = cs::install_statusline(&mut cstate, &data_dir, &file, &statusline_command(&exe), now_ms()).map_err(code)?;
             persist(app, |s| s.capture.statusline = true)?;
-            Ok(if chained { "enabled_chained".into() } else { "enabled".into() })
+            Ok(if ch.previous.is_some() { "enabled_chained".into() } else { "enabled".into() })
         }
         ("statusline", false) => {
-            let note = match cstate.statusline.take() {
-                Some(ch) => outcome_text(cs::revert_statusline(&ch).map_err(|e| e.to_string())?),
-                None => "nothing_to_do",
-            };
-            cs::save_state(&data_dir, &cstate).map_err(|e| e.to_string())?;
+            let mut cstate = read_state()?;
+            // a failed revert keeps both the record and the setting, so it can be retried
+            let note = outcome_text(cs::uninstall_statusline(&mut cstate, &data_dir).map_err(code)?);
             persist(app, |s| s.capture.statusline = false)?;
             Ok(note.into())
         }
@@ -343,31 +393,33 @@ pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
             if !conflict.is_empty() {
                 return Err(format!("telemetry_env_conflict:{}", conflict.join(",")));
             }
+            let managed = cs::managed_conflicts(&managed_settings());
+            if !managed.is_empty() {
+                return Err(format!("telemetry_settings_conflict:managed settings: {}", managed.join(", ")));
+            }
+            let mut cstate = read_state()?;
             let port = settings.capture.otel_port;
-            start_receiver(app, port).map_err(|e| format!("port_busy:{port}:{e}"))?;
+            if cstate.otel.as_ref().is_some_and(|c| c.token().is_none()) {
+                let _ = cs::add_otel_token(&mut cstate, &data_dir, &cs::new_token());
+            }
+            let token = match &cstate.otel {
+                Some(ch) => ch.token().map(str::to_owned),
+                None => Some(cs::new_token()),
+            };
+            start_receiver(app, port, token.clone()).map_err(|e| format!("port_busy:{port}:{e}"))?;
             if cstate.otel.is_none() {
                 let file = claude_settings_file(&settings);
-                match cs::install_otel(&file, &data_dir, port, now_ms()) {
-                    Ok(ch) => cstate.otel = Some(ch),
-                    Err(e) => {
-                        stop_receiver(app);
-                        return Err(match e {
-                            cs::SettingsError::TelemetryConflict(k) => format!("telemetry_settings_conflict:{k}"),
-                            other => other.to_string(),
-                        });
-                    }
+                if let Err(e) = cs::install_otel(&mut cstate, &data_dir, &file, port, token.as_deref().unwrap_or_default(), now_ms()) {
+                    stop_receiver(app);
+                    return Err(code(e));
                 }
-                cs::save_state(&data_dir, &cstate).map_err(|e| e.to_string())?;
             }
             persist(app, |s| s.capture.otel = true)?;
             Ok("enabled".into())
         }
         ("otel", false) => {
-            let note = match cstate.otel.take() {
-                Some(ch) => outcome_text(cs::revert_otel(&ch).map_err(|e| e.to_string())?),
-                None => "nothing_to_do",
-            };
-            cs::save_state(&data_dir, &cstate).map_err(|e| e.to_string())?;
+            let mut cstate = read_state()?;
+            let note = outcome_text(cs::uninstall_otel(&mut cstate, &data_dir).map_err(code)?);
             stop_receiver(app);
             persist(app, |s| s.capture.otel = false)?;
             Ok(note.into())
@@ -376,22 +428,29 @@ pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
     }
 }
 
-fn store_limits(db: &Path, snaps: &[tracker_core::model::LimitSnapshot]) -> Result<(), String> {
-    let mut store = Store::open(db).map_err(|e| e.to_string())?;
+/// A limit read finished after "delete all data" (or before onboarding) is dropped.
+const DISCARDED: &str = "discarded";
+
+fn store_limits(state: &AppState, epoch: u64, snaps: &[tracker_core::model::LimitSnapshot]) -> Result<(), String> {
+    let _writing = state.writers.read().unwrap_or_else(|e| e.into_inner());
+    if state.capture.wipes.load(Ordering::SeqCst) != epoch || !state.settings.read().unwrap().onboarded {
+        return Err(DISCARDED.into());
+    }
+    let mut store = Store::open(&state.db_path).map_err(|e| e.to_string())?;
     let mut tx = store.transaction().map_err(|e| e.to_string())?;
     tx.insert_limits(snaps).map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())
 }
 
-pub fn start_receiver(app: &AppHandle, port: u16) -> std::io::Result<()> {
+fn start_receiver(app: &AppHandle, port: u16, token: Option<String>) -> std::io::Result<()> {
     let state = app.state::<AppState>();
     let mut slot = state.capture.receiver.lock().unwrap();
-    if slot.as_ref().is_some_and(|r| r.port == port) {
+    if slot.as_ref().is_some_and(|r| r.port == port && r.token == token) {
         return Ok(());
     }
     *slot = None;
     let handle = app.clone();
-    match otlp::Receiver::start(port, state.db_path.clone(), move |_| {
+    match otlp::Receiver::start(port, state.db_path.clone(), token, move |_| {
         let _ = handle.emit("data-changed", ());
     }) {
         Ok(r) => {
@@ -406,10 +465,47 @@ pub fn start_receiver(app: &AppHandle, port: u16) -> std::io::Result<()> {
     }
 }
 
+/// A pre-token install gets a token first, so the receiver only accepts Claude Code's requests.
+fn start_otel(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let port = state.settings.read().unwrap().capture.otel_port;
+    let mut cstate = cs::load_state(&state.data_dir);
+    if cstate.otel.as_ref().is_some_and(|c| c.token().is_none())
+        && let Err(e) = cs::add_otel_token(&mut cstate, &state.data_dir, &cs::new_token())
+    {
+        log::warn!("could not add a token to the telemetry settings: {e}");
+    }
+    let token = cstate.otel.as_ref().and_then(|c| c.token()).map(str::to_owned);
+    if let Err(e) = start_receiver(app, port, token) {
+        log::warn!("otlp receiver could not start: {e}");
+    }
+}
+
 pub fn stop_receiver(app: &AppHandle) {
     let state = app.state::<AppState>();
     let r = state.capture.receiver.lock().unwrap().take();
     drop(r);
+}
+
+/// Part of "delete all data": stops every capture writer before the data goes.
+pub fn pause(app: &AppHandle) -> std::io::Result<()> {
+    let state = app.state::<AppState>();
+    state.capture.wipes.fetch_add(1, Ordering::SeqCst);
+    stop_receiver(app);
+    *state.capture.codex.lock().unwrap() = PollStatus::default();
+    *state.capture.claude.lock().unwrap() = PollStatus::default();
+    statusline::set_paused(&state.data_dir, true)
+}
+
+pub fn resume(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    if let Err(e) = statusline::set_paused(&state.data_dir, false) {
+        log::warn!("could not resume the status-line capture: {e}");
+    }
+    if state.settings.read().unwrap().capture.otel {
+        start_otel(app);
+    }
+    wake_readers(app);
 }
 
 /// No background reads before onboarding is confirmed, nor for providers the user disabled.
@@ -430,8 +526,8 @@ fn wake_claude(app: &AppHandle) {
 
 /// `tool = 'claude_code'` also covers Cowork logs.
 fn latest_claude_event_ms(state: &AppState) -> Option<i64> {
-    let store = state.store.lock().ok()?;
-    store
+    state
+        .db()
         .conn()
         .query_row("SELECT MAX(ts_ms) FROM usage_event WHERE tool = 'claude_code'", [], |r| r.get::<_, Option<i64>>(0))
         .ok()
@@ -490,7 +586,8 @@ fn start_claude_poller(app: &AppHandle) {
                 state.capture.claude.lock().unwrap().last_error = Some("claude_not_found".into());
                 continue;
             };
-            match read_claude(&state, &s, &bin).and_then(|snaps| store_limits(&state.db_path, &snaps)) {
+            let epoch = state.capture.wipes.load(Ordering::SeqCst);
+            match read_claude(&state, &s, &bin).and_then(|snaps| store_limits(&state, epoch, &snaps)) {
                 Ok(()) => {
                     failures = 0;
                     let mut c = state.capture.claude.lock().unwrap();
@@ -501,7 +598,7 @@ fn start_claude_poller(app: &AppHandle) {
                     let _ = app.emit("data-changed", ());
                 }
                 // throttled: keep the last reading, no error shown
-                Err(e) if e == "claude_throttled" => {}
+                Err(e) if e == "claude_throttled" || e == DISCARDED => {}
                 Err(e) => {
                     failures = failures.saturating_add(1);
                     let mut c = state.capture.claude.lock().unwrap();
@@ -523,10 +620,14 @@ fn wake_codex(app: &AppHandle) {
 
 pub fn start(app: &AppHandle) {
     let s = app.state::<AppState>().settings.read().unwrap().clone();
-    if s.capture.otel
-        && let Err(e) = start_receiver(app, s.capture.otel_port)
-    {
-        log::warn!("otlp receiver could not start: {e}");
+    if s.onboarded {
+        // a wipe interrupted before it deleted anything leaves the pause behind
+        if let Err(e) = statusline::set_paused(&app.state::<AppState>().data_dir, false) {
+            log::warn!("could not resume the status-line capture: {e}");
+        }
+        if s.capture.otel {
+            start_otel(app);
+        }
     }
     start_claude_poller(app);
     let (tx, rx) = channel::<()>();
@@ -553,7 +654,8 @@ pub fn start(app: &AppHandle) {
                 wait = Duration::from_secs(30 * 60);
                 continue;
             };
-            match codex_limits::query(&bin, Duration::from_secs(20), now_ms()).and_then(|snaps| store_limits(&state.db_path, &snaps)) {
+            let epoch = state.capture.wipes.load(Ordering::SeqCst);
+            match codex_limits::query(&bin, Duration::from_secs(20), now_ms()).and_then(|snaps| store_limits(&state, epoch, &snaps)) {
                 Ok(()) => {
                     let mut c = state.capture.codex.lock().unwrap();
                     c.binary = Some(bin.to_string_lossy().into_owned());
@@ -562,6 +664,7 @@ pub fn start(app: &AppHandle) {
                     drop(c);
                     let _ = app.emit("data-changed", ());
                 }
+                Err(e) if e == DISCARDED => {}
                 Err(e) => {
                     let mut c = state.capture.codex.lock().unwrap();
                     if c.last_error.as_deref() != Some(e.as_str()) {
@@ -572,4 +675,17 @@ pub fn start(app: &AppHandle) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_line_paths_are_quoted_literally_for_each_shell() {
+        assert_eq!(quoted_command(r"C:\Users\A\x.exe", Some(r"C:\Users\A\x.exe"), true), "C:/Users/A/x.exe --statusline");
+        let odd = r"C:\Users\O'Neil $HOME `x`\app.exe";
+        assert_eq!(quoted_command(odd, None, true), r"'C:/Users/O'\''Neil $HOME `x`/app.exe' --statusline");
+        assert_eq!(quoted_command(odd, Some(r"C:\Users\ONEIL$~1\app.exe"), false), "& 'C:/Users/O''Neil $HOME `x`/app.exe' --statusline");
+    }
 }

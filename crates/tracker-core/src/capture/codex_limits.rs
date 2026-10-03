@@ -9,26 +9,21 @@ use crate::discovery::{codex_homes, Env, ExtraPaths};
 use crate::model::{window_name, Accuracy, LimitSnapshot, Provider, Tool};
 use crate::sources::{f64_at, i64_at, str_at};
 use serde_json::{json, Value};
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 pub const SOURCE: &str = "codex_app_server";
 
-/// Where a usable `codex` binary may live, best first.
-pub fn candidates(env: &Env, extra: &ExtraPaths, configured: Option<&Path>) -> Vec<PathBuf> {
+/// Install locations only: a Codex home added as a log folder is never run from.
+pub fn candidates(env: &Env, configured: Option<&Path>) -> Vec<PathBuf> {
     let mut v: Vec<PathBuf> = Vec::new();
     if let Some(p) = configured {
         v.push(p.to_owned());
     }
-    if let Some(path) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&path) {
-            v.push(dir.join("codex.exe"));
-        }
-    }
-    for home in codex_homes(env, extra) {
+    v.extend(super::path_dirs().into_iter().map(|d| d.join("codex.exe")));
+    if let Some(home) = codex_homes(env, &ExtraPaths::default()).into_iter().next() {
         // the Codex desktop app keeps a runnable copy of the CLI here
         v.push(home.join(".sandbox-bin").join("codex.exe"));
     }
@@ -38,18 +33,18 @@ pub fn candidates(env: &Env, extra: &ExtraPaths, configured: Option<&Path>) -> V
     v
 }
 
-pub fn find_codex(env: &Env, extra: &ExtraPaths, configured: Option<&Path>) -> Option<PathBuf> {
-    candidates(env, extra, configured).into_iter().find(|p| p.is_file())
+pub fn find_codex(env: &Env, configured: Option<&Path>) -> Option<PathBuf> {
+    candidates(env, configured).into_iter().find(|p| p.is_file())
 }
 
 pub fn parse_result(result: &Value, now_ms: i64) -> Vec<LimitSnapshot> {
     let mut snaps = Vec::new();
-    let buckets: Vec<&Value> = match result.get("rateLimitsByLimitId").and_then(Value::as_object) {
-        Some(m) if !m.is_empty() => m.values().collect(),
-        _ => result.get("rateLimits").into_iter().collect(),
+    let buckets: Vec<(Option<&str>, &Value)> = match result.get("rateLimitsByLimitId").and_then(Value::as_object) {
+        Some(m) if !m.is_empty() => m.iter().map(|(k, b)| (Some(k.as_str()), b)).collect(),
+        _ => result.get("rateLimits").map(|b| (None, b)).into_iter().collect(),
     };
-    for b in buckets {
-        let limit_id = str_at(b, "limitId").unwrap_or("codex").to_owned();
+    for (key, b) in buckets {
+        let limit_id = str_at(b, "limitId").filter(|s| !s.is_empty()).or(key).unwrap_or("codex").to_owned();
         let plan = str_at(b, "planType").map(str::to_owned);
         for slot in ["primary", "secondary"] {
             let Some(w) = b.get(slot).filter(|w| w.is_object()) else { continue };
@@ -76,7 +71,8 @@ pub fn parse_result(result: &Value, now_ms: i64) -> Vec<LimitSnapshot> {
 
 pub fn query(bin: &Path, timeout: Duration, now_ms: i64) -> Result<Vec<LimitSnapshot>, String> {
     let mut cmd = Command::new(bin);
-    cmd.arg("app-server").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+    // even when the user's config.toml turns analytics on
+    cmd.args(["-c", "analytics.enabled=false", "app-server"]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -86,16 +82,7 @@ pub fn query(bin: &Path, timeout: Duration, now_ms: i64) -> Result<Vec<LimitSnap
     let mut child = cmd.spawn().map_err(|e| format!("cannot start codex: {e}"))?;
     let mut stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
-    let (tx, rx) = mpsc::channel::<Value>();
-    std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            if let Ok(v) = serde_json::from_str::<Value>(&line)
-                && tx.send(v).is_err()
-            {
-                break;
-            }
-        }
-    });
+    let rx = super::json_lines(stdout);
     let send = |stdin: &mut std::process::ChildStdin, v: Value| -> Result<(), String> {
         writeln!(stdin, "{v}").and_then(|_| stdin.flush()).map_err(|e| format!("codex closed its input: {e}"))
     };
@@ -154,6 +141,25 @@ mod tests {
         assert_eq!(s.len(), 1);
         assert_eq!(s[0].window, "seven_day");
         assert!(parse_result(&json!({}), 1).is_empty());
+    }
+
+    #[test]
+    fn a_bucket_without_its_own_id_takes_the_map_key() {
+        let w = json!({"usedPercent": 1, "windowDurationMins": 300});
+        let r = json!({"rateLimitsByLimitId": {"codex": {"limitId": "codex", "primary": w}, "codex_other": {"limitId": null, "primary": w}}});
+        let mut ids: Vec<String> = parse_result(&r, 1).into_iter().map(|s| s.limit_id).collect();
+        ids.sort();
+        assert_eq!(ids, ["codex", "codex_other"]);
+    }
+
+    #[test]
+    fn only_the_default_codex_home_is_an_executable_location() {
+        let home = std::env::temp_dir().join("aiut-home");
+        let env = Env { home: Some(home.clone()), roaming: None, local: None, claude_config_dir: None, codex_home: None };
+        let c = candidates(&env, None);
+        let sandbox: Vec<&PathBuf> = c.iter().filter(|p| p.starts_with(&home)).collect();
+        assert_eq!(sandbox, [&home.join(".codex").join(".sandbox-bin").join("codex.exe")]);
+        assert!(c.iter().all(|p| p.is_absolute()));
     }
 
     #[test]

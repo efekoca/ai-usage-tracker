@@ -87,17 +87,17 @@ fn build_main(app: &AppHandle) {
     if app.get_webview_window(MAIN).is_some() {
         return; // a concurrent request already built it
     }
-    let (mut w, mut h) = (1360.0, 880.0);
-    if let Ok(Some(m)) = app.primary_monitor() {
-        let s = m.scale_factor();
-        let area = m.work_area().size;
-        w = f64::min(w, area.width as f64 / s * 0.9);
-        h = f64::min(h, area.height as f64 / s * 0.9);
-    }
+    let (w, h, min_w, min_h) = match app.primary_monitor() {
+        Ok(Some(m)) => {
+            let area = m.work_area().size;
+            main_size(area.width as f64 / m.scale_factor(), area.height as f64 / m.scale_factor())
+        }
+        _ => (1360.0, 880.0, 860.0, 560.0),
+    };
     let mut b = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::App("index.html".into()))
         .title("AI Usage Tracker")
-        .inner_size(w.max(900.0), h.max(600.0))
-        .min_inner_size(860.0, 560.0)
+        .inner_size(w, h)
+        .min_inner_size(min_w, min_h)
         .center()
         .visible(true);
     if supports_mica() {
@@ -109,6 +109,12 @@ fn build_main(app: &AppHandle) {
         }
         Err(e) => log::error!("cannot create main window: {e}"),
     }
+}
+
+/// Fits the work area minus the frame, or the page bottom is out of reach on small screens.
+fn main_size(aw: f64, ah: f64) -> (f64, f64, f64, f64) {
+    let (aw, ah) = ((aw - 16.0).max(320.0), (ah - 48.0).max(240.0));
+    ((aw * 0.9).min(1360.0).max(aw.min(900.0)), (ah * 0.9).min(880.0).max(ah.min(600.0)), aw.min(860.0), ah.min(560.0))
 }
 
 fn widget_size(size: &str) -> (f64, f64) {
@@ -124,7 +130,7 @@ pub fn ensure_widget(app: &AppHandle, s: &Settings) -> Option<WebviewWindow> {
         return Some(w);
     }
     let (w, h) = widget_size(&s.widget.size);
-    let mut b = WebviewWindowBuilder::new(app, WIDGET, WebviewUrl::App("widget.html".into()))
+    let b = WebviewWindowBuilder::new(app, WIDGET, WebviewUrl::App("widget.html".into()))
         .title("AI Usage Tracker widget")
         .inner_size(w, h)
         .resizable(false)
@@ -135,16 +141,16 @@ pub fn ensure_widget(app: &AppHandle, s: &Settings) -> Option<WebviewWindow> {
         .skip_taskbar(true)
         .focused(false)
         .visible(false);
-    if let (Some(x), Some(y)) = (s.widget.x, s.widget.y) {
-        b = b.position(x as f64, y as f64);
-    }
     match b.build() {
         Ok(win) => {
-            if !s.widget.anchor.is_empty() {
-                place_widget(&win, &s.widget.anchor);
-            } else if s.widget.x.is_none() || !on_any_monitor(&win, s.widget.x.unwrap_or(0), s.widget.y.unwrap_or(0)) {
-                // never placed, or the monitor it lived on is gone
-                place_widget(&win, "bottom-right");
+            // saved positions are physical (from Moved events), so they are restored as physical
+            match (s.widget.anchor.as_str(), s.widget.x, s.widget.y) {
+                ("", Some(x), Some(y)) if fits_a_monitor(&win, x, y) => {
+                    LAST_PLACED_MS.store(chrono::Utc::now().timestamp_millis(), Ordering::SeqCst);
+                    let _ = win.set_position(PhysicalPosition::new(x, y));
+                }
+                ("", _, _) => place_widget(&win, "bottom-right"), // never placed, or its monitor is gone
+                (corner, _, _) => place_widget(&win, corner),
             }
             let handle = app.clone();
             win.on_window_event(move |e| {
@@ -161,18 +167,30 @@ pub fn ensure_widget(app: &AppHandle, s: &Settings) -> Option<WebviewWindow> {
     }
 }
 
-fn on_any_monitor(w: &WebviewWindow, x: i32, y: i32) -> bool {
-    w.available_monitors().unwrap_or_default().iter().any(|m| {
-        let (p, s) = (m.position(), m.size());
-        x >= p.x - 50 && y >= p.y - 50 && x < p.x + s.width as i32 && y < p.y + s.height as i32
-    })
+fn fits_a_monitor(w: &WebviewWindow, x: i32, y: i32) -> bool {
+    let Ok(size) = w.outer_size() else { return false };
+    let rects: Vec<(i32, i32, i32, i32)> = w
+        .available_monitors()
+        .unwrap_or_default()
+        .iter()
+        .map(|m| (m.position().x, m.position().y, m.size().width as i32, m.size().height as i32))
+        .collect();
+    rect_fits((x, y, size.width as i32, size.height as i32), &rects)
+}
+
+fn rect_fits((x, y, w, h): (i32, i32, i32, i32), monitors: &[(i32, i32, i32, i32)]) -> bool {
+    const SLACK: i32 = 24;
+    monitors.iter().any(|&(mx, my, mw, mh)| x >= mx - SLACK && y >= my - SLACK && x + w <= mx + mw + SLACK && y + h <= my + mh + SLACK)
 }
 
 /// When the app itself last moved the widget; Moved events right after it are ours, not a drag.
 static LAST_PLACED_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+static LAST_DRAG_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+static DRAG_SAVE_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn remember_widget_position(app: &AppHandle, x: i32, y: i32) {
-    if chrono::Utc::now().timestamp_millis() - LAST_PLACED_MS.load(Ordering::SeqCst) < 600 {
+    let now = chrono::Utc::now().timestamp_millis();
+    if now - LAST_PLACED_MS.load(Ordering::SeqCst) < 600 {
         return;
     }
     let state = app.state::<AppState>();
@@ -184,10 +202,27 @@ fn remember_widget_position(app: &AppHandle, x: i32, y: i32) {
     s.widget.x = Some(x);
     s.widget.y = Some(y);
     s.widget.anchor.clear();
-    let snapshot = s.clone();
     drop(s);
-    if let Ok(store) = state.store.try_lock() {
-        let _ = snapshot.save(&store);
+    LAST_DRAG_MS.store(now, Ordering::SeqCst);
+    // a drag fires many Moved events: save and tell the UI once it has settled, off the event loop
+    if DRAG_SAVE_PENDING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    let spawned = std::thread::Builder::new().name("widget-position".into()).spawn(move || {
+        while chrono::Utc::now().timestamp_millis() - LAST_DRAG_MS.load(Ordering::SeqCst) < 400 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        DRAG_SAVE_PENDING.store(false, Ordering::SeqCst);
+        match app.state::<AppState>().update_settings(|_| {}) {
+            Ok(s) => {
+                let _ = app.emit("settings-changed", &s);
+            }
+            Err(e) => log::warn!("widget position not saved: {e}"),
+        }
+    });
+    if spawned.is_err() {
+        DRAG_SAVE_PENDING.store(false, Ordering::SeqCst);
     }
 }
 
@@ -331,19 +366,77 @@ pub fn handle_menu(app: &AppHandle, id: &str) {
             }
         }
     }
-    let _ = s.save(&state.store.lock().unwrap());
+    let _ = s.save(&state.db());
     *state.settings.write().unwrap() = s.clone();
     apply_widget_settings(app, &s);
     let _ = app.emit("settings-changed", &s);
     crate::tray::refresh_soon();
 }
 
-pub fn apply_autostart(app: &AppHandle, on: bool) {
-    use tauri_plugin_autostart::ManagerExt;
-    let m = app.autolaunch();
-    let r = if on { m.enable() } else { m.disable() };
-    if let Err(e) = r {
-        log::warn!("autostart change failed: {e}");
+/// The uninstaller removes the same value.
+const AUTOSTART_NAME: &str = "AI Usage Tracker";
+
+/// Quoted, so a folder name with spaces cannot be read as another program.
+pub fn apply_autostart(on: bool, user_choice: bool) {
+    #[cfg(windows)]
+    {
+        let r = if on {
+            std::env::current_exe().map_err(|e| e.to_string()).and_then(|exe| autostart::enable(AUTOSTART_NAME, &autostart_command(&exe), user_choice))
+        } else {
+            autostart::disable(AUTOSTART_NAME)
+        };
+        if let Err(e) = r {
+            log::warn!("autostart change failed: {e}");
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = (on, user_choice);
+}
+
+fn autostart_command(exe: &std::path::Path) -> String {
+    format!("\"{}\" --autostart", exe.display())
+}
+
+#[cfg(windows)]
+mod autostart {
+    use windows_sys::Win32::Foundation::ERROR_FILE_NOT_FOUND;
+    use windows_sys::Win32::System::Registry::{RegDeleteKeyValueW, RegSetKeyValueW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, REG_SZ};
+
+    const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+    const APPROVED: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
+
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(Some(0)).collect()
+    }
+
+    fn delete(root: HKEY, key: &str, name: &str) -> u32 {
+        // SAFETY: NUL-terminated UTF-16 strings that outlive the call.
+        let rc = unsafe { RegDeleteKeyValueW(root, wide(key).as_ptr(), wide(name).as_ptr()) };
+        if rc == ERROR_FILE_NOT_FOUND { 0 } else { rc }
+    }
+
+    pub fn enable(name: &str, command: &str, user_choice: bool) -> Result<(), String> {
+        let data = wide(command);
+        // SAFETY: as above; the size is the byte length including the terminating NUL.
+        let rc = unsafe { RegSetKeyValueW(HKEY_CURRENT_USER, wide(RUN).as_ptr(), wide(name).as_ptr(), REG_SZ, data.as_ptr().cast(), (data.len() * 2) as u32) };
+        if rc != 0 {
+            return Err(format!("registry error {rc}"));
+        }
+        if user_choice {
+            delete(HKEY_CURRENT_USER, APPROVED, name);
+        }
+        // older versions could write a machine-wide entry when run elevated; it fails quietly otherwise
+        delete(HKEY_LOCAL_MACHINE, RUN, name);
+        Ok(())
+    }
+
+    pub fn disable(name: &str) -> Result<(), String> {
+        delete(HKEY_LOCAL_MACHINE, RUN, name);
+        delete(HKEY_CURRENT_USER, APPROVED, name);
+        match delete(HKEY_CURRENT_USER, RUN, name) {
+            0 => Ok(()),
+            rc => Err(format!("registry error {rc}")),
+        }
     }
 }
 
@@ -424,4 +517,32 @@ fn fullscreen_app_active() -> bool {
 #[cfg(not(windows))]
 fn fullscreen_app_active() -> bool {
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_main_window_fits_small_scaled_screens() {
+        // 1366×768 at 150 %, taskbar taken off
+        let (w, h, min_w, min_h) = main_size(910.0, 480.0);
+        assert!(w <= 894.0 && min_w <= w && h <= 432.0 && min_h <= h);
+        assert_eq!(main_size(1920.0, 1040.0), (1360.0, 880.0, 860.0, 560.0));
+    }
+
+    #[test]
+    fn a_widget_must_lie_on_one_monitor() {
+        let mons = [(0, 0, 1920, 1080), (-2560, -200, 2560, 1440)];
+        assert!(rect_fits((1600, 900, 300, 150), &mons));
+        assert!(rect_fits((-300, 100, 280, 120), &mons));
+        assert!(!rect_fits((1800, 900, 300, 150), &mons), "half off the right edge");
+        assert!(!rect_fits((4000, 100, 300, 150), &mons), "the monitor is gone");
+    }
+
+    #[test]
+    fn the_autostart_path_is_quoted() {
+        let cmd = autostart_command(std::path::Path::new(r"C:\Program Files\AI Usage Tracker\ai-usage-tracker.exe"));
+        assert_eq!(cmd, r#""C:\Program Files\AI Usage Tracker\ai-usage-tracker.exe" --autostart"#);
+    }
 }
