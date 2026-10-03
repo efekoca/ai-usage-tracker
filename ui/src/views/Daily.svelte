@@ -282,8 +282,7 @@
   .tiles {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0;
-    padding: 0;
+    gap: 24px;
   }
   @media (max-width: 1000px) {
     .tiles {

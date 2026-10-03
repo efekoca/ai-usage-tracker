@@ -263,7 +263,7 @@
   .tiles {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    padding: 0;
+    gap: 24px;
   }
   @media (max-width: 1000px) {
     .tiles {
@@ -298,6 +298,7 @@
     grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
     gap: 16px;
     align-items: start;
+    margin-bottom: 16px;
   }
   @media (max-width: 1100px) {
     .grid {
