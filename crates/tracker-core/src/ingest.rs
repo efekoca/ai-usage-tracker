@@ -13,6 +13,8 @@ use std::time::UNIX_EPOCH;
 pub struct IngestReport {
     pub files_seen: usize,
     pub files_read: usize,
+    /// Usage records, readings and tool calls written; zero when only other lines were appended.
+    pub records_written: usize,
     pub events_before: i64,
     pub events_after: i64,
     pub limits_before: i64,
@@ -43,8 +45,9 @@ pub fn ingest(store: &mut Store, files: &[DiscoveredFile], mut on_progress: impl
     };
     for (i, f) in files.iter().enumerate() {
         match ingest_file(store, f) {
-            Ok(Some(warns)) => {
+            Ok(Some((warns, records))) => {
                 rep.files_read += 1;
+                rep.records_written += records;
                 let p = f.path.to_string_lossy().into_owned();
                 rep.warnings.extend(warns.into_iter().map(|w| (p.clone(), w)));
             }
@@ -64,8 +67,9 @@ pub fn ingest(store: &mut Store, files: &[DiscoveredFile], mut on_progress: impl
     rep
 }
 
-/// Returns `Ok(None)` when the file was unchanged and skipped, otherwise the parse warnings.
-pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<Vec<String>>, String> {
+/// Returns `Ok(None)` when the file was unchanged and skipped, otherwise the parse warnings
+/// and the number of records written.
+pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<(Vec<String>, usize)>, String> {
     let meta = std::fs::metadata(&f.path).map_err(|e| e.to_string())?;
     let size = meta.len();
     let mtime_ms = meta
@@ -83,7 +87,7 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<Vec<S
         _ => (0, serde_json::Value::Null), // new, replaced, truncated or whole-document file
     };
 
-    let out: ParseOutput = match f.parser {
+    let mut out: ParseOutput = match f.parser {
         ParserKind::ClaudeCodeJsonl => claude_code::parse_file(
             &f.path,
             offset,
@@ -104,6 +108,12 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<Vec<S
     .map_err(|e| e.to_string())?;
 
     let mut tx = store.transaction().map_err(|e| e.to_string())?;
+    tx.drop_stale(&out.stale_events, &out.stale_tool_calls, &out.stale_limits).map_err(|e| e.to_string())?;
+    for (i, thread) in &out.copies {
+        if let Some(ts) = tx.absorb_offset_copy(thread, &out.events[*i].tokens).map_err(|e| e.to_string())? {
+            out.events[*i].ts_ms = out.events[*i].ts_ms.min(ts);
+        }
+    }
     tx.upsert_events(&out.events).map_err(|e| e.to_string())?;
     tx.insert_limits(&out.limits).map_err(|e| e.to_string())?;
     tx.upsert_tool_calls(&out.tool_calls).map_err(|e| e.to_string())?;
@@ -122,5 +132,6 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<Vec<S
     )
     .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
-    Ok(Some(out.warnings))
+    let records = out.events.len() + out.limits.len() + out.tool_calls.len() + out.tool_results.len();
+    Ok(Some((out.warnings, records)))
 }

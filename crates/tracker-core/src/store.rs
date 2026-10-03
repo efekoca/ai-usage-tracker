@@ -121,7 +121,20 @@ const MIGRATIONS: &[&str] = &[
     r#"
     DELETE FROM file_checkpoint WHERE parser IN ('claude_code_jsonl', 'cowork_jsonl', 'codex_rollout');
     "#,
+    // v9: Codex keys come from content, so copied fork history merges with its source.
+    r#"
+    INSERT INTO setting(key, value) VALUES('repair.codex_keys', '1') ON CONFLICT(key) DO UPDATE SET value = '1';
+    DELETE FROM file_checkpoint WHERE parser = 'codex_rollout';
+    "#,
+    // v10: 0.2.4's Codex keys are replaced by fork-root keys; offset keys are replaced per file.
+    r#"
+    DELETE FROM usage_event WHERE tool = 'codex' AND source = 'codex_rollout' AND key GLOB 'cx:*:t*';
+    DELETE FROM tool_call WHERE tool = 'codex' AND key GLOB 'cxt:*:i*';
+    DELETE FROM setting WHERE key = 'repair.codex_keys';
+    DELETE FROM file_checkpoint WHERE parser = 'codex_rollout';
+    "#,
 ];
+
 
 /// A captured row is hidden when the same request also exists as an exact (log) row.
 const NOT_SUPERSEDED: &str = "NOT (u.accuracy = 'captured' AND u.request_id IS NOT NULL AND EXISTS (
@@ -139,6 +152,7 @@ const EVENT_COLUMNS: &str = "key, ts_ms, tool, client, model, project_id, sessio
 /// SQLite evaluates every right-hand side against the old row, so the order does not matter.
 const UPSERT_EVENT_TAIL: &str = "ON CONFLICT(key) DO UPDATE SET
     ts_ms = MIN(ts_ms, excluded.ts_ms),
+    model = CASE WHEN model = 'unknown' THEN excluded.model ELSE model END,
     input = MAX(input, excluded.input),
     cache_read = MAX(cache_read, excluded.cache_read),
     cache_write = MAX(cache_write, excluded.cache_write),
@@ -429,6 +443,19 @@ impl Store {
             // backups made before v2 have no request_id column, before v7 no branch/agent/thread
             let their_req = if theirs >= 2 { "e.request_id" } else { "NULL" };
             let their_v7 = if theirs >= 7 { "e.branch, e.agent, e.thread_id" } else { "NULL, NULL, NULL" };
+            // Codex rows from before v10 use other keys: take them only for sessions this database lacks
+            self.conn.execute_batch(
+                "DROP TABLE IF EXISTS temp.codex_sessions;
+                 CREATE TEMP TABLE codex_sessions AS SELECT DISTINCT session_id FROM main.usage_event WHERE tool = 'codex' AND session_id IS NOT NULL;",
+            )?;
+            let old_codex = |t: &str| {
+                if theirs >= 10 {
+                    String::new()
+                } else {
+                    format!("AND NOT ({t}.tool = 'codex' AND {t}.session_id IN (SELECT session_id FROM temp.codex_sessions))")
+                }
+            };
+            let (old_events, old_calls) = (old_codex("e"), old_codex("c"));
             let tx = self.conn.unchecked_transaction()?;
             tx.execute(
                 "INSERT INTO project(path, name, hidden) SELECT path, name, hidden FROM other.project WHERE true
@@ -444,7 +471,7 @@ impl Store {
                      FROM other.usage_event e
                      LEFT JOIN other.project op ON op.id = e.project_id
                      LEFT JOIN main.project p ON p.path = op.path
-                     WHERE true
+                     WHERE true {old_events}
                      {UPSERT_EVENT_TAIL}"
                 ),
                 [],
@@ -459,13 +486,15 @@ impl Store {
             )?;
             if theirs >= 7 {
                 tx.execute(
-                    "INSERT INTO tool_call(key, ts_ms, tool, session_id, project_id, agent, name, failed)
-                     SELECT c.key, c.ts_ms, c.tool, c.session_id, p.id, c.agent, c.name, c.failed
-                     FROM other.tool_call c
-                     LEFT JOIN other.project op ON op.id = c.project_id
-                     LEFT JOIN main.project p ON p.path = op.path
-                     WHERE true
-                     ON CONFLICT(key) DO UPDATE SET failed = COALESCE(failed, excluded.failed)",
+                    &format!(
+                        "INSERT INTO tool_call(key, ts_ms, tool, session_id, project_id, agent, name, failed)
+                         SELECT c.key, c.ts_ms, c.tool, c.session_id, p.id, c.agent, c.name, c.failed
+                         FROM other.tool_call c
+                         LEFT JOIN other.project op ON op.id = c.project_id
+                         LEFT JOIN main.project p ON p.path = op.path
+                         WHERE true {old_calls}
+                         ON CONFLICT(key) DO UPDATE SET failed = COALESCE(failed, excluded.failed)"
+                    ),
                     [],
                 )?;
             }
@@ -473,6 +502,7 @@ impl Store {
             Ok((events, limits))
         })();
         self.conn.execute("DETACH DATABASE other", [])?;
+        let _ = self.conn.execute("DROP TABLE IF EXISTS temp.codex_sessions", []);
         self.project_cache.clear();
         result
     }
@@ -601,6 +631,48 @@ impl StoreTx<'_> {
             st.execute(params![c.key, c.ts_ms, c.tool.as_str(), c.session_id, pid, c.agent, c.name, c.failed.map(i64::from)])?;
         }
         Ok(())
+    }
+
+    /// Removes what an older version stored for a file now read again under new keys.
+    pub fn drop_stale(&mut self, events: &[String], calls: &[String], limits: &[(String, i64)]) -> Result<()> {
+        let mut e = self.tx.prepare_cached("DELETE FROM usage_event WHERE key = ?1")?;
+        for k in events {
+            e.execute([k])?;
+        }
+        let mut c = self.tx.prepare_cached("DELETE FROM tool_call WHERE key = ?1")?;
+        for k in calls {
+            c.execute([k])?;
+        }
+        let mut l = self.tx.prepare_cached("DELETE FROM limit_snapshot WHERE source = ?1 AND ts_ms = ?2")?;
+        for (source, ts) in limits {
+            l.execute(params![source, ts])?;
+        }
+        Ok(())
+    }
+
+    /// For a request copied from `thread`'s log: removes every row an older version stored for it
+    /// under an offset key (`cx:<thread>:<digits>`, the original and earlier copies) and returns
+    /// the earliest time.
+    pub fn absorb_offset_copy(&mut self, thread: &str, t: &Tokens) -> Result<Option<i64>> {
+        let lo = format!("cx:{thread}:");
+        let hi = format!("cx:{thread};");
+        let found: Vec<(String, i64)> = {
+            let mut st = self.tx.prepare_cached(
+                "SELECT key, ts_ms FROM usage_event WHERE key >= ?1 AND key < ?2 AND input = ?3 AND cache_read = ?4
+                   AND cache_write = ?5 AND output = ?6 AND reasoning = ?7",
+            )?;
+            let rows = st.query_map(
+                params![lo, hi, t.input as i64, t.cache_read as i64, t.cache_write as i64, t.output as i64, t.reasoning as i64],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            rows.collect::<Result<_>>()?
+        };
+        let mut earliest = None;
+        for (key, ts) in found.into_iter().filter(|(k, _)| k[lo.len()..].bytes().all(|b| b.is_ascii_digit())) {
+            self.tx.execute("DELETE FROM usage_event WHERE key = ?1", [key])?;
+            earliest = Some(earliest.map_or(ts, |e: i64| e.min(ts)));
+        }
+        Ok(earliest)
     }
 
     /// Records outcomes that arrived after their calls (Claude's `tool_result` lines).

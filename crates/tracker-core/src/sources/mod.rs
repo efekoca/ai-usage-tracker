@@ -56,6 +56,14 @@ pub struct ParseOutput {
     pub state: Value,
     pub lines_total: u64,
     pub lines_recognised: u64,
+    /// Keys an older version stored for this file's records; replaced when the file is re-read.
+    pub stale_events: Vec<String>,
+    pub stale_tool_calls: Vec<String>,
+    /// (source, ts_ms) of readings an older version stored from copied history.
+    pub stale_limits: Vec<(String, i64)>,
+    /// Events copied from another thread's log: (index in `events`, that thread). The original
+    /// may be stored under an older key while its own log is gone.
+    pub copies: Vec<(usize, String)>,
 }
 
 /// One complete JSONL line with the byte offset at which it starts.

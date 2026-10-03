@@ -486,3 +486,515 @@ fn rows_read_before_this_version_learn_their_subagent_session_on_the_next_read()
     assert_eq!((session.as_str(), agent.as_deref()), ("0199aaaa-bbbb-7ccc-8ddd-eeeeffff0001", Some("guardian")));
     assert_eq!(sums(&store, "codex").events, 5, "re-reading adds nothing");
 }
+
+const P: &str = "0199bbbb-0000-7000-8000-00000000000a";
+const F: &str = "0199bbbb-0000-7000-8000-00000000000b";
+const S2: &str = "0199bbbb-0000-7000-8000-00000000000c";
+
+fn cx_meta(ts: &str, id: &str, extra: &str) -> String {
+    format!(r#"{{"timestamp":"{ts}","type":"session_meta","payload":{{"id":"{id}","session_id":"{id}","cwd":"C:\\Work\\Repo","originator":"codex_cli_rs","source":"cli"{extra}}}}}"#)
+}
+
+fn cx_turn(ts: &str, model: &str) -> String {
+    format!(r#"{{"timestamp":"{ts}","type":"turn_context","payload":{{"model":"{model}"}}}}"#)
+}
+
+fn cx_usage(i: u64, c: u64, o: u64) -> String {
+    format!(r#"{{"input_tokens":{i},"cached_input_tokens":{c},"output_tokens":{o},"reasoning_output_tokens":0,"total_tokens":{}}}"#, i + o)
+}
+
+fn cx_tokens(ts: &str, total: (u64, u64, u64), last: (u64, u64, u64), limits: bool) -> String {
+    let rl = if limits {
+        r#"{"limit_id":"codex","plan_type":"plus","primary":{"used_percent":40.0,"window_minutes":300,"resets_at":1789300000}}"#
+    } else {
+        "null"
+    };
+    format!(
+        r#"{{"timestamp":"{ts}","type":"event_msg","payload":{{"type":"token_count","info":{{"total_token_usage":{},"last_token_usage":{}}},"rate_limits":{rl}}}}}"#,
+        cx_usage(total.0, total.1, total.2),
+        cx_usage(last.0, last.1, last.2)
+    )
+}
+
+fn cx_action(ts: &str, call: &str) -> String {
+    format!(r#"{{"timestamp":"{ts}","type":"event_msg","payload":{{"type":"item_completed","item":{{"type":"CommandExecution","id":"{call}","status":"completed","exit_code":0}}}}}}"#)
+}
+
+fn cx_settings(ts: &str, thread: &str) -> String {
+    format!(r#"{{"timestamp":"{ts}","type":"event_msg","payload":{{"type":"thread_settings_applied","thread_id":"{thread}","thread_settings":{{}}}}}}"#)
+}
+
+fn cx_subagent_meta(ts: &str, id: &str, parent: &str, root: &str, depth: u32, role: &str) -> String {
+    format!(
+        r#"{{"timestamp":"{ts}","type":"session_meta","payload":{{"id":"{id}","session_id":"{root}","cwd":"C:\\Work\\Repo","originator":"codex_cli_rs","source":{{"subagent":{{"thread_spawn":{{"parent_thread_id":"{parent}","depth":{depth},"agent_role":"{role}"}}}}}},"parent_thread_id":"{parent}"}}}}"#
+    )
+}
+
+/// The parent thread's own log: two requests, a limit reading and one action.
+fn parent_log(ts: [&str; 5]) -> Vec<String> {
+    vec![
+        cx_meta(ts[0], P, ""),
+        cx_turn(ts[1], "gpt-5.6-sol"),
+        cx_tokens(ts[2], (100_000, 80_000, 2_000), (100_000, 80_000, 2_000), true),
+        cx_action(ts[3], "call_1"),
+        cx_tokens(ts[4], (220_000, 180_000, 5_000), (120_000, 100_000, 3_000), false),
+    ]
+}
+
+const PARENT_TS: [&str; 5] =
+    ["2026-09-10T10:00:00.000Z", "2026-09-10T10:00:01.000Z", "2026-09-10T10:01:00.000Z", "2026-09-10T10:01:30.000Z", "2026-09-10T10:02:00.000Z"];
+const COPY_TS: [&str; 5] =
+    ["2026-09-10T11:00:00.001Z", "2026-09-10T11:00:00.002Z", "2026-09-10T11:00:00.003Z", "2026-09-10T11:00:00.004Z", "2026-09-10T11:00:00.005Z"];
+
+struct CodexHome {
+    _dir: tempfile::TempDir,
+    env: Env,
+    day: std::path::PathBuf,
+}
+
+fn codex_home() -> CodexHome {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let day = home.join(".codex/sessions/2026/09/10");
+    fs::create_dir_all(&day).unwrap();
+    let env = Env { home: Some(home.clone()), roaming: Some(home.join("AppData/Roaming")), local: Some(home.join("AppData/Local")), ..Default::default() };
+    CodexHome { _dir: dir, env, day }
+}
+
+fn write_rollout(h: &CodexHome, id: &str, lines: &[String]) {
+    fs::write(h.day.join(format!("rollout-2026-09-10T10-00-00-{id}.jsonl")), lines.join("\n") + "\n").unwrap();
+}
+
+type CodexRow = (i64, String, Option<String>, Option<String>, i64);
+
+fn codex_rows(store: &Store) -> Vec<CodexRow> {
+    let mut st = store
+        .conn()
+        .prepare("SELECT ts_ms, session_id, agent, thread_id, input + cache_read + cache_write + output FROM usage_event WHERE tool = 'codex' ORDER BY ts_ms")
+        .unwrap();
+    st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))).unwrap().map(Result::unwrap).collect()
+}
+
+fn count(store: &Store, sql: &str) -> i64 {
+    store.conn().query_row(sql, [], |r| r.get(0)).unwrap()
+}
+
+fn ms(ts: &str) -> i64 {
+    tracker_core::model::parse_ts_ms(ts).unwrap()
+}
+
+fn fork_log(own_marker: bool) -> Vec<String> {
+    let mut fork = vec![cx_meta("2026-09-10T11:00:00.000Z", F, &format!(r#","forked_from_id":"{P}""#))];
+    fork.extend(parent_log(COPY_TS));
+    if own_marker {
+        fork.push(cx_settings("2026-09-10T11:00:00.006Z", F));
+    }
+    fork.push(cx_turn("2026-09-10T11:00:30.000Z", "gpt-5.6-sol"));
+    fork.push(cx_tokens("2026-09-10T11:01:00.000Z", (350_000, 290_000, 6_000), (130_000, 110_000, 1_000), true));
+    fork.push(cx_action("2026-09-10T11:01:10.000Z", "call_2"));
+    fork
+}
+
+#[test]
+fn a_codex_fork_does_not_count_the_copied_history_again() {
+    let h = codex_home();
+    write_rollout(&h, P, &parent_log(PARENT_TS));
+    write_rollout(&h, F, &fork_log(true));
+
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &h.env);
+    let rows = codex_rows(&store);
+    assert_eq!(rows.len(), 3, "two parent requests and the fork's own one");
+    assert_eq!(rows.iter().map(|r| r.4).sum::<i64>(), 102_000 + 123_000 + 131_000);
+    assert_eq!(rows[0].0, ms(PARENT_TS[2]), "the original time is kept, not the copy's");
+    assert_eq!(rows[1].0, ms(PARENT_TS[4]));
+    assert_eq!((rows[0].1.as_str(), rows[2].1.as_str()), (P, F));
+    assert_eq!(count(&store, "SELECT count(*) FROM tool_call WHERE tool = 'codex'"), 2);
+    assert_eq!(count(&store, "SELECT count(*) FROM limit_snapshot WHERE source = 'codex_rollout'"), 2, "a copied reading is not a new reading");
+
+    let before = codex_rows(&store);
+    run(&mut store, &h.env);
+    assert_eq!(codex_rows(&store), before, "re-reading adds nothing");
+}
+
+#[test]
+fn a_fork_without_an_owner_marker_ends_its_copy_at_the_first_pause() {
+    let h = codex_home();
+    write_rollout(&h, P, &parent_log(PARENT_TS));
+    write_rollout(&h, F, &fork_log(false));
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &h.env);
+    let rows = codex_rows(&store);
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[2].1, F);
+}
+
+#[test]
+fn a_subagent_with_forked_context_keeps_its_own_label() {
+    let h = codex_home();
+    write_rollout(&h, P, &parent_log(PARENT_TS));
+    let mut sub = vec![cx_subagent_meta("2026-09-10T11:00:00.000Z", F, P, P, 1, "explorer")];
+    sub.extend(parent_log(COPY_TS));
+    sub.push(cx_turn("2026-09-10T11:00:00.006Z", "gpt-5.6-terra"));
+    sub.push(cx_tokens("2026-09-10T11:00:05.000Z", (230_000, 180_000, 5_500), (10_000, 0, 500), false));
+    write_rollout(&h, F, &sub);
+
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &h.env);
+    let rows = codex_rows(&store);
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows.iter().filter(|r| r.2.is_none()).count(), 2, "the parent's requests stay main-agent requests");
+    let own = &rows[2];
+    assert_eq!((own.1.as_str(), own.2.as_deref(), own.3.as_deref()), (P, Some("explorer"), Some(F)));
+}
+
+#[test]
+fn a_fork_read_before_its_parent_ends_up_the_same() {
+    let h = codex_home();
+    write_rollout(&h, F, &fork_log(true));
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &h.env);
+    assert_eq!(codex_rows(&store).len(), 3, "the copy is the only record of the parent so far");
+
+    write_rollout(&h, P, &parent_log(PARENT_TS));
+    run(&mut store, &h.env);
+    let rows = codex_rows(&store);
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0].0, ms(PARENT_TS[2]), "the parent's own log moves the request back to its real time");
+}
+
+#[test]
+fn a_resumed_codex_session_and_a_full_context_add_no_requests() {
+    let h = codex_home();
+    let resent = cx_tokens("2026-09-11T09:00:00.000Z", (100_000, 80_000, 2_000), (100_000, 80_000, 2_000), false)
+        .replace(r#""cached_input_tokens":80000,"#, r#""cached_input_tokens":80000,"cache_write_input_tokens":0,"#);
+    let lines = vec![
+        cx_meta(PARENT_TS[0], P, ""),
+        cx_turn(PARENT_TS[1], "gpt-5.6-sol"),
+        cx_tokens(PARENT_TS[2], (100_000, 80_000, 2_000), (100_000, 80_000, 2_000), false),
+        resent,
+        cx_tokens("2026-09-11T09:01:00.000Z", (220_000, 180_000, 5_000), (120_000, 100_000, 3_000), false),
+        cx_tokens("2026-09-11T09:02:00.000Z", (258_400, 180_000, 5_000), (0, 0, 0), false),
+    ];
+    write_rollout(&h, P, &lines);
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &h.env);
+    assert_eq!(codex_rows(&store).len(), 2);
+}
+
+#[test]
+fn a_nested_subagent_counts_toward_the_root_session() {
+    let h = codex_home();
+    let meta = cx_subagent_meta(PARENT_TS[0], S2, F, P, 2, "worker");
+    write_rollout(&h, S2, &[meta, cx_turn(PARENT_TS[1], "gpt-5.6-terra"), cx_tokens(PARENT_TS[2], (1_000, 0, 10), (1_000, 0, 10), false)]);
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &h.env);
+    assert_eq!(codex_rows(&store)[0].1, P);
+}
+
+/// Byte offsets of the lines with the given payload type, as an older version keyed them.
+fn offsets_of(lines: &[String], kind: &str) -> Vec<usize> {
+    let mut at = 0;
+    let mut out = Vec::new();
+    for l in lines {
+        if l.contains(&format!(r#""type":"{kind}""#)) {
+            out.push(at);
+        }
+        at += l.len() + 1;
+    }
+    out
+}
+
+/// Rows an older version stored for the parent's log: offset keys, real times.
+fn store_offset_rows(store: &Store, thread: &str, lines: &[String], times: &[&str]) {
+    let usages = [(20_000i64, 80_000i64, 2_000i64), (20_000, 100_000, 3_000)];
+    for ((off, ts), (input, cached, out)) in offsets_of(lines, "token_count").iter().zip(times).zip(usages) {
+        store
+            .conn()
+            .execute(
+                "INSERT INTO usage_event(key, ts_ms, tool, model, session_id, input, cache_read, cache_write, cache_write_1h, output,
+                     reasoning, request_input, web_search, accuracy, source)
+                 VALUES(?1, ?2, 'codex', 'gpt-5.6-sol', ?3, ?4, ?5, 0, 0, ?6, 0, ?4 + ?5, 0, 'exact', 'codex_rollout')",
+                rusqlite::params![format!("cx:{thread}:{off}"), ms(ts), thread, input, cached, out],
+            )
+            .unwrap();
+    }
+    for off in offsets_of(lines, "item_completed") {
+        store
+            .conn()
+            .execute(
+                "INSERT INTO tool_call(key, ts_ms, tool, session_id, name, failed) VALUES(?1, 1, 'codex', ?2, 'shell', 0)",
+                rusqlite::params![format!("cxt:{thread}:{off}"), thread],
+            )
+            .unwrap();
+    }
+}
+
+#[test]
+fn rows_an_older_version_keyed_by_offset_are_replaced_file_by_file() {
+    let h = codex_home();
+    let parent = parent_log(PARENT_TS);
+    write_rollout(&h, P, &parent);
+    let mut store = Store::open_in_memory().unwrap();
+    store_offset_rows(&store, P, &parent, &[PARENT_TS[2], PARENT_TS[4]]);
+    store
+        .conn()
+        .execute(
+            "INSERT INTO usage_event(key, ts_ms, tool, model, session_id, input, cache_read, cache_write, cache_write_1h, output, reasoning,
+                 request_input, web_search, accuracy, source)
+             VALUES('cx:0199dead-0000-7000-8000-000000000000:42', 1, 'codex', 'gpt-5.6-sol', 'gone', 7, 0, 0, 0, 1, 0, 7, 0, 'exact', 'codex_rollout')",
+            [],
+        )
+        .unwrap();
+    assert_eq!(codex_rows(&store).len(), 3);
+
+    run(&mut store, &h.env);
+    let rows = codex_rows(&store);
+    assert_eq!(rows.len(), 3, "the parent's two requests once, and the row of a log that is gone");
+    assert!(rows.iter().any(|r| r.1 == "gone"));
+    assert_eq!(count(&store, "SELECT count(*) FROM tool_call WHERE tool = 'codex'"), 1);
+}
+
+#[test]
+fn a_copy_takes_over_an_original_whose_log_is_gone() {
+    let h = codex_home();
+    let mut store = Store::open_in_memory().unwrap();
+    store_offset_rows(&store, P, &parent_log(PARENT_TS), &[PARENT_TS[2], PARENT_TS[4]]);
+    write_rollout(&h, F, &fork_log(true));
+
+    run(&mut store, &h.env);
+    let rows = codex_rows(&store);
+    assert_eq!(rows.len(), 3, "the parent's requests are not counted again from the copy");
+    assert_eq!((rows[0].0, rows[1].0), (ms(PARENT_TS[2]), ms(PARENT_TS[4])), "and keep their real times");
+}
+
+#[test]
+fn a_fork_of_a_fork_counts_each_request_once() {
+    let h = codex_home();
+    let f2: &str = "0199bbbb-0000-7000-8000-00000000000d";
+    write_rollout(&h, P, &parent_log(PARENT_TS));
+    let fork = fork_log(false);
+    write_rollout(&h, F, &fork);
+    let burst = |i: usize| format!("2026-09-10T12:00:00.{:03}Z", i + 1);
+    let mut f2_log = vec![cx_meta("2026-09-10T12:00:00.000Z", f2, &format!(r#","forked_from_id":"{F}""#))];
+    for (i, line) in fork.iter().enumerate() {
+        let v: serde_json::Value = serde_json::from_str(line).unwrap();
+        f2_log.push(line.replace(v["timestamp"].as_str().unwrap(), &burst(i)));
+    }
+    f2_log.push(cx_tokens("2026-09-10T12:05:00.000Z", (360_000, 300_000, 6_500), (10_000, 10_000, 500), false));
+    write_rollout(&h, f2, &f2_log);
+
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &h.env);
+    assert_eq!(codex_rows(&store).len(), 4);
+}
+
+#[test]
+fn a_copy_ends_at_the_first_model_pause_even_with_lines_in_between() {
+    let h = codex_home();
+    write_rollout(&h, P, &parent_log(PARENT_TS));
+    let item = |ts: &str| format!(r#"{{"timestamp":"{ts}","type":"response_item","payload":{{"type":"message","role":"assistant"}}}}"#);
+    let mut sub = vec![cx_subagent_meta("2026-09-10T11:00:00.000Z", F, P, P, 1, "explorer")];
+    sub.extend(parent_log(COPY_TS));
+    sub.push(cx_turn("2026-09-10T11:00:00.006Z", "gpt-5.6-terra"));
+    sub.push(item("2026-09-10T11:00:01.500Z"));
+    sub.push(cx_tokens("2026-09-10T11:00:01.520Z", (230_000, 180_000, 5_500), (10_000, 0, 500), true));
+    write_rollout(&h, F, &sub);
+
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &h.env);
+    let rows = codex_rows(&store);
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[2].2.as_deref(), Some("explorer"));
+    assert_eq!(count(&store, "SELECT count(*) FROM limit_snapshot WHERE source = 'codex_rollout'"), 2, "the subagent's own reading is kept");
+}
+
+#[test]
+fn a_reviewers_forwarded_items_do_not_take_over_the_parents_log() {
+    let h = codex_home();
+    let forwarded = r#"{"timestamp":"2026-09-10T10:01:40.000Z","type":"event_msg","payload":{"type":"item_completed","thread_id":"0199ffff-0000-7000-8000-000000000001","item":{"type":"CommandExecution","id":"call_r","status":"completed","exit_code":0}}}"#;
+    let mut lines = parent_log(PARENT_TS);
+    lines.insert(4, forwarded.to_owned());
+    write_rollout(&h, P, &lines);
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &h.env);
+    assert!(codex_rows(&store).iter().all(|r| r.1 == P));
+    assert_eq!(count(&store, "SELECT count(*) FROM limit_snapshot WHERE source = 'codex_rollout'"), 1);
+}
+
+#[test]
+fn a_model_missing_in_a_copy_is_learned_from_the_original() {
+    let h = codex_home();
+    let mut fork = vec![cx_meta("2026-09-10T11:00:00.000Z", F, &format!(r#","forked_from_id":"{P}""#))];
+    fork.extend(parent_log(COPY_TS).into_iter().filter(|l| !l.contains("turn_context")));
+    write_rollout(&h, F, &fork);
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &h.env);
+    assert_eq!(count(&store, "SELECT count(*) FROM usage_event WHERE model = 'unknown'"), 2);
+
+    write_rollout(&h, P, &parent_log(PARENT_TS));
+    run(&mut store, &h.env);
+    assert_eq!(count(&store, "SELECT count(*) FROM usage_event WHERE model = 'unknown'"), 0);
+}
+
+#[test]
+fn an_old_backup_brings_its_tool_calls_for_new_sessions() {
+    let dir = tempfile::tempdir().unwrap();
+    let backup = dir.path().join("old.db");
+    {
+        let old = Store::open(&backup).unwrap();
+        old.conn()
+            .execute_batch(
+                "INSERT INTO usage_event(key, ts_ms, tool, model, session_id, input, cache_read, cache_write, cache_write_1h, output,
+                     reasoning, request_input, web_search, accuracy, source)
+                 VALUES('cx:Q:100', 1, 'codex', 'gpt-5.6-sol', 'Q', 10, 0, 0, 0, 1, 0, 10, 0, 'exact', 'codex_rollout');
+                 INSERT INTO tool_call(key, ts_ms, tool, session_id, name, failed) VALUES('cxt:Q:800', 1, 'codex', 'Q', 'shell', 0);
+                 PRAGMA user_version = 8;",
+            )
+            .unwrap();
+    }
+    let mut store = Store::open_in_memory().unwrap();
+    store.merge_from(&backup).unwrap();
+    assert_eq!(count(&store, "SELECT count(*) FROM usage_event WHERE session_id = 'Q'"), 1);
+    assert_eq!(count(&store, "SELECT count(*) FROM tool_call WHERE session_id = 'Q'"), 1);
+}
+
+/// Offset-keyed rows an older version stored for one log, every token_count line under the id
+/// that was current there (the last `session_meta` seen).
+fn store_offset_rows_of(store: &Store, lines: &[String], usages: &[(i64, i64, i64)], times: &[&str]) {
+    let mut at = 0usize;
+    let mut sid = String::new();
+    let mut n = 0;
+    for l in lines {
+        let v: serde_json::Value = serde_json::from_str(l).unwrap();
+        if v["type"] == "session_meta" {
+            sid = v["payload"]["id"].as_str().unwrap().to_owned();
+        }
+        if v["payload"]["type"] == "token_count" {
+            let (input, cached, out) = usages[n];
+            store
+                .conn()
+                .execute(
+                    "INSERT INTO usage_event(key, ts_ms, tool, model, session_id, input, cache_read, cache_write, cache_write_1h, output,
+                         reasoning, request_input, web_search, accuracy, source)
+                     VALUES(?1, ?2, 'codex', 'gpt-5.6-sol', ?3, ?4, ?5, 0, 0, ?6, 0, ?4 + ?5, 0, 'exact', 'codex_rollout')",
+                    rusqlite::params![format!("cx:{sid}:{at}"), ms(times[n]), sid, input, cached, out],
+                )
+                .unwrap();
+            n += 1;
+        }
+        at += l.len() + 1;
+    }
+}
+
+const P_USAGES: [(i64, i64, i64); 2] = [(20_000, 80_000, 2_000), (20_000, 100_000, 3_000)];
+const F_OWN: (i64, i64, i64) = (20_000, 110_000, 1_000);
+
+fn fork_of_fork(f2: &str, fork: &[String]) -> Vec<String> {
+    let mut out = vec![cx_meta("2026-09-10T12:00:00.000Z", f2, &format!(r#","forked_from_id":"{F}""#))];
+    for (i, line) in fork.iter().enumerate() {
+        let v: serde_json::Value = serde_json::from_str(line).unwrap();
+        out.push(line.replace(v["timestamp"].as_str().unwrap(), &format!("2026-09-10T12:00:00.{:03}Z", i + 1)));
+    }
+    out.push(cx_settings("2026-09-10T12:00:00.900Z", f2));
+    out.push(cx_tokens("2026-09-10T12:05:00.000Z", (360_000, 300_000, 6_500), (10_000, 10_000, 500), false));
+    out
+}
+
+#[test]
+fn old_rows_of_two_vanished_logs_are_counted_once_from_a_later_copy() {
+    let h = codex_home();
+    let f2 = "0199bbbb-0000-7000-8000-00000000000d";
+    let fork = fork_log(true);
+    let mut store = Store::open_in_memory().unwrap();
+    store_offset_rows_of(&store, &parent_log(PARENT_TS), &P_USAGES, &[PARENT_TS[2], PARENT_TS[4]]);
+    store_offset_rows_of(&store, &fork, &[P_USAGES[0], P_USAGES[1], F_OWN], &[COPY_TS[2], COPY_TS[4], "2026-09-10T11:01:00.000Z"]);
+    assert_eq!(codex_rows(&store).len(), 5, "what the old version stored: the parent's requests twice");
+    write_rollout(&h, f2, &fork_of_fork(f2, &fork));
+
+    run(&mut store, &h.env);
+    let rows = codex_rows(&store);
+    assert_eq!(rows.len(), 4, "the parent's two requests, the fork's own and the second fork's own");
+    assert_eq!((rows[0].0, rows[1].0), (ms(PARENT_TS[2]), ms(PARENT_TS[4])));
+    assert_eq!(rows[2].0, ms("2026-09-10T11:01:00.000Z"));
+}
+
+#[test]
+fn forks_from_codex_versions_without_forked_from_id_count_once() {
+    let h = codex_home();
+    let f2 = "0199bbbb-0000-7000-8000-00000000000d";
+    write_rollout(&h, P, &parent_log(PARENT_TS));
+    let fork: Vec<String> = fork_log(false).into_iter().map(|l| l.replace(&format!(r#","forked_from_id":"{P}""#), "")).collect();
+    write_rollout(&h, F, &fork);
+    let f2_log: Vec<String> = fork_of_fork(f2, &fork)
+        .into_iter()
+        .filter(|l| !l.contains("thread_settings_applied"))
+        .map(|l| l.replace(&format!(r#","forked_from_id":"{F}""#), ""))
+        .collect();
+    write_rollout(&h, f2, &f2_log);
+
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &h.env);
+    assert_eq!(codex_rows(&store).len(), 4);
+}
+
+#[test]
+fn sibling_forks_keep_identical_requests_apart() {
+    let h = codex_home();
+    let f3 = "0199bbbb-0000-7000-8000-00000000000e";
+    write_rollout(&h, P, &parent_log(PARENT_TS));
+    write_rollout(&h, F, &fork_log(true));
+    let sibling: Vec<String> = fork_log(true).into_iter().map(|l| l.replace(F, f3)).collect();
+    write_rollout(&h, f3, &sibling);
+
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &h.env);
+    assert_eq!(codex_rows(&store).len(), 4, "each fork's own request counts, even with identical usage");
+}
+
+#[test]
+fn readings_an_older_version_copied_into_a_fork_are_removed() {
+    let h = codex_home();
+    write_rollout(&h, P, &parent_log(PARENT_TS));
+    write_rollout(&h, F, &fork_log(true));
+    let mut store = Store::open_in_memory().unwrap();
+    store
+        .conn()
+        .execute(
+            "INSERT INTO limit_snapshot(ts_ms, provider, tool, limit_id, window, used_pct, resets_at, source, accuracy)
+             VALUES(?1, 'openai', 'codex', 'codex', 'five_hour', 40.0, 1789300000, 'codex_rollout', 'exact')",
+            [ms(COPY_TS[2])],
+        )
+        .unwrap();
+    run(&mut store, &h.env);
+    assert_eq!(count(&store, "SELECT count(*) FROM limit_snapshot WHERE source = 'codex_rollout'"), 2, "the parent's and the fork's own");
+}
+
+#[test]
+fn a_session_less_row_does_not_block_an_old_backup() {
+    let dir = tempfile::tempdir().unwrap();
+    let backup = dir.path().join("old.db");
+    {
+        let old = Store::open(&backup).unwrap();
+        old.conn()
+            .execute_batch(
+                "INSERT INTO usage_event(key, ts_ms, tool, model, session_id, input, cache_read, cache_write, cache_write_1h, output,
+                     reasoning, request_input, web_search, accuracy, source)
+                 VALUES('cx:Q:100', 1, 'codex', 'gpt-5.6-sol', 'Q', 10, 0, 0, 0, 1, 0, 10, 0, 'exact', 'codex_rollout');
+                 PRAGMA user_version = 8;",
+            )
+            .unwrap();
+    }
+    let mut store = Store::open_in_memory().unwrap();
+    store
+        .conn()
+        .execute(
+            "INSERT INTO usage_event(key, ts_ms, tool, model, session_id, input, cache_read, cache_write, cache_write_1h, output, reasoning,
+                 request_input, web_search, accuracy, source)
+             VALUES('cx:Z:1', 1, 'codex', 'gpt-5.6-sol', NULL, 1, 0, 0, 0, 1, 0, 1, 0, 'exact', 'codex_rollout')",
+            [],
+        )
+        .unwrap();
+    store.merge_from(&backup).unwrap();
+    assert_eq!(count(&store, "SELECT count(*) FROM usage_event WHERE session_id = 'Q'"), 1);
+}

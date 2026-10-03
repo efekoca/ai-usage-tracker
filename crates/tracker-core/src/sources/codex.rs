@@ -1,55 +1,141 @@
 //! Codex rollout parser (`<CODEX_HOME>/{sessions,archived_sessions}/YYYY/MM/DD/rollout-*.jsonl`).
 //! Used by both the Codex CLI and the Codex desktop app.
 //!
-//! Format notes (observed, Codex 0.142–0.152):
-//! * `session_meta.payload`: `id`, `cwd`, `originator`, `cli_version`, `parent_thread_id`.
-//! * `turn_context.payload.model`: the model for the following turn.
-//! * `event_msg` with `payload.type == "token_count"`: `info.last_token_usage` (this request)
-//!   and `info.total_token_usage` (cumulative). `input_tokens` *includes* cached input;
-//!   `output_tokens` *includes* reasoning. Consecutive events can repeat an unchanged total
-//!   (skipped). The cumulative total can drop after compaction, so we sum `last_token_usage`
-//!   instead of diffing totals.
-//! * `payload.rate_limits`: `primary`/`secondary` `{used_percent, window_minutes, resets_at}`,
+//! Format notes:
+//! * `session_meta.payload`: `id`, `cwd`, `originator`, `git.branch`, `source`, `parent_thread_id`,
+//!   `forked_from_id`, `session_id` (the root thread). Subagent rollouts have
+//!   `source: {"subagent": …}`; their requests count toward the root session.
+//! * Only the first `session_meta` belongs to the file. A fork or a subagent started with forked
+//!   context first copies the source thread's history (its `session_meta`, `token_count`,
+//!   `item_completed`, …) in one burst with new timestamps. `thread_settings_applied` names the
+//!   thread that owns what follows (Codex ≥ 0.152); older logs end a copy at the first pause.
+//! * `token_count`: `info.last_token_usage` (this request) and `info.total_token_usage`
+//!   (cumulative). `input_tokens` includes cached input, `output_tokens` includes reasoning.
+//! * De-dup keys come from content, so copied history, rewritten and moved files all map to the
+//!   same rows: `cx:<fork root>:t<cumulative totals>` for usage, `cxt:i<call id>` for actions.
+//!   Versions before 0.2.5 keyed rows by byte offset; a file read from its start reports those
+//!   keys as stale so they are replaced in the same transaction.
+//! * `rate_limits`: `primary`/`secondary` `{used_percent, window_minutes, resets_at}`,
 //!   `plan_type`, `limit_id`. Windows are classified by `window_minutes`, not by slot.
-//! * `session_meta.payload.git.branch`: the branch when the session started in a repository.
-//! * Subagent rollouts (e.g. the `guardian` auto-review) have `source: {"subagent": …}` and
-//!   `parent_thread_id`; their requests count toward the parent session.
-//! * `event_msg` `item_completed` records each action the agent ran: `CommandExecution`
-//!   (`status`, `exit_code`), `FileChange` (`status`), `McpToolCall` (`server`, `tool`,
-//!   `status`), `WebSearch`, `Extension` (`kind`), `ImageView`. Only names and outcomes are kept.
-//!
-//! De-dup key: `cx:<session id>:<byte offset of the line>`. Rollouts are append-only, so the
-//! key is stable across re-reads and when a file is moved to `archived_sessions`.
 
 use super::{f64_at, i64_at, read_jsonl_from, str_at, u64_at, ParseOutput};
 use crate::model::{parse_ts_ms, window_name, Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::path::Path;
 
 pub const SOURCE: &str = "codex_rollout";
 
+/// Copied history is written in one burst; a line this long after the previous one comes from
+/// the file's own thread.
+const COPY_BURST_MS: i64 = 1_000;
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 struct State {
-    /// This rollout's own thread id.
-    session_id: Option<String>,
-    cwd: Option<String>,
-    originator: Option<String>,
+    own: Option<String>,
+    owner: Option<String>,
+    threads: BTreeMap<String, Thread>,
     model: Option<String>,
     last_total: Option<String>,
-    cli_version: Option<String>,
+    last_line_ms: Option<i64>,
+    /// The session id the offset keys of versions before 0.2.5 used.
+    legacy: Option<String>,
+    /// The owner was named by the log itself (`thread_settings_applied`, `item_completed`).
+    marked: bool,
+    /// The last thread whose `session_meta` had no `forked_from_id`: older Codex starts a copy
+    /// with the source's own `session_meta`, which names the source.
+    unsourced: Option<String>,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+struct Thread {
+    cwd: Option<String>,
+    originator: Option<String>,
     branch: Option<String>,
     agent: Option<String>,
-    /// The session that started this subagent.
     parent: Option<String>,
+    root: Option<String>,
+    forked_from: Option<String>,
+}
+
+struct Who {
+    thread: String,
+    session: String,
+    agent: Option<String>,
+    cwd: Option<String>,
+    branch: Option<String>,
+    originator: Option<String>,
+}
+
+impl State {
+    fn own_id(&self, path: &Path) -> String {
+        self.own.clone().or_else(|| session_id_from_filename(path)).unwrap_or_default()
+    }
+
+    fn owner_id(&self, path: &Path) -> String {
+        self.owner.clone().unwrap_or_else(|| self.own_id(path))
+    }
+
+    fn in_copy(&self, path: &Path) -> bool {
+        self.owner.as_ref().is_some_and(|o| *o != self.own_id(path))
+    }
+
+    /// Only the file's own thread or one whose `session_meta` was copied here can own lines;
+    /// `/review` forwards a child's items with the child's id into the parent's log.
+    fn take_owner(&mut self, id: &str, path: &Path) {
+        if id == self.own_id(path) || self.threads.contains_key(id) {
+            self.owner = Some(id.to_owned());
+            self.marked = true;
+        }
+    }
+
+    /// A marked owner keeps its own id, so sibling forks stay apart; otherwise the fork root,
+    /// which every copy of the line agrees on even when the copy hides where it ended.
+    fn key_thread(&self, id: &str) -> String {
+        if self.marked { id.to_owned() } else { self.fork_root(id) }
+    }
+
+    /// The first thread of the fork chain: a request keeps this key in every copy of its history.
+    fn fork_root(&self, id: &str) -> String {
+        let mut cur = id.to_owned();
+        for _ in 0..64 {
+            match self.threads.get(&cur).and_then(|t| t.forked_from.clone()) {
+                Some(next) if next != cur => cur = next,
+                _ => break,
+            }
+        }
+        cur
+    }
+
+    fn who(&self, path: &Path) -> Who {
+        let own = self.own_id(path);
+        let id = self.owner_id(path);
+        let base = self.threads.get(&own).cloned().unwrap_or_default();
+        let t = self.threads.get(&id).cloned().unwrap_or_default();
+        let session = match &t.agent {
+            Some(_) => t.root.clone().filter(|r| *r != id).or(t.parent.clone()).unwrap_or_else(|| id.clone()),
+            None => id.clone(),
+        };
+        Who {
+            session,
+            agent: t.agent,
+            cwd: t.cwd.or(base.cwd),
+            branch: t.branch.or(base.branch),
+            originator: t.originator.or(base.originator),
+            thread: id,
+        }
+    }
 }
 
 pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<ParseOutput> {
     let mut st: State = serde_json::from_value(state.clone()).unwrap_or_default();
-    if st.session_id.is_none() {
-        st.session_id = session_id_from_filename(path);
+    if st.legacy.is_none() {
+        st.legacy = session_id_from_filename(path).or_else(|| path.file_stem().map(|s| s.to_string_lossy().into_owned()));
     }
+    let replay = offset == 0;
     let (lines, next) = read_jsonl_from(path, offset)?;
     let mut out = ParseOutput { next_offset: next, ..Default::default() };
     let mut typed = 0u64;
@@ -63,62 +149,112 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
         let Some(kind) = str_at(v, "type") else { continue };
         typed += 1;
         let p = v.get("payload").unwrap_or(&Value::Null);
-        match kind {
-            "session_meta" => {
+        let ts_ms = str_at(v, "timestamp").and_then(parse_ts_ms);
+        if let (Some(t), Some(l)) = (ts_ms, st.last_line_ms)
+            && t - l >= COPY_BURST_MS
+            && st.in_copy(path)
+        {
+            st.owner = None;
+            st.marked = false;
+        }
+        match (kind, str_at(p, "type")) {
+            ("session_meta", _) => {
                 if let Some(id) = str_at(p, "id") {
-                    st.session_id = Some(id.to_owned());
+                    let t = thread_of(p);
+                    if let Some(src) = st.unsourced.take().filter(|s| s != id)
+                        && let Some(prev) = st.threads.get_mut(&src)
+                    {
+                        prev.forked_from = Some(id.to_owned());
+                    }
+                    if t.forked_from.is_none() && t.agent.is_none() {
+                        st.unsourced = Some(id.to_owned());
+                    }
+                    st.threads.entry(id.to_owned()).or_insert(t);
+                    if st.own.is_none() {
+                        st.own = Some(id.to_owned());
+                    }
+                    st.owner = Some(id.to_owned());
+                    st.marked = false;
+                    st.legacy = Some(id.to_owned());
                 }
-                st.cwd = str_at(p, "cwd").map(str::to_owned).or(st.cwd.take());
-                st.originator = str_at(p, "originator").map(str::to_owned).or(st.originator.take());
-                st.cli_version = str_at(p, "cli_version").map(str::to_owned).or(st.cli_version.take());
-                if let Some(b) = p.get("git").and_then(|g| str_at(g, "branch")).map(str::trim).filter(|b| !b.is_empty()) {
-                    st.branch = Some(b.to_owned());
-                }
-                if let Some(src) = p.get("source") {
-                    st.agent = subagent_label(src);
-                }
-                st.parent = str_at(p, "parent_thread_id").filter(|s| !s.is_empty()).map(str::to_owned).or(st.parent.take());
                 out.lines_recognised += 1;
             }
-            "turn_context" => {
+            ("turn_context", _) => {
                 if let Some(m) = str_at(p, "model") {
                     st.model = Some(m.to_owned());
                 }
                 if let Some(c) = str_at(p, "cwd") {
-                    st.cwd = Some(c.to_owned());
+                    let id = st.owner_id(path);
+                    st.threads.entry(id).or_default().cwd = Some(c.to_owned());
                 }
                 out.lines_recognised += 1;
             }
-            "event_msg" if str_at(p, "type") == Some("token_count") => {
-                let ts_ms = str_at(v, "timestamp").and_then(parse_ts_ms);
+            ("event_msg", Some("thread_settings_applied")) => {
+                if let Some(id) = str_at(p, "thread_id") {
+                    st.take_owner(id, path);
+                }
+                if st.model.is_none()
+                    && let Some(m) = p.get("thread_settings").and_then(|s| str_at(s, "model"))
+                {
+                    st.model = Some(m.to_owned());
+                }
+            }
+            ("event_msg", Some("token_count")) => {
+                if replay {
+                    out.stale_events.push(format!("cx:{}:{}", st.legacy.as_deref().unwrap_or_default(), line.offset));
+                }
                 let mut recognised = false;
                 if let (Some(info), Some(ts_ms)) = (p.get("info").filter(|i| !i.is_null()), ts_ms) {
-                    let total_key = info.get("total_token_usage").map(|t| t.to_string());
-                    if total_key.is_some() && total_key == st.last_total {
-                        recognised = true; // repeated snapshot, nothing new
+                    let total = info.get("total_token_usage").map(totals_key);
+                    if total.is_some() && total == st.last_total {
+                        recognised = true;
                     } else if let Some(last) = info.get("last_token_usage") {
-                        st.last_total = total_key;
-                        out.events.push(event(&st, path, line.offset, ts_ms, last));
+                        st.last_total = total.clone();
+                        if u64_at(last, "input_tokens") + u64_at(last, "output_tokens") > 0 {
+                            let who = st.who(path);
+                            let key = match total {
+                                Some(t) => format!("cx:{}:t{t}", st.key_thread(&who.thread)),
+                                None => format!("cx:{}:o{}", who.thread, line.offset),
+                            };
+                            if st.in_copy(path) {
+                                out.copies.push((out.events.len(), st.legacy.clone().unwrap_or_default()));
+                            }
+                            out.events.push(event(&who, &st, key, ts_ms, last));
+                        }
                         recognised = true;
                     }
                 }
                 if let (Some(rl), Some(ts_ms)) = (p.get("rate_limits").filter(|r| !r.is_null()), ts_ms) {
-                    rate_limits(rl, ts_ms, &mut out.limits);
+                    if !st.in_copy(path) {
+                        rate_limits(rl, ts_ms, &mut out.limits);
+                    } else if replay {
+                        out.stale_limits.push((SOURCE.to_owned(), ts_ms));
+                    }
                     recognised = true;
                 }
                 if recognised {
                     out.lines_recognised += 1;
                 }
             }
-            "event_msg" if str_at(p, "type") == Some("item_completed") => {
-                if let (Some(item), Some(ts_ms)) = (p.get("item"), str_at(v, "timestamp").and_then(parse_ts_ms))
-                    && let Some(call) = action(&st, path, line.offset, ts_ms, item)
+            ("event_msg", Some("item_completed")) => {
+                if replay {
+                    out.stale_tool_calls.push(format!("cxt:{}:{}", st.legacy.as_deref().unwrap_or_default(), line.offset));
+                }
+                if let Some(id) = str_at(p, "thread_id") {
+                    st.take_owner(id, path);
+                }
+                let completed = i64_at(p, "completed_at_ms").filter(|&ms| ms > 0).or(ts_ms);
+                if let (Some(item), Some(ts_ms)) = (p.get("item"), completed)
+                    && let Some(call) = action(&st.who(path), line.offset, ts_ms, item)
                 {
                     out.tool_calls.push(call);
                     out.lines_recognised += 1;
                 }
             }
             _ => {}
+        }
+        if ts_ms.is_some() {
+            st.last_line_ms = ts_ms;
         }
     }
     if out.lines_total >= 20 && typed == 0 {
@@ -128,32 +264,45 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
     Ok(out)
 }
 
-/// This rollout's thread id (the de-dup key part), and the session its usage counts toward:
-/// the parent for a subagent, itself otherwise.
-fn ids(st: &State, path: &Path) -> (String, String) {
-    let thread = st.session_id.clone().unwrap_or_else(|| path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default());
-    let session = match (&st.agent, &st.parent) {
-        (Some(_), Some(parent)) => parent.clone(),
-        _ => thread.clone(),
-    };
-    (thread, session)
+fn thread_of(p: &Value) -> Thread {
+    let id = |k: &str| str_at(p, k).filter(|s| !s.is_empty()).map(str::to_owned);
+    Thread {
+        cwd: id("cwd"),
+        originator: id("originator"),
+        branch: p.get("git").and_then(|g| str_at(g, "branch")).map(str::trim).filter(|b| !b.is_empty()).map(str::to_owned),
+        agent: p.get("source").and_then(subagent_label),
+        parent: id("parent_thread_id"),
+        root: id("session_id"),
+        forked_from: id("forked_from_id"),
+    }
 }
 
-fn event(st: &State, path: &Path, offset: u64, ts_ms: i64, last: &Value) -> UsageEvent {
+/// The cumulative totals: identical in a thread's own log and in any copy of it.
+fn totals_key(t: &Value) -> String {
+    format!(
+        "{}-{}-{}-{}-{}",
+        u64_at(t, "input_tokens"),
+        u64_at(t, "cached_input_tokens"),
+        u64_at(t, "cache_write_input_tokens"),
+        u64_at(t, "output_tokens"),
+        u64_at(t, "reasoning_output_tokens")
+    )
+}
+
+fn event(who: &Who, st: &State, key: String, ts_ms: i64, last: &Value) -> UsageEvent {
     let input_all = u64_at(last, "input_tokens");
     let cached = u64_at(last, "cached_input_tokens");
     let cache_write = u64_at(last, "cache_write_input_tokens");
     let output = u64_at(last, "output_tokens");
     let reasoning = u64_at(last, "reasoning_output_tokens").min(output);
-    let (thread, session) = ids(st, path);
     UsageEvent {
-        key: format!("cx:{thread}:{offset}"),
+        key,
         ts_ms,
         tool: Tool::Codex,
-        client: st.originator.clone(),
+        client: who.originator.clone(),
         model: st.model.clone().unwrap_or_else(|| "unknown".into()),
-        project_path: st.cwd.clone(),
-        session_id: Some(session),
+        project_path: who.cwd.clone(),
+        session_id: Some(who.session.clone()),
         tokens: Tokens {
             input: input_all.saturating_sub(cached).saturating_sub(cache_write),
             cache_read: cached,
@@ -170,9 +319,9 @@ fn event(st: &State, path: &Path, offset: u64, ts_ms: i64, last: &Value) -> Usag
         request_id: None,
         accuracy: Accuracy::Exact,
         source: SOURCE.into(),
-        branch: st.branch.clone(),
-        agent: st.agent.clone(),
-        thread_id: st.agent.is_some().then_some(thread),
+        branch: who.branch.clone(),
+        agent: who.agent.clone(),
+        thread_id: who.agent.is_some().then(|| who.thread.clone()),
     }
 }
 
@@ -196,7 +345,7 @@ fn subagent_label(source: &Value) -> Option<String> {
 
 /// One completed action (command, file change, MCP tool call, web search, …) by name and
 /// outcome. Messages, reasoning and compaction items are not actions and are skipped.
-fn action(st: &State, path: &Path, offset: u64, ts_ms: i64, item: &Value) -> Option<ToolCall> {
+fn action(who: &Who, offset: u64, ts_ms: i64, item: &Value) -> Option<ToolCall> {
     let status = str_at(item, "status");
     let (name, failed) = match str_at(item, "type")? {
         // a non-zero exit code counts as an error, as Claude Code reports it for its shell
@@ -213,14 +362,17 @@ fn action(st: &State, path: &Path, offset: u64, ts_ms: i64, item: &Value) -> Opt
         "ImageView" => ("view_image".to_owned(), None),
         _ => return None,
     };
-    let (thread, session) = ids(st, path);
+    let key = match str_at(item, "id") {
+        Some(id) => format!("cxt:i{id}"),
+        None => format!("cxt:{}:o{offset}", who.thread),
+    };
     Some(ToolCall {
-        key: format!("cxt:{thread}:{offset}"),
+        key,
         ts_ms,
         tool: Tool::Codex,
-        session_id: Some(session),
-        project_path: st.cwd.clone(),
-        agent: st.agent.clone(),
+        session_id: Some(who.session.clone()),
+        project_path: who.cwd.clone(),
+        agent: who.agent.clone(),
         name,
         failed,
     })
