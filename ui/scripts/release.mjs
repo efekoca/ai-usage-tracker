@@ -1,7 +1,7 @@
 // Rust embeds source paths (panic locations) that would carry the builder's user name, so they
 // are remapped to neutral prefixes computed here rather than stored in the repository.
 import { spawnSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -14,24 +14,30 @@ const remaps = [
   [rustupHome, 'rustup'],
   [repo, 'app'],
 ]
-const flags = remaps.map(([from, to]) => `--remap-path-prefix=${from}=${to}`).join(' ')
-const env = { ...process.env, RUSTFLAGS: [process.env.RUSTFLAGS, flags].filter(Boolean).join(' ') }
+// one argument per flag, so paths with spaces stay whole
+const sep = '\x1f'
+const inherited = process.env.CARGO_ENCODED_RUSTFLAGS?.split(sep) ?? process.env.RUSTFLAGS?.split(/\s+/) ?? []
+const flags = [...inherited.filter(Boolean), ...remaps.map(([from, to]) => `--remap-path-prefix=${from}=${to}`)]
+const env = { ...process.env, CARGO_ENCODED_RUSTFLAGS: flags.join(sep) }
+delete env.RUSTFLAGS
 
 const keyPath = process.env.TAURI_SIGNING_PRIVATE_KEY_PATH ?? join(homedir(), '.tauri', 'ai-usage-tracker.key')
 const signing = !!process.env.TAURI_SIGNING_PRIVATE_KEY || existsSync(keyPath)
 const args = ['--prefix', 'ui', 'tauri', 'build', ...process.argv.slice(2)]
+const scratch = signing ? mkdtempSync(join(tmpdir(), 'ai-usage-tracker-')) : null
 if (signing) {
   env.TAURI_SIGNING_PRIVATE_KEY ??= keyPath // the CLI takes a path or the key itself
   env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ??= ''
-  const extra = join(tmpdir(), 'ai-usage-tracker-release.json')
+  const extra = join(scratch, 'release.json')
   writeFileSync(extra, JSON.stringify({ bundle: { createUpdaterArtifacts: true } }))
-  args.push('--config', extra)
+  args.push('--config', `"${extra}"`)
 } else {
   console.log('No update signing key found: building without update artifacts.')
 }
 
 // the Tauri CLI finds src-tauri from the repository root
 const r = spawnSync('npx', args, { cwd: repo, env, stdio: 'inherit', shell: true })
+if (scratch) rmSync(scratch, { recursive: true, force: true })
 if (r.status !== 0) process.exit(r.status ?? 1)
 
 const version = JSON.parse(readFileSync(join(repo, 'src-tauri', 'tauri.conf.json'), 'utf8')).version
