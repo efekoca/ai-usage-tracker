@@ -32,7 +32,7 @@
 </div>
 <div class="foot">
   {#if hover}
-    <span><b>{names[hover[0]]} {fmtHour(hover[1])}</b> · <span class="num">{format(grid[hover[0]][hover[1]])}</span></span>
+    <span><b>{names[hover[0]]} {fmtHour(hover[1])}</b> · <span class="num">{format(grid[hover[0]]?.[hover[1]] ?? 0)}</span></span>
   {:else}
     <span></span>
   {/if}

@@ -6,7 +6,7 @@
   // The list floats above everything so a scrolling card never clips it.
   import { tick } from 'svelte'
   import Icon from './Icon.svelte'
-  import { i18n, t } from '../lib/i18n.svelte'
+  import { searchKey, t } from '../lib/i18n.svelte'
 
   // outside any container-query ancestor (which would anchor position: fixed) and outside the label
   function portal(node: HTMLElement) {
@@ -48,8 +48,7 @@
 
   const withSearch = $derived(searchable ?? options.length > 8)
   const current = $derived(options.find((o) => o.value === value))
-  const fold = (s: string) => s.toLocaleLowerCase(i18n.lang === 'tr' ? 'tr-TR' : 'en-US')
-  const shown = $derived(query.trim() ? options.filter((o) => fold(`${o.label} ${o.sub ?? ''}`).includes(fold(query.trim()))) : options)
+  const shown = $derived(query.trim() ? options.filter((o) => searchKey(`${o.label} ${o.sub ?? ''}`).includes(searchKey(query.trim()))) : options)
 
   function place() {
     if (!trigger) return
@@ -151,7 +150,7 @@
           const now = Date.now()
           typed = now - typedAt > 700 ? e.key : typed + e.key
           typedAt = now
-          const i = shown.findIndex((o) => fold(o.label).startsWith(fold(typed)))
+          const i = shown.findIndex((o) => searchKey(o.label).startsWith(searchKey(typed)))
           if (i >= 0) {
             active = i
             scrollActive()

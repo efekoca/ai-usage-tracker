@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { api, type LimitHistoryView, type PlansFile, type Tip, type Tips } from '../lib/api'
-  import { app } from '../lib/store.svelte'
+  import { app, latest } from '../lib/store.svelte'
   import { fmtCompact, fmtInt, fmtMoney, fmtPct, has, t, toolLabel } from '../lib/i18n.svelte'
   import Icon from '../components/Icon.svelte'
   import PlanAdvice from '../components/PlanAdvice.svelte'
@@ -9,13 +9,31 @@
   let data = $state<Tips | null>(null)
   let history = $state<LimitHistoryView | null>(null)
   let plans = $state<PlansFile | null>(null)
-  onMount(async () => {
-    plans = await api.plans()
+  let failed = $state('')
+  onMount(() => {
+    api.plans().then((p) => (plans = p)).catch(() => {})
   })
   $effect(() => {
     void app.tick
-    api.tips($state.snapshot(app.period), $state.snapshot(app.filter)).then((d) => (data = d)).catch(() => (data = null))
-    api.limitHistory().then((h) => (history = h)).catch(() => (history = null))
+    return latest(
+      () => api.tips($state.snapshot(app.period), $state.snapshot(app.filter)),
+      (d) => {
+        data = d
+        failed = ''
+      },
+      (e) => {
+        data = null
+        failed = String(e)
+      },
+    )
+  })
+  $effect(() => {
+    void app.tick
+    return latest(
+      () => api.limitHistory(),
+      (h) => (history = h),
+      () => (history = null),
+    )
   })
 
   function toolName(tool: string, name: string) {
@@ -41,14 +59,19 @@
           amount: null,
           share: null,
         }
-      case 'tool_errors':
+      case 'tool_errors': {
+        const known = tip.known ?? (tip.rate_pct > 0 ? Math.round((tip.failed * 100) / tip.rate_pct) : tip.calls)
+        const unknown = Math.max(0, tip.calls - known)
         return {
           icon: 'warning',
           title: t(`${k}.title`, { tool: toolLabel(tip.tool), name: toolName(tip.tool, tip.name) }),
-          body: t(`${k}.body`, { calls: fmtInt(tip.calls), rate: fmtPct(tip.rate_pct, 0), failed: fmtInt(tip.failed) }),
+          body:
+            t(`${k}.body`, { known: fmtInt(known), rate: fmtPct(tip.rate_pct, 0), failed: fmtInt(tip.failed) }) +
+            (unknown > 0 ? ' ' + t(`${k}.unknown`, { n: fmtInt(unknown) }) : ''),
           amount: null,
           share: null,
         }
+      }
     }
   }
 </script>
@@ -64,7 +87,11 @@
   </div>
 {/if}
 
-{#if data}
+{#if failed}
+  <div class="banner"><Icon name="warning" size={16} />{t('common.error', { e: failed })}</div>
+{:else if !data}
+  <p class="muted">{t('common.loading')}</p>
+{:else}
   <h2 class="section">{t('tips.findings')}</h2>
   {#if data.tips.length === 0}
     <div class="card empty">

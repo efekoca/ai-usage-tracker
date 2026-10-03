@@ -48,20 +48,25 @@ function inkOn(hex: string): string {
 }
 
 let refreshTimer: ReturnType<typeof setTimeout> | undefined
+let refreshGen = 0
 
 export async function refresh() {
   if (!app.settings?.onboarded) return
+  const gen = ++refreshGen
   app.loading = true
   try {
     const [report, limits] = await Promise.all([api.report($state.snapshot(app.period), $state.snapshot(app.filter)), api.limits()])
+    if (gen !== refreshGen) return
     app.report = report
     app.limits = limits
     app.error = ''
   } catch (e) {
-    app.error = String(e)
+    if (gen === refreshGen) app.error = String(e)
   } finally {
-    app.loading = false
-    app.tick++
+    if (gen === refreshGen) {
+      app.loading = false
+      app.tick++
+    }
   }
 }
 
@@ -70,11 +75,33 @@ export function refreshSoon() {
   refreshTimer = setTimeout(refresh, 250)
 }
 
-export async function saveSettings(patch: Partial<Settings>) {
-  if (!app.settings) return
-  const next = { ...$state.snapshot(app.settings), ...patch } as Settings
-  app.settings = await api.saveSettings(next)
-  applyAppearance(app.settings, app.info)
+/** Runs `load` and passes its result on only while the caller still wants it; returns the cancel. */
+export function latest<T>(load: () => Promise<T>, done: (v: T) => void, fail?: (e: unknown) => void): () => void {
+  let live = true
+  load().then(
+    (v) => live && done(v),
+    (e) => live && fail?.(e),
+  )
+  return () => {
+    live = false
+  }
+}
+
+export type SettingsPatch = Partial<Settings> | ((s: Settings) => Partial<Settings>)
+let saving: Promise<unknown> = Promise.resolve()
+
+/** One save at a time, each patch applied to the newest settings, so quick changes never undo each other. */
+export function saveSettings(patch: SettingsPatch): Promise<void> {
+  const run = async () => {
+    if (!app.settings) return
+    const cur = $state.snapshot(app.settings) as Settings
+    const next = { ...cur, ...(typeof patch === 'function' ? patch(cur) : patch) } as Settings
+    app.settings = await api.saveSettings(next)
+    applyAppearance(app.settings, app.info)
+  }
+  const p = saving.then(run)
+  saving = p.catch(() => {})
+  return p
 }
 
 export async function init() {
@@ -110,7 +137,9 @@ export async function init() {
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => app.tick++)
   // limit states (reset/stale, countdowns) move with time
   setInterval(() => {
-    if (app.settings?.onboarded) api.limits().then((l) => (app.limits = l)).catch(() => {})
+    if (!app.settings?.onboarded) return
+    const gen = refreshGen
+    api.limits().then((l) => gen === refreshGen && (app.limits = l)).catch(() => {})
   }, 60_000)
 
   await refresh()

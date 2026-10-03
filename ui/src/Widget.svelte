@@ -17,9 +17,12 @@
     document.documentElement.dataset.mica = 'false'
   }
 
+  let gen = 0
   async function load() {
+    const mine = ++gen
     try {
-      data = await api.widgetData()
+      const d = await api.widgetData()
+      if (mine === gen) data = d
     } catch {
       /* backend busy; the next tick retries */
     }

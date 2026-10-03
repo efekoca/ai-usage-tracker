@@ -11,6 +11,7 @@
     format,
     height = 220,
     ariaLabel,
+    sum = true,
   }: {
     dates: string[]
     values: Record<string, number>[]
@@ -18,10 +19,14 @@
     format: (v: number) => string
     height?: number
     ariaLabel: string
+    /** false when the series are statistics of one quantity (avg, p90), which do not add up */
+    sum?: boolean
   } = $props()
 
   let width = $state(600)
   let hover: number | null = $state(null)
+  // the data can shrink under a resting pointer
+  const hi = $derived(hover !== null && hover < dates.length && hover < values.length ? hover : null)
   const m = { top: 12, right: 12, bottom: 26, left: 52 }
   const iw = $derived(Math.max(10, width - m.left - m.right))
   const ih = $derived(height - m.top - m.bottom)
@@ -31,7 +36,7 @@
   const maxY = $derived(Math.max(1e-9, ...values.flatMap((v) => series.map((s) => v[s.key] ?? 0)).filter(Number.isFinite)))
   const x = $derived(scaleLinear().domain([0, Math.max(1, dates.length - 1)]).range([0, iw]))
   const y = $derived(scaleLinear().domain([0, maxY]).nice(4).range([ih, 0]))
-  const ticks = $derived(y.ticks(4))
+  const ticks = $derived(maxY > 1e-9 ? y.ticks(4) : [0])
 
   const areaGen = $derived(
     area<[number, number]>()
@@ -97,26 +102,26 @@
       {#each xLabels as i (i)}
         <text class="axis" x={x(i)} y={ih + 18} text-anchor={i === 0 ? 'start' : i === dates.length - 1 ? 'end' : 'middle'}>{fmtDate(dates[i], 'short')}</text>
       {/each}
-      {#if hover !== null}
-        <line class="cross" x1={x(hover)} x2={x(hover)} y1="0" y2={ih} />
+      {#if hi !== null}
+        <line class="cross" x1={x(hi)} x2={x(hi)} y1="0" y2={ih} />
         {#each layers as layer, li (series[li].key)}
-          {#if Number.isFinite(layer[hover][1])}
-          <circle cx={x(hover)} cy={y(layer[hover][1])} r="4.5" fill={series[li].color} stroke="var(--surface)" stroke-width="2" />
+          {#if Number.isFinite(layer[hi]?.[1] ?? NaN)}
+          <circle cx={x(hi)} cy={y(layer[hi][1])} r="4.5" fill={series[li].color} stroke="var(--surface)" stroke-width="2" />
           {/if}
         {/each}
       {/if}
       <rect class="hit" width={iw} height={ih} role="presentation" onpointermove={move} onpointerleave={() => (hover = null)} />
     </g>
   </svg>
-  {#if hover !== null}
-    {@const left = m.left + x(hover)}
+  {#if hi !== null}
+    {@const left = m.left + x(hi)}
     <div class="tip" style="left:{Math.min(Math.max(left, 90), width - 90)}px">
-      <div class="tip-date">{fmtDate(dates[hover], 'long')}</div>
+      <div class="tip-date">{fmtDate(dates[hi], 'long')}</div>
       {#each [...series].reverse() as s (s.key)}
-        <div class="tip-row"><i style="background:{s.color}"></i><span>{s.label}</span><b class="num">{Number.isFinite(values[hover]?.[s.key] ?? 0) ? format(values[hover]?.[s.key] ?? 0) : '—'}</b></div>
+        <div class="tip-row"><i style="background:{s.color}"></i><span>{s.label}</span><b class="num">{Number.isFinite(values[hi]?.[s.key] ?? 0) ? format(values[hi]?.[s.key] ?? 0) : '—'}</b></div>
       {/each}
-      {#if series.length > 1}
-        <div class="tip-row total"><span>Σ</span><b class="num">{format(total(hover))}</b></div>
+      {#if sum && series.length > 1}
+        <div class="tip-row total"><span>Σ</span><b class="num">{format(total(hi))}</b></div>
       {/if}
     </div>
   {/if}

@@ -46,7 +46,8 @@
   const known = $derived(lstate === 'fresh' && used !== null)
   const behind = $derived(lstate === 'behind' && used !== null)
   const pct = $derived(known ? Math.max(0, Math.min(100, used as number)) : 0)
-  const level = $derived(behind ? 'outdated' : !known ? 'unknown' : pct >= 100 ? 'full' : pct >= 90 ? 'high' : pct >= 70 ? 'warn' : 'ok')
+  // 99.5 already prints as 100 %, so it counts as full here too (as in the limit history)
+  const level = $derived(behind ? 'outdated' : !known ? 'unknown' : pct >= 99.5 ? 'full' : pct >= 90 ? 'high' : pct >= 70 ? 'warn' : 'ok')
   const icon = $derived(level === 'ok' ? 'check' : level === 'unknown' || level === 'outdated' ? 'clock' : 'warning')
   // severity always follows usage; only the number and the bar follow the chosen reading
   const mode = $derived(app.settings?.limit_display ?? 'used')
@@ -151,11 +152,9 @@
     transition: width 600ms var(--ease);
   }
   .fill.warn {
-    background: var(--warning);
-  }
-  .fill.high {
     background: var(--serious);
   }
+  .fill.high,
   .fill.full {
     background: var(--critical);
   }

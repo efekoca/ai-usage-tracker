@@ -34,7 +34,8 @@
     await document.fonts.ready
     // let the charts measure their width and draw before printing
     await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)))
-    invoke('report_ready').catch(() => {})
+    // a page without its data must not be saved as a report
+    invoke('report_ready', { ok: !failed }).catch(() => {})
   })
 
   const mode = $derived(s?.limit_display ?? 'used')

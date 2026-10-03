@@ -25,36 +25,39 @@
   })
 
   function setPlan(p: Provider, id: string) {
-    const next = { ...(app.settings?.plans ?? {}) }
-    if (id) next[p] = id
-    else delete next[p]
-    saveSettings({ plans: next })
+    saveSettings((c) => {
+      const next = { ...c.plans }
+      if (id) next[p] = id
+      else delete next[p]
+      return { plans: next }
+    })
   }
 
   let draft: Threshold = $state({ provider: 'anthropic', window: 'five_hour', tokens: null, cost_usd: null })
   let draftKind: 'cost' | 'tokens' = $state('cost')
   let draftValue = $state('')
+  const draftProvider = $derived<Provider | undefined>(providers.includes(draft.provider) ? draft.provider : providers[0])
 
+  const reloadLimits = () => api.limits().then((l) => (app.limits = l))
   function addThreshold() {
     const v = Number(draftValue.replace(',', '.'))
-    if (!(v > 0)) return
-    const th: Threshold = { provider: draft.provider, window: draft.window, tokens: draftKind === 'tokens' ? Math.round(v) : null, cost_usd: draftKind === 'cost' ? v : null }
-    const rest = (app.settings?.thresholds ?? []).filter((x) => !(x.provider === th.provider && x.window === th.window))
-    saveSettings({ thresholds: [...rest, th] }).then(() => api.limits().then((l) => (app.limits = l)))
+    if (!(v > 0) || !draftProvider) return
+    const th: Threshold = { provider: draftProvider, window: draft.window, tokens: draftKind === 'tokens' ? Math.round(v) : null, cost_usd: draftKind === 'cost' ? v : null }
+    saveSettings((c) => ({ thresholds: [...c.thresholds.filter((x) => !(x.provider === th.provider && x.window === th.window)), th] })).then(reloadLimits)
     draftValue = ''
   }
-  function removeThreshold(i: number) {
-    const list = [...(app.settings?.thresholds ?? [])]
-    list.splice(i, 1)
-    saveSettings({ thresholds: list }).then(() => api.limits().then((l) => (app.limits = l)))
+  function removeThreshold(th: Threshold) {
+    saveSettings((c) => ({ thresholds: c.thresholds.filter((x) => !(x.provider === th.provider && x.window === th.window)) })).then(reloadLimits)
   }
   const planNote = (p: Provider) => plans?.providers[p]?.plans.find((x) => x.id === app.settings?.plans[p])
   function setPrice(p: Provider, raw: string) {
     const v = Number(raw.replace(',', '.'))
-    const next = { ...(app.settings?.plan_prices ?? {}) }
-    if (v > 0) next[p] = v
-    else delete next[p]
-    saveSettings({ plan_prices: next })
+    saveSettings((c) => {
+      const next = { ...c.plan_prices }
+      if (v > 0) next[p] = v
+      else delete next[p]
+      return { plan_prices: next }
+    })
   }
 </script>
 
@@ -146,20 +149,21 @@
 <section class="card">
   <h2>{t('limits.thresholds')}</h2>
   <p class="subtle small help">{t('limits.thresholds.help')}</p>
-  {#each app.settings?.thresholds ?? [] as th, i (th.provider + th.window)}
+  {#each app.settings?.thresholds ?? [] as th (th.provider + th.window)}
+    {@const name = `${t(`provider.${th.provider}`)} · ${windowLabel(th.window)}`}
     <div class="list-row">
-      <span>{t(`provider.${th.provider}`)} · {windowLabel(th.window)}</span>
+      <span>{name}</span>
       <span class="spacer"></span>
       <span class="num">{th.cost_usd ? fmtMoney(th.cost_usd) : `${fmtCompact(th.tokens ?? 0)} ${t('metric.tokens')}`}</span>
-      <button class="btn ghost" aria-label={t('common.remove')} onclick={() => removeThreshold(i)}><Icon name="trash" size={15} /></button>
+      <button class="btn ghost" aria-label="{t('common.remove')}: {name}" onclick={() => removeThreshold(th)}><Icon name="trash" size={15} /></button>
     </div>
   {/each}
   <div class="add">
-    <Select label={t('common.tool')} value={draft.provider} options={providers.map((p) => ({ value: p, label: t(`provider.${p}`) }))} onchange={(v) => (draft.provider = v as Provider)} />
-    <Select label={t('limits.title')} value={draft.window} options={[{ value: 'five_hour', label: windowLabel('five_hour') }, { value: 'seven_day', label: windowLabel('seven_day') }]} onchange={(v) => (draft.window = v)} />
-    <Select label={t('metric.cost')} value={draftKind} options={[{ value: 'cost', label: `${t('metric.cost')} (USD)` }, { value: 'tokens', label: t('metric.tokens') }]} onchange={(v) => (draftKind = v as 'cost' | 'tokens')} />
-    <input class="field" inputmode="decimal" bind:value={draftValue} placeholder={draftKind === 'cost' ? '50' : '5000000'} aria-label="value" />
-    <button class="btn" onclick={addThreshold}><Icon name="plus" size={14} />{t('limits.addThreshold')}</button>
+    <Select label={t('history.filter.provider')} value={draftProvider ?? ''} disabled={!draftProvider} options={providers.map((p) => ({ value: p, label: t(`provider.${p}`) }))} onchange={(v) => (draft.provider = v as Provider)} />
+    <Select label={t('history.filter.window')} value={draft.window} options={[{ value: 'five_hour', label: windowLabel('five_hour') }, { value: 'seven_day', label: windowLabel('seven_day') }]} onchange={(v) => (draft.window = v)} />
+    <Select label={t('limits.thresholdKind')} value={draftKind} options={[{ value: 'cost', label: `${t('metric.cost')} (USD)` }, { value: 'tokens', label: t('metric.tokens') }]} onchange={(v) => (draftKind = v as 'cost' | 'tokens')} />
+    <input class="field" inputmode="decimal" bind:value={draftValue} placeholder={draftKind === 'cost' ? '50' : '5000000'} aria-label={draftKind === 'cost' ? t('limits.thresholdCost') : t('limits.thresholdTokens')} />
+    <button class="btn" onclick={addThreshold} disabled={!draftProvider}><Icon name="plus" size={14} />{t('limits.addThreshold')}</button>
   </div>
 </section>
 

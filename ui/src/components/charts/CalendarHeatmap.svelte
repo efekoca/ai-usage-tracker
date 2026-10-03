@@ -17,9 +17,11 @@
     selected?: string | null
   } = $props()
 
+  const uid = `cal-${Math.random().toString(36).slice(2, 9)}`
   const CELL = 13
   const GAP = 3
   let hover: number | null = $state(null)
+  const hi = $derived(hover !== null && hover < days.length ? hover : null)
 
   // offset so that the first column starts on Monday
   const firstDow = $derived(days.length ? (new Date(days[0].date + 'T00:00:00').getDay() + 6) % 7 : 0)
@@ -58,19 +60,20 @@
   const names = $derived(weekdayNames())
 
   function key(e: KeyboardEvent) {
-    const h = hover ?? days.length - 1
+    if (!days.length) return
+    const h = hi ?? days.length - 1
     const map: Record<string, number> = { ArrowLeft: -7, ArrowRight: 7, ArrowUp: -1, ArrowDown: 1 }
     if (e.key in map) {
       e.preventDefault()
       hover = Math.max(0, Math.min(days.length - 1, h + map[e.key]))
-    } else if (e.key === 'Enter' && hover !== null) onselect?.(days[hover].date)
+    } else if (e.key === 'Enter' && hi !== null) onselect?.(days[hi].date)
     else if (e.key === 'Escape') hover = null
   }
 </script>
 
 <div class="wrap">
   <div class="scroller">
-    <svg width={svgW} height={svgH} role="grid" aria-label={ariaLabel} tabindex="0" onkeydown={key} onblur={() => (hover = null)}>
+    <svg width={svgW} height={svgH} role="listbox" aria-label={ariaLabel} aria-activedescendant={hi !== null ? `${uid}-${hi}` : undefined} tabindex="0" onkeydown={key} onblur={() => (hover = null)}>
       {#each months as m (m.c)}
         <text class="axis" x={36 + m.c * (CELL + GAP)} y="10">{m.label}</text>
       {/each}
@@ -80,7 +83,7 @@
       {#each days as d, i (d.date)}
         {@const p = pos(i)}
         {@const v = value(i)}
-        <!-- keyboard access is provided by the grid (arrow keys + Enter) -->
+        <!-- keyboard access is on the list itself (arrow keys + Enter) -->
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <rect
           x={36 + p.c * (CELL + GAP)}
@@ -90,9 +93,11 @@
           rx="3"
           fill={ramp[level(v)]}
           class:sel={selected === d.date}
-          class:hov={hover === i}
-          role="gridcell"
+          class:hov={hi === i}
+          id="{uid}-{i}"
+          role="option"
           tabindex="-1"
+          aria-selected={selected === d.date}
           aria-label="{fmtDate(d.date, 'long')}: {format(v)}"
           onpointerenter={() => (hover = i)}
           onpointerleave={() => (hover = null)}
@@ -102,8 +107,8 @@
     </svg>
   </div>
   <div class="foot">
-    {#if hover !== null}
-      <span><b>{fmtDate(days[hover].date, 'long')}</b> · <span class="num">{format(value(hover))}</span></span>
+    {#if hi !== null}
+      <span><b>{fmtDate(days[hi].date, 'long')}</b> · <span class="num">{format(value(hi))}</span></span>
     {:else}
       <span></span>
     {/if}

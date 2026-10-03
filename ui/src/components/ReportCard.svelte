@@ -2,7 +2,7 @@
   import { open as openDialog, save } from '@tauri-apps/plugin-dialog'
   import { app, saveSettings } from '../lib/store.svelte'
   import { api } from '../lib/api'
-  import { fmtDate, t } from '../lib/i18n.svelte'
+  import { fmtDate, has, localDate, t } from '../lib/i18n.svelte'
   import Segmented from './Segmented.svelte'
   import Toggle from './Toggle.svelte'
   import Icon from './Icon.svelte'
@@ -12,28 +12,28 @@
   let busy = $state(false)
   let status = $state<{ ok: boolean; text: string } | null>(null)
 
-  // local calendar dates, never UTC
-  const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   const addDays = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
-  const range = $derived.by(() => {
-    const today = new Date()
+  function rangeOf(w: Which, today = new Date()) {
     const monday = addDays(today, -((today.getDay() + 6) % 7))
-    if (which === 'lastWeek') return { from: ymd(addDays(monday, -7)), to: ymd(addDays(monday, -1)) }
-    if (which === 'thisWeek') return { from: ymd(monday), to: ymd(today) }
-    return { from: ymd(addDays(today, -6)), to: ymd(today) }
-  })
+    if (w === 'lastWeek') return { from: localDate(addDays(monday, -7)), to: localDate(addDays(monday, -1)) }
+    if (w === 'thisWeek') return { from: localDate(monday), to: localDate(today) }
+    return { from: localDate(addDays(today, -6)), to: localDate(today) }
+  }
+  const range = $derived(rangeOf(which))
 
   async function run() {
     status = null
-    const path = await save({ defaultPath: `AI-Usage_${range.from}_${range.to}.pdf`, filters: [{ name: 'PDF', extensions: ['pdf'] }] })
+    // the page may have stayed open past midnight: take the dates now, not when it was drawn
+    const r = rangeOf(which)
+    const path = await save({ defaultPath: `AI-Usage_${r.from}_${r.to}.pdf`, filters: [{ name: 'PDF', extensions: ['pdf'] }] })
     if (!path) return
     busy = true
     try {
-      await api.exportReport(range.from, range.to, path)
+      await api.exportReport(r.from, r.to, path)
       status = { ok: true, text: t('report.saved') }
     } catch (e) {
       const code = String(e)
-      status = { ok: false, text: t('report.failed', { e: code }) }
+      status = { ok: false, text: t('report.failed', { e: has(`report.err.${code}`) ? t(`report.err.${code}`) : code }) }
     } finally {
       busy = false
     }

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { fmtCompact, fmtPct, t } from '../../lib/i18n.svelte'
+  import { fmtCompact, fmtPct, lower, t } from '../../lib/i18n.svelte'
   import type { Tokens } from '../../lib/api'
   let { tokens }: { tokens: Tokens } = $props()
 
@@ -32,7 +32,7 @@
         <td></td>
         <td class="name" title={t('metric.reasoning.help')}>↳ {t('metric.reasoning')}</td>
         <td class="num">{fmtCompact(tokens.reasoning)}</td>
-        <td class="num subtle">{fmtPct((tokens.reasoning / Math.max(1, tokens.output)) * 100, 0)} {t('metric.output').toLowerCase()}</td>
+        <td class="num subtle">{fmtPct((tokens.reasoning / Math.max(1, tokens.output)) * 100, 0)} {lower(t('metric.output'))}</td>
       </tr>
     {/if}
   </tbody>

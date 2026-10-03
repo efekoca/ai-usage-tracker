@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app } from '../lib/store.svelte'
+  import { app, latest } from '../lib/store.svelte'
   import { api, type ModelCompare, type Provider } from '../lib/api'
   import { fmtCompact, fmtInt, fmtMoney, fmtPct, t } from '../lib/i18n.svelte'
   import Segmented from './Segmented.svelte'
@@ -7,9 +7,20 @@
   import Icon from './Icon.svelte'
 
   let c = $state<ModelCompare | null>(null)
+  let failed = $state('')
   $effect(() => {
     void app.tick
-    api.compareModels($state.snapshot(app.period), $state.snapshot(app.filter)).then((d) => (c = d)).catch(() => (c = null))
+    return latest(
+      () => api.compareModels($state.snapshot(app.period), $state.snapshot(app.filter)),
+      (d) => {
+        c = d
+        failed = ''
+      },
+      (e) => {
+        c = null
+        failed = String(e)
+      },
+    )
   })
 
   let provider = $state<'all' | Provider>('all')
@@ -31,7 +42,9 @@
   </div>
   <p class="subtle small lead">{t('compare.lead')}</p>
 
-  {#if !c}
+  {#if failed}
+    <p class="muted small">{t('common.error', { e: failed })}</p>
+  {:else if !c}
     <p class="muted small">{t('common.loading')}</p>
   {:else if c.basis_events === 0}
     <p class="muted small">{t('compare.none')}</p>

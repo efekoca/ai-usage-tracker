@@ -1,6 +1,7 @@
 <script lang="ts">
   // Chat use is not in local logs, so the figure is a lower bound.
-  import { app, saveSettings } from '../lib/store.svelte'
+  import { untrack } from 'svelte'
+  import { app, latest, saveSettings } from '../lib/store.svelte'
   import { api, type PlanDef, type PlansFile, type PlanValue, type Provider } from '../lib/api'
   import { fmtDate, fmtDec, fmtInt, fmtMoney, i18n, t } from '../lib/i18n.svelte'
   import Icon from './Icon.svelte'
@@ -8,17 +9,20 @@
 
   let plans = $state<PlansFile | null>(null)
   let value = $state<PlanValue | null>(null)
+  let failed = $state('')
 
-  async function load() {
-    try {
-      ;[plans, value] = await Promise.all([plans ? Promise.resolve(plans) : api.plans(), api.planValue()])
-    } catch {
-      /* shown as empty */
-    }
-  }
   $effect(() => {
     void app.tick
-    load()
+    const known = untrack(() => plans)
+    return latest(
+      () => Promise.all([known ? Promise.resolve(known) : api.plans(), api.planValue()]),
+      ([p, v]) => {
+        plans = p
+        value = v
+        failed = ''
+      },
+      (e) => (failed = String(e)),
+    )
   })
 
   const providers = $derived.by(() => {
@@ -43,10 +47,12 @@
   }
   function setPrice(p: Provider, raw: string) {
     const v = Number(raw.replace(',', '.'))
-    const next = { ...(app.settings?.plan_prices ?? {}) }
-    if (v > 0) next[p] = v
-    else delete next[p]
-    saveSettings({ plan_prices: next })
+    saveSettings((c) => {
+      const next = { ...c.plan_prices }
+      if (v > 0) next[p] = v
+      else delete next[p]
+      return { plan_prices: next }
+    })
   }
 
   function row(p: Provider) {
@@ -79,7 +85,9 @@
     <span class="subtle small">{t('value.lead')}</span>
   </div>
 
-  {#if !value || !plans}
+  {#if failed && (!value || !plans)}
+    <p class="muted small">{t('common.error', { e: failed })}</p>
+  {:else if !value || !plans}
     <p class="muted small">{t('common.loading')}</p>
   {:else}
     <div class="rows">
@@ -149,7 +157,7 @@
         </div>
       {/each}
     </div>
-    <p class="subtle small foot">{t('value.lowerBound')} {plans.prices_verified_at ? t('value.source', { d: fmtDate(plans.prices_verified_at) }) : ''}</p>
+    <p class="subtle small foot">{t('value.notSavings')} {t('value.lowerBound')} {plans.prices_verified_at ? t('value.source', { d: fmtDate(plans.prices_verified_at) }) : ''}</p>
   {/if}
 </section>
 

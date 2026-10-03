@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api, type LimitHistoryView, type Provider, type WindowRecord } from '../lib/api'
-  import { app } from '../lib/store.svelte'
+  import { app, latest } from '../lib/store.svelte'
   import { fmtCompact, fmtDateTime, fmtDuration, fmtInt, fmtMoney, fmtPct, i18n, t, windowLabel } from '../lib/i18n.svelte'
   import Segmented from './Segmented.svelte'
   import Select from './Select.svelte'
@@ -20,10 +20,21 @@
   let showAll = $state(false)
 
   let view = $state<LimitHistoryView | null>(null)
+  let failed = $state('')
   $effect(() => {
     void app.tick
     const days = range
-    api.limitHistory(days).then((v) => (view = v)).catch(() => (view = null))
+    return latest(
+      () => api.limitHistory(days),
+      (v) => {
+        view = v
+        failed = ''
+      },
+      (e) => {
+        view = null
+        failed = String(e)
+      },
+    )
   })
 
   const enabled = $derived.by(() => {
@@ -238,6 +249,8 @@
       {/if}
     {/if}
   </section>
+{:else if failed}
+  <div class="banner"><Icon name="warning" size={16} />{t('common.error', { e: failed })}</div>
 {/if}
 
 <style>

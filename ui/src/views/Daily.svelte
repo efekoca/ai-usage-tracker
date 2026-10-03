@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, toolColor } from '../lib/store.svelte'
+  import { app, latest, toolColor } from '../lib/store.svelte'
   import { api, type DayDetail, type DayPoint } from '../lib/api'
   import { fmtClock, fmtCompact, fmtDate, fmtHour, fmtInt, fmtMoney, fmtPct, t, toolLabel, weekdayNames, windowLabel } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
@@ -30,6 +30,7 @@
 
   const selected = $derived(picked && days.some((d) => d.date === picked) ? picked : (active.at(-1)?.date ?? null))
   let detail = $state<DayDetail | null>(null)
+  let detailFailed = $state('')
   $effect(() => {
     void app.tick
     const d = selected
@@ -37,9 +38,14 @@
       detail = null
       return
     }
-    api.dayDetail(d, $state.snapshot(app.filter)).then((x) => {
-      if (x.date === selected) detail = x
-    })
+    return latest(
+      () => api.dayDetail(d, $state.snapshot(app.filter)),
+      (x) => {
+        detail = x
+        detailFailed = ''
+      },
+      (e) => (detailFailed = String(e)),
+    )
   })
   const idx = $derived(active.findIndex((d) => d.date === selected))
   const prevDay = $derived(idx > 0 ? active[idx - 1].date : idx === -1 ? (active.filter((d) => d.date < (selected ?? '')).at(-1)?.date ?? null) : null)
@@ -209,6 +215,8 @@
               </div>
             {/if}
           {/if}
+        {:else if detailFailed}
+          <p class="muted">{t('common.error', { e: detailFailed })}</p>
         {:else}
           <p class="muted">{t('common.loading')}</p>
         {/if}
@@ -231,7 +239,7 @@
       </section>
       <section class="card">
         <h2>{t('days.top')}</h2>
-        <BarList ariaLabel={t('days.top')} items={active.map((d) => ({ key: d.date, label: fmtDate(d.date, 'medium'), value: of(d) }))} format={fmt} max={6} onpick={(k) => (picked = k)} />
+        <BarList ariaLabel={t('days.top')} items={active.map((d) => ({ key: d.date, label: fmtDate(d.date, 'medium'), value: of(d) }))} format={fmt} max={6} other={false} onpick={(k) => (picked = k)} />
       </section>
     </div>
   </div>

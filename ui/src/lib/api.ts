@@ -50,6 +50,7 @@ export interface Totals {
   unpriced_events: number
   unpriced_tokens: number
   cache_read_with_writes: number
+  cache_write_with_reads: number
   cache_savings_usd: number
 }
 
@@ -483,7 +484,7 @@ export type Tip =
   | { kind: 'fast_mode'; requests: number; extra_usd: number; cost_share_pct: number }
   | { kind: 'residency'; requests: number; extra_usd: number; cost_share_pct: number }
   | { kind: 'large_contexts'; requests: number; requests_pct: number; cost_usd: number; cost_share_pct: number; threshold: number }
-  | { kind: 'tool_errors'; tool: Tool; name: string; calls: number; failed: number; rate_pct: number }
+  | { kind: 'tool_errors'; tool: Tool; name: string; calls: number; known?: number; failed: number; rate_pct: number }
 export interface Tips {
   tips: Tip[]
   requests: number

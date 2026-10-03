@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onDestroy, onMount, untrack } from 'svelte'
   import { app, saveSettings } from '../lib/store.svelte'
   import { api, type Provider, type WidgetData, type WidgetItemKind, type WidgetSettings } from '../lib/api'
-  import { fmtPct, t } from '../lib/i18n.svelte'
+  import { fmtPct, searchKey, t } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
   import Toggle from '../components/Toggle.svelte'
   import Icon from '../components/Icon.svelte'
@@ -21,18 +21,48 @@
   const SUGGESTED = ['Segoe UI Variable Display', 'Segoe UI', 'Aptos', 'Bahnschrift', 'Calibri', 'Cascadia Mono', 'Consolas', 'Georgia', 'Verdana', 'Arial']
   const suggested = $derived(SUGGESTED.filter((f) => fonts.includes(f)))
   const fontMatches = $derived.by(() => {
-    const q = fontQuery.trim().toLocaleLowerCase()
-    return q ? fonts.filter((f) => f.toLocaleLowerCase().includes(q)) : fonts
+    const q = searchKey(fontQuery.trim())
+    return q ? fonts.filter((f) => searchKey(f).includes(q)) : fonts
+  })
+
+  // only fields edited here are saved, so a stale copy never overwrites the tray's or shortcut's changes
+  type Key = keyof WidgetSettings
+  const pending = new Map<Key, number>()
+  let edits = 0
+  function sync(saved: WidgetSettings) {
+    for (const k of Object.keys(saved) as Key[]) if (!pending.has(k)) (ws as Record<Key, unknown>)[k] = structuredClone(saved[k])
+  }
+  $effect(() => {
+    const saved = app.settings?.widget
+    if (saved) {
+      const snap = $state.snapshot(saved) as WidgetSettings
+      untrack(() => sync(snap))
+    }
   })
 
   let timer: ReturnType<typeof setTimeout> | undefined
-  function commit() {
+  function flush() {
     clearTimeout(timer)
-    timer = setTimeout(() => saveSettings({ widget: $state.snapshot(ws) as WidgetSettings }), 250)
+    timer = undefined
+    if (!pending.size) return
+    const marks = [...pending]
+    const patch = Object.fromEntries(marks.map(([k]) => [k, $state.snapshot(ws[k])])) as Partial<WidgetSettings>
+    saveSettings((c) => ({ widget: { ...c.widget, ...patch } }))
+      .catch(() => {})
+      .finally(() => {
+        for (const [k, n] of marks) if (pending.get(k) === n) pending.delete(k)
+        if (app.settings) sync($state.snapshot(app.settings.widget) as WidgetSettings)
+      })
   }
-  function set<K extends keyof WidgetSettings>(k: K, v: WidgetSettings[K]) {
+  function commit(...keys: Key[]) {
+    for (const k of keys) pending.set(k, ++edits)
+    clearTimeout(timer)
+    timer = setTimeout(flush, 250)
+  }
+  onDestroy(flush)
+  function set<K extends Key>(k: K, v: WidgetSettings[K]) {
     ws[k] = v
-    commit()
+    commit(k)
   }
   function move(i: number, d: -1 | 1) {
     const j = i + d
@@ -40,24 +70,29 @@
     const items = [...ws.items]
     ;[items[i], items[j]] = [items[j], items[i]]
     ws.items = items
-    commit()
+    commit('items')
   }
   function toggleItem(i: number, v: boolean) {
     ws.items[i].enabled = v
-    commit()
+    commit('items')
   }
   function toggleProvider(p: Provider, v: boolean) {
     const all = (data?.providers ?? ['anthropic', 'openai']) as Provider[]
     const cur = ws.providers.length ? [...ws.providers] : [...all]
     const next = v ? [...new Set([...cur, p])] : cur.filter((x) => x !== p)
+    // an empty list means "all", so the last provider cannot be switched off
+    if (!next.length) return
     ws.providers = next.length === all.length ? [] : next
-    commit()
+    commit('providers')
   }
   const providerOn = (p: Provider) => ws.providers.length === 0 || ws.providers.includes(p)
+  const lastOn = (p: Provider) => {
+    const all = (data?.providers ?? providers) as Provider[]
+    return all.includes(p) && providerOn(p) && all.filter(providerOn).length === 1
+  }
   async function reset() {
-    const keep = { visible: ws.visible, x: ws.x, y: ws.y }
     const d: WidgetSettings = {
-      visible: keep.visible, opacity: 0.85, size: 'm', scale: 1, x: keep.x, y: keep.y, anchor: 'bottom-right', auto_hide_fullscreen: true,
+      visible: ws.visible, opacity: 0.85, size: 'm', scale: 1, x: ws.x, y: ws.y, anchor: 'bottom-right', auto_hide_fullscreen: true,
       layout: 'horizontal',
       items: (['primary', 'cost', 'limit_five_hour', 'limit_seven_day', 'tools', 'week_tokens', 'week_cost', 'month_cost', 'updated'] as WidgetItemKind[]).map((k, i) => ({ kind: k, enabled: i < 4 })),
       providers: [], primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '',
@@ -68,7 +103,8 @@
       hotkey: ws.hotkey,
     }
     ws = d
-    commit()
+    commit(...(Object.keys(d) as Key[]).filter((k) => k !== 'visible' && k !== 'x' && k !== 'y' && k !== 'anchor' && k !== 'hotkey'))
+    api.placeWidget('bottom-right')
   }
   const providers: Provider[] = ['anthropic', 'openai']
 </script>
@@ -122,7 +158,7 @@
         <span>{t('ws.providers')}</span>
         <div class="row">
           {#each providers as p (p)}
-            <label class="chk"><Toggle checked={providerOn(p)} label={t(`provider.${p}`)} onchange={(v) => toggleProvider(p, v)} />{t(`provider.${p}`)}</label>
+            <label class="chk"><Toggle checked={providerOn(p)} disabled={lastOn(p)} label={t(`provider.${p}`)} onchange={(v) => toggleProvider(p, v)} />{t(`provider.${p}`)}</label>
           {/each}
         </div>
       </div>

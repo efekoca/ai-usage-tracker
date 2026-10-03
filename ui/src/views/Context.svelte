@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { app } from '../lib/store.svelte'
+  import { app, latest } from '../lib/store.svelte'
   import { api, type ContextStats } from '../lib/api'
-  import { fmtCompact, fmtInt, fmtMoney, fmtPct, t } from '../lib/i18n.svelte'
+  import { fmtCompact, fmtInt, fmtMoney, fmtPct, localDate, lower, t } from '../lib/i18n.svelte'
   import StatTile from '../components/StatTile.svelte'
   import Histogram from '../components/charts/Histogram.svelte'
   import AreaChart from '../components/charts/AreaChart.svelte'
@@ -11,13 +11,14 @@
   let failed = $state('')
   $effect(() => {
     void app.tick
-    api
-      .contextStats($state.snapshot(app.period), $state.snapshot(app.filter))
-      .then((d) => {
+    return latest(
+      () => api.contextStats($state.snapshot(app.period), $state.snapshot(app.filter)),
+      (d) => {
         c = d
         failed = ''
-      })
-      .catch((e) => (failed = String(e)))
+      },
+      (e) => (failed = String(e)),
+    )
   })
 
   const k = (n: number) => (n >= 1_000_000 ? `${n / 1_000_000}M` : `${n / 1000}K`)
@@ -36,7 +37,16 @@
     { key: 'avg', label: t('context.series.avg'), color: 'var(--s3)' },
     { key: 'p90', label: t('context.series.p90'), color: 'var(--s4, var(--s1))' },
   ]
-  const values = $derived((c?.daily ?? []).map((d) => ({ avg: d.avg, p90: d.p90 })))
+  // every calendar day between the first and the last, so idle days show as gaps instead of vanishing
+  const trend = $derived.by(() => {
+    const daily = c?.daily ?? []
+    if (!daily.length) return { dates: [] as string[], values: [] as Record<string, number>[] }
+    const by = new Map(daily.map((d) => [d.date, d]))
+    const dates: string[] = []
+    const end = new Date(daily[daily.length - 1].date + 'T00:00:00')
+    for (let d = new Date(daily[0].date + 'T00:00:00'); d <= end; d.setDate(d.getDate() + 1)) dates.push(localDate(d))
+    return { dates, values: dates.map((k) => ({ avg: by.get(k)?.avg ?? NaN, p90: by.get(k)?.p90 ?? NaN })) }
+  })
 </script>
 
 <p class="subtle small lead">{t('context.lead')}</p>
@@ -50,7 +60,7 @@
 {:else}
   <section class="tiles card">
     <StatTile hero label={t('context.avg')} value={fmtCompact(c.avg)}>
-      <span class="subtle">{fmtInt(c.requests)} {t('context.requests').toLocaleLowerCase()}</span>
+      <span class="subtle">{fmtInt(c.requests)} {lower(t('context.requests'))}</span>
     </StatTile>
     <StatTile label={t('context.median')} value={fmtCompact(c.median)} />
     <StatTile label={t('context.p90')} hint={t('context.p90Help')} value={fmtCompact(c.p90)} />
@@ -67,8 +77,8 @@
     </section>
     <section class="card">
       <h2>{t('context.trend')}</h2>
-      {#if c.daily.length > 1}
-        <AreaChart dates={c.daily.map((d) => d.date)} {values} {series} format={fmtCompact} ariaLabel={t('context.trend')} />
+      {#if c.daily.length > 0}
+        <AreaChart dates={trend.dates} values={trend.values} {series} sum={false} format={fmtCompact} ariaLabel={t('context.trend')} />
       {:else}
         <p class="muted small">{t('common.empty')}</p>
       {/if}

@@ -3,7 +3,7 @@
   import { onMount } from 'svelte'
   import { app, refresh, saveSettings } from '../lib/store.svelte'
   import { api, type HotkeyStatus, type PricingFile } from '../lib/api'
-  import { fmtDate, fmtDateTime, fmtInt, fmtPct, t, windowLabel } from '../lib/i18n.svelte'
+  import { fmtDate, fmtDateTime, fmtInt, fmtPct, localDate, t, windowLabel } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
   import Select from '../components/Select.svelte'
   import Toggle from '../components/Toggle.svelte'
@@ -147,6 +147,13 @@
     pricing.user_aliases = next
     pricingDirty = true
   }
+  const priceLabel = $derived({
+    input: t('metric.input'),
+    output: t('metric.output'),
+    cache_read: t('metric.cacheRead'),
+    cache_write_5m: `${t('metric.cacheWrite')} 5m`,
+    cache_write_1h: `${t('metric.cacheWrite')} 1h`,
+  })
   function num(v: string): number | null {
     if (v.trim() === '') return null
     const n = Number(v.replace(',', '.'))
@@ -163,7 +170,7 @@
     })
   }
   async function doBackup() {
-    const stamp = new Date().toISOString().slice(0, 10)
+    const stamp = localDate()
     const path = await save({ defaultPath: `ai-usage-tracker-${stamp}.db`, filters: [{ name: 'SQLite', extensions: ['db'] }] })
     if (!path) return
     await guard(async () => {
@@ -229,7 +236,7 @@
   <h2>{t('settings.widget')}</h2>
   <div class="item">
     <span>{t('settings.widget.show')}</span>
-    <Toggle checked={s.widget.visible} label={t('settings.widget.show')} onchange={(v) => saveSettings({ widget: { ...s.widget, visible: v } })} />
+    <Toggle checked={s.widget.visible} label={t('settings.widget.show')} onchange={(v) => saveSettings((c) => ({ widget: { ...c.widget, visible: v } }))} />
   </div>
   <div class="item">
     <div><span>{t('ws.title')}</span><div class="subtle small">{t('settings.widget.studio')}</div></div>
@@ -266,7 +273,7 @@
   <p class="subtle small prose">{t('settings.tray.help')}</p>
   <div class="item">
     <div><span>{t('settings.tray.show')}</span><div class="subtle small">{t('settings.tray.showHelp', { warn: fmtPct(s.widget.warn_at), high: fmtPct(s.widget.high_at) })}</div></div>
-    <Toggle checked={s.tray.show_percent} label={t('settings.tray.show')} onchange={(v) => saveSettings({ tray: { ...s.tray, show_percent: v } })} />
+    <Toggle checked={s.tray.show_percent} label={t('settings.tray.show')} onchange={(v) => saveSettings((c) => ({ tray: { ...c.tray, show_percent: v } }))} />
   </div>
   <div class="item">
     <span>{t('settings.tray.limit')}</span>
@@ -276,7 +283,7 @@
       disabled={!s.tray.show_percent}
       minWidth={220}
       options={[{ value: 'auto', label: t('settings.tray.auto') }, ...trayLimits.map(([p, w]) => ({ value: `${p}:${w}`, label: `${t(`provider.${p}`)} · ${windowLabel(w)}` }))]}
-      onchange={(v) => saveSettings({ tray: { ...s.tray, limit: v } })}
+      onchange={(v) => saveSettings((c) => ({ tray: { ...c.tray, limit: v } }))}
     />
   </div>
 </section>
@@ -362,7 +369,7 @@
                   <input
                     class="cell"
                     inputmode="decimal"
-                    aria-label="{m.id} {k}"
+                    aria-label="{m.id}: {priceLabel[k]}"
                     value={m[k] ?? ''}
                     onchange={(e) => {
                       const v = num(e.currentTarget.value)
@@ -385,14 +392,14 @@
       <div class="list-row">
         <code>{from}</code><span class="muted small">{t('settings.pricing.aliasAs')}</span><code>{to}</code>
         <span class="spacer"></span>
-        <button class="btn ghost" aria-label={t('common.remove')} onclick={() => removeAlias(from)}><Icon name="trash" size={15} /></button>
+        <button class="btn ghost" aria-label="{t('common.remove')}: {from}" onclick={() => removeAlias(from)}><Icon name="trash" size={15} /></button>
       </div>
     {/each}
     <div class="row wrap">
-      <Select label={t('common.model')} bind:value={aliasFrom} minWidth={190} searchable placeholder="—" options={unpriced.map((m) => ({ value: m, label: m }))} />
+      <Select label={t('settings.pricing.aliasFrom')} bind:value={aliasFrom} minWidth={190} searchable placeholder="—" options={unpriced.map((m) => ({ value: m, label: m }))} />
       <span class="muted small">{t('settings.pricing.aliasAs')}</span>
-      <Select label={t('common.model')} bind:value={aliasTo} minWidth={190} searchable placeholder="—" options={pricing.models.map((m) => ({ value: m.id, label: m.id }))} />
-      <button class="btn" onclick={addAlias} disabled={!aliasFrom || !aliasTo}><Icon name="plus" size={14} /></button>
+      <Select label={t('settings.pricing.aliasTo')} bind:value={aliasTo} minWidth={190} searchable placeholder="—" options={pricing.models.map((m) => ({ value: m.id, label: m.id }))} />
+      <button class="btn" aria-label={t('settings.pricing.aliasAdd')} title={t('settings.pricing.aliasAdd')} onclick={addAlias} disabled={!aliasFrom || !aliasTo}><Icon name="plus" size={14} /></button>
     </div>
     {#if s.dismissed_unpriced?.length}
       <div class="list-row">
@@ -421,7 +428,7 @@
     <span>{t('settings.data.export')}</span>
     <div class="row">
       <Segmented label={t('settings.data.export')} bind:value={exportGran} options={[{ value: 'daily', label: t('settings.data.exportDaily') }, { value: 'events', label: t('settings.data.exportEvents') }]} />
-      <Segmented label="format" bind:value={exportFormat} options={[{ value: 'csv', label: 'CSV' }, { value: 'json', label: 'JSON' }]} />
+      <Segmented label={t('settings.data.format')} bind:value={exportFormat} options={[{ value: 'csv', label: 'CSV' }, { value: 'json', label: 'JSON' }]} />
       <button class="btn" onclick={doExport}><Icon name="download" size={15} />{t('settings.data.export')}</button>
     </div>
   </div>

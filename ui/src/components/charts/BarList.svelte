@@ -5,13 +5,23 @@
     items,
     format,
     max = 8,
+    other = true,
     onpick,
     ariaLabel,
-  }: { items: Item[]; format: (v: number) => string; max?: number; onpick?: (key: string) => void; ariaLabel: string } = $props()
+  }: {
+    items: Item[]
+    format: (v: number) => string
+    max?: number
+    /** false: a ranked top list, where a summed rest would read as one more entry */
+    other?: boolean
+    onpick?: (key: string) => void
+    ariaLabel: string
+  } = $props()
 
   const shown = $derived.by(() => {
     const sorted = [...items].sort((a, b) => b.value - a.value)
     if (sorted.length <= max) return sorted
+    if (!other) return sorted.slice(0, max)
     const head = sorted.slice(0, max - 1)
     const rest = sorted.slice(max - 1)
     return [...head, { key: '__other', label: `${t('common.other')} (${rest.length})`, value: rest.reduce((a, r) => a + r.value, 0), muted: true }]

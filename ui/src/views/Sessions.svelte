@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { app, toolColor } from '../lib/store.svelte'
+  import { app, latest, toolColor } from '../lib/store.svelte'
   import { api, type SessionRow, type Sessions } from '../lib/api'
-  import { clientLabel, fmtCompact, fmtDateTime, fmtInt, fmtSpan, fmtMoney, fmtPct, t, toolLabel } from '../lib/i18n.svelte'
+  import { clientLabel, fmtCompact, fmtDateTime, fmtInt, fmtSpan, fmtMoney, fmtPct, lower, searchKey, t, toolLabel } from '../lib/i18n.svelte'
   import StatTile from '../components/StatTile.svelte'
   import Icon from '../components/Icon.svelte'
 
@@ -9,13 +9,14 @@
   let failed = $state('')
   $effect(() => {
     void app.tick
-    api
-      .sessions($state.snapshot(app.period), $state.snapshot(app.filter))
-      .then((d) => {
+    return latest(
+      () => api.sessions($state.snapshot(app.period), $state.snapshot(app.filter)),
+      (d) => {
         data = d
         failed = ''
-      })
-      .catch((e) => (failed = String(e)))
+      },
+      (e) => (failed = String(e)),
+    )
   })
 
   type Key = 'started' | 'duration' | 'requests' | 'tokens' | 'cost' | 'hit' | 'context'
@@ -41,13 +42,13 @@
   const projectName = (s: SessionRow) => (s.hidden ? `${t('projects.hidden')}${s.project_id !== null ? ` #${s.project_id}` : ''}` : s.project || t('projects.noProject'))
 
   const rows = $derived.by(() => {
-    const q = query.trim().toLocaleLowerCase()
+    const q = searchKey(query.trim())
     const list = (data?.sessions ?? []).filter(
       (s) =>
         !q ||
-        s.session_id.toLowerCase().includes(q) ||
-        (!s.hidden && s.project.toLocaleLowerCase().includes(q)) ||
-        s.models.some((m) => m.model.toLowerCase().includes(q)),
+        searchKey(s.session_id).includes(q) ||
+        (!s.hidden && searchKey(s.project).includes(q)) ||
+        s.models.some((m) => searchKey(m.model).includes(q)),
     )
     const f = value[sortKey]
     return list.sort((a, b) => (desc ? f(b) - f(a) : f(a) - f(b)) || b.started_ms - a.started_ms)
@@ -180,7 +181,7 @@
                           {#each s.models as m (m.model)}
                             <li>
                               <span class="chip">{m.model}</span>
-                              <span class="subtle small">{fmtInt(m.events)} {t('sessions.requests').toLocaleLowerCase()}</span>
+                              <span class="subtle small">{fmtInt(m.events)} {lower(t('sessions.requests'))}</span>
                               <span class="spacer"></span>
                               <span class="num small">{fmtCompact(m.total_tokens)}</span>
                               <span class="num small money">{m.unpriced ? '—' : fmtMoney(m.cost_usd)}</span>

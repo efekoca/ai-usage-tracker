@@ -11,39 +11,50 @@
   let warnings: ParserWarning[] = $state([])
   let now = $state(Date.now())
 
+  let gen = 0
   async function load() {
-    ;[sources, warnings] = await Promise.all([api.detectSources(), api.parserWarnings()])
+    const mine = ++gen
+    const [s, w] = await Promise.all([api.detectSources(), api.parserWarnings()])
+    if (mine !== gen) return
+    sources = s
+    warnings = w
     now = Date.now()
   }
   $effect(() => {
     void app.tick
     void app.scan?.last_scan_ms
-    load()
+    load().catch(() => {})
+    return () => gen++
   })
 
   async function setEnabled(id: SourceId, on: boolean) {
-    const cur = new Set(app.settings?.enabled_sources ?? [])
-    if (on) cur.add(id)
-    else cur.delete(id)
-    await saveSettings({ enabled_sources: [...cur] })
+    await saveSettings((c) => {
+      const cur = new Set(c.enabled_sources)
+      if (on) cur.add(id)
+      else cur.delete(id)
+      return { enabled_sources: [...cur] }
+    })
     load()
   }
 
   async function addFolder(kind: 'claude' | 'codex') {
     const dir = await open({ directory: true, multiple: false })
-    if (typeof dir !== 'string' || !app.settings) return
-    const ep = { ...app.settings.extra_paths }
-    if (kind === 'claude') ep.claude_config_dirs = [...new Set([...ep.claude_config_dirs, dir])]
-    else ep.codex_homes = [...new Set([...ep.codex_homes, dir])]
-    await saveSettings({ extra_paths: ep })
+    if (typeof dir !== 'string') return
+    await saveSettings((c) => {
+      const ep = { ...c.extra_paths }
+      if (kind === 'claude') ep.claude_config_dirs = [...new Set([...ep.claude_config_dirs, dir])]
+      else ep.codex_homes = [...new Set([...ep.codex_homes, dir])]
+      return { extra_paths: ep }
+    })
     load()
   }
   async function removeFolder(kind: 'claude' | 'codex', dir: string) {
-    if (!app.settings) return
-    const ep = { ...app.settings.extra_paths }
-    if (kind === 'claude') ep.claude_config_dirs = ep.claude_config_dirs.filter((d) => d !== dir)
-    else ep.codex_homes = ep.codex_homes.filter((d) => d !== dir)
-    await saveSettings({ extra_paths: ep })
+    await saveSettings((c) => {
+      const ep = { ...c.extra_paths }
+      if (kind === 'claude') ep.claude_config_dirs = ep.claude_config_dirs.filter((d) => d !== dir)
+      else ep.codex_homes = ep.codex_homes.filter((d) => d !== dir)
+      return { extra_paths: ep }
+    })
     load()
   }
 </script>

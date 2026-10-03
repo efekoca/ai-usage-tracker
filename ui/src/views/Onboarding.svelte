@@ -13,14 +13,24 @@
   let chosen: Record<string, string> = $state({ ...(app.settings?.plans ?? {}) })
   let showPrivacy = $state(false)
   let busy = $state(false)
+  let loaded = $state(false)
+  let loadError = $state('')
+  let saveError = $state('')
 
-  onMount(async () => {
-    const [found, p] = await Promise.all([api.detectSources(), api.plans()])
-    // fill toggles before the list renders so every bind:checked starts defined
-    enabled = Object.fromEntries(found.map((s) => [s.id, s.supported && s.found]))
-    plans = p
-    sources = found
-  })
+  async function detect() {
+    loadError = ''
+    try {
+      const [found, p] = await Promise.all([api.detectSources(), api.plans()])
+      // fill toggles before the list renders so every bind:checked starts defined
+      enabled = Object.fromEntries(found.map((s) => [s.id, s.supported && s.found]))
+      plans = p
+      sources = found
+      loaded = true
+    } catch (e) {
+      loadError = String(e)
+    }
+  }
+  onMount(detect)
 
   const anyFound = $derived(sources.some((s) => s.found && s.supported))
   const providers = $derived.by(() => {
@@ -35,11 +45,17 @@
 
   async function start() {
     busy = true
+    saveError = ''
     const list = sources.filter((s) => s.supported && enabled[s.id]).map((s) => s.id) as SourceId[]
     const planMap: Record<string, string> = {}
     for (const [k, v] of Object.entries(chosen)) if (v) planMap[k] = v
-    await saveSettings({ enabled_sources: list, plans: planMap, onboarded: true })
-    busy = false
+    try {
+      await saveSettings({ enabled_sources: list, plans: planMap, onboarded: true })
+    } catch (e) {
+      saveError = String(e)
+    } finally {
+      busy = false
+    }
   }
 </script>
 
@@ -54,7 +70,13 @@
 
     <section class="card">
       <h2>{t('onb.detected')}</h2>
-      {#if sources.length === 0}
+      {#if loadError}
+        <div class="banner" role="alert">
+          <Icon name="warning" size={16} />
+          <span class="grow">{t('common.error', { e: loadError })}</span>
+          <button class="btn" onclick={detect}>{t('common.retry')}</button>
+        </div>
+      {:else if !loaded}
         <p class="muted">{t('common.loading')}</p>
       {/if}
       {#each sources as s (s.id)}
@@ -95,7 +117,8 @@
     </section>
 
     <div class="cta">
-      <button class="btn primary big" onclick={start} disabled={busy}>{t('onb.start')}</button>
+      {#if saveError}<p class="small err" role="alert">{t('common.error', { e: saveError })}</p>{/if}
+      <button class="btn primary big" onclick={start} disabled={busy || !loaded}>{t('onb.start')}</button>
     </div>
   </div>
 </main>
@@ -181,8 +204,13 @@
   }
   .cta {
     display: flex;
-    justify-content: center;
+    flex-direction: column;
+    align-items: center;
     margin-top: 8px;
+  }
+  .err {
+    color: var(--bad-ink);
+    margin: 0 0 8px;
   }
   .big {
     height: 38px;

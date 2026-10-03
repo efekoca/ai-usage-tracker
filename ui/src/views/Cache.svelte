@@ -12,7 +12,7 @@
   const prompt = (k: Tokens) => k.input + k.cache_read + k.cache_write
   const hit = (k: Tokens) => (prompt(k) > 0 ? (k.cache_read / prompt(k)) * 100 : null)
   // reads ÷ writes over Claude only: OpenAI caches implicitly and logs no writes
-  const reuse = (x: { tokens: Tokens; cache_read_with_writes: number }) => (x.tokens.cache_write > 0 ? x.cache_read_with_writes / x.tokens.cache_write : null)
+  const reuse = (x: { cache_read_with_writes: number; cache_write_with_reads: number }) => (x.cache_write_with_reads > 0 ? x.cache_read_with_writes / x.cache_write_with_reads : null)
 
   let breakdown: 'model' | 'client' | 'project' = $state('model')
   const rows = $derived.by((): Group[] => {

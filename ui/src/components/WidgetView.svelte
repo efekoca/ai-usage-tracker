@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { Provider, WidgetData, WidgetItemKind, WidgetSettings } from '../lib/api'
-  import { fmtCompact, fmtDec, fmtDuration, fmtMoney, fmtPct, fmtTime, limitShown, t, toolLabel, type LimitMode } from '../lib/i18n.svelte'
+  import type { Provider, WidgetData, WidgetItemKind, WidgetPeriod, WidgetSettings } from '../lib/api'
+  import { fmtCompact, fmtDec, fmtDuration, fmtMoney, fmtPct, fmtTime, limitShown, lower, t, toolLabel, type LimitMode } from '../lib/i18n.svelte'
   import { toolColor } from '../lib/store.svelte'
 
   let {
@@ -43,30 +43,33 @@
 
   const R = 15
   const C = 2 * Math.PI * R
-  const primaryValue = $derived(period ? (ws.primary_metric === 'tokens' ? fmtCompact(period.tokens) : fmtMoney(period.cost_usd)) : '–')
-  const secondaryValue = $derived(period ? (ws.primary_metric === 'tokens' ? fmtMoney(period.cost_usd) : fmtCompact(period.tokens) + ' ' + t('metric.tokens').toLowerCase()) : '')
+  // models without a price add nothing, so such a sum is only a lower bound
+  const money = (p: WidgetPeriod, usd: number) => (p.has_unpriced ? `≥ ${fmtMoney(usd)}` : fmtMoney(usd))
+  const partial = (p: WidgetPeriod | null) => (p?.has_unpriced ? t('widget.unpriced') : undefined)
+  const primaryValue = $derived(period ? (ws.primary_metric === 'tokens' ? fmtCompact(period.tokens) : money(period, period.cost_usd)) : '–')
+  const secondaryValue = $derived(period ? (ws.primary_metric === 'tokens' ? money(period, period.cost_usd) : fmtCompact(period.tokens) + ' ' + lower(t('metric.tokens'))) : '')
 </script>
 
 {#snippet stat(kind: WidgetItemKind)}
   {#if kind === 'primary'}
     <div class="primary">
       {#if ws.show_labels}<span class="label">{periodLabel}</span>{/if}
-      <span class="big num">{primaryValue}</span>
+      <span class="big num" title={ws.primary_metric === 'cost' ? partial(period) : undefined}>{primaryValue}</span>
     </div>
   {:else if kind === 'cost'}
-    <span class="secondary num">{secondaryValue}</span>
+    <span class="secondary num" title={ws.primary_metric === 'tokens' ? partial(period) : undefined}>{secondaryValue}</span>
   {:else if kind === 'tools' && period}
     <div class="tools">
       {#each period.tools as tl (tl.tool)}
-        <span class="tool"><i style="background:{toolColor[tl.tool]}"></i>{#if ws.show_labels}<span class="tn">{toolLabel(tl.tool)}</span>{/if}<b class="num">{ws.primary_metric === 'tokens' ? fmtCompact(tl.tokens) : fmtMoney(tl.cost_usd)}</b></span>
+        <span class="tool"><i style="background:{toolColor[tl.tool]}"></i>{#if ws.show_labels}<span class="tn">{toolLabel(tl.tool)}</span>{/if}<b class="num" title={ws.primary_metric === 'cost' ? partial(period) : undefined}>{ws.primary_metric === 'tokens' ? fmtCompact(tl.tokens) : money(period, tl.cost_usd)}</b></span>
       {/each}
     </div>
   {:else if kind === 'week_tokens' && data}
     <span class="mini">{#if ws.show_labels}<span class="ml">{t('widget.period.days7')}</span>{/if}<b class="num">{fmtCompact(data.days7.tokens)}</b></span>
   {:else if kind === 'week_cost' && data}
-    <span class="mini">{#if ws.show_labels}<span class="ml">{t('widget.period.days7')}</span>{/if}<b class="num">{fmtMoney(data.days7.cost_usd)}</b></span>
+    <span class="mini">{#if ws.show_labels}<span class="ml">{t('widget.period.days7')}</span>{/if}<b class="num" title={partial(data.days7)}>{money(data.days7, data.days7.cost_usd)}</b></span>
   {:else if kind === 'month_cost' && data}
-    <span class="mini">{#if ws.show_labels}<span class="ml">{t('widget.period.month1')}</span>{/if}<b class="num">{fmtMoney(data.month1.cost_usd)}</b></span>
+    <span class="mini">{#if ws.show_labels}<span class="ml">{t('widget.period.month1')}</span>{/if}<b class="num" title={partial(data.month1)}>{money(data.month1, data.month1.cost_usd)}</b></span>
   {:else if kind === 'updated' && data}
     <span class="updated">{t('widget.updated', { t: fmtTime(data.updated_ms) })}</span>
   {/if}

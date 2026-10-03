@@ -1,6 +1,7 @@
 <script lang="ts">
   import { app, saveSettings, toolColor } from '../lib/store.svelte'
-  import { fmtCompact, fmtDate, fmtHour, fmtMoney, t, toolLabel, weekdayNames } from '../lib/i18n.svelte'
+  import type { Accuracy } from '../lib/api'
+  import { fmtCompact, fmtDate, fmtHour, fmtMoney, fmtPct, t, toolLabel, weekdayNames } from '../lib/i18n.svelte'
   import StatTile from '../components/StatTile.svelte'
   import Segmented from '../components/Segmented.svelte'
   import AreaChart from '../components/charts/AreaChart.svelte'
@@ -24,9 +25,19 @@
   // dismissal covers only the listed models; a newly unpriced one still warns
   const unpriced = $derived((app.report?.unpriced_models ?? []).filter((m) => !(app.settings?.dismissed_unpriced ?? []).includes(m)))
   function dismissUnpriced() {
-    const prev = app.settings?.dismissed_unpriced ?? []
-    saveSettings({ dismissed_unpriced: [...new Set([...prev, ...unpriced])] })
+    const now = [...unpriced]
+    saveSettings((c) => ({ dismissed_unpriced: [...new Set([...c.dismissed_unpriced, ...now])] }))
   }
+  // the badge names the least certain source in the period; the tooltip gives the mix
+  const accuracy = $derived.by(() => {
+    const by = r?.by_accuracy ?? {}
+    const kinds = (['estimated', 'captured', 'exact'] as Accuracy[]).filter((k) => (by[k] ?? 0) > 0)
+    const total = kinds.reduce((a, k) => a + by[k], 0)
+    return {
+      kind: kinds[0] ?? 'exact',
+      detail: kinds.length > 1 ? kinds.map((k) => `${t(`acc.${k}`)} ${fmtPct((by[k] / total) * 100, 0)}`).join(' · ') : '',
+    }
+  })
 </script>
 
 {#if !r}
@@ -49,7 +60,7 @@
 
   <section class="tiles card">
     <StatTile hero label={t('overview.totalTokens')} value={fmtCompact(r.totals.total_tokens)} current={r.totals.total_tokens} previous={r.previous.total_tokens}>
-      <AccuracyBadge kind="exact" />
+      <AccuracyBadge kind={accuracy.kind} detail={accuracy.detail} />
     </StatTile>
     <StatTile label={t('overview.cost')} hint={t('metric.apiEq.help')} value={fmtMoney(r.totals.cost_usd)} current={r.totals.cost_usd} previous={r.previous.cost_usd} />
     <StatTile label={t('overview.avgDaily')} value={fmtCompact(r.avg_daily_tokens)}>
@@ -84,7 +95,7 @@
       <div class="card-head">
         <h2>{t('overview.limitsNow')}</h2>
         <span class="spacer"></span>
-        <button class="btn ghost" onclick={() => (app.view = 'limits')}><Icon name="chevron" size={14} /></button>
+        <button class="btn ghost" aria-label={t('overview.openLimits')} title={t('overview.openLimits')} onclick={() => (app.view = 'limits')}><Icon name="chevron" size={14} /></button>
       </div>
       {#if headline.length === 0}
         <p class="muted small">{t('limits.none')}</p>

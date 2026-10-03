@@ -97,7 +97,7 @@
   <Onboarding />
 {:else}
   <div class="shell">
-    <nav class="sidebar" aria-label="Navigation">
+    <nav class="sidebar" aria-label={t('nav.label')}>
       <div class="brand">
         <img src="/app-icon.png" alt="" width="22" height="22" />
         <span class="label">{t('app.name')}</span>

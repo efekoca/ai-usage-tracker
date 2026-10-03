@@ -1,15 +1,26 @@
 <script lang="ts">
   import { api, type AgentsTools, type Tool, type ToolRow } from '../lib/api'
-  import { app, toolColor } from '../lib/store.svelte'
+  import { app, latest, toolColor } from '../lib/store.svelte'
   import { fmtCompact, fmtInt, fmtMoney, fmtPct, has, t, toolLabel } from '../lib/i18n.svelte'
   import Segmented from './Segmented.svelte'
   import Icon from './Icon.svelte'
   import BarValue from './BarValue.svelte'
 
   let data = $state<AgentsTools | null>(null)
+  let failed = $state('')
   $effect(() => {
     void app.tick
-    api.agentsTools($state.snapshot(app.period), $state.snapshot(app.filter)).then((d) => (data = d)).catch(() => (data = null))
+    return latest(
+      () => api.agentsTools($state.snapshot(app.period), $state.snapshot(app.filter)),
+      (d) => {
+        data = d
+        failed = ''
+      },
+      (e) => {
+        data = null
+        failed = String(e)
+      },
+    )
   })
 
   const agentLabel = (a: string | null) => (a === null ? t('agent.main') : has(`agent.${a}`) ? t(`agent.${a}`) : a)
@@ -153,6 +164,8 @@
       {/if}
     </section>
   </div>
+{:else if failed}
+  <div class="banner"><Icon name="warning" size={16} />{t('common.error', { e: failed })}</div>
 {/if}
 
 <style>

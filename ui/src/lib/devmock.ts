@@ -63,6 +63,7 @@ function totals(tokens: number, cost: number, unpriced = false): Totals {
     unpriced_tokens: unpriced ? tokens : 0,
     cache_savings_usd: unpriced ? 0 : cost * 0.9,
     cache_read_with_writes: Math.round(cr * 0.9),
+    cache_write_with_reads: Math.round(cw * 0.9),
   }
 }
 
@@ -322,7 +323,7 @@ function mockDay(date: string) {
   }
 }
 
-const update = { current: '0.2.5', configured: true, checking: false, last_check_ms: Date.now() - 3600e3, last_error: null, available: null as null | { version: string; notes: string | null; date: string | null }, installing: false, downloaded: 0, total: null }
+const update = { current: '0.2.6', configured: true, checking: false, last_check_ms: Date.now() - 3600e3, last_error: null, available: null as null | { version: string; notes: string | null; date: string | null }, installing: false, downloaded: 0, total: null }
 
 const pricing = {
   schema_version: 1,
@@ -340,7 +341,7 @@ export function installMock() {
       const a = args as Record<string, unknown>
       switch (cmd) {
         case 'app_info':
-          return { version: '0.2.5', data_dir: 'C:\\Users\\you\\AppData\\Local\\AIUsageTracker', pricing_origin: 'bundled', pricing_updated_at: '2026-10-02', supports_mica: false, accent_color: null, started_hidden: false, reports_dir: 'C:\\Users\\you\\Documents\\AI Usage Tracker' }
+          return { version: '0.2.6', data_dir: 'C:\\Users\\you\\AppData\\Local\\AIUsageTracker', pricing_origin: 'bundled', pricing_updated_at: '2026-10-02', supports_mica: false, accent_color: null, started_hidden: false, reports_dir: 'C:\\Users\\you\\Documents\\AI Usage Tracker' }
         case 'get_settings':
           return settings
         case 'save_settings':

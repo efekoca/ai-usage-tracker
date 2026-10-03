@@ -2,10 +2,10 @@
   import Icon from './Icon.svelte'
   import { t } from '../lib/i18n.svelte'
   import type { Accuracy } from '../lib/api'
-  let { kind, compact = false }: { kind: Accuracy; compact?: boolean } = $props()
+  let { kind, compact = false, detail = '' }: { kind: Accuracy; compact?: boolean; detail?: string } = $props()
 </script>
 
-<span class="badge {kind}" class:compact title={t(`acc.${kind}.help`)}>
+<span class="badge {kind}" class:compact title={detail ? `${t(`acc.${kind}.help`)}\n${t('acc.mix', { mix: detail })}` : t(`acc.${kind}.help`)}>
   <Icon name={kind} size={compact ? 12 : 13} />
   <span>{t(`acc.${kind}`)}</span>
 </span>

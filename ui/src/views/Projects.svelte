@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, refresh, setFilter } from '../lib/store.svelte'
+  import { app, latest, refresh, setFilter } from '../lib/store.svelte'
   import { api, type ProjectRow } from '../lib/api'
   import { fmtCompact, fmtMoney, fmtPct, t } from '../lib/i18n.svelte'
   import Toggle from '../components/Toggle.svelte'
@@ -9,7 +9,7 @@
   let rows: ProjectRow[] = $state([])
   $effect(() => {
     void app.tick
-    api.projectsForSettings().then((r) => (rows = r))
+    return latest(() => api.projectsForSettings(), (r) => (rows = r))
   })
 
   const byId = $derived(new Map((app.report?.by_project ?? []).map((g) => [g.key, g])))

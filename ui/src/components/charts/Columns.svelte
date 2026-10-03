@@ -32,12 +32,13 @@
 
   let width = $state(600)
   let hover: number | null = $state(null)
+  const hi = $derived(hover !== null && hover < dates.length && hover < values.length ? hover : null)
   const m = { top: 12, right: 8, bottom: 26, left: 52 }
   const iw = $derived(Math.max(10, width - m.left - m.right))
   const ih = $derived(height - m.top - m.bottom)
   const totals = $derived(values.map((v) => series.reduce((a, s) => a + (v[s.key] ?? 0), 0)))
   const y = $derived(scaleLinear().domain([0, Math.max(1e-9, ...totals)]).nice(4).range([ih, 0]))
-  const ticks = $derived(y.ticks(4))
+  const ticks = $derived(Math.max(0, ...totals) > 0 ? y.ticks(4) : [0])
   const band = $derived(iw / Math.max(1, dates.length))
   const bw = $derived(Math.max(3, Math.min(24, band * 0.62)))
   const GAP = 2
@@ -56,6 +57,10 @@
     }),
   )
   const labelEvery = $derived(labelStep > 0 ? labelStep : Math.max(1, Math.ceil(dates.length / Math.max(2, Math.floor(iw / 70)))))
+  // the last bar gets a label too, unless it would touch the regular one before it
+  const lastLabel = $derived(
+    labelStep === 0 && dates.length > 1 && (dates.length - 1) % labelEvery !== 0 && ((dates.length - 1) % labelEvery) * band >= 60 ? dates.length - 1 : -1,
+  )
 
   function barPath(x0: number, top: number, bottom: number, w: number, round: boolean): string {
     const h = Math.max(0, bottom - top)
@@ -78,7 +83,7 @@
       {/each}
       {#each stacks as segs, i (dates[i])}
         {@const cx = band * i + band / 2}
-        <g class="col" class:dim={hover !== null && hover !== i} class:sel={selected === dates[i]}>
+        <g class="col" class:dim={hi !== null && hi !== i} class:sel={selected === dates[i]}>
           {#each segs as seg, si (seg.key)}
             {@const top = y(seg.y1) + (si < segs.length - 1 ? GAP / 2 : 0)}
             {@const bottom = y(seg.y0) - (si > 0 ? GAP / 2 : 0)}
@@ -97,22 +102,22 @@
           onpointerleave={() => (hover = null)}
           onclick={() => onselect?.(dates[i])}
         />
-        {#if i % labelEvery === 0 || (labelStep === 0 && i === dates.length - 1)}
+        {#if i % labelEvery === 0 || i === lastLabel}
           <text class="axis" x={cx} y={ih + 18} text-anchor="middle">{xLabel(dates[i])}</text>
         {/if}
       {/each}
       <line class="base" x1="0" x2={iw} y1={ih} y2={ih} />
     </g>
   </svg>
-  {#if hover !== null}
-    {@const left = m.left + band * hover + band / 2}
+  {#if hi !== null}
+    {@const left = m.left + band * hi + band / 2}
     <div class="tip" style="left:{Math.min(Math.max(left, 90), width - 90)}px">
-      <div class="tip-date">{tipLabel(dates[hover])}</div>
+      <div class="tip-date">{tipLabel(dates[hi])}</div>
       {#each [...series].reverse() as s (s.key)}
-        <div class="tip-row"><i style="background:{s.color}"></i><span>{s.label}</span><b class="num">{format(values[hover]?.[s.key] ?? 0)}</b></div>
+        <div class="tip-row"><i style="background:{s.color}"></i><span>{s.label}</span><b class="num">{format(values[hi]?.[s.key] ?? 0)}</b></div>
       {/each}
       {#if series.length > 1}
-        <div class="tip-row total"><span>Σ</span><b class="num">{format(totals[hover])}</b></div>
+        <div class="tip-row total"><span>Σ</span><b class="num">{format(totals[hi])}</b></div>
       {/if}
     </div>
   {/if}

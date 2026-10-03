@@ -1,14 +1,25 @@
 <script lang="ts">
   import { api, type Branches } from '../lib/api'
-  import { app, setFilter, toolColor } from '../lib/store.svelte'
+  import { app, latest, setFilter, toolColor } from '../lib/store.svelte'
   import { fmtCompact, fmtDateTime, fmtInt, fmtMoney, fmtPct, t, toolLabel } from '../lib/i18n.svelte'
   import Icon from './Icon.svelte'
   import BarValue from './BarValue.svelte'
 
   let data = $state<Branches | null>(null)
+  let failed = $state('')
   $effect(() => {
     void app.tick
-    api.branches($state.snapshot(app.period), $state.snapshot(app.filter)).then((d) => (data = d)).catch(() => (data = null))
+    return latest(
+      () => api.branches($state.snapshot(app.period), $state.snapshot(app.filter)),
+      (d) => {
+        data = d
+        failed = ''
+      },
+      (e) => {
+        data = null
+        failed = String(e)
+      },
+    )
   })
   const total = $derived(Math.max(1e-9, (data?.rows ?? []).reduce((s, r) => s + r.totals.cost_usd, 0)))
   const coverage = $derived(data ? (data.events_with_branch / Math.max(1, data.events_with_branch + data.events_without_branch)) * 100 : 0)
@@ -77,6 +88,8 @@
       {/if}
     {/if}
   </section>
+{:else if failed}
+  <div class="banner"><Icon name="warning" size={16} />{t('common.error', { e: failed })}</div>
 {/if}
 
 <style>
