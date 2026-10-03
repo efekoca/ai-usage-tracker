@@ -998,3 +998,172 @@ fn a_session_less_row_does_not_block_an_old_backup() {
     store.merge_from(&backup).unwrap();
     assert_eq!(count(&store, "SELECT count(*) FROM usage_event WHERE session_id = 'Q'"), 1);
 }
+
+#[test]
+fn codex_requests_with_a_null_total_are_not_taken_for_repeats() {
+    let h = codex_home();
+    let no_total = |ts: &str, last: (u64, u64, u64)| {
+        format!(
+            r#"{{"timestamp":"{ts}","type":"event_msg","payload":{{"type":"token_count","info":{{"total_token_usage":null,"last_token_usage":{}}},"rate_limits":null}}}}"#,
+            cx_usage(last.0, last.1, last.2)
+        )
+    };
+    let lines = vec![
+        cx_meta(PARENT_TS[0], P, ""),
+        cx_turn(PARENT_TS[1], "gpt-5.6-sol"),
+        no_total(PARENT_TS[2], (1_000, 0, 10)),
+        no_total(PARENT_TS[4], (2_000, 0, 20)),
+    ];
+    write_rollout(&h, P, &lines);
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &h.env);
+    assert_eq!(codex_rows(&store).len(), 2);
+}
+
+#[test]
+fn a_complete_last_line_without_a_newline_is_read_once() {
+    let h = codex_home();
+    let path = h.day.join(format!("rollout-2026-09-10T10-00-00-{P}.jsonl"));
+    fs::write(&path, parent_log(PARENT_TS).join("\n")).unwrap();
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &h.env);
+    assert_eq!(codex_rows(&store).len(), 2);
+    assert_eq!(run(&mut store, &h.env).files_read, 0, "nothing is left waiting");
+
+    let mut f = fs::OpenOptions::new().append(true).open(&path).unwrap();
+    writeln!(f).unwrap();
+    writeln!(f, "{}", cx_tokens("2026-09-10T10:03:00.000Z", (230_000, 180_000, 5_500), (10_000, 0, 500), false)).unwrap();
+    let rep = run(&mut store, &h.env);
+    assert!(rep.warnings.is_empty(), "{:?}", rep.warnings);
+    assert_eq!(codex_rows(&store).len(), 3);
+}
+
+#[test]
+fn projects_are_found_again_after_a_wipe_or_a_rolled_back_write() {
+    let h = codex_home();
+    write_rollout(&h, P, &parent_log(PARENT_TS));
+    let mut store = Store::open_in_memory().unwrap();
+    {
+        let mut tx = store.transaction().unwrap();
+        tx.upsert_tool_calls(&[tracker_core::model::ToolCall {
+            key: "cxt:iprobe".into(),
+            ts_ms: 1,
+            tool: tracker_core::model::Tool::Codex,
+            session_id: None,
+            project_path: Some(r"C:\Work\Repo".into()),
+            agent: None,
+            name: "shell".into(),
+            failed: None,
+        }])
+        .unwrap();
+    }
+    let rep = run(&mut store, &h.env);
+    assert!(rep.errors.is_empty(), "{:?}", rep.errors);
+    assert_eq!(codex_rows(&store).len(), 2);
+
+    store.wipe_data().unwrap();
+    let rep = run(&mut store, &h.env);
+    assert!(rep.errors.is_empty(), "{:?}", rep.errors);
+    assert_eq!(codex_rows(&store).len(), 2);
+    assert_eq!(store.projects().unwrap().len(), 1);
+}
+
+#[test]
+fn a_wipe_on_another_connection_does_not_leave_stale_project_ids() {
+    let h = codex_home();
+    write_rollout(&h, P, &parent_log(PARENT_TS));
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("tracker.db");
+    let mut worker = Store::open(&db).unwrap();
+    let mut tx = worker.transaction().unwrap();
+    tx.upsert_tool_calls(&[tracker_core::model::ToolCall {
+        key: "cxt:iprobe".into(),
+        ts_ms: 1,
+        tool: tracker_core::model::Tool::Codex,
+        session_id: None,
+        project_path: Some(r"C:\Work\Repo".into()),
+        agent: None,
+        name: "shell".into(),
+        failed: None,
+    }])
+    .unwrap();
+    tx.commit().unwrap();
+    let ui = Store::open(&db).unwrap();
+    ui.wipe_data().unwrap();
+    ui.conn().execute("INSERT INTO project(path, name) VALUES('other-root', 'Other')", []).unwrap();
+
+    let rep = run(&mut worker, &h.env);
+    assert!(rep.errors.is_empty(), "{:?}", rep.errors);
+    assert_eq!(codex_rows(&worker).len(), 2);
+    assert_eq!(count(&worker, "SELECT count(*) FROM usage_event u JOIN project p ON p.id = u.project_id WHERE p.path = 'other-root'"), 0);
+}
+
+#[test]
+fn a_backup_replaces_the_old_one_only_when_complete_and_never_the_live_database() {
+    let h = codex_home();
+    write_rollout(&h, P, &parent_log(PARENT_TS));
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("tracker.db");
+    let mut store = Store::open(&db).unwrap();
+    run(&mut store, &h.env);
+
+    let backup = dir.path().join("backup.db");
+    fs::write(&backup, b"an older backup").unwrap();
+    store.backup_to(&backup).unwrap();
+    assert_eq!(Store::open(&backup).unwrap().event_count().unwrap(), 2);
+
+    let blocked = dir.path().join("blocked.db");
+    fs::create_dir(&blocked).unwrap();
+    assert!(store.backup_to(&blocked).is_err());
+    assert!(blocked.is_dir());
+
+    for live in ["tracker.db", "TRACKER.DB-wal", "tracker.db-shm"] {
+        assert!(store.backup_to(&dir.path().join(live)).is_err(), "{live}");
+    }
+    assert_eq!(store.event_count().unwrap(), 2);
+    let names: Vec<String> = fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    assert!(names.iter().all(|n| !n.ends_with(".tmp")), "{names:?}");
+}
+
+#[test]
+fn an_imported_backup_cannot_bring_negative_or_absurd_counts() {
+    let dir = tempfile::tempdir().unwrap();
+    let backup = dir.path().join("odd.db");
+    {
+        let old = Store::open(&backup).unwrap();
+        old.conn()
+            .execute_batch(
+                "INSERT INTO usage_event(key, ts_ms, tool, model, session_id, input, cache_read, cache_write, cache_write_1h, output,
+                     reasoning, request_input, web_search, accuracy, source) VALUES
+                 ('ok', 1, 'codex', 'm', 'Q', 10, 0, 0, 0, 1, 0, 10, 0, 'exact', 'codex_rollout'),
+                 ('negative', 2, 'codex', 'm', 'Q', -5, 0, 0, 0, 1, 0, 10, 0, 'exact', 'codex_rollout'),
+                 ('huge', 3, 'codex', 'm', 'Q', 10, 0, 0, 0, 9000000000000000000, 0, 10, 0, 'exact', 'codex_rollout'),
+                 ('text', 'later', 'codex', 'm', 'Q', 10, 0, 0, 0, 1, 0, 10, 0, 'exact', 'codex_rollout'),
+                 ('real', 5, 'codex', 'm', 'Q', 10.5, 0, 0, 0, 1, 0, 10, 0, 'exact', 'codex_rollout');
+                 INSERT INTO limit_snapshot(ts_ms, provider, tool, window, used_pct, resets_at, source, accuracy) VALUES
+                 (1, 'openai', 'codex', 'five_hour', 40.0, 100, 'codex_rollout', 'exact'),
+                 (2, 'openai', 'codex', 'five_hour', 9e999, 100, 'codex_rollout', 'exact'),
+                 (3, 'openai', 'codex', 'five_hour', 40.0, 'soon', 'codex_rollout', 'exact');",
+            )
+            .unwrap();
+    }
+    let mut store = Store::open_in_memory().unwrap();
+    assert_eq!(store.merge_from(&backup).unwrap(), (1, 1));
+    assert_eq!(store.events_between(0, i64::MAX).unwrap().len(), 1);
+    assert_eq!(store.limits_between(0, i64::MAX).unwrap().len(), 1);
+}
+
+#[test]
+fn old_rows_of_a_later_vanished_copy_are_taken_by_an_earlier_copy() {
+    let h = codex_home();
+    let f2 = "0199bbbb-0000-7000-8000-00000000000d";
+    let mut store = Store::open_in_memory().unwrap();
+    store_offset_rows_of(&store, &parent_log(PARENT_TS), &P_USAGES, &[PARENT_TS[2], PARENT_TS[4]]);
+    let mut later: Vec<String> = fork_log(true).into_iter().map(|l| l.replace(F, f2).replace("2026-09-10T11:", "2026-09-10T12:")).collect();
+    later.insert(1, cx_turn("2026-09-10T12:00:00.000Z", "gpt-5.6-sol"));
+    store_offset_rows_of(&store, &later, &[P_USAGES[0], P_USAGES[1], F_OWN], &["2026-09-10T12:00:00.003Z", "2026-09-10T12:00:00.005Z", "2026-09-10T12:01:00.000Z"]);
+    write_rollout(&h, F, &fork_log(true));
+
+    run(&mut store, &h.env);
+    assert_eq!(codex_rows(&store).len(), 4, "the parent's two requests, the fork's own and the vanished fork's own");
+}

@@ -4,6 +4,7 @@
 use crate::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::Serialize;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -135,6 +136,7 @@ const MIGRATIONS: &[&str] = &[
     "#,
 ];
 
+const MAX_IMPORTED_COUNT: i64 = 1_000_000_000_000;
 
 /// A captured row is hidden when the same request also exists as an exact (log) row.
 const NOT_SUPERSEDED: &str = "NOT (u.accuracy = 'captured' AND u.request_id IS NOT NULL AND EXISTS (
@@ -174,7 +176,7 @@ const UPSERT_EVENT_TAIL: &str = "ON CONFLICT(key) DO UPDATE SET
 
 pub struct Store {
     conn: Connection,
-    project_cache: HashMap<String, i64>,
+    project_cache: RefCell<HashMap<String, i64>>,
 }
 
 #[derive(Debug, Clone)]
@@ -250,7 +252,7 @@ impl Store {
         for (i, sql) in MIGRATIONS.iter().enumerate().skip(version as usize) {
             conn.execute_batch(&format!("BEGIN; {sql} PRAGMA user_version = {}; COMMIT;", i + 1))?;
         }
-        Ok(Store { conn, project_cache: HashMap::new() })
+        Ok(Store { conn, project_cache: RefCell::default() })
     }
 
     pub fn conn(&self) -> &Connection {
@@ -259,7 +261,7 @@ impl Store {
 
     pub fn transaction(&mut self) -> Result<StoreTx<'_>> {
         let tx = self.conn.transaction()?;
-        Ok(StoreTx { tx, project_cache: &mut self.project_cache })
+        Ok(StoreTx { tx, project_cache: self.project_cache.get_mut(), new_projects: HashMap::new() })
     }
 
     pub fn checkpoint(&self, path: &str) -> Result<Option<Checkpoint>> {
@@ -416,6 +418,7 @@ impl Store {
 
     /// Removes projects that no longer have any usage (e.g. after re-assignment).
     pub fn prune_projects(&self) -> Result<usize> {
+        self.project_cache.borrow_mut().clear();
         self.conn.execute(
             "DELETE FROM project WHERE id NOT IN (SELECT DISTINCT project_id FROM usage_event WHERE project_id IS NOT NULL)
                AND id NOT IN (SELECT DISTINCT project_id FROM tool_call WHERE project_id IS NOT NULL)",
@@ -423,8 +426,14 @@ impl Store {
         )
     }
 
+    /// Another connection may have deleted projects, and their ids are reused.
+    pub fn forget_projects(&mut self) {
+        self.project_cache.get_mut().clear();
+    }
+
     /// Deletes every usage record, snapshot and checkpoint (settings are kept).
     pub fn wipe_data(&self) -> Result<()> {
+        self.project_cache.borrow_mut().clear();
         self.conn.execute_batch(
             "BEGIN; DELETE FROM usage_event; DELETE FROM tool_call; DELETE FROM limit_snapshot; DELETE FROM file_checkpoint;
              DELETE FROM project; COMMIT; VACUUM;",
@@ -456,6 +465,11 @@ impl Store {
                 }
             };
             let (old_events, old_calls) = (old_codex("e"), old_codex("c"));
+            // a damaged or hand-made file must not bring negative or absurd counts
+            let valid_counts: String = ["input", "cache_read", "cache_write", "cache_write_1h", "output", "reasoning", "request_input", "web_search"]
+                .iter()
+                .map(|c| format!(" AND typeof(e.{c}) = 'integer' AND e.{c} BETWEEN 0 AND {MAX_IMPORTED_COUNT}"))
+                .collect();
             let tx = self.conn.unchecked_transaction()?;
             tx.execute(
                 "INSERT INTO project(path, name, hidden) SELECT path, name, hidden FROM other.project WHERE true
@@ -471,7 +485,7 @@ impl Store {
                      FROM other.usage_event e
                      LEFT JOIN other.project op ON op.id = e.project_id
                      LEFT JOIN main.project p ON p.path = op.path
-                     WHERE true {old_events}
+                     WHERE typeof(e.ts_ms) = 'integer' {valid_counts} {old_events}
                      {UPSERT_EVENT_TAIL}"
                 ),
                 [],
@@ -480,7 +494,9 @@ impl Store {
                 "INSERT INTO limit_snapshot(ts_ms, provider, tool, account, limit_id, window, used_pct, resets_at, status,
                      plan, source, accuracy)
                  SELECT ts_ms, provider, tool, account, limit_id, window, used_pct, resets_at, status, plan, source, accuracy
-                 FROM other.limit_snapshot WHERE true
+                 FROM other.limit_snapshot
+                 WHERE typeof(ts_ms) = 'integer' AND typeof(resets_at) IN ('integer', 'null')
+                   AND (used_pct IS NULL OR used_pct BETWEEN 0 AND 1000)
                  ON CONFLICT(source, account, limit_id, window, ts_ms) DO NOTHING",
                 [],
             )?;
@@ -492,7 +508,7 @@ impl Store {
                          FROM other.tool_call c
                          LEFT JOIN other.project op ON op.id = c.project_id
                          LEFT JOIN main.project p ON p.path = op.path
-                         WHERE true {old_calls}
+                         WHERE typeof(c.ts_ms) = 'integer' AND typeof(c.failed) IN ('integer', 'null') {old_calls}
                          ON CONFLICT(key) DO UPDATE SET failed = COALESCE(failed, excluded.failed)"
                     ),
                     [],
@@ -503,16 +519,46 @@ impl Store {
         })();
         self.conn.execute("DETACH DATABASE other", [])?;
         let _ = self.conn.execute("DROP TABLE IF EXISTS temp.codex_sessions", []);
-        self.project_cache.clear();
+        self.project_cache.get_mut().clear();
         result
     }
 
-    /// Consistent copy of the database (works while the app is running).
+    /// Works while the app is running; an existing `dest` is replaced only once the copy is complete.
     pub fn backup_to(&self, dest: &Path) -> Result<()> {
-        let _ = std::fs::remove_file(dest);
-        self.conn.execute("VACUUM INTO ?1", [dest.to_string_lossy()])?;
-        Ok(())
+        if self.is_live_file(dest) {
+            return Err(rusqlite::Error::InvalidPath(dest.to_owned()));
+        }
+        let name = dest.file_name().ok_or_else(|| rusqlite::Error::InvalidPath(dest.to_owned()))?;
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+        let tmp = dest.with_file_name(format!(".{}.{}-{nanos}.tmp", name.to_string_lossy(), std::process::id()));
+        let written = self
+            .conn
+            .execute("VACUUM INTO ?1", [tmp.to_string_lossy()])
+            .and_then(|_| std::fs::rename(&tmp, dest).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e))));
+        if written.is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        written
     }
+
+    fn is_live_file(&self, path: &Path) -> bool {
+        let Some(live) = self.conn.path().filter(|p| !p.is_empty()).and_then(|p| canonical(Path::new(p))) else {
+            return false;
+        };
+        let Some(path) = canonical(path) else { return false };
+        ["", "-wal", "-shm", "-journal"].iter().any(|s| path == format!("{live}{s}"))
+    }
+}
+
+/// Lower-cased, since Windows paths are case-insensitive.
+fn canonical(path: &Path) -> Option<String> {
+    let full = match std::fs::canonicalize(path) {
+        Ok(p) => p,
+        Err(_) => std::fs::canonicalize(path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")))
+            .ok()?
+            .join(path.file_name()?),
+    };
+    Some(full.to_string_lossy().to_lowercase())
 }
 
 fn row_to_limit(r: &rusqlite::Row<'_>) -> rusqlite::Result<LimitSnapshot> {
@@ -539,12 +585,14 @@ fn row_to_limit(r: &rusqlite::Row<'_>) -> rusqlite::Result<LimitSnapshot> {
 pub struct StoreTx<'a> {
     tx: Transaction<'a>,
     project_cache: &'a mut HashMap<String, i64>,
+    /// Cached only once the transaction commits.
+    new_projects: HashMap<String, i64>,
 }
 
 impl StoreTx<'_> {
     fn project_id(&mut self, path: &str) -> Result<i64> {
         let key = normalize_project_path(path);
-        if let Some(id) = self.project_cache.get(&key) {
+        if let Some(id) = self.project_cache.get(&key).or_else(|| self.new_projects.get(&key)) {
             return Ok(*id);
         }
         let name = project_name(path);
@@ -554,7 +602,7 @@ impl StoreTx<'_> {
             params![key, name, path],
         )?;
         let id: i64 = self.tx.query_row("SELECT id FROM project WHERE path = ?1", [&key], |r| r.get(0))?;
-        self.project_cache.insert(key, id);
+        self.new_projects.insert(key, id);
         Ok(id)
     }
 
@@ -748,7 +796,9 @@ impl StoreTx<'_> {
     }
 
     pub fn commit(self) -> Result<()> {
-        self.tx.commit()
+        self.tx.commit()?;
+        self.project_cache.extend(self.new_projects);
+        Ok(())
     }
 }
 

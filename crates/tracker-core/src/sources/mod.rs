@@ -72,8 +72,7 @@ pub struct Line {
     pub value: Option<Value>,
 }
 
-/// Reads complete lines starting at `offset`. A trailing line without `\n` is *not* consumed,
-/// because the writer may still be appending to it.
+/// A trailing line without `\n` may still be being written, unless it is already whole JSON.
 pub fn read_jsonl_from(path: &Path, offset: u64) -> std::io::Result<(Vec<Line>, u64)> {
     let mut f = File::open(path)?;
     f.seek(SeekFrom::Start(offset))?;
@@ -84,16 +83,20 @@ pub fn read_jsonl_from(path: &Path, offset: u64) -> std::io::Result<(Vec<Line>, 
     loop {
         buf.clear();
         let n = r.read_until(b'\n', &mut buf)?;
-        if n == 0 || buf.last() != Some(&b'\n') {
-            break; // EOF, or a partial line still being written
+        if n == 0 {
+            break;
         }
         let mut slice: &[u8] = &buf;
         if pos == 0 && slice.starts_with(&[0xEF, 0xBB, 0xBF]) {
             slice = &slice[3..];
         }
         let trimmed = trim_ascii(slice);
+        let value: Option<Value> = if trimmed.is_empty() { None } else { serde_json::from_slice(trimmed).ok() };
+        if buf.last() != Some(&b'\n') && !value.as_ref().is_some_and(Value::is_object) {
+            break;
+        }
         if !trimmed.is_empty() {
-            out.push(Line { offset: pos, value: serde_json::from_slice(trimmed).ok() });
+            out.push(Line { offset: pos, value });
         }
         pos += n as u64;
     }

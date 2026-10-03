@@ -205,7 +205,7 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
                 }
                 let mut recognised = false;
                 if let (Some(info), Some(ts_ms)) = (p.get("info").filter(|i| !i.is_null()), ts_ms) {
-                    let total = info.get("total_token_usage").map(totals_key);
+                    let total = info.get("total_token_usage").filter(|t| t.is_object()).map(totals_key);
                     if total.is_some() && total == st.last_total {
                         recognised = true;
                     } else if let Some(last) = info.get("last_token_usage") {

@@ -37,6 +37,7 @@ pub struct Progress {
 }
 
 pub fn ingest(store: &mut Store, files: &[DiscoveredFile], mut on_progress: impl FnMut(Progress)) -> IngestReport {
+    store.forget_projects();
     let mut rep = IngestReport {
         files_seen: files.len(),
         events_before: store.event_count().unwrap_or(0),
