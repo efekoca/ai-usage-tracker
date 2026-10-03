@@ -40,7 +40,6 @@ struct State {
     last_total: Option<String>,
     cli_version: Option<String>,
     branch: Option<String>,
-    /// Subagent type when this rollout is a subagent's.
     agent: Option<String>,
     /// The session that started this subagent.
     parent: Option<String>,

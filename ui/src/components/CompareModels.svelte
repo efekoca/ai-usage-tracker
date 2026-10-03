@@ -1,6 +1,4 @@
 <script lang="ts">
-  // "What would another model cost": the period's priced requests repriced on every model in
-  // the price list, cheapest first, against the actual cost. Follows period and filters.
   import { app } from '../lib/store.svelte'
   import { api, type ModelCompare, type Provider } from '../lib/api'
   import { fmtCompact, fmtInt, fmtMoney, fmtPct, t } from '../lib/i18n.svelte'
@@ -77,7 +75,6 @@
 </section>
 
 <style>
-  /* spaced like the page's own cards */
   section {
     margin-bottom: 16px;
   }

@@ -3,10 +3,7 @@
 </script>
 
 <script lang="ts">
-  // Drop-down picker that matches the app (the native one does not): a trigger button and a
-  // floating list with an optional search field, full keyboard support (arrows, Home/End,
-  // Enter, Escape, type-to-find) and the listbox pattern for screen readers. The list floats
-  // above everything, so a scrolling card never clips it.
+  // The list floats above everything so a scrolling card never clips it.
   import { tick } from 'svelte'
   import Icon from './Icon.svelte'
   import { i18n, t } from '../lib/i18n.svelte'
@@ -24,10 +21,9 @@
   }: {
     value?: string
     options: SelectOption[]
-    /** Accessible name (shown to screen readers; visible labels stay outside). */
+    /** Accessible name only; visible labels stay outside. */
     label: string
     onchange?: (value: string) => void
-    /** Show a search field; by default when there are more than eight options. */
     searchable?: boolean
     disabled?: boolean
     placeholder?: string
@@ -145,7 +141,6 @@
         hide(false)
         break
       default:
-        // type to find, when there is no search field
         if (!withSearch && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
           const now = Date.now()
           typed = now - typedAt > 700 ? e.key : typed + e.key
@@ -166,7 +161,6 @@
   }
   $effect(() => {
     if (!open) return
-    // a click anywhere else, a resize or a scroll outside the list closes it
     const outside = (e: PointerEvent) => {
       const el = e.target as Node
       if (!trigger?.contains(el) && !document.getElementById(`${uid}-pop`)?.contains(el)) hide(false)
@@ -185,7 +179,6 @@
     }
   })
   $effect(() => {
-    // keep the highlighted row inside the filtered list
     void query
     if (active >= shown.length) active = Math.max(0, shown.length - 1)
   })

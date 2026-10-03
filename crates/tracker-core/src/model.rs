@@ -1,5 +1,4 @@
-//! Normalised records shared by every source parser, the store and the query layer.
-//! Nothing here ever holds prompt or response content — only metadata and counts.
+//! Normalised usage records. Never holds prompt or response content, only metadata and counts.
 
 use serde::{Deserialize, Serialize};
 
@@ -101,7 +100,6 @@ pub struct Tokens {
     pub cache_write: u64,
     /// Subset of `cache_write` written with a 1-hour TTL (Anthropic only).
     pub cache_write_1h: u64,
-    /// Output tokens, reasoning included.
     pub output: u64,
     /// Subset of `output` spent on reasoning/thinking, when the tool reports it.
     pub reasoning: u64,
@@ -191,7 +189,6 @@ pub struct LimitSnapshot {
     pub ts_ms: i64,
     pub provider: Provider,
     pub tool: Tool,
-    /// Account / organisation identifier when the source exposes one.
     pub account: Option<String>,
     /// Provider-specific limit family (Codex `limit_id`), empty when not applicable.
     pub limit_id: String,
@@ -208,7 +205,6 @@ pub struct LimitSnapshot {
     pub accuracy: Accuracy,
 }
 
-/// Maps a window length in minutes to the canonical window name.
 pub fn window_name(minutes: i64) -> String {
     match minutes {
         300 => "five_hour".into(),
@@ -219,7 +215,6 @@ pub fn window_name(minutes: i64) -> String {
     }
 }
 
-/// Parses an RFC 3339 timestamp into epoch milliseconds.
 pub fn parse_ts_ms(s: &str) -> Option<i64> {
     chrono::DateTime::parse_from_rfc3339(s).ok().map(|d| d.timestamp_millis())
 }

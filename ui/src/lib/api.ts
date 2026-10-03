@@ -1,4 +1,4 @@
-// Typed wrappers around the Rust IPC commands. Types mirror the serde output of tracker-core.
+// Types mirror the serde output of tracker-core.
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 

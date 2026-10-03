@@ -1,5 +1,4 @@
 <script lang="ts" generics="T extends string">
-  // Apple-style segmented control: a radiogroup with roving focus and arrow-key navigation.
   let {
     options,
     value = $bindable(),

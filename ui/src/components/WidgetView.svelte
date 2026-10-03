@@ -1,6 +1,4 @@
 <script lang="ts">
-  // The widget's content, driven entirely by WidgetSettings. Used by the widget window and by
-  // the live preview on the Widget settings page.
   import type { Provider, WidgetData, WidgetItemKind, WidgetSettings } from '../lib/api'
   import { fmtCompact, fmtDec, fmtDuration, fmtMoney, fmtPct, fmtTime, limitShown, t, toolLabel, type LimitMode } from '../lib/i18n.svelte'
   import { toolColor } from '../lib/store.svelte'
@@ -29,8 +27,7 @@
     const l = data?.limits.find((x) => x.provider === p && x.window === w)
     if (!l) return null
     const known = l.state === 'fresh' && l.used_pct !== null
-    // 'behind': used after the reading, so the current value is unknown; the last reading is
-    // shown only as "last N %", never as the current value
+    // 'behind': the current value is unknown, so only the last reading is shown
     const last = l.state === 'behind' && l.used_pct !== null ? { pct: limitShown(l.used_pct, mode), ago: l.observed_ms ? fmtDuration(now - l.observed_ms) : '' } : null
     const pct = known ? Math.max(0, Math.min(100, l.used_pct as number)) : null
     return { pct, val: pct === null ? null : limitShown(pct, mode), last, resets: l.resets_at, estimated: l.accuracy === 'estimated', captured: l.accuracy === 'captured' }
@@ -76,7 +73,6 @@
 {/snippet}
 
 {#snippet providerLimits(p: Provider, kinds: WidgetItemKind[])}
-  <!-- one row per provider: the first enabled window leads, the others follow inline -->
   {@const rows = kinds.map((k) => ({ k, l: limit(p, k) })).filter((x) => x.l !== null) as { k: WidgetItemKind; l: NonNullable<ReturnType<typeof limit>> }[]}
   {#if rows.length}
     {@const lead = rows[0]}

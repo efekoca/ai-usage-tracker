@@ -1,5 +1,4 @@
-//! IPC commands called by the UI. Every command is content-free: it returns counts, costs and
-//! metadata only. Project names are masked here when the user asked to hide them.
+//! Commands return counts, costs and metadata only, never content; hidden project names are masked here.
 
 use crate::settings::Settings;
 use crate::state::{load_price_book, AppState, ScanStatus};
@@ -28,19 +27,15 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
-// ------------------------------------------------------------------ info
-
 #[derive(Serialize)]
 pub struct AppInfo {
     version: String,
     data_dir: String,
     pricing_origin: String,
     pricing_updated_at: String,
-    /// Mica needs Windows 11 (build 22000+).
     supports_mica: bool,
     accent_color: Option<String>,
     started_hidden: bool,
-    /// Default folder for the Monday PDF summaries.
     reports_dir: String,
 }
 
@@ -58,8 +53,6 @@ pub fn app_info(app: AppHandle, state: State<AppState>) -> AppInfo {
     }
 }
 
-// ------------------------------------------------------------------ settings & sources
-
 #[tauri::command]
 pub fn get_settings(state: State<AppState>) -> Settings {
     state.settings.read().unwrap().clone()
@@ -69,8 +62,8 @@ pub fn get_settings(state: State<AppState>) -> Settings {
 pub fn save_settings(app: AppHandle, state: State<AppState>, settings: Settings) -> Res<Settings> {
     let old = state.settings.read().unwrap().clone();
     let mut settings = settings;
-    // capture switches change only through set_capture (they edit files outside the app), the
-    // shortcut only through set_hotkey (it must register first)
+    // capture changes only via set_capture (it edits files outside the app), the shortcut only
+    // via set_hotkey (it must register first)
     settings.capture = old.capture.clone();
     settings.widget.hotkey = old.widget.hotkey.clone();
     settings.widget.normalize();
@@ -134,8 +127,6 @@ pub fn parser_warnings(state: State<AppState>) -> Res<Vec<ParserWarning>> {
     let rows = state.store.lock().unwrap().files_with_warnings().map_err(err)?;
     Ok(rows.into_iter().map(|(path, parser, count, last)| ParserWarning { path, parser, count, last }).collect())
 }
-
-// ------------------------------------------------------------------ analytics
 
 fn mask_report(r: &mut Report, hide_all: bool) {
     for g in &mut r.by_project {
@@ -234,7 +225,6 @@ pub struct WidgetData {
     updated_ms: i64,
 }
 
-/// Totals per tool for a period, only for the enabled providers.
 fn widget_period(
     store: &tracker_core::store::Store,
     book: &PriceBook,
@@ -316,7 +306,7 @@ pub fn list_projects(state: State<AppState>) -> Res<Vec<ProjectRow>> {
     Ok(v)
 }
 
-/// Unmasked list for the project settings screen, where the user decides what to hide.
+/// Unmasked: the settings screen is where the user chooses what to hide.
 #[tauri::command]
 pub fn list_projects_for_settings(state: State<AppState>) -> Res<Vec<ProjectRow>> {
     state.store.lock().unwrap().projects().map_err(err)
@@ -336,8 +326,6 @@ pub fn list_models(state: State<AppState>) -> Res<Vec<String>> {
     let rows = st.query_map([], |r| r.get::<_, String>(0)).map_err(err)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(err)
 }
-
-// ------------------------------------------------------------------ pricing & plans
 
 #[derive(Serialize)]
 pub struct PricingInfo {
@@ -380,8 +368,6 @@ pub const PLANS_JSON: &str = tracker_core::plans::DEFAULT_PLANS_JSON;
 pub fn get_plans() -> serde_json::Value {
     serde_json::from_str(PLANS_JSON).unwrap_or(serde_json::Value::Null)
 }
-
-// ------------------------------------------------------------------ data management
 
 #[tauri::command]
 pub fn export_data(
@@ -428,8 +414,7 @@ pub fn import_database(app: AppHandle, state: State<AppState>, path: PathBuf) ->
     Ok(ImportResult { events, limits })
 }
 
-/// Deletes every record and returns the app to onboarding so nothing is re-imported until
-/// the user confirms sources again. Settings other than `onboarded` are kept.
+/// Returns to onboarding so nothing is re-imported until the user confirms sources again.
 #[tauri::command]
 pub fn wipe_all_data(app: AppHandle, state: State<AppState>) -> Res<()> {
     let mut s = state.settings.read().unwrap().clone();
@@ -451,7 +436,6 @@ pub fn open_data_folder(state: State<AppState>) -> Res<()> {
     std::process::Command::new("explorer").arg(&state.data_dir).spawn().map(|_| ()).map_err(err)
 }
 
-/// Opens an https link from the UI (pricing/plan sources) in the default browser.
 #[tauri::command]
 pub fn open_url(url: String) -> Res<()> {
     if !url.starts_with("https://") {
@@ -459,8 +443,6 @@ pub fn open_url(url: String) -> Res<()> {
     }
     std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).spawn().map(|_| ()).map_err(err)
 }
-
-// ------------------------------------------------------------------ windows
 
 #[tauri::command]
 pub fn open_main(app: AppHandle) {
@@ -474,13 +456,12 @@ pub fn set_widget_visible(app: AppHandle, state: State<AppState>, visible: bool)
     save_settings(app, state, s).map(|_| ())
 }
 
-/// Font families installed on this computer, for the widget's font picker.
 #[tauri::command]
 pub async fn list_fonts() -> Vec<String> {
     crate::fonts::installed_families()
 }
 
-/// Snaps the widget to a corner. `remember` makes it the anchor it keeps while resizing.
+/// `remember` makes `corner` the anchor the widget keeps while resizing.
 #[tauri::command]
 pub fn place_widget(app: AppHandle, state: State<AppState>, corner: String, remember: Option<bool>) -> Res<()> {
     if let Some(w) = tauri::Manager::get_webview_window(&app, windows::WIDGET) {
@@ -503,8 +484,6 @@ pub fn widget_menu(app: AppHandle) {
     windows::popup_widget_menu(&app);
 }
 
-// ------------------------------------------------------------------ live capture
-
 #[tauri::command]
 pub fn capture_status(app: AppHandle) -> crate::capture::CaptureStatus {
     crate::capture::status(&app)
@@ -524,8 +503,7 @@ pub fn quit_app(app: AppHandle, state: State<AppState>) {
 }
 
 
-// ------------------------------------------------------------------ insights
-// Run as async commands so long ranges never block the window's event loop.
+// Insight commands are async so long ranges never block the window's event loop.
 
 fn range_for(store: &tracker_core::store::Store, period: Period) -> Res<analytics::Range> {
     Ok(analytics::period_range(period, &chrono::Local, now_ms(), store.first_event_ms().map_err(err)?))
@@ -563,7 +541,6 @@ pub async fn context_stats(app: AppHandle, period: Period, filter: Option<Filter
     insights::context_stats(&store, &book, range_for(&store, period)?, &filter.unwrap_or_default(), &chrono::Local).map_err(err)
 }
 
-/// API-equivalent cost per provider over the last 30 days, for the plan-value comparison.
 #[tauri::command]
 pub async fn plan_value(app: AppHandle) -> Res<insights::PlanValue> {
     let state = app.state::<AppState>();
@@ -572,9 +549,7 @@ pub async fn plan_value(app: AppHandle) -> Res<insights::PlanValue> {
     insights::plan_value(&store, &book, range_for(&store, Period::Month1)?, &chrono::Local).map_err(err)
 }
 
-// ------------------------------------------------------------------ PDF report
-
-/// Saves the summary of the local days `from..=to` as a PDF at `path` (chosen by the user).
+/// `from` and `to` are inclusive local days.
 #[tauri::command]
 pub async fn export_report(app: AppHandle, from: String, to: String, path: PathBuf) -> Res<()> {
     crate::pdf::render(&app, &from, &to, &path)?;
@@ -590,14 +565,12 @@ pub fn report_ready(state: State<AppState>) {
     }
 }
 
-/// Opens the PDF this app saved last (only that file, never an arbitrary path).
+/// Opens only the PDF this app saved last, never an arbitrary path.
 #[tauri::command]
 pub fn open_last_report(state: State<AppState>) -> Res<()> {
     let path = state.last_report.lock().unwrap().clone().ok_or("no report yet")?;
     std::process::Command::new("explorer").arg(path).spawn().map(|_| ()).map_err(err)
 }
-
-// ------------------------------------------------------------------ branches, agents, tips, limit history
 
 #[tauri::command]
 pub async fn get_branches(app: AppHandle, period: Period, filter: Option<Filter>) -> Res<insights::Branches> {
@@ -637,12 +610,11 @@ pub async fn get_tips(app: AppHandle, period: Period, filter: Option<Filter>) ->
 pub struct LimitHistoryView {
     history: tracker_core::history::LimitHistory,
     advice: Vec<tracker_core::history::PlanAdvice>,
-    /// Plans taken from the readings because none was chosen (provider → plan id).
+    /// Provider → plan id inferred from the readings when the user chose none.
     detected_plans: std::collections::BTreeMap<String, String>,
 }
 
-/// The plan a provider's newest readings name, when it maps to exactly one plan in the list:
-/// Codex names it exactly; Claude says "max" for both Max plans, so only "pro" is taken.
+/// Claude reports "max" for both Max plans, so only "pro" is taken from its readings.
 fn detected_plan(store: &tracker_core::store::Store, provider: Provider, plans: &tracker_core::plans::PlansFile) -> Option<String> {
     let newest = store.latest_limits().ok()?.into_iter().filter(|s| s.provider == provider && s.plan.is_some()).max_by_key(|s| s.ts_ms)?;
     let plan = newest.plan?;
@@ -652,8 +624,6 @@ fn detected_plan(store: &tracker_core::store::Store, provider: Provider, plans: 
     }
 }
 
-/// Limit windows of the last `days` days (default eight weeks) with this computer's use in
-/// each, and plan advice from the last four weeks.
 #[tauri::command]
 pub async fn get_limit_history(app: AppHandle, days: Option<i64>) -> Res<LimitHistoryView> {
     let state = app.state::<AppState>();
@@ -685,8 +655,6 @@ pub async fn get_limit_history(app: AppHandle, days: Option<i64>) -> Res<LimitHi
     Ok(LimitHistoryView { history, advice, detected_plans })
 }
 
-// ------------------------------------------------------------------ shortcut & updates
-
 #[derive(Serialize)]
 pub struct HotkeyStatus {
     hotkey: String,
@@ -698,8 +666,7 @@ pub fn hotkey_status(state: State<AppState>) -> HotkeyStatus {
     HotkeyStatus { hotkey: state.settings.read().unwrap().widget.hotkey.clone(), error: state.hotkey_error.lock().unwrap().clone() }
 }
 
-/// Registers `hotkey` (empty = none) and saves it. A combination another program owns is
-/// refused and the previous one stays.
+/// Empty clears the shortcut; one owned by another program is refused and the old one restored.
 #[tauri::command]
 pub async fn set_hotkey(app: AppHandle, hotkey: String) -> Res<HotkeyStatus> {
     let hotkey: String = hotkey.trim().chars().take(64).collect();
@@ -733,7 +700,6 @@ pub async fn install_update(app: AppHandle) -> Res<()> {
     crate::updates::install(&app).await
 }
 
-/// One local day in detail (`date` as YYYY-MM-DD).
 #[tauri::command]
 pub async fn get_day_detail(app: AppHandle, date: String, filter: Option<Filter>) -> Res<insights::DayDetail> {
     let date = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d").map_err(err)?;

@@ -1,5 +1,4 @@
 <script lang="ts">
-  // Days: the period day by day, day patterns, and everything about one chosen day.
   import { app, toolColor } from '../lib/store.svelte'
   import { api, type DayDetail, type DayPoint } from '../lib/api'
   import { fmtClock, fmtCompact, fmtDate, fmtHour, fmtInt, fmtMoney, fmtPct, t, toolLabel, weekdayNames, windowLabel } from '../lib/i18n.svelte'
@@ -29,7 +28,6 @@
   )
   const colValues = $derived(days.map((d) => (metric === 'tokens' ? d.by_tool : metric === 'cost' ? d.cost_by_tool : { events: d.events })))
 
-  // the chosen day: the one picked, otherwise the latest day with use
   const selected = $derived(picked && days.some((d) => d.date === picked) ? picked : (active.at(-1)?.date ?? null))
   let detail = $state<DayDetail | null>(null)
   $effect(() => {
@@ -47,7 +45,6 @@
   const prevDay = $derived(idx > 0 ? active[idx - 1].date : idx === -1 ? (active.filter((d) => d.date < (selected ?? '')).at(-1)?.date ?? null) : null)
   const nextDay = $derived(idx >= 0 && idx < active.length - 1 ? active[idx + 1].date : idx === -1 ? (active.find((d) => d.date > (selected ?? ''))?.date ?? null) : null)
 
-  // ---- patterns over the period
   const busiest = $derived(active.length ? active.reduce((a, b) => (of(b) > of(a) ? b : a)) : null)
   const perActive = $derived(active.length ? active.reduce((s, d) => s + of(d), 0) / active.length : 0)
   const streaks = $derived.by(() => {
@@ -79,7 +76,6 @@
   })
   const weekdayTop = $derived(Math.max(1e-9, ...weekdays.map((w) => w.value)))
 
-  // ---- the chosen day
   const dv = (x: { tokens: number; cost_usd: number; events: number }) => (metric === 'tokens' ? x.tokens : metric === 'cost' ? x.cost_usd : x.events)
   const hourKeys = Array.from({ length: 24 }, (_, h) => String(h))
   const hourValues = $derived(

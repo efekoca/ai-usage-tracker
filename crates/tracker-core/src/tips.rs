@@ -14,7 +14,6 @@ const MIN_MS: i64 = 60_000;
 
 /// A cache write this large after a pause is a rebuilt context, not new conversation.
 pub const REBUILD_MIN_PROMPT: u64 = 20_000;
-/// Requests above this prompt size count as large.
 pub const LARGE_CONTEXT: u64 = 100_000;
 /// Tool error rates are judged on at least this many calls with a known outcome.
 pub const TOOL_MIN_CALLS: u64 = 20;
@@ -32,9 +31,7 @@ pub enum Tip {
     FastMode { requests: u64, extra_usd: f64, cost_share_pct: f64 },
     /// Data residency (e.g. US-only inference); `extra_usd` = the regional surcharge.
     Residency { requests: u64, extra_usd: f64, cost_share_pct: f64 },
-    /// Requests whose prompt exceeded [`LARGE_CONTEXT`]: their share of requests and of cost.
     LargeContexts { requests: u64, requests_pct: f64, cost_usd: f64, cost_share_pct: f64, threshold: u64 },
-    /// A tool whose calls often returned an error.
     ToolErrors { tool: Tool, name: String, calls: u64, failed: u64, rate_pct: f64 },
 }
 
@@ -95,8 +92,8 @@ pub struct Rebuilds {
 /// than the cache lifetime (5 minutes, or an hour for conversations writing 1-hour entries).
 /// A request counts when at least 40 % of its prompt was written again (the shared system
 /// prompt usually stays cached, the conversation after it does not). The first request of a
-/// conversation, a model switch (the cache is per model) and small prompts are not counted. `extra_usd` is what those writes cost beyond reading the same
-/// tokens from a cache that was still warm.
+/// conversation, a model switch (the cache is per model) and small prompts are not counted.
+/// `extra_usd` is what those writes cost beyond reading the same tokens from a warm cache.
 pub fn cache_rebuilds(events: &[EventRow], book: &PriceBook) -> Rebuilds {
     let mut threads: HashMap<(&str, &str), Vec<&EventRow>> = HashMap::new();
     for e in events.iter().filter(|e| e.tool.provider() == Provider::Anthropic) {
@@ -138,7 +135,7 @@ pub fn tips(store: &Store, book: &PriceBook, range: Range, filter: &Filter) -> R
     let total: f64 = events.iter().filter_map(|e| cost(book, &input_of(e))).sum();
     let mut out = Vec::new();
 
-    // ---- cache rebuilt after a pause (Claude caches explicitly: writes are logged)
+    // Claude caches explicitly, so its cache writes are logged
     {
         let r = cache_rebuilds(&events, book);
         if r.requests >= 3 && material(r.extra_usd, total) {
@@ -146,7 +143,7 @@ pub fn tips(store: &Store, book: &PriceBook, range: Range, filter: &Filter) -> R
         }
     }
 
-    // ---- price-tier surcharges, each against the same request at the standard rate
+    // each surcharge is measured against the same request at the standard rate
     {
         let (mut lc_n, mut lc_extra) = (0u64, 0.0);
         let mut lc_models: BTreeMap<String, f64> = BTreeMap::new();
@@ -193,7 +190,7 @@ pub fn tips(store: &Store, book: &PriceBook, range: Range, filter: &Filter) -> R
         }
     }
 
-    // ---- large prompts: most of the cost of long sessions is re-sending their context
+    // most of the cost of long sessions is re-sending their context
     {
         let priced: Vec<(u64, f64)> = events.iter().filter_map(|e| cost(book, &input_of(e)).map(|c| (e.request_input, c))).collect();
         let large: Vec<&(u64, f64)> = priced.iter().filter(|(size, _)| *size > LARGE_CONTEXT).collect();
@@ -210,7 +207,7 @@ pub fn tips(store: &Store, book: &PriceBook, range: Range, filter: &Filter) -> R
         }
     }
 
-    // ---- tools that often return an error (each error usually costs another request)
+    // each tool error usually costs another request
     let mut tool_calls = 0u64;
     {
         let by_session = !filter.models.is_empty() || !filter.clients.is_empty();

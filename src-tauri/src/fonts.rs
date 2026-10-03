@@ -1,7 +1,4 @@
-//! Installed font families, for the widget's font picker.
-
-/// Sorted, de-duplicated family names of the fonts installed for this user and system-wide.
-/// Vertical variants ("@…") are skipped.
+/// Names starting with "@" are vertical-writing variants.
 #[cfg(windows)]
 pub fn installed_families() -> Vec<String> {
     use std::collections::BTreeSet;

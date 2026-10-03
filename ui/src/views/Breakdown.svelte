@@ -170,7 +170,6 @@
     color: var(--ink);
     font-weight: 600;
   }
-  /* narrow windows: tighter cells */
   @media (max-width: 1100px) {
     th,
     td {

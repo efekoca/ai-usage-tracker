@@ -70,7 +70,6 @@ pub struct ModelPrice {
     pub notes: Option<String>,
 }
 
-/// Cost of some usage, split by token category.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
 pub struct Cost {
     pub input: f64,
@@ -93,7 +92,6 @@ impl Cost {
     }
 }
 
-/// What the calculator needs from one usage record.
 #[derive(Clone, Copy)]
 pub struct CostInput<'a> {
     pub model: &'a str,
@@ -206,7 +204,6 @@ impl PriceBook {
 }
 
 impl PriceBook {
-    /// Whether this request is priced at its model's long-context tier.
     pub fn is_long_context(&self, c: &CostInput) -> bool {
         self.lookup(c.model).and_then(|p| p.long_context.as_ref()).is_some_and(|lc| c.request_input > lc.threshold)
     }

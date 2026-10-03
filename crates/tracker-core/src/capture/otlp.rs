@@ -65,7 +65,6 @@ fn text<'a>(a: &'a HashMap<&str, Value>, k: &str) -> Option<&'a str> {
     a.get(k).and_then(Value::as_str).filter(|s| !s.is_empty())
 }
 
-/// Turns an OTLP logs export request into usage events (only `api_request`).
 pub fn parse_logs(body: &Value) -> Vec<UsageEvent> {
     let mut out = Vec::new();
     for rl in body.get("resourceLogs").and_then(Value::as_array).into_iter().flatten() {
@@ -127,7 +126,6 @@ pub fn parse_logs(body: &Value) -> Vec<UsageEvent> {
     out
 }
 
-/// Live counters for the settings screen.
 #[derive(Debug, Default)]
 pub struct ReceiverStats {
     pub events: AtomicU64,

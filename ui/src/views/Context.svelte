@@ -1,6 +1,4 @@
 <script lang="ts">
-  // Context analysis: how large the prompt of each request is, how that is distributed, how it
-  // moves day by day, and what long-context pricing tiers added. Follows period and filters.
   import { app } from '../lib/store.svelte'
   import { api, type ContextStats } from '../lib/api'
   import { fmtCompact, fmtInt, fmtMoney, fmtPct, t } from '../lib/i18n.svelte'
@@ -23,7 +21,7 @@
   })
 
   const k = (n: number) => (n >= 1_000_000 ? `${n / 1_000_000}M` : `${n / 1000}K`)
-  // short labels so neighbouring bars never collide: "<10K", "10–50K", "500K–1M", "≥1M"
+  // short labels so neighbouring bars never collide
   const bucketLabel = (from: number, to: number | null) =>
     to === null ? `≥${k(from)}` : from === 0 ? `<${k(to)}` : to >= 1_000_000 ? `${k(from)}–${k(to)}` : `${from / 1000}–${k(to)}`
   const bars = $derived(

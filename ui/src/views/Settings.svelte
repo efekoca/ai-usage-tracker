@@ -33,7 +33,6 @@
     models = await api.models()
   })
 
-  // ---- widget shortcut: press the combination to record it
   const DEFAULT_HOTKEY = 'Ctrl+Alt+Shift+W'
   let hk: HotkeyStatus | null = $state(null)
   let recording = $state(false)
@@ -44,7 +43,7 @@
     Equal: 'Equal', BracketLeft: 'BracketLeft', BracketRight: 'BracketRight', Backslash: 'Backslash', Semicolon: 'Semicolon',
     Quote: 'Quote', Comma: 'Comma', Period: 'Period', Slash: 'Slash', Pause: 'Pause', PrintScreen: 'PrintScreen',
   }
-  /** The key as the shortcut parser names it (by physical position, so the layout does not matter). */
+  // by physical key (e.code), so the keyboard layout does not matter
   function keyName(code: string): string | null {
     if (/^Key[A-Z]$/.test(code)) return code.slice(3)
     if (/^Digit\d$/.test(code)) return code.slice(5)
@@ -83,7 +82,6 @@
   }
   const keycaps = (v: string) => v.split('+').map((k) => (k === 'Super' ? 'Win' : k))
 
-  // ---- updates
   const upd = $derived(app.update)
   let checking = $state(false)
   async function checkNow() {

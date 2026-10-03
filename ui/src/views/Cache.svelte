@@ -1,5 +1,4 @@
 <script lang="ts">
-  // Prompt-cache analysis: hit rate, reuse, net savings, daily trend and breakdowns.
   import { app, toolColor } from '../lib/store.svelte'
   import { clientLabel, fmtCompact, fmtDec, fmtMoney, fmtPct, t, toolLabel } from '../lib/i18n.svelte'
   import type { Group, Tokens } from '../lib/api'
@@ -252,7 +251,6 @@
     align-items: flex-start;
     max-width: 820px;
   }
-  /* narrow windows: tighter cells */
   @media (max-width: 1100px) {
     th,
     td {

@@ -1,5 +1,4 @@
-//! Weekly summary as a PDF. The report page (`report.html`) is rendered in a hidden window and
-//! printed with WebView2's own PrintToPdf: no print dialog and no extra software involved.
+//! Renders `report.html` in a hidden window and prints it with WebView2's PrintToPdf (no print dialog).
 
 use crate::state::AppState;
 use chrono::{Datelike, Days, NaiveDate};
@@ -13,14 +12,12 @@ pub const LABEL: &str = "report";
 /// One report window at a time (a manual save and the Monday save can meet).
 static RENDERING: Mutex<()> = Mutex::new(());
 
-/// Renders the summary of the local days `from..=to` (`YYYY-MM-DD`) into `out`.
 pub fn render(app: &AppHandle, from: &str, to: &str, out: &Path) -> Result<(), String> {
     let valid = |d: &str| NaiveDate::parse_from_str(d, "%Y-%m-%d").is_ok();
     if !valid(from) || !valid(to) || from > to {
         return Err("invalid_range".into());
     }
     let _one = RENDERING.lock().unwrap_or_else(|e| e.into_inner());
-    // one report at a time
     if let Some(w) = app.get_webview_window(LABEL) {
         let _ = w.destroy();
     }
@@ -43,19 +40,16 @@ pub fn render(app: &AppHandle, from: &str, to: &str, out: &Path) -> Result<(), S
     result
 }
 
-/// Default folder for the Monday summaries: Documents\AI Usage Tracker.
 pub fn default_dir(app: &AppHandle) -> Option<PathBuf> {
     app.path().document_dir().ok().map(|d| d.join("AI Usage Tracker"))
 }
 
-/// Monday to Sunday of the week before the one containing `today`.
 pub fn last_full_week(today: NaiveDate) -> (NaiveDate, NaiveDate) {
     let monday = today - Days::new(today.weekday().num_days_from_monday() as u64);
     (monday - Days::new(7), monday - Days::new(1))
 }
 
-/// While enabled, saves last week's summary once (checked every half hour); the file name
-/// carries the week, so an existing file means it is done.
+/// The file name carries the week, so an existing file means that week is done.
 pub fn start_weekly(app: AppHandle) {
     let _ = std::thread::Builder::new().name("weekly-report".into()).spawn(move || {
         std::thread::sleep(Duration::from_secs(90));
@@ -143,7 +137,7 @@ mod tests {
     #[test]
     fn last_full_week_is_monday_to_sunday_before_this_week() {
         let d = |y, m, dd| NaiveDate::from_ymd_opt(y, m, dd).unwrap();
-        // Friday 2 Oct 2026 → 21–27 Sep
+        // a Friday
         assert_eq!(last_full_week(d(2026, 10, 2)), (d(2026, 9, 21), d(2026, 9, 27)));
         // on a Monday the week just ended
         assert_eq!(last_full_week(d(2026, 10, 5)), (d(2026, 9, 28), d(2026, 10, 4)));

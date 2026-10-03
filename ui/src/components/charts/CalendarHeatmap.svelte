@@ -1,5 +1,4 @@
 <script lang="ts">
-  // Year-style calendar: one column per week (Mon→Sun), single-hue sequential ramp.
   import { fmtDate, fmtMonth, weekdayNames } from '../../lib/i18n.svelte'
 
   let {
@@ -27,7 +26,6 @@
   const cols = $derived(Math.ceil((firstDow + days.length) / 7))
   const pos = (i: number) => ({ c: Math.floor((i + firstDow) / 7), r: (i + firstDow) % 7 })
 
-  // quantile thresholds over non-zero days → 5 levels
   const levels = $derived.by(() => {
     const v = days.map((_, i) => value(i)).filter((x) => x > 0).sort((a, b) => a - b)
     if (!v.length) return [Infinity, Infinity, Infinity, Infinity]
@@ -42,7 +40,6 @@
   }
   const ramp = ['var(--seq-0)', 'var(--seq-2)', 'var(--seq-3)', 'var(--seq-4)', 'var(--seq-5)', 'var(--seq-6)']
 
-  // one label per month, at the first full week column; drop labels that would collide
   const months = $derived.by(() => {
     const out: { c: number; label: string }[] = []
     let last = ''

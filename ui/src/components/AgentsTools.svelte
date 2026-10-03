@@ -1,6 +1,4 @@
 <script lang="ts">
-  // Breakdown page: how much the subagents did (per tool, main conversation first) and which
-  // tools the agents called, with the share of calls that returned an error.
   import { api, type AgentsTools, type Tool, type ToolRow } from '../lib/api'
   import { app, toolColor } from '../lib/store.svelte'
   import { fmtCompact, fmtInt, fmtMoney, fmtPct, has, t, toolLabel } from '../lib/i18n.svelte'
@@ -16,7 +14,6 @@
 
   const agentLabel = (a: string | null) => (a === null ? t('agent.main') : has(`agent.${a}`) ? t(`agent.${a}`) : a)
   const tools = $derived([...new Set((data?.agents ?? []).map((a) => a.tool))] as Tool[])
-  // per tool: share by cost, or by tokens when nothing in it has a price
   function shareOf(tool: Tool, cost: number, tokens: number) {
     const rows = (data?.agents ?? []).filter((a) => a.tool === tool)
     const c = rows.reduce((s, a) => s + a.totals.cost_usd, 0)
@@ -24,7 +21,6 @@
     const n = rows.reduce((s, a) => s + a.totals.total_tokens, 0)
     return n > 0 ? tokens / n : 0
   }
-  // subagents' share of the tool's requests (always exact) and of its priced cost
   function subShare(tool: Tool): string {
     const rows = (data?.agents ?? []).filter((a) => a.tool === tool)
     const sub = rows.filter((a) => a.agent !== null)

@@ -20,10 +20,8 @@ pub const FULL_PCT: f64 = 99.5;
 const SAME_RESET_MS: i64 = 2 * MIN_MS;
 /// Windows that never reached this are unused (Codex reports a moving reset time for them).
 const USED_PCT: f64 = 1.0;
-/// The plan advice looks at this many days.
 pub const ADVICE_DAYS: i64 = 28;
 
-/// What the readings show about one limit window.
 #[derive(Debug, Clone, Serialize)]
 pub struct WindowRecord {
     /// Known only when a reading named the reset time.
@@ -37,7 +35,6 @@ pub struct WindowRecord {
     /// Highest reading. When `complete` is false the window may have gone higher unseen.
     pub peak_pct: f64,
     pub readings: u32,
-    /// Reached 100 %.
     pub full: bool,
     pub full_at_ms: Option<i64>,
     /// How long it stayed full until its reset (until now while it runs).
@@ -265,8 +262,6 @@ fn record(items: &[&Reading], reset: Option<(i64, i64)>, dur_ms: i64, now_ms: i6
     }
 }
 
-// ---------------------------------------------------------------- local use per window
-
 /// A window's capacity is estimated only from readings this high: providers report whole
 /// percentages, so a low peak would carry a large rounding error.
 const CAPACITY_MIN_PEAK: f64 = 10.0;
@@ -326,8 +321,6 @@ pub fn add_local_usage(h: &mut LimitHistory, store: &Store, book: &PriceBook) ->
     }
     Ok(())
 }
-
-// ---------------------------------------------------------------- plan advice
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -422,7 +415,6 @@ fn stats(history: &LimitHistory, provider: Provider, window: &str, plan_filter: 
     s
 }
 
-/// Plan advice for one provider from the last [`ADVICE_DAYS`] days of limit windows.
 pub fn plan_advice(history: &LimitHistory, provider: Provider, plan_id: Option<&str>, plans: &PlansFile, now_ms: i64) -> PlanAdvice {
     let since = now_ms - ADVICE_DAYS * DAY_MS;
     // Codex readings name the plan exactly; Claude's say only "max", which fits both Max plans

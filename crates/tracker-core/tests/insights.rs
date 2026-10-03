@@ -1,6 +1,3 @@
-//! Sessions, model comparison, context analysis, plan value, limit forecasts, branches,
-//! subagents and tools, and tips.
-
 use chrono::{FixedOffset, TimeZone};
 use tracker_core::analytics::{Filter, Range};
 use tracker_core::insights::{agents_tools, branches, compare_models, context_stats, day_detail, forecast, plan_value, sessions, ForecastKind};
@@ -104,8 +101,6 @@ fn close(a: f64, b: f64) -> bool {
     (a - b).abs() < 1e-9
 }
 
-// ---------------------------------------------------------------- forecast
-
 #[test]
 fn a_fast_window_fills_before_the_reset() {
     let now = ms(2026, 10, 2, 12, 0);
@@ -147,8 +142,6 @@ fn an_early_or_unused_window_is_not_extrapolated() {
     assert!(close(idle.at_reset_pct.unwrap(), 0.0));
 }
 
-// ---------------------------------------------------------------- sessions
-
 #[test]
 fn sessions_group_by_tool_and_id_and_keep_their_largest_prompt() {
     let t = ms(2026, 9, 10, 9, 0);
@@ -174,8 +167,6 @@ fn sessions_group_by_tool_and_id_and_keep_their_largest_prompt() {
     assert!(close(cl.models.iter().map(|m| m.cost_usd).sum::<f64>(), cl.totals.cost_usd));
 }
 
-// ---------------------------------------------------------------- model comparison
-
 #[test]
 fn every_priced_model_is_compared_on_the_same_requests() {
     let t = ms(2026, 9, 10, 9, 0);
@@ -197,8 +188,6 @@ fn every_priced_model_is_compared_on_the_same_requests() {
     assert!(c.targets.windows(2).all(|w| w[0].cost_usd <= w[1].cost_usd), "cheapest first");
     assert_eq!(c.targets.len(), PriceBook::default_book().file().models.len());
 }
-
-// ---------------------------------------------------------------- context
 
 #[test]
 fn context_sizes_are_bucketed_and_long_context_premiums_counted() {
@@ -236,8 +225,6 @@ fn long_context_premium_is_zero_at_the_threshold() {
     assert_eq!(book.long_context_premium(&CostInput { model: "no-such-model", ..at }), None);
 }
 
-// ---------------------------------------------------------------- plan value
-
 #[test]
 fn plan_value_runs_a_daily_total_per_provider() {
     let tz = FixedOffset::east_opt(3 * 3600).unwrap();
@@ -260,8 +247,6 @@ fn plan_value_runs_a_daily_total_per_provider() {
     let o = v.providers.iter().find(|p| p.provider == Provider::OpenAI).unwrap();
     assert!(close(o.cost_usd, 0.4));
 }
-
-// ---------------------------------------------------------------- branches
 
 #[test]
 fn branches_are_per_project_and_requests_without_one_are_kept_apart() {
@@ -286,8 +271,6 @@ fn branches_are_per_project_and_requests_without_one_are_kept_apart() {
     let codex = b.rows.iter().find(|r| r.branch.as_deref() == Some("feature/login")).unwrap();
     assert_eq!(codex.tools, vec![Tool::Codex]);
 }
-
-// ---------------------------------------------------------------- subagents and tools
 
 /// (key, time, tool, name, subagent, failed)
 type Call<'a> = (&'a str, i64, Tool, &'a str, Option<&'a str>, Option<bool>);
@@ -350,8 +333,6 @@ fn subagent_share_and_tool_calls_are_counted() {
     let f = Filter { tools: vec![Tool::Codex], ..Default::default() };
     assert_eq!(agents_tools(&s, &PriceBook::default_book(), all(), &f).unwrap().tool_calls, 1);
 }
-
-// ---------------------------------------------------------------- tips
 
 fn tip_kinds(t: &Tips) -> Vec<String> {
     t.tips.iter().map(|x| serde_json::to_value(x).unwrap()["kind"].as_str().unwrap().to_owned()).collect()
@@ -455,8 +436,6 @@ fn large_prompts_are_reported_when_they_carry_most_of_the_cost() {
         other => panic!("{other:?}"),
     }
 }
-
-// ---------------------------------------------------------------- one day
 
 #[test]
 fn a_day_is_split_by_local_hour_with_its_sessions_and_limit_peaks() {

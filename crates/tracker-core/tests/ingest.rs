@@ -1,5 +1,3 @@
-//! End-to-end tests over a fake user profile built from synthetic fixtures.
-
 mod common;
 
 use common::*;
@@ -240,7 +238,6 @@ fn a_machine_without_any_ai_tool_works() {
     let mut store = Store::open_in_memory().unwrap();
     let rep = run(&mut store, &env);
     assert_eq!((rep.files_seen, rep.new_events()), (0, 0));
-    // and with no environment at all
     assert!(enumerate_files(&Env::default(), &ExtraPaths::default(), &all_sources()).is_empty());
 }
 
@@ -342,8 +339,6 @@ fn a_subagent_started_in_a_sub_directory_belongs_to_the_session_project() {
     let n: i64 = store.conn().query_row("SELECT count(*) FROM usage_event WHERE key = 'cc:msg_agent' AND project_id IS NOT NULL", [], |r| r.get(0)).unwrap();
     assert_eq!(n, 1, "the subagent transcript is read");
 }
-
-// ---------------------------------------------------------------- branches, subagents, tools
 
 fn claude_line(kind: &str, session: &str, id: &str, extra: &str, content: &str) -> String {
     let message = if kind == "assistant" {

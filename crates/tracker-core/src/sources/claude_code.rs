@@ -29,12 +29,11 @@ pub struct ClaudeCtx<'a> {
     pub source: &'a str,
 }
 
-/// `C:Usersmeapp` → `C--Users-me-app` (Claude Code's project folder naming).
+/// `C:\Users\me\app` → `C--Users-me-app` (Claude Code's project folder naming).
 fn encode_dir(p: &str) -> String {
     p.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
 }
 
-/// The `<encoded dir>` folder right under `projects`, if the file is inside one.
 fn project_folder(path: &Path) -> Option<String> {
     let mut parts = path.components().map(|c| c.as_os_str().to_string_lossy().into_owned());
     parts.by_ref().find(|c| c.eq_ignore_ascii_case("projects"))?;
@@ -229,7 +228,6 @@ fn tool_calls(v: &Value) -> Vec<ToolCall> {
         .collect()
 }
 
-/// Tool results in a user line: whether each call returned an error (`is_error`).
 fn tool_results(v: &Value) -> Vec<(String, bool)> {
     if str_at(v, "type") != Some("user") {
         return Vec::new();

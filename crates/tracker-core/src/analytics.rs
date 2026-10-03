@@ -1,5 +1,4 @@
-//! Aggregations for the UI: period ranges in the user's local time zone, totals with cost,
-//! breakdowns, daily series, weekday×hour heatmap, trend, and plan-limit views.
+//! UI aggregations. Periods and daily buckets use the user's local time zone.
 
 use crate::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool};
 use crate::pricing::{Cost, CostInput, PriceBook};
@@ -9,8 +8,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
 pub type Result<T> = std::result::Result<T, rusqlite::Error>;
-
-// ---------------------------------------------------------------- periods
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
@@ -76,8 +73,6 @@ pub fn period_range<Tz: TimeZone>(period: Period, tz: &Tz, now_ms: i64, first_ev
         }
     }
 }
-
-// ---------------------------------------------------------------- totals
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Filter {
@@ -160,9 +155,7 @@ pub struct DayPoint {
     pub tokens: u64,
     pub cost_usd: f64,
     pub events: u64,
-    /// Tokens per tool.
     pub by_tool: BTreeMap<String, u64>,
-    /// API-equivalent cost per tool.
     pub cost_by_tool: BTreeMap<String, f64>,
     /// Prompt tokens (uncached input + cache read + cache write) and the cached part.
     pub prompt_tokens: u64,
@@ -266,7 +259,6 @@ pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filte
         }
     }
 
-    // previous period for the trend (same filter)
     let prev_range = range.previous(tz);
     let mut previous = Totals::default();
     for e in store.events_between(prev_range.from_ms, prev_range.to_ms)?.iter().filter(|e| filter.matches(e)) {
@@ -324,8 +316,6 @@ pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filte
         by_accuracy,
     })
 }
-
-// ---------------------------------------------------------------- limits
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -467,7 +457,6 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
         });
         // project shares of a limit only make sense against a current reading
         let used = if state == LimitState::Fresh { s.used_pct } else { None };
-        // the window's average pace so far (current readings only)
         let forecast = match (state, s.resets_at, dur_ms, s.used_pct) {
             (LimitState::Fresh, Some(r), Some(d), Some(cur)) => Some(crate::insights::forecast(now_ms, cur, r * 1000, d)),
             _ => None,
@@ -587,12 +576,10 @@ fn window_usage(
     Ok((total, shares))
 }
 
-/// Convenience for the widget: local "today" range.
 pub fn today<Tz: TimeZone>(tz: &Tz, now_ms: i64) -> Range {
     period_range(Period::Today, tz, now_ms, None)
 }
 
-/// Rough helper used by tests and the UI to show "x minutes ago".
 pub fn age_minutes(now_ms: i64, ts_ms: i64) -> i64 {
     (now_ms - ts_ms).max(0) / 60_000
 }
@@ -606,7 +593,7 @@ mod tests {
 
     #[test]
     fn periods_are_local_calendar_days() {
-        let tz = FixedOffset::east_opt(3 * 3600).unwrap(); // UTC+3
+        let tz = FixedOffset::east_opt(3 * 3600).unwrap();
         // 2026-10-02 00:30 local == 2026-10-01 21:30 UTC
         let now = tz.with_ymd_and_hms(2026, 10, 2, 0, 30, 0).unwrap().timestamp_millis();
         let r = period_range(Period::Today, &tz, now, None);

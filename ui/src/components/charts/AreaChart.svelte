@@ -1,5 +1,4 @@
 <script lang="ts">
-  // Daily series as overlaid 2px lines with light area washes and a crosshair tooltip.
   import { area, line, curveMonotoneX } from 'd3-shape'
   import { scaleLinear } from 'd3-scale'
   import { fmtDate } from '../../lib/i18n.svelte'
@@ -50,7 +49,6 @@
       .curve(curveMonotoneX),
   )
 
-  // ~6 evenly spaced date labels
   const xLabels = $derived.by(() => {
     const n = dates.length
     if (n === 0) return []

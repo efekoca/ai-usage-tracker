@@ -1,6 +1,4 @@
 <script lang="ts">
-  // Categorical columns (one series): ≤40px wide, 4px rounded top anchored to the baseline,
-  // value labels above, hover tooltip with the full detail. Used for size distributions.
   import { scaleLinear } from 'd3-scale'
 
   type Bar = { key: string; label: string; value: number; detail?: string }
@@ -22,7 +20,6 @@
   const bw = $derived(Math.max(6, Math.min(40, band * 0.6)))
   const R = 4
 
-  // rounded top only; a zero bar draws nothing
   function bar(x: number, top: number, w: number, h: number) {
     if (h <= 0) return ''
     const r = Math.min(R, h, w / 2)

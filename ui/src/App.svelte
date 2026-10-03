@@ -22,7 +22,6 @@
 
   let failed = $state('')
   let page: HTMLDivElement | undefined = $state()
-  // every view starts at the top
   $effect(() => {
     void app.view
     page?.scrollTo({ top: 0 })
@@ -51,7 +50,7 @@
   ]
   const withToolbar: View[] = ['overview', 'tips', 'daily', 'breakdown', 'sessions', 'cache', 'context', 'projects']
 
-  // a newer signed release found by the update check; dismissed for this run only
+  // dismissed for this run only (not persisted)
   let updateDismissed = $state('')
   const update = $derived(app.update?.available && app.update.available.version !== updateDismissed ? app.update.available : null)
   async function installUpdate(v: string) {
@@ -256,8 +255,7 @@
     overflow-y: auto;
     padding: 6px 28px 32px;
   }
-  /* narrow windows: the sidebar keeps only its icons (names stay as tooltips and for screen
-     readers), giving the page about 170 px more */
+  /* icon-only sidebar; names remain as tooltips and, visually hidden, for screen readers */
   @media (max-width: 1100px) {
     .shell {
       grid-template-columns: 60px minmax(0, 1fr);

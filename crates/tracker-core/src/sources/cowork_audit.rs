@@ -47,11 +47,10 @@ pub fn parse_file(path: &Path, offset: u64) -> std::io::Result<ParseOutput> {
                 out.limits.push(snapshot(ts_ms, kind, pct, i64_at(info, "resetsAt"), status.clone()));
                 any = true;
             }
-        } else if let (Some(kind), Some(st)) = (str_at(info, "rateLimitType"), &status) {
-            // attach the status to the window it refers to
-            if let Some(s) = out.limits.iter_mut().rev().find(|s| s.ts_ms == ts_ms && s.window == kind) {
-                s.status = Some(st.clone());
-            }
+        } else if let (Some(kind), Some(st)) = (str_at(info, "rateLimitType"), &status)
+            && let Some(s) = out.limits.iter_mut().rev().find(|s| s.ts_ms == ts_ms && s.window == kind)
+        {
+            s.status = Some(st.clone());
         }
         if any {
             out.lines_recognised += 1;

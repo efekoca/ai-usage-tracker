@@ -1,5 +1,4 @@
 <script lang="ts">
-  // View header: title, period segmented control (with custom range) and filters in one row.
   import { app, setFilter, setPeriod } from '../lib/store.svelte'
   import { t, toolLabel } from '../lib/i18n.svelte'
   import { api, type Period, type Tool } from '../lib/api'

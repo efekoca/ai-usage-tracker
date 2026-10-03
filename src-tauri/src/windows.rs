@@ -1,5 +1,4 @@
-//! Main window (created on demand and destroyed on close to free WebView memory), the
-//! always-on-top widget, its native context menu, menu handling and full-screen auto-hide.
+//! The main window is created on demand and destroyed on close to free WebView memory.
 
 use crate::settings::Settings;
 use crate::state::AppState;
@@ -12,7 +11,7 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWi
 pub const MAIN: &str = "main";
 pub const WIDGET: &str = "widget";
 
-/// Windows 11 (build 22000+) supports Mica.
+/// Build 22000 is Windows 11, the first with Mica.
 pub fn supports_mica() -> bool {
     #[cfg(windows)]
     {
@@ -45,7 +44,6 @@ fn os_build() -> u32 {
     v.build
 }
 
-/// The user's Windows accent color as `#rrggbb` (read-only registry lookup), if set.
 pub fn accent_color() -> Option<String> {
     #[cfg(windows)]
     {
@@ -66,16 +64,13 @@ pub fn accent_color() -> Option<String> {
     }
 }
 
-/// Creating a WebView window waits for the event loop. When the caller *is* the event loop
-/// (synchronous IPC commands, menu and tray handlers) that wait deadlocks on Windows, so
-/// window creation always happens on a short-lived helper thread.
+/// Creating a WebView window waits for the event loop, which deadlocks on Windows when called
+/// from it (sync IPC commands, menu and tray handlers), so it always runs on a helper thread.
 fn off_main(f: impl FnOnce() + Send + 'static) {
     if let Err(e) = std::thread::Builder::new().name("window-builder".into()).spawn(f) {
         log::error!("cannot spawn window builder: {e}");
     }
 }
-
-// ------------------------------------------------------------------ main window
 
 pub fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window(MAIN) {
@@ -92,7 +87,6 @@ fn build_main(app: &AppHandle) {
     if app.get_webview_window(MAIN).is_some() {
         return; // a concurrent request already built it
     }
-    // roomy by default, but never larger than ~90 % of the primary monitor's work area
     let (mut w, mut h) = (1360.0, 880.0);
     if let Ok(Some(m)) = app.primary_monitor() {
         let s = m.scale_factor();
@@ -116,8 +110,6 @@ fn build_main(app: &AppHandle) {
         Err(e) => log::error!("cannot create main window: {e}"),
     }
 }
-
-// ------------------------------------------------------------------ widget
 
 fn widget_size(size: &str) -> (f64, f64) {
     match size {
@@ -188,7 +180,7 @@ fn remember_widget_position(app: &AppHandle, x: i32, y: i32) {
     if s.widget.x == Some(x) && s.widget.y == Some(y) {
         return;
     }
-    // a user drag: the widget now stays where it was dropped
+    // a user drag: drop the corner anchor
     s.widget.x = Some(x);
     s.widget.y = Some(y);
     s.widget.anchor.clear();
@@ -199,7 +191,6 @@ fn remember_widget_position(app: &AppHandle, x: i32, y: i32) {
     }
 }
 
-/// Moves the widget to a corner of the monitor it is on (work area, so the taskbar is avoided).
 pub fn place_widget(w: &WebviewWindow, corner: &str) {
     let Ok(Some(m)) = w.current_monitor().or_else(|_| w.primary_monitor()) else { return };
     let area = m.work_area();
@@ -216,7 +207,6 @@ pub fn place_widget(w: &WebviewWindow, corner: &str) {
     let _ = w.set_position(PhysicalPosition::new(x, y));
 }
 
-/// Applies visibility/size from settings and tells the widget to re-render.
 pub fn apply_widget_settings(app: &AppHandle, s: &Settings) {
     if !s.onboarded {
         if let Some(w) = app.get_webview_window(WIDGET) {
@@ -301,7 +291,6 @@ fn user_locale() -> String {
     String::new()
 }
 
-/// Handles ids from both the widget context menu and the tray menu.
 pub fn handle_menu(app: &AppHandle, id: &str) {
     let state = app.state::<AppState>();
     let mut s = state.settings.read().unwrap().clone();
@@ -349,8 +338,6 @@ pub fn handle_menu(app: &AppHandle, id: &str) {
     crate::tray::refresh_soon();
 }
 
-// ------------------------------------------------------------------ autostart
-
 pub fn apply_autostart(app: &AppHandle, on: bool) {
     use tauri_plugin_autostart::ManagerExt;
     let m = app.autolaunch();
@@ -360,12 +347,8 @@ pub fn apply_autostart(app: &AppHandle, on: bool) {
     }
 }
 
-// ------------------------------------------------------------------ full-screen auto-hide
-
 static FULLSCREEN_HIDDEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Polls the shell's "user notification state" every 2 s: when a full-screen app, game or
-/// presentation is in front, the widget hides; it comes back afterwards.
 pub fn start_fullscreen_watch(app: AppHandle) {
     std::thread::Builder::new()
         .name("fullscreen-watch".into())
@@ -392,9 +375,8 @@ pub fn start_fullscreen_watch(app: AppHandle) {
         .expect("spawn fullscreen watcher");
 }
 
-/// True when an exclusive D3D game / presentation runs, or the foreground window (of another
-/// process) covers its whole monitor. `QUNS_BUSY` alone is not trusted: always-on-top
-/// full-screen overlays (e.g. GPU overlays) report it permanently.
+/// `QUNS_BUSY` is not trusted: always-on-top full-screen overlays (e.g. GPU overlays) report it
+/// permanently, so the foreground window's rect is checked instead.
 #[cfg(windows)]
 fn fullscreen_app_active() -> bool {
     use windows_sys::Win32::Foundation::RECT;

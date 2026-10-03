@@ -1,6 +1,4 @@
 <script lang="ts">
-  // Limits page, History tab: every five-hour or weekly window the readings cover, with
-  // filters, a summary, the distribution of peaks, a chart and a sortable table.
   import { api, type LimitHistoryView, type Provider, type WindowRecord } from '../lib/api'
   import { app } from '../lib/store.svelte'
   import { fmtCompact, fmtDateTime, fmtDuration, fmtInt, fmtMoney, fmtPct, i18n, t, windowLabel } from '../lib/i18n.svelte'
@@ -52,7 +50,7 @@
   const visible = $derived(showAll ? rows : rows.slice(0, 30))
   const keyOf = (p: Provider, w: WindowRecord) => `${p}:${w.first_ms}:${w.resets_at_ms ?? 0}`
   const kept = $derived(new Set(rows.map((w) => keyOf(w.provider, w))))
-  // every chart spans the chosen period ("all" starts at the first window shown)
+  // range >= 3650 means "all": start at the first window shown
   const chartFrom = $derived(
     range >= 3650 && all.length ? Math.min(...all.map(startOf)) : (view?.history.to_ms ?? Date.now()) - range * DAY,
   )
@@ -447,7 +445,6 @@
   .state.running i {
     opacity: 0.55;
   }
-  /* narrow windows: tighter cells, secondary columns hidden */
   @media (max-width: 1100px) {
     th,
     td {

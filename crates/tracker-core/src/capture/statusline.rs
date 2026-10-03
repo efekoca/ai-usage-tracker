@@ -82,7 +82,6 @@ pub fn render_default(windows: Option<&Map<String, Value>>) -> String {
     parts.join(" · ")
 }
 
-/// Parser for the capture file (incremental JSONL).
 pub fn parse_file(path: &Path, offset: u64) -> std::io::Result<ParseOutput> {
     let (lines, next) = read_jsonl_from(path, offset)?;
     let mut out = ParseOutput { next_offset: next, ..Default::default() };

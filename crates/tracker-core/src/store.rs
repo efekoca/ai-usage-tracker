@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 pub type Result<T> = std::result::Result<T, rusqlite::Error>;
 
 const MIGRATIONS: &[&str] = &[
-    // v1
     r#"
     CREATE TABLE project (
         id      INTEGER PRIMARY KEY,
@@ -75,27 +74,23 @@ const MIGRATIONS: &[&str] = &[
         value TEXT NOT NULL
     );
     "#,
-    // v2: provider request ids link live-captured events to their log copies. Claude
-    // transcripts are re-read once so existing rows get their request id.
+    // v2: request ids link captured events to their log copies; re-read Claude transcripts.
     r#"
     ALTER TABLE usage_event ADD COLUMN request_id TEXT;
     CREATE INDEX usage_event_req ON usage_event(request_id);
     CREATE INDEX usage_event_session ON usage_event(session_id);
     DELETE FROM file_checkpoint WHERE parser IN ('claude_code_jsonl', 'cowork_jsonl');
     "#,
-    // v3: projects keyed by the session's first directory (not every sub-directory), with the
-    // original spelling kept for display. Claude transcripts are re-read to re-assign them.
+    // v3: projects keyed by the session's first directory; re-read Claude transcripts.
     r#"
     ALTER TABLE project ADD COLUMN display_path TEXT;
     DELETE FROM file_checkpoint WHERE parser IN ('claude_code_jsonl', 'cowork_jsonl');
     "#,
-    // v4: Cowork sessions are grouped into one project; Codex rollouts are re-read once so
-    // their projects get the original path spelling.
+    // v4: Cowork grouped into one project; re-read Codex for the original path spelling.
     r#"
     DELETE FROM file_checkpoint WHERE parser IN ('codex_rollout', 'cowork_jsonl');
     "#,
-    // v5: pricing modifiers (speed, tier, region) are kept from whichever copy of a message
-    // carries them, and audit warnings keep their utilization; re-read Claude logs once.
+    // v5: re-read Claude logs to keep pricing modifiers from any copy and audit utilization.
     r#"
     DELETE FROM file_checkpoint WHERE parser IN ('claude_code_jsonl', 'cowork_jsonl', 'cowork_audit');
     "#,
@@ -103,9 +98,7 @@ const MIGRATIONS: &[&str] = &[
     r#"
     DELETE FROM file_checkpoint WHERE parser = 'claude_code_jsonl';
     "#,
-    // v7: git branch, subagent type and subagent thread per request, and tool calls by name
-    // (never their input or output). Claude and Codex logs are re-read once to fill them in;
-    // rows whose logs are gone keep NULL (unknown).
+    // v7: branch, subagent and tool calls (names only, never input or output); re-read logs.
     r#"
     ALTER TABLE usage_event ADD COLUMN branch TEXT;
     ALTER TABLE usage_event ADD COLUMN agent TEXT;
@@ -179,7 +172,6 @@ pub struct Checkpoint {
     pub state: serde_json::Value,
 }
 
-/// A usage row as read back for analysis.
 #[derive(Debug, Clone, Serialize)]
 pub struct EventRow {
     pub ts_ms: i64,
@@ -199,7 +191,6 @@ pub struct EventRow {
     pub thread_id: Option<String>,
 }
 
-/// A tool call as read back for analysis.
 #[derive(Debug, Clone, Serialize)]
 pub struct ToolCallRow {
     pub ts_ms: i64,
@@ -219,7 +210,6 @@ pub struct ProjectRow {
     pub hidden: bool,
 }
 
-/// Default database location for the current user.
 pub fn default_data_dir() -> Option<PathBuf> {
     dirs::data_local_dir().map(|d| d.join("AIUsageTracker"))
 }
@@ -364,7 +354,7 @@ impl Store {
         Ok(())
     }
 
-    /// Latest snapshot per (provider, tool, account, limit_id, window), plus how old it is.
+    /// Latest snapshot per (provider, tool, account, limit_id, window).
     pub fn latest_limits(&self) -> Result<Vec<LimitSnapshot>> {
         let mut st = self.conn.prepare(
             "SELECT s.ts_ms, s.provider, s.tool, s.account, s.limit_id, s.window, s.used_pct, s.resets_at,
@@ -538,8 +528,7 @@ impl StoreTx<'_> {
         Ok(id)
     }
 
-    /// Inserts events; a repeated key keeps the field-wise maximum (streaming duplicates)
-    /// and the earliest timestamp. A log-derived (exact) copy upgrades a captured one.
+    /// A repeated key merges with the stored row per `UPSERT_EVENT_TAIL`.
     pub fn upsert_events(&mut self, events: &[UsageEvent]) -> Result<()> {
         for e in events {
             let pid = match &e.project_path {
@@ -699,7 +688,6 @@ pub fn normalize_project_path(path: &str) -> String {
     if looks_windows { trimmed.replace('/', "\\").to_lowercase() } else { trimmed.to_owned() }
 }
 
-/// Display name for a project directory: its last path component.
 pub fn project_name(path: &str) -> String {
     path.trim_end_matches(['\\', '/'])
         .rsplit(['\\', '/'])

@@ -1,7 +1,5 @@
 <script lang="ts">
-  // Plan value: the last 30 days of API-equivalent use per provider against the plan price
-  // (list price from plans.json, or the user's own price). Chat use is not in local logs, so
-  // the figure is a lower bound and says so.
+  // Chat use is not in local logs, so the figure is a lower bound.
   import { app, saveSettings } from '../lib/store.svelte'
   import { api, type PlanDef, type PlansFile, type PlanValue, type Provider } from '../lib/api'
   import { fmtDate, fmtDec, fmtInt, fmtMoney, i18n, t } from '../lib/i18n.svelte'
@@ -23,7 +21,6 @@
     load()
   })
 
-  // providers whose sources are enabled, in a fixed order
   const providers = $derived.by(() => {
     const s = new Set<Provider>()
     for (const src of app.settings?.enabled_sources ?? []) {
@@ -33,7 +30,6 @@
     return (['anthropic', 'openai'] as Provider[]).filter((p) => s.has(p))
   })
 
-  // a month's price spread over the 30 days compared
   const DAYS_PER_MONTH = 365.25 / 12
   function planOf(p: Provider): PlanDef | undefined {
     const id = app.settings?.plans[p]
@@ -64,7 +60,6 @@
     return { pv, plan, price, cost, share, ratio, day }
   }
 
-  // running API-equivalent cost against the plan price (dashed), as a small inline chart
   const W = 240
   const H = 64
   function path(cum: number[], top: number) {
@@ -161,7 +156,6 @@
 </section>
 
 <style>
-  /* spaced like the page's own cards */
   section {
     margin-bottom: 16px;
   }

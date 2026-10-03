@@ -1,4 +1,3 @@
-//! Shared fake-machine builder for integration tests.
 #![allow(dead_code)]
 
 use std::collections::HashSet;

@@ -1,9 +1,5 @@
-; Clean uninstall for AI Usage Tracker.
-; 1. Before files are removed, undo every opt-in live-capture change made outside the app's
-;    folder (Claude Code statusLine / telemetry env in settings.json).
-; 2. Remove the "start with Windows" entry.
-; 3. The archive lives in %LOCALAPPDATA%\AIUsageTracker (not the default bundle-id folder), so
-;    remove it when the user ticks "Delete the application data".
+; Uninstall reverts the opt-in edits to Claude Code's settings.json before files go. App data
+; lives in %LOCALAPPDATA%\AIUsageTracker, not the bundle-id folder NSIS knows, so remove it here.
 
 !macro NSIS_HOOK_PREUNINSTALL
   ; an update also runs the old uninstaller (with /UPDATE); keep capture settings then

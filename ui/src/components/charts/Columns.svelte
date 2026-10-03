@@ -1,6 +1,4 @@
 <script lang="ts">
-  // Daily columns stacked by series (≤24px wide, 4px rounded top, 2px surface gap between
-  // segments) with a hover tooltip. Used for short periods where a calendar would be sparse.
   import { scaleLinear } from 'd3-scale'
   import { fmtDate } from '../../lib/i18n.svelte'
 
@@ -26,10 +24,9 @@
     ariaLabel: string
     selected?: string | null
     onselect?: (date: string) => void
-    /** Axis and tooltip labels for a column key (dates by default). */
     xLabel?: (key: string) => string
     tipLabel?: (key: string) => string
-    /** Label every n-th column (0 = as many as fit). */
+    /** 0 = as many labels as fit. */
     labelStep?: number
   } = $props()
 
@@ -45,7 +42,6 @@
   const bw = $derived(Math.max(3, Math.min(24, band * 0.62)))
   const GAP = 2
 
-  // stacked segments, bottom-up, with a surface gap between them
   const stacks = $derived(
     values.map((v) => {
       let acc = 0

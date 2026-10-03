@@ -12,7 +12,6 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::Path;
 
-/// Which parser handles a file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ParserKind {
     ClaudeCodeJsonl,
@@ -42,7 +41,6 @@ impl ParserKind {
     }
 }
 
-/// Result of parsing (part of) one file.
 #[derive(Debug, Default)]
 pub struct ParseOutput {
     pub events: Vec<UsageEvent>,
@@ -103,8 +101,6 @@ fn trim_ascii(mut s: &[u8]) -> &[u8] {
     }
     s
 }
-
-// ---- small tolerant accessors ----
 
 pub(crate) fn u64_at(v: &Value, key: &str) -> u64 {
     match v.get(key) {

@@ -1,10 +1,7 @@
-//! The widget's system-wide shortcut (shows or hides it from any program).
-
 use crate::state::AppState;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
-/// Checks a shortcut's spelling (`Ctrl+Alt+Shift+W`, `Super+F9`, …) without registering it.
 pub fn parse(hotkey: &str) -> Result<Shortcut, String> {
     let s: Shortcut = hotkey.trim().parse().map_err(|e| format!("{e}"))?;
     if s.mods.is_empty() {
@@ -14,8 +11,7 @@ pub fn parse(hotkey: &str) -> Result<Shortcut, String> {
     Ok(s)
 }
 
-/// Replaces the registered shortcut with `hotkey` (empty = none). The outcome is kept for the
-/// settings screen: another program may already own the combination.
+/// The error is kept for the settings screen: another program may already own the combination.
 pub fn apply(app: &AppHandle, hotkey: &str) -> Result<(), String> {
     let gs = app.global_shortcut();
     let _ = gs.unregister_all();

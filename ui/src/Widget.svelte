@@ -25,7 +25,6 @@
     }
   }
 
-  // the window follows the content size (layout, items and scale all change it)
   let lastSize = ''
   async function fit() {
     await tick()
@@ -74,7 +73,6 @@
     }
   })
 
-  // click runs the click action; a press that moves starts a window drag (unless locked)
   let down: { x: number; y: number } | null = null
   function pointerdown(e: PointerEvent) {
     if (e.button !== 0) return

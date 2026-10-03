@@ -1,5 +1,3 @@
-//! Calculation layer: costs, breakdowns, daily series and plan-limit views.
-
 mod common;
 
 use chrono::{FixedOffset, TimeZone};
@@ -55,7 +53,6 @@ fn all_time_report_prices_every_known_model_and_flags_unknown_ones() {
     assert_eq!(r.peak_day.as_ref().unwrap().date, "2026-09-01");
     assert_eq!(r.daily.iter().map(|d| d.events).sum::<u64>(), 9);
 
-    // breakdowns add up
     let tool_sum: u64 = r.by_tool.iter().map(|g| g.totals.total_tokens).sum();
     assert_eq!(tool_sum, r.totals.total_tokens);
     let proj: Vec<&str> = r.by_project.iter().map(|g| g.label.as_str()).collect();
@@ -109,8 +106,6 @@ fn hidden_projects_keep_their_data_but_are_flagged() {
     assert!(g.hidden);
     assert_eq!(r.totals.events, 9);
 }
-
-// ---------------------------------------------------------------- limits
 
 fn ev(key: &str, ts: i64, tool: Tool, model: &str, project: &str, input: u64, output: u64) -> UsageEvent {
     UsageEvent {

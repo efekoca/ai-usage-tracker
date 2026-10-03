@@ -1,6 +1,4 @@
 <script lang="ts">
-  // Widget customisation with a live preview. Edits apply to the preview at once and are
-  // saved (and pushed to the real widget) shortly after.
   import { onMount } from 'svelte'
   import { app, saveSettings } from '../lib/store.svelte'
   import { api, type Provider, type WidgetData, type WidgetItemKind, type WidgetSettings } from '../lib/api'
@@ -20,7 +18,6 @@
     api.widgetData().then((d) => (data = d))
     api.listFonts().then((f) => (fonts = f)).catch(() => {})
   })
-  // common Windows faces that suit small UI text; only the installed ones are listed
   const SUGGESTED = ['Segoe UI Variable Display', 'Segoe UI', 'Aptos', 'Bahnschrift', 'Calibri', 'Cascadia Mono', 'Consolas', 'Georgia', 'Verdana', 'Arial']
   const suggested = $derived(SUGGESTED.filter((f) => fonts.includes(f)))
   const fontMatches = $derived.by(() => {

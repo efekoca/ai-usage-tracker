@@ -2,7 +2,6 @@ import { svelte } from '@sveltejs/vite-plugin-svelte'
 import { defineConfig } from 'vite'
 import { resolve } from 'node:path'
 
-// Three entry pages: the dashboard, the always-on-top widget and the printable report.
 export default defineConfig({
   plugins: [svelte()],
   clearScreen: false,

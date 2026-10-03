@@ -21,7 +21,7 @@
     app.limits.filter((l) => l.window === 'five_hour' || l.window === 'seven_day' || l.source === 'user_threshold'),
   )
   const hasClaude = $derived(toolsPresent.includes('claude_code'))
-  // models the user chose not to be warned about again; a newly unpriced model still warns
+  // dismissal covers only the listed models; a newly unpriced one still warns
   const unpriced = $derived((app.report?.unpriced_models ?? []).filter((m) => !(app.settings?.dismissed_unpriced ?? []).includes(m)))
   function dismissUnpriced() {
     const prev = app.settings?.dismissed_unpriced ?? []

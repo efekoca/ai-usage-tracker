@@ -1,5 +1,4 @@
-//! User settings, stored as one JSON document in the tracker database.
-//! Unknown/missing fields fall back to defaults so older/newer settings never break startup.
+//! Missing or unknown fields fall back to defaults so older or newer settings never break startup.
 
 use serde::{Deserialize, Serialize};
 use tracker_core::analytics::Threshold;
@@ -8,7 +7,6 @@ use tracker_core::store::Store;
 
 const KEY: &str = "settings.v1";
 
-/// One line/block the widget can show, in the user's order.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WidgetItem {
     /// `primary` (big number), `cost`, `limit_five_hour`, `limit_seven_day`, `tools`,
@@ -38,16 +36,13 @@ fn default_items() -> Vec<WidgetItem> {
 #[serde(default)]
 pub struct WidgetSettings {
     pub visible: bool,
-    /// Background opacity 0.3–1.0.
     pub opacity: f64,
-    /// Size preset kept for the context menu: "s" | "m" | "l" (maps to `scale`).
+    /// Context-menu preset "s" | "m" | "l"; the actual size is `scale`.
     pub size: String,
-    /// Free zoom factor 0.6–2.0; the window follows the content size.
     pub scale: f64,
     pub x: Option<i32>,
     pub y: Option<i32>,
-    /// Corner the widget sticks to while it resizes ("bottom-right", …); empty once the user
-    /// drags it somewhere else.
+    /// Corner kept while resizing ("bottom-right", …); empty once the user drags the widget.
     pub anchor: String,
     pub auto_hide_fullscreen: bool,
     /// "horizontal" | "vertical" | "line"
@@ -55,7 +50,7 @@ pub struct WidgetSettings {
     pub items: Vec<WidgetItem>,
     /// Which providers to show; empty = all enabled ones.
     pub providers: Vec<String>,
-    /// Range of the big number: "today" | "days7" | "month1"
+    /// "today" | "days7" | "month1"
     pub primary_period: String,
     /// "tokens" | "cost"
     pub primary_metric: String,
@@ -76,18 +71,13 @@ pub struct WidgetSettings {
     pub lock_position: bool,
     /// "open_dashboard" | "none"
     pub click_action: String,
-    /// CSS family name of an installed font; empty = the app font (Inter).
+    /// Empty = the app font (Inter).
     pub font_family: String,
-    /// Size factor for labels and small values, 0.8–1.6 (independent of `scale`).
     pub text_scale: f64,
-    /// Size factor of the big number, 0.6–2.0.
     pub number_scale: f64,
-    /// Weight of the big number and limit values, 300–900.
     pub number_weight: u16,
-    /// Fixed-width digits so values do not jitter as they change.
     pub tabular_nums: bool,
-    /// System-wide shortcut that shows or hides the widget (`Ctrl+Alt+Shift+W` style);
-    /// empty = none.
+    /// Empty = no shortcut.
     pub hotkey: String,
 }
 
@@ -131,7 +121,6 @@ impl Default for WidgetSettings {
 }
 
 impl WidgetSettings {
-    /// Fills in items added by newer versions and clamps values.
     pub fn normalize(&mut self) {
         for d in default_items() {
             if !self.items.iter().any(|i| i.kind == d.kind) {
@@ -161,18 +150,14 @@ impl WidgetSettings {
     }
 }
 
-/// Four keys, so it does not take a combination another program or an AltGr character
-/// (Ctrl+Alt on many keyboard layouts) is likely to need.
+/// Four keys, so it avoids combinations other programs or AltGr (Ctrl+Alt on many layouts) need.
 pub const DEFAULT_HOTKEY: &str = "Ctrl+Alt+Shift+W";
 
-/// The tray icon's live percentage.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct TraySettings {
-    /// Draw the percentage into the tray icon (otherwise the app icon).
     pub show_percent: bool,
-    /// Which limit: "auto" (the fullest current one) or "<provider>:<window>",
-    /// e.g. "anthropic:five_hour".
+    /// "auto" (the fullest current limit) or "<provider>:<window>", e.g. "anthropic:five_hour".
     pub limit: String,
 }
 
@@ -182,24 +167,22 @@ impl Default for TraySettings {
     }
 }
 
-/// Live capture switches. The two limit reads are on by default (they change no files and use
-/// the user's own Claude Code / Codex sign-in); the two methods that edit Claude Code's
-/// settings file stay off until the user turns them on.
+/// Limit reads default on (they change no files); methods that edit Claude Code's settings
+/// file stay off until the user turns them on.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CaptureSettings {
     pub codex_poll: bool,
     pub codex_poll_minutes: u64,
-    /// Explicit path to `codex.exe`; empty = auto-detect.
+    /// Empty = auto-detect.
     pub codex_path: String,
     pub statusline: bool,
     pub otel: bool,
     pub otel_port: u16,
-    /// Claude plan-limit reads through Claude Code's `get_usage` request.
+    /// Reads plan limits through Claude Code's `get_usage` request.
     pub claude_poll: bool,
-    /// Idle interval; while Claude is in use a read follows new activity within a minute.
     pub claude_poll_minutes: u64,
-    /// Explicit path to `claude.exe`; empty = auto-detect.
+    /// Empty = auto-detect.
     pub claude_path: String,
 }
 
@@ -229,10 +212,9 @@ pub struct Settings {
     pub theme: String,
     pub enabled_sources: Vec<SourceId>,
     pub extra_paths: ExtraPaths,
-    /// Plan ids from plans.json, per provider ("anthropic" / "openai").
+    /// Provider ("anthropic" / "openai") → plan id from plans.json.
     pub plans: std::collections::BTreeMap<String, String>,
     pub thresholds: Vec<Threshold>,
-    /// Mask every project name in the UI and exports.
     pub hide_project_names: bool,
     /// Display currency; costs are always computed in USD.
     pub currency: String,
@@ -241,26 +223,22 @@ pub struct Settings {
     pub widget: WidgetSettings,
     pub capture: CaptureSettings,
     pub autostart: bool,
-    /// Optional network use: allow fetching a newer pricing/plan file. Off by default.
+    /// Opt-in network use: fetch a newer pricing/plan file.
     pub allow_config_updates: bool,
-    /// Visual: show cost or tokens first.
+    /// "tokens" | "cost"
     pub primary_metric: String,
-    /// Unpriced models whose warning the user dismissed; a model that becomes unpriced later
-    /// warns again.
+    /// A model that becomes unpriced again later warns again.
     pub dismissed_unpriced: Vec<String>,
     /// How limit percentages read: "used" (Claude's convention) or "remaining" (Codex's).
     pub limit_display: String,
-    /// The user's own monthly plan price in USD per provider ("anthropic" / "openai"), when
-    /// it differs from the list price or the plan has none.
+    /// Monthly USD price per provider, when it differs from the list price or the plan has none.
     pub plan_prices: std::collections::BTreeMap<String, f64>,
-    /// Save last week's PDF summary every Monday (while the app runs).
     pub weekly_report_auto: bool,
-    /// Folder for those PDFs; empty = Documents\AI Usage Tracker.
+    /// Empty = Documents\AI Usage Tracker.
     pub weekly_report_dir: String,
     pub tray: TraySettings,
-    /// Look for a signed update on the project's release page at start and every few hours.
-    /// Only the version file is downloaded; nothing is sent. Has no effect until the build
-    /// names a release location.
+    /// Only the version file is downloaded; nothing is sent. No effect until the build names a
+    /// release location.
     pub update_check: bool,
 }
 

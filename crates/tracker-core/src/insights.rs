@@ -1,5 +1,4 @@
-//! Deeper views over the archive: sessions, "what would another model cost", context size
-//! analysis, plan value and limit forecasts. Everything is computed from stored counts only.
+//! Derived views over the archive, computed from stored counts only.
 
 use crate::analytics::{local_date, Filter, Range, Totals};
 use crate::model::{Provider, Tool};
@@ -41,8 +40,6 @@ fn percentile(sorted: &[u64], p: f64) -> u64 {
     let rank = ((p / 100.0) * sorted.len() as f64).ceil() as usize;
     sorted[rank.clamp(1, sorted.len()) - 1]
 }
-
-// ---------------------------------------------------------------- sessions
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SessionModel {
@@ -166,8 +163,6 @@ pub fn sessions(store: &Store, book: &PriceBook, range: Range, filter: &Filter) 
     Ok(Sessions { sessions, events_without_session: without })
 }
 
-// ---------------------------------------------------------------- model comparison
-
 #[derive(Debug, Clone, Serialize)]
 pub struct CompareTarget {
     pub model: String,
@@ -247,8 +242,6 @@ pub fn compare_models(store: &Store, book: &PriceBook, range: Range, filter: &Fi
         targets,
     })
 }
-
-// ---------------------------------------------------------------- context size
 
 /// Bucket edges for prompt sizes. 200K and 272K are where long-context pricing starts for
 /// older Claude models and current OpenAI models.
@@ -378,8 +371,6 @@ pub fn context_stats<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range
     Ok(out)
 }
 
-// ---------------------------------------------------------------- plan value
-
 #[derive(Debug, Clone, Serialize)]
 pub struct ProviderValue {
     pub provider: Provider,
@@ -436,8 +427,6 @@ pub fn plan_value<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, t
         .collect();
     Ok(PlanValue { range, dates: dates.iter().map(|d| d.format("%Y-%m-%d").to_string()).collect(), providers })
 }
-
-// ---------------------------------------------------------------- branches
 
 #[derive(Debug, Clone, Serialize)]
 pub struct BranchRow {
@@ -526,8 +515,6 @@ pub fn branches(store: &Store, book: &PriceBook, range: Range, filter: &Filter) 
     Ok(Branches { rows, events_with_branch: with, events_without_branch: without })
 }
 
-// ---------------------------------------------------------------- subagents and tools
-
 #[derive(Debug, Clone, Serialize)]
 pub struct AgentRow {
     pub tool: Tool,
@@ -547,7 +534,6 @@ pub struct ToolRow {
     /// Calls whose outcome the log records.
     pub known: u64,
     pub failed: u64,
-    /// Calls made by subagents.
     pub by_subagents: u64,
 }
 
@@ -562,7 +548,6 @@ pub struct AgentsTools {
     pub filtered_by_session: bool,
 }
 
-/// How much of the usage subagents made, and which tools were called how often.
 pub fn agents_tools(store: &Store, book: &PriceBook, range: Range, filter: &Filter) -> Result<AgentsTools> {
     let events: Vec<EventRow> = store.events_between(range.from_ms, range.to_ms)?.into_iter().filter(|e| filter.matches(e)).collect();
     struct Acc {
@@ -638,19 +623,15 @@ pub fn agents_tools(store: &Store, book: &PriceBook, range: Range, filter: &Filt
     Ok(AgentsTools { agents, tools, tool_calls: total, filtered_by_session: by_session })
 }
 
-// ---------------------------------------------------------------- one day
-
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct HourPoint {
     pub hour: u32,
     pub tokens: u64,
     pub cost_usd: f64,
     pub events: u64,
-    /// Tokens per tool.
     pub by_tool: BTreeMap<String, u64>,
 }
 
-/// The highest limit reading of the day for one window.
 #[derive(Debug, Clone, Serialize)]
 pub struct DayLimitPeak {
     pub provider: Provider,
@@ -683,8 +664,6 @@ fn groups(map: HashMap<String, (String, bool, Totals)>) -> Vec<crate::analytics:
     v
 }
 
-/// Everything about one local calendar day: totals, the hours it was used in, tools, models,
-/// projects, sessions and the highest limit readings of the day.
 pub fn day_detail<Tz: TimeZone>(store: &Store, book: &PriceBook, date: NaiveDate, filter: &Filter, tz: &Tz) -> Result<DayDetail> {
     use chrono::Timelike;
     let from = crate::analytics::start_of_day(tz, date);
@@ -743,8 +722,6 @@ pub fn day_detail<Tz: TimeZone>(store: &Store, book: &PriceBook, date: NaiveDate
         limit_peaks: peaks.into_iter().map(|((provider, window), (peak_pct, at_ms))| DayLimitPeak { provider, window, peak_pct, at_ms }).collect(),
     })
 }
-
-// ---------------------------------------------------------------- limit forecast
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

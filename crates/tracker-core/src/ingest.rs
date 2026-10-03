@@ -103,7 +103,6 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<Vec<S
     }
     .map_err(|e| e.to_string())?;
 
-    // The offset only covers complete lines; a size equal to `next_offset` means fully read.
     let mut tx = store.transaction().map_err(|e| e.to_string())?;
     tx.upsert_events(&out.events).map_err(|e| e.to_string())?;
     tx.insert_limits(&out.limits).map_err(|e| e.to_string())?;

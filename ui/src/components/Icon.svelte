@@ -1,5 +1,4 @@
 <script lang="ts" module>
-  // Line icons on a 24px grid, drawn to sit next to Inter at 1.6px stroke.
   const paths: Record<string, string> = {
     overview: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
     daily: 'M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM4 10h16M8 3v4M16 3v4',

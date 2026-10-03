@@ -42,7 +42,6 @@ pub fn find_codex(env: &Env, extra: &ExtraPaths, configured: Option<&Path>) -> O
     candidates(env, extra, configured).into_iter().find(|p| p.is_file())
 }
 
-/// Maps an `account/rateLimits/read` result to snapshots.
 pub fn parse_result(result: &Value, now_ms: i64) -> Vec<LimitSnapshot> {
     let mut snaps = Vec::new();
     let buckets: Vec<&Value> = match result.get("rateLimitsByLimitId").and_then(Value::as_object) {
@@ -75,7 +74,6 @@ pub fn parse_result(result: &Value, now_ms: i64) -> Vec<LimitSnapshot> {
     snaps
 }
 
-/// Starts `codex app-server`, reads the limits and stops it again.
 pub fn query(bin: &Path, timeout: Duration, now_ms: i64) -> Result<Vec<LimitSnapshot>, String> {
     let mut cmd = Command::new(bin);
     cmd.arg("app-server").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());

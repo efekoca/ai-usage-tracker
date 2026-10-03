@@ -1,5 +1,4 @@
-// Development-only IPC mock: lets the UI run in a plain browser (vite dev) with synthetic,
-// deterministic data. Never included in production builds (see main.ts / widget.ts).
+// Dev-only IPC mock for running the UI in a plain browser; never in production builds (see main.ts).
 import { mockIPC } from '@tauri-apps/api/mocks'
 import plansJson from '../../../config/plans.json'
 import type { DayPoint, Group, LimitView, Period, Report, Settings, Totals } from './api'
@@ -271,7 +270,6 @@ function mockHistory() {
   })
   const codexWeek = week.map((w, i) => ({ ...w, peak_pct: [12, 20, 9, 31, 26, 18, 44, 7][i], full: false, full_at_ms: null, full_minutes: null, plan: 'plus' }))
   const codexFive = five.slice(0, 12).map((w, i) => ({ ...w, peak_pct: [8, 22, 15, 41, 5, 13, 29, 18, 9, 36, 12, 7][i], full: false, full_at_ms: null, full_minutes: null, plan: 'plus', complete: i % 3 !== 0, in_progress: false }))
-  // this computer's use inside each window, roughly in step with the peak
   const withLocal = <T extends { peak_pct: number }>(list: T[], perPct: number) =>
     list.map((w, i) => ({ ...w, local: { requests: Math.round(w.peak_pct * 9 + i), tokens: Math.round(w.peak_pct * 2.1e6), cost_usd: w.peak_pct * perPct * (0.85 + ((i * 7) % 5) / 15), unpriced_requests: 0 } }))
   const stats = (w: number, c: number, f: number, fm: number, pc: number | null, ps: number | null) => ({ windows: w, complete: c, full: f, full_minutes: fm, peak_complete: pc, peak_seen: ps })

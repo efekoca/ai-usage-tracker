@@ -1,6 +1,3 @@
-//! Background ingestion: event-driven via file watching (ReadDirectoryChangesW through
-//! `notify`), debounced, with a slow periodic safety rescan. Idle cost is a blocked thread.
-
 use crate::settings::Settings;
 use crate::state::AppState;
 use notify::{RecursiveMode, Watcher};
@@ -19,9 +16,7 @@ const DEBOUNCE: Duration = Duration::from_millis(1500);
 const SAFETY_RESCAN: Duration = Duration::from_secs(300);
 
 pub enum Msg {
-    /// Something changed (or the user asked): rescan soon.
     Scan,
-    /// Sources/paths changed: rebuild watches, then scan.
     Reconfigure,
     Shutdown,
 }
@@ -37,7 +32,7 @@ impl Worker {
     }
 }
 
-/// Creates the channel now; the thread is started by [`start`] once state is managed.
+/// The thread starts later via [`start`], once `AppState` is managed.
 pub fn channel_pair() -> (Worker, std::sync::mpsc::Receiver<Msg>) {
     let (tx, rx) = channel();
     (Worker { tx }, rx)
@@ -61,7 +56,7 @@ fn run(app: AppHandle, db_path: PathBuf, rx: std::sync::mpsc::Receiver<Msg>, tx:
     };
     let mut watcher: Option<notify::RecommendedWatcher> = None;
     let mut watched: Vec<(PathBuf, bool)> = Vec::new();
-    let mut pending = true; // initial scan on startup
+    let mut pending = true;
     let mut rewatch = true;
 
     loop {
@@ -75,7 +70,6 @@ fn run(app: AppHandle, db_path: PathBuf, rx: std::sync::mpsc::Receiver<Msg>, tx:
             rewatch = false;
         }
         if pending {
-            // debounce bursts of file events into one scan
             let deadline = Instant::now() + DEBOUNCE;
             while let Some(left) = deadline.checked_duration_since(Instant::now()) {
                 match rx.recv_timeout(left) {
@@ -109,7 +103,7 @@ fn scan(app: &AppHandle, store: &mut Store) {
     let state = app.state::<AppState>();
     let settings = state.settings.read().unwrap().clone();
     if !settings.onboarded {
-        return; // nothing is read until the user has confirmed sources in onboarding
+        return; // nothing is read until the user confirms sources in onboarding
     }
     let enabled: HashSet<SourceId> = settings.enabled_sources.iter().copied().collect();
     let mut files = discovery::enumerate_files(&Env::from_system(), &settings.extra_paths, &enabled);
@@ -175,7 +169,6 @@ fn dirs_home() -> Option<String> {
     Env::from_system().home.map(|h| h.to_string_lossy().into_owned())
 }
 
-/// Directories to watch and whether to watch them recursively.
 fn watch_roots(env: &Env, s: &Settings) -> Vec<(PathBuf, bool)> {
     let on = |id| s.enabled_sources.contains(&id);
     let mut v = Vec::new();

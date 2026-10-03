@@ -1,6 +1,5 @@
 <script lang="ts">
-  // A plan-limit meter. Severity uses the reserved status colors and always ships with an
-  // icon + label; stale/reset readings are shown as unknown instead of a misleading bar.
+  // Stale or reset readings show as unknown rather than a misleading bar.
   import Icon from './Icon.svelte'
   import AccuracyBadge from './AccuracyBadge.svelte'
   import { fmtCompact, fmtDec, fmtDuration, fmtLimit, fmtTime, fmtWhen, limitShown, t, windowLabel } from '../lib/i18n.svelte'
@@ -43,8 +42,7 @@
     return () => clearInterval(id)
   })
 
-  // 'behind': the provider was used after this reading, so the current value is unknown (only
-  // that it is at least the reading). It is shown as the last reading, never as the current value.
+  // 'behind': used since this reading, so it is shown as the last reading, never the current value.
   const known = $derived(lstate === 'fresh' && used !== null)
   const behind = $derived(lstate === 'behind' && used !== null)
   const pct = $derived(known ? Math.max(0, Math.min(100, used as number)) : 0)

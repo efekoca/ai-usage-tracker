@@ -1,11 +1,9 @@
-//! The plan list (`config/plans.json`): list prices, the order of each provider's personal
-//! plans and the usage ratios the providers publish between them.
+//! Plan list (`config/plans.json`): list prices, ladder order and published usage ratios.
 
 use crate::model::Provider;
 use serde::Deserialize;
 use std::collections::HashMap;
 
-/// The plan file shipped with the app.
 pub const DEFAULT_PLANS_JSON: &str = include_str!("../../../config/plans.json");
 
 #[derive(Debug, Clone, Deserialize)]
@@ -48,13 +46,11 @@ impl PlansFile {
         self.plans(p).iter().find(|x| x.id == id)
     }
 
-    /// The next personal plan up the ladder.
     pub fn above(&self, p: Provider, plan: &PlanDef) -> Option<&PlanDef> {
         let rung = plan.ladder?;
         self.plans(p).iter().filter(|x| x.ladder.is_some_and(|l| l > rung)).min_by_key(|x| x.ladder)
     }
 
-    /// The next personal plan down the ladder.
     pub fn below(&self, p: Provider, plan: &PlanDef) -> Option<&PlanDef> {
         let rung = plan.ladder?;
         self.plans(p).iter().filter(|x| x.ladder.is_some_and(|l| l < rung)).max_by_key(|x| x.ladder)

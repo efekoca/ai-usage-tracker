@@ -1,7 +1,4 @@
 <script lang="ts">
-  // Limit windows on a time axis: each bar spans a window (start to reset) and is as tall as
-  // the highest reading in it. Filled windows use the critical status color (with a label in
-  // the legend and tooltip); windows not watched to their end are hatched ("at least").
   import { scaleLinear } from 'd3-scale'
   import type { WindowRecord } from '../../lib/api'
   import { fmtDate, fmtDateTime, fmtDuration, fmtPct, t } from '../../lib/i18n.svelte'

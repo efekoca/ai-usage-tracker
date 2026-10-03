@@ -1,5 +1,3 @@
-//! Limit history (windows from readings) and the plan advice built on it.
-
 use tracker_core::history::{add_local_usage, build_windows, limit_history, plan_advice, AdviceKind, Reading};
 use tracker_core::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool, UsageEvent};
 use tracker_core::pricing::PriceBook;

@@ -87,7 +87,6 @@ impl std::fmt::Display for UsageError {
     }
 }
 
-/// Maps a `get_usage` response to snapshots.
 pub fn parse_response(resp: &Value, now_ms: i64) -> Result<Vec<LimitSnapshot>, UsageError> {
     let available = resp.get("rate_limits_available").and_then(Value::as_bool).unwrap_or(false);
     if !available {

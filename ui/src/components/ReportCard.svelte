@@ -1,5 +1,4 @@
 <script lang="ts">
-  // Settings card: save a period's summary as a PDF, and optionally every Monday.
   import { open as openDialog, save } from '@tauri-apps/plugin-dialog'
   import { app, saveSettings } from '../lib/store.svelte'
   import { api } from '../lib/api'
@@ -81,7 +80,6 @@
 </section>
 
 <style>
-  /* same rhythm as the other settings cards */
   .group {
     margin-bottom: 16px;
     max-width: 900px;

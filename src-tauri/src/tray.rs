@@ -1,7 +1,3 @@
-//! The tray icon (the notification area at the right end of the taskbar). Optionally it shows
-//! a limit's percentage drawn into the icon; its tooltip lists every current limit. It follows
-//! new readings, settings and the passing of reset times.
-
 use crate::settings::Settings;
 use crate::state::AppState;
 use crate::windows::{handle_menu, show_main, system_is_turkish};
@@ -21,7 +17,7 @@ const REFRESH: Duration = Duration::from_secs(20);
 
 static DIRTY: AtomicBool = AtomicBool::new(true);
 
-/// What is on screen now, so the icon and menu are replaced only when they change.
+/// Last applied state, so the icon and menu are replaced only when they change.
 #[derive(Default, PartialEq, Clone)]
 struct Shown {
     icon: Option<(String, Level, u32)>,
@@ -31,7 +27,6 @@ struct Shown {
 
 static SHOWN: Mutex<Option<Shown>> = Mutex::new(None);
 
-/// Asks the tray to update at its next tick (new readings, settings, update status).
 pub fn refresh_soon() {
     DIRTY.store(true, Ordering::SeqCst);
 }
@@ -98,8 +93,6 @@ pub fn start(app: AppHandle) {
         .expect("spawn tray updater");
 }
 
-// ------------------------------------------------------------------ what to show
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Level {
     Normal,
@@ -107,7 +100,6 @@ pub enum Level {
     High,
 }
 
-/// One current limit as the tray shows it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Current {
     pub provider: Provider,
@@ -117,8 +109,7 @@ pub struct Current {
     pub behind: bool,
 }
 
-/// Current five-hour and weekly limits of the enabled providers (fullest reading per window).
-/// `None` when they cannot be read right now; the tray then keeps what it shows.
+/// `None` when limits cannot be read right now; the tray then keeps what it shows.
 fn current_limits(app: &AppHandle, s: &Settings) -> Option<Vec<Current>> {
     let state = app.state::<AppState>();
     let providers = crate::commands::enabled_providers(s);
@@ -143,7 +134,6 @@ fn current_limits(app: &AppHandle, s: &Settings) -> Option<Vec<Current>> {
     Some(out)
 }
 
-/// The limit the icon shows: the chosen one, or the fullest.
 pub fn pick<'a>(limits: &'a [Current], choice: &str) -> Option<&'a Current> {
     match choice.split_once(':') {
         Some((p, w)) => limits.iter().find(|c| c.provider.as_str() == p && c.window == w),
@@ -161,7 +151,6 @@ pub fn level(used: f64, warn_at: f64, high_at: f64) -> Level {
     }
 }
 
-/// The number drawn into the icon: used or left, as the user chose.
 pub fn shown_value(used: f64, remaining: bool) -> u32 {
     let v = if remaining { 100.0 - used } else { used };
     v.clamp(0.0, 100.0).round() as u32
@@ -242,13 +231,11 @@ fn update(app: &AppHandle) {
     *shown = Some(next);
 }
 
-/// The small-icon size Windows uses for the tray at the primary monitor's scale.
+/// Windows uses the small-icon size, scaled by the primary monitor, for the tray.
 fn icon_size(app: &AppHandle) -> u32 {
     let scale = app.primary_monitor().ok().flatten().map(|m| m.scale_factor()).unwrap_or(1.0);
     ((16.0 * scale).round() as u32).clamp(16, 64)
 }
-
-// ------------------------------------------------------------------ drawing
 
 /// 5×7 digits for one or two characters; rows top to bottom, bit 4 = left column.
 const DIGITS_5X7: [[u8; 7]; 10] = [
@@ -287,13 +274,11 @@ fn colors(level: Level) -> ([u8; 3], [u8; 3]) {
     }
 }
 
-/// RGBA pixels of a `size`×`size` rounded badge with `text` (digits only) centred in it,
-/// drawn with whole-pixel scaling so the digits stay sharp.
+/// Whole-pixel scaling keeps the digits sharp.
 pub fn badge(text: &str, size: u32, level: Level) -> Vec<u8> {
     let s = size as i64;
     let (bg, fg) = colors(level);
     let mut px = vec![0u8; (size * size * 4) as usize];
-    // rounded square, anti-aliased corners
     let r = (s as f64 * 0.22).max(2.0);
     for y in 0..s {
         for x in 0..s {

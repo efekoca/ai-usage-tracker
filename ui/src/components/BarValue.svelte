@@ -1,6 +1,5 @@
 <script lang="ts">
-  // A small bar with its value, for table cells. The value has a fixed width so the bars of
-  // every row line up; the cell itself stays a normal table cell.
+  // The value has a fixed width so the bars of every row line up.
   let { pct, text, tone = 'accent' }: { pct: number; text: string; tone?: 'accent' | 'series' | 'critical' | 'teal' } = $props()
 </script>
 

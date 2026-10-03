@@ -1,6 +1,5 @@
 <script lang="ts">
-  // Printable usage summary for one period (from/to in the URL). Rendered in a hidden window and
-  // saved as a PDF by the app; laid out for A4 portrait at the content width of the page.
+  // Rendered in a hidden window and saved as a PDF by the app.
   import { onMount, tick } from 'svelte'
   import { invoke } from '@tauri-apps/api/core'
   import { applyAppearance, toolColor } from './lib/store.svelte'
@@ -50,7 +49,6 @@
   const projectLabel = (name: string, hidden: boolean, id: string | number | null) =>
     hideAll || hidden ? `${t('projects.hidden')}${id !== null ? ` #${id}` : ''}` : name || t('projects.noProject')
 
-  // plan value over the report's own days
   const days = $derived(r ? r.days_in_range : 7)
   function value(p: Provider) {
     const planId = s?.plans[p]
@@ -257,8 +255,7 @@
 </main>
 
 <style>
-  /* the app shell pins html/body/#app to the window and hides overflow; a report must flow
-     over as many pages as it needs */
+  /* undo the app shell's fixed-height, overflow-hidden root so the report flows across pages */
   :global(html),
   :global(body),
   :global(#app) {

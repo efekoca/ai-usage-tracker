@@ -1,6 +1,3 @@
-//! AI Usage Tracker desktop shell: wires tracker-core to a tray app with a dashboard window
-//! and an always-on-top widget.
-
 mod capture;
 mod commands;
 mod fonts;
@@ -21,7 +18,7 @@ use tauri::{Manager, RunEvent};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 use tracker_core::store::Store;
 
-/// Command-line modes that must not start the GUI (or the single-instance check).
+/// Runs before the GUI so these modes never start it or hit the single-instance check.
 pub fn cli_mode() -> Option<i32> {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--statusline") {
@@ -36,11 +33,8 @@ pub fn cli_mode() -> Option<i32> {
     None
 }
 
-/// A process started from inside a packaged (MSIX) app, e.g. by the Claude desktop app, can
-/// inherit that package's file-system virtualization even without a package identity: its
-/// writes to %LOCALAPPDATA% land in `Packages\<package>\LocalCache\Local`, a private copy the
-/// normally started app never sees. Such a start hands over to Explorer, which starts this app
-/// in the user's normal context, and exits.
+/// A start from inside an MSIX app (e.g. the Claude desktop app) can inherit its file-system
+/// virtualization, so %LOCALAPPDATA% writes land in a private copy. Relaunch via Explorer instead.
 #[cfg(windows)]
 fn relaunched_outside_package() -> bool {
     let Some(data_dir) = tracker_core::store::default_data_dir() else { return false };
@@ -64,8 +58,6 @@ fn relaunched_outside_package() -> bool {
     std::process::Command::new(explorer).arg(exe).spawn().is_ok()
 }
 
-/// Writes a probe file into the data folder and looks for it under every package's
-/// `LocalCache\Local`: finding it there means writes are being virtualized.
 #[cfg(windows)]
 fn writes_are_redirected(data_dir: &std::path::Path) -> bool {
     let (Some(folder), Some(local)) = (data_dir.file_name(), data_dir.parent()) else { return false };

@@ -75,7 +75,6 @@ pub fn save_state(data_dir: &Path, st: &CaptureState) -> std::io::Result<()> {
     write_atomic(&p, &serde_json::to_string_pretty(st).unwrap_or_default())
 }
 
-/// Claude Code's user settings file for a config root (`CLAUDE_CONFIG_DIR` or `~/.claude`).
 pub fn settings_path(config_root: &Path) -> PathBuf {
     config_root.join("settings.json")
 }
@@ -122,7 +121,6 @@ fn backup(path: &Path, data_dir: &Path, now_ms: i64) -> std::io::Result<PathBuf>
     Ok(dest)
 }
 
-/// The `statusLine` value we install.
 pub fn statusline_value(command: &str) -> Value {
     serde_json::json!({ "type": "command", "command": command, "padding": 0 })
 }

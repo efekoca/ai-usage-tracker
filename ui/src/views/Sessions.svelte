@@ -1,6 +1,4 @@
 <script lang="ts">
-  // Sessions in the selected period: summary tiles and a sortable, searchable table whose rows
-  // open into a per-model breakdown. Follows the toolbar's period and filters.
   import { app, toolColor } from '../lib/store.svelte'
   import { api, type SessionRow, type Sessions } from '../lib/api'
   import { clientLabel, fmtCompact, fmtDateTime, fmtInt, fmtSpan, fmtMoney, fmtPct, t, toolLabel } from '../lib/i18n.svelte'

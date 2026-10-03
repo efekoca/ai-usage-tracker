@@ -1,6 +1,4 @@
-//! Live capture runtime: installs/reverts the opt-in methods and runs their background parts
-//! (Codex and Claude limit pollers, loopback OTLP receiver). The status-line bridge itself runs as a
-//! separate short-lived process (`ai-usage-tracker.exe --statusline`, see `statusline_main`).
+//! The status-line bridge runs as a separate short-lived process (`--statusline`, see `statusline_main`).
 
 use crate::settings::Settings;
 use crate::state::AppState;
@@ -50,15 +48,12 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
-/// The Claude Code user settings file this app edits (first configured config root).
 pub fn claude_settings_file(s: &Settings) -> PathBuf {
     let env = Env::from_system();
     let roots = discovery::claude_config_roots(&env, &s.extra_paths);
     let root = roots.iter().find(|r| r.is_dir()).cloned().or_else(|| roots.first().cloned()).unwrap_or_else(|| PathBuf::from(".claude"));
     cs::settings_path(&root)
 }
-
-// ------------------------------------------------------------------ status line command
 
 #[cfg(windows)]
 fn short_path(p: &Path) -> Option<String> {
@@ -78,7 +73,7 @@ fn short_path(_: &Path) -> Option<String> {
     None
 }
 
-/// Git Bash, which Claude Code prefers for status-line commands on Windows.
+/// Claude Code prefers Git Bash for status-line commands on Windows.
 pub fn git_bash() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("CLAUDE_CODE_GIT_BASH_PATH")
         && Path::new(&p).is_file()
@@ -96,7 +91,7 @@ pub fn git_bash() -> Option<PathBuf> {
     c.into_iter().find(|p| p.is_file())
 }
 
-/// A command line that runs this executable in bridge mode under both Git Bash and PowerShell.
+/// Must work under both Git Bash and PowerShell, whichever Claude Code uses.
 pub fn statusline_command(exe: &Path) -> String {
     let fwd = |s: &str| s.replace('\\', "/");
     if let Some(short) = short_path(exe).filter(|s| !s.contains(' ')) {
@@ -106,10 +101,7 @@ pub fn statusline_command(exe: &Path) -> String {
     if git_bash().is_some() { format!("\"{full}\" --statusline") } else { format!("& \"{full}\" --statusline") }
 }
 
-// ------------------------------------------------------------------ bridge process mode
-
-/// Entry point for `--statusline`: record the limit windows, then print either the user's
-/// previous status line (run with the same input) or a short default line.
+/// Run by Claude Code as its status-line command; chains to the user's previous one if any.
 pub fn statusline_main() -> i32 {
     let Some(data_dir) = tracker_core::store::default_data_dir() else { return 0 };
     let mut input = Vec::new();
@@ -175,8 +167,7 @@ fn run_chained(cmd: &str, input: &[u8]) -> Option<String> {
     reader.join().ok()
 }
 
-/// Entry point for `--revert-capture` (used by the uninstaller): undo every change made
-/// outside this app's folder and switch the capture options off.
+/// `--revert-capture`, run by the uninstaller: undoes every change made outside the app's folder.
 pub fn revert_all_main() -> i32 {
     let Some(data_dir) = tracker_core::store::default_data_dir() else { return 0 };
     let mut state = cs::load_state(&data_dir);
@@ -197,8 +188,6 @@ pub fn revert_all_main() -> i32 {
     }
     0
 }
-
-// ------------------------------------------------------------------ in-app install/revert
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CaptureStatus {
@@ -259,8 +248,7 @@ fn claude_binary(s: &Settings) -> Option<PathBuf> {
     claude_usage::find_claude(&Env::from_system(), configured.as_deref())
 }
 
-/// One Claude limit read: an empty folder of this app's own as the working directory, so no
-/// project settings, files or trust prompts are involved.
+/// Runs in an empty folder of the app's own so no project settings, files or trust prompts apply.
 fn read_claude(state: &AppState, s: &Settings, bin: &Path) -> Result<Vec<tracker_core::model::LimitSnapshot>, String> {
     let work = state.data_dir.join("claude-usage");
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
@@ -287,7 +275,6 @@ fn outcome_text(o: RevertOutcome) -> &'static str {
     }
 }
 
-/// Turns one capture method on or off. Returns a short machine-readable note for the UI.
 pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
     let state = app.state::<AppState>();
     let data_dir = state.data_dir.clone();
@@ -313,7 +300,7 @@ pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
             let bin = claude_binary(&settings).ok_or("claude_not_found")?;
             match read_claude(&state, &settings, &bin) {
                 Ok(snaps) => store_limits(&state.db_path, &snaps)?,
-                // signed in with plan limits, just asked too soon: the next cycle reads them
+                // signed in, just asked too soon: the next cycle reads the limits
                 Err(e) if e == "claude_throttled" => {}
                 Err(e) => return Err(e),
             }
@@ -396,8 +383,6 @@ fn store_limits(db: &Path, snaps: &[tracker_core::model::LimitSnapshot]) -> Resu
     tx.commit().map_err(|e| e.to_string())
 }
 
-// ------------------------------------------------------------------ background parts
-
 pub fn start_receiver(app: &AppHandle, port: u16) -> std::io::Result<()> {
     let state = app.state::<AppState>();
     let mut slot = state.capture.receiver.lock().unwrap();
@@ -427,13 +412,11 @@ pub fn stop_receiver(app: &AppHandle) {
     drop(r);
 }
 
-/// Background reads start only after the first-run screen was confirmed, and only for a
-/// provider whose sources the user kept enabled.
+/// No background reads before onboarding is confirmed, nor for providers the user disabled.
 fn reads_allowed(s: &Settings, sources: &[SourceId]) -> bool {
     s.onboarded && sources.iter().any(|id| s.enabled_sources.contains(id))
 }
 
-/// Runs both limit reads now (e.g. right after the first-run screen was confirmed).
 pub fn wake_readers(app: &AppHandle) {
     wake_claude(app);
     wake_codex(app);
@@ -445,7 +428,7 @@ fn wake_claude(app: &AppHandle) {
     }
 }
 
-/// Newest Claude usage event in the archive (logs of Claude Code and Cowork).
+/// `tool = 'claude_code'` also covers Cowork logs.
 fn latest_claude_event_ms(state: &AppState) -> Option<i64> {
     let store = state.store.lock().ok()?;
     store
@@ -455,10 +438,8 @@ fn latest_claude_event_ms(state: &AppState) -> Option<i64> {
         .flatten()
 }
 
-/// Claude limit poller. Claude's usage service limits how often it is asked, so reads are at
-/// least five minutes apart: every five minutes while Claude is in use, every fifteen when
-/// idle (chat use on the web or in the desktop app leaves no local log and is only seen this
-/// way). A throttled answer keeps the last reading; real failures back off up to 30 minutes.
+/// Claude's usage service throttles callers, so reads stay >= 5 min apart. Idle reads still run
+/// every 15 min because web and desktop chat use leaves no local log.
 fn start_claude_poller(app: &AppHandle) {
     let (tx, rx) = channel::<()>();
     *app.state::<AppState>().capture.claude_wake.lock().unwrap() = Some(tx);
@@ -519,7 +500,7 @@ fn start_claude_poller(app: &AppHandle) {
                     drop(c);
                     let _ = app.emit("data-changed", ());
                 }
-                // asked too soon: the last reading stays; try again next cycle, no error shown
+                // throttled: keep the last reading, no error shown
                 Err(e) if e == "claude_throttled" => {}
                 Err(e) => {
                     failures = failures.saturating_add(1);
@@ -540,7 +521,6 @@ fn wake_codex(app: &AppHandle) {
     }
 }
 
-/// Starts whatever the saved settings enable. Called once at startup.
 pub fn start(app: &AppHandle) {
     let s = app.state::<AppState>().settings.read().unwrap().clone();
     if s.capture.otel
@@ -553,7 +533,6 @@ pub fn start(app: &AppHandle) {
     *app.state::<AppState>().capture.codex_wake.lock().unwrap() = Some(tx);
     let app = app.clone();
     let _ = std::thread::Builder::new().name("codex-limits".into()).spawn(move || {
-        // first poll shortly after startup, then at the configured interval
         let mut wait = Duration::from_secs(20);
         loop {
             match rx.recv_timeout(wait) {
@@ -571,7 +550,6 @@ pub fn start(app: &AppHandle) {
             }
             let Some(bin) = codex_binary(&s) else {
                 state.capture.codex.lock().unwrap().last_error = Some("codex_not_found".into());
-                // nothing to run; look again much later
                 wait = Duration::from_secs(30 * 60);
                 continue;
             };

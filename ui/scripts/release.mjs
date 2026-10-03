@@ -1,11 +1,5 @@
-// Release build.
-// 1. No build-machine paths in the binary: Rust embeds source paths (panic locations), which
-//    would carry the builder's user name. They are remapped to neutral prefixes computed here,
-//    so no machine-specific path is ever written into the repository.
-// 2. Signed updates: when the update signing key exists (TAURI_SIGNING_PRIVATE_KEY, or the file
-//    at TAURI_SIGNING_PRIVATE_KEY_PATH, default ~/.tauri/ai-usage-tracker.key) the installer is
-//    signed and, when config/updates.json names a release location, a latest.json is written
-//    next to it. Both go to target/release/bundle/release, ready to attach to a release.
+// Rust embeds source paths (panic locations) that would carry the builder's user name, so they
+// are remapped to neutral prefixes computed here rather than stored in the repository.
 import { spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
@@ -36,7 +30,7 @@ if (signing) {
   console.log('No update signing key found: building without update artifacts.')
 }
 
-// run from the repository root, where the Tauri CLI finds src-tauri
+// the Tauri CLI finds src-tauri from the repository root
 const r = spawnSync('npx', args, { cwd: repo, env, stdio: 'inherit', shell: true })
 if (r.status !== 0) process.exit(r.status ?? 1)
 

@@ -1,6 +1,3 @@
-// Turkish / English strings and locale-aware formatting. The language follows the system
-// unless the user picks one in Settings.
-
 type Dict = Record<string, string>
 
 const tr: Dict = {
@@ -1642,28 +1639,24 @@ export function fmtCompact(n: number): string {
   return new Intl.NumberFormat(locale(), { notation: 'compact', maximumFractionDigits: 1 }).format(n)
 }
 
-/** Percentage with the locale's sign placement (tr: "%46", en: "46%"); `n` is 0–100. */
+/** `n` is a percent (0–100), not a fraction; the locale places the sign (tr "%46"). */
 export function fmtPct(n: number, digits = 0): string {
   return new Intl.NumberFormat(locale(), { style: 'percent', maximumFractionDigits: digits, minimumFractionDigits: digits }).format(n / 100)
 }
 
 export type LimitMode = 'used' | 'remaining'
-/** The percentage shown for a limit: used, or what is left of it (always 0–100). */
 export function limitShown(used: number, mode: LimitMode): number {
   const u = Math.max(0, Math.min(100, used))
   return mode === 'remaining' ? 100 - u : u
 }
-/** "%15 kullanıldı" / "%85 kaldı" — the number always says which way it counts. */
 export function fmtLimit(used: number, mode: LimitMode): string {
   return t(`limits.val.${mode}`, { pct: fmtPct(limitShown(used, mode)) })
 }
 
-/** Plain decimal number without a unit. */
 export function fmtDec(n: number, digits = 0): string {
   return new Intl.NumberFormat(locale(), { maximumFractionDigits: digits, minimumFractionDigits: digits }).format(n)
 }
 
-/** USD amount converted with the user's manual rate. */
 export function fmtMoney(usd: number, opts: { compact?: boolean } = {}): string {
   const v = usd * (i18n.currency === 'USD' ? 1 : i18n.fx)
   const digits = Math.abs(v) >= 100 ? 0 : Math.abs(v) >= 1 ? 2 : Math.abs(v) >= 0.01 ? 2 : 4
@@ -1693,12 +1686,10 @@ export function fmtTime(ms: number): string {
   return new Intl.DateTimeFormat(locale(), { hour: '2-digit', minute: '2-digit', weekday: 'short' }).format(new Date(ms))
 }
 
-/** Day, month and time, e.g. "2 Eki 14:05". */
 export function fmtDateTime(ms: number): string {
   return new Intl.DateTimeFormat(locale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(ms))
 }
 
-/** A moment soon: the time alone when it is today, otherwise with the weekday. */
 export function fmtWhen(ms: number): string {
   const d = new Date(ms)
   const today = new Date()
@@ -1706,7 +1697,6 @@ export function fmtWhen(ms: number): string {
   return sameDay ? new Intl.DateTimeFormat(locale(), { hour: '2-digit', minute: '2-digit' }).format(d) : fmtTime(ms)
 }
 
-/** Clock time of a moment, e.g. "14:05". */
 export function fmtClock(ms: number): string {
   return new Intl.DateTimeFormat(locale(), { hour: '2-digit', minute: '2-digit' }).format(new Date(ms))
 }

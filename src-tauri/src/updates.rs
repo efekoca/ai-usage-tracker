@@ -1,9 +1,6 @@
-//! Signed updates from the project's release page. The release location is fixed at build
-//! time in `config/updates.json` (`github_repo` as `owner/name`, or a full `endpoint` URL);
-//! without one nothing is ever requested. A check downloads only the release's `latest.json`
-//! (version, notes, installer URL and signature); nothing about the user or their usage is
-//! sent. An installer is used only if its signature matches the public key in
-//! `tauri.conf.json`, and only when the user asks for it.
+//! The release location is fixed at build time in `config/updates.json`; without one nothing is
+//! ever requested. A check downloads only `latest.json` and sends nothing about the user. An
+//! installer runs only when the user asks and its signature matches the key in `tauri.conf.json`.
 
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
@@ -26,7 +23,6 @@ fn file() -> UpdatesFile {
     serde_json::from_str(UPDATES_JSON).unwrap_or_default()
 }
 
-/// `owner/name` with GitHub's allowed characters.
 fn valid_repo(r: &str) -> bool {
     let mut parts = r.split('/');
     let ok = |s: Option<&str>| {
@@ -35,7 +31,6 @@ fn valid_repo(r: &str) -> bool {
     ok(parts.next()) && ok(parts.next()) && parts.next().is_none()
 }
 
-/// The URL of the release manifest, if this build names a release location.
 pub fn endpoint() -> Option<String> {
     let f = file();
     let e = f.endpoint.trim();
@@ -94,7 +89,6 @@ fn updater(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
     app.updater_builder().endpoints(vec![url]).map_err(|e| e.to_string())?.timeout(Duration::from_secs(30)).build().map_err(|e| e.to_string())
 }
 
-/// Looks for a newer release. Returns the status after the check.
 pub async fn check(app: &AppHandle) -> Result<UpdateStatus, String> {
     let u = updater(app)?;
     set(app, |s| {
@@ -129,8 +123,6 @@ pub async fn check(app: &AppHandle) -> Result<UpdateStatus, String> {
     }
 }
 
-/// Downloads the newer release, verifies its signature and runs its installer, which closes
-/// this app and starts the new version.
 pub async fn install(app: &AppHandle) -> Result<(), String> {
     let u = updater(app)?;
     let update = u.check().await.map_err(|e| e.to_string())?.ok_or("no_update")?;
@@ -171,7 +163,6 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Checks a minute after start and then every few hours, while the setting is on.
 pub fn start(app: AppHandle) {
     if endpoint().is_none() {
         return;

@@ -1,5 +1,4 @@
 <script lang="ts">
-  // Weekday × hour intensity (local time), single-hue sequential ramp.
   import { fmtHour, weekdayNames } from '../../lib/i18n.svelte'
   let { grid, format, ariaLabel }: { grid: number[][]; format: (v: number) => string; ariaLabel: string } = $props()
 

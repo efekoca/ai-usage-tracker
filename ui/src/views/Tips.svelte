@@ -1,6 +1,4 @@
 <script lang="ts">
-  // Tips: findings from the user's own records, each with the figures it rests on, what helps
-  // and how it was calculated; plus the plan recommendation per provider.
   import { onMount } from 'svelte'
   import { api, type LimitHistoryView, type PlansFile, type Tip, type Tips } from '../lib/api'
   import { app } from '../lib/store.svelte'

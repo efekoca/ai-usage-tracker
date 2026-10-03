@@ -1,5 +1,4 @@
 <script lang="ts">
-  // Opt-in live capture switches with what each one changes, its live status and errors.
   import { onMount } from 'svelte'
   import { app } from '../lib/store.svelte'
   import { api, type CaptureStatus } from '../lib/api'

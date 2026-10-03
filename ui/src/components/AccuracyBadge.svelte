@@ -1,6 +1,4 @@
 <script lang="ts">
-  // "Exact / Estimated / Live" next to a figure: always written out (an icon alone says
-  // nothing), with the explanation as a tooltip.
   import Icon from './Icon.svelte'
   import { t } from '../lib/i18n.svelte'
   import type { Accuracy } from '../lib/api'

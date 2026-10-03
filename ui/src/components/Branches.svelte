@@ -1,5 +1,4 @@
 <script lang="ts">
-  // Projects page: usage per project and git branch.
   import { api, type Branches } from '../lib/api'
   import { app, setFilter, toolColor } from '../lib/store.svelte'
   import { fmtCompact, fmtDateTime, fmtInt, fmtMoney, fmtPct, t, toolLabel } from '../lib/i18n.svelte'
@@ -160,7 +159,6 @@
     text-align: right;
     font-variant-numeric: tabular-nums;
   }
-  /* narrow windows: tighter cells, secondary columns hidden */
   @media (max-width: 1100px) {
     th,
     td {

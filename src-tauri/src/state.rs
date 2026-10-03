@@ -1,5 +1,3 @@
-//! Process-wide state shared by commands, the worker thread and windows.
-
 use crate::capture::CaptureRuntime;
 use crate::settings::Settings;
 use crate::worker::Worker;
@@ -38,10 +36,8 @@ pub struct AppState {
     pub started_hidden: bool,
     /// Signalled by the hidden report page when it is ready to print.
     pub report_ready: Mutex<Option<std::sync::mpsc::Sender<()>>>,
-    /// The PDF saved last, which the UI may ask to open.
     pub last_report: Mutex<Option<PathBuf>>,
     pub updates: Mutex<crate::updates::UpdateStatus>,
-    /// Why the widget shortcut could not be registered, if it could not.
     pub hotkey_error: Mutex<Option<String>>,
 }
 
@@ -51,7 +47,6 @@ impl AppState {
     }
 }
 
-/// Loads the user's pricing override when present and valid, otherwise the bundled file.
 pub fn load_price_book(data_dir: &std::path::Path) -> (PriceBook, String) {
     let p = data_dir.join("pricing.json");
     if let Ok(s) = std::fs::read_to_string(&p) {

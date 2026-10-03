@@ -1,6 +1,4 @@
 <script lang="ts">
-  // One provider's plan recommendation: the verdict, the measured facts behind it and the
-  // published ratio it relies on. Nothing here is estimated beyond what the text says.
   import type { PlanAdvice, PlansFile } from '../lib/api'
   import { api } from '../lib/api'
   import { app } from '../lib/store.svelte'

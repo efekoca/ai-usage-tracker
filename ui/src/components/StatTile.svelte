@@ -1,5 +1,4 @@
 <script lang="ts">
-  // Stat tile: label · value · optional signed delta vs the previous period.
   import Icon from './Icon.svelte'
   import { fmtDec, fmtPct, t } from '../lib/i18n.svelte'
   import type { Snippet } from 'svelte'

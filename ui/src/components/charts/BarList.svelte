@@ -1,5 +1,4 @@
 <script lang="ts">
-  // Ranked horizontal bars (single hue): label · bar · value. Long tails fold into "Other".
   import { t } from '../../lib/i18n.svelte'
   type Item = { key: string; label: string; value: number; sub?: string; color?: string; muted?: boolean }
   let {

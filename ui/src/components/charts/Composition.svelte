@@ -1,5 +1,4 @@
 <script lang="ts">
-  // One 100% bar of token categories (fixed categorical slots, 2px surface gaps) + legend table.
   import { fmtCompact, fmtPct, t } from '../../lib/i18n.svelte'
   import type { Tokens } from '../../lib/api'
   let { tokens }: { tokens: Tokens } = $props()

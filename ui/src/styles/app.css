@@ -1,6 +1,4 @@
-/* Design tokens. Light/dark follow the OS unless the user picks one ([data-theme]). Chart
-   colors are the validated reference palette (categorical slots in fixed order, a single-hue
-   sequential ramp and a reserved status set). */
+/* Chart colors are a validated palette: fixed categorical slots, one-hue ramp, reserved status set. */
 
 :root,
 [data-theme='light'] {
@@ -26,10 +24,10 @@
   --grid: #e1e0d9;
   --axis: #c3c2b7;
 
-  --s1: #2a78d6; /* blue  */
-  --s2: #eb6834; /* orange */
-  --s3: #1baf7a; /* aqua  */
-  --s4: #eda100; /* yellow */
+  --s1: #2a78d6;
+  --s2: #eb6834;
+  --s3: #1baf7a;
+  --s4: #eda100;
   --s5: #e87ba4;
   --s6: #008300;
   --s7: #4a3aa7;
@@ -226,8 +224,6 @@ button {
   white-space: nowrap;
   border: 0;
 }
-
-/* ---------- shared controls ---------- */
 
 .card {
   background: var(--surface);
