@@ -18,7 +18,6 @@ tracker-core = { path = "../crates/tracker-core" }
 tauri = { version = "2.12.1", features = ["tray-icon", "image-png"] }
 tauri-plugin-log = "2"
 tauri-plugin-single-instance = "2"
-tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-updater = "2"
