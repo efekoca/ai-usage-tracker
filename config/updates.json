@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "github_repo": "",
+  "github_repo": "efekoca/ai-usage-tracker",
   "endpoint": "",
   "check_every_hours": 6
 }
