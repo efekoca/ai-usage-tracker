@@ -11,6 +11,11 @@
   let ws = $state<WidgetSettings>(structuredClone($state.snapshot(app.settings!.widget)) as WidgetSettings)
   let data = $state<WidgetData | null>(null)
   let backdrop: 'light' | 'dark' | 'photo' = $state('photo')
+  // a wide widget (single line, large scale) is shrunk to fit the preview instead of being cut off
+  let stageW = $state(0)
+  let natW = $state(0)
+  let natH = $state(0)
+  const fit = $derived(natW && stageW ? Math.min(1, (stageW - 56) / natW) : 1)
 
   let fonts = $state<string[]>([])
   let fontQuery = $state('')
@@ -122,8 +127,12 @@
       <span class="spacer"></span>
       <Segmented label={t('ws.backdrop')} bind:value={backdrop} options={[{ value: 'photo', label: t('ws.backdrop.photo') }, { value: 'light', label: t('settings.theme.light') }, { value: 'dark', label: t('settings.theme.dark') }]} />
     </div>
-    <div class="stage {backdrop}" data-theme={ws.theme === 'system' ? undefined : ws.theme}>
-      <WidgetView {data} {ws} mode={app.settings?.limit_display ?? 'used'} />
+    <div class="stage {backdrop}" data-theme={ws.theme === 'system' ? undefined : ws.theme} bind:clientWidth={stageW}>
+      <div class="fit" style:width={natW ? `${natW * fit}px` : undefined} style:height={natH ? `${natH * fit}px` : undefined}>
+        <div class="natural" bind:offsetWidth={natW} bind:offsetHeight={natH} style:transform="scale({fit})">
+          <WidgetView {data} {ws} mode={app.settings?.limit_display ?? 'used'} />
+        </div>
+      </div>
     </div>
     <p class="subtle small">{t('ws.preview.help')}</p>
   </section>
@@ -335,6 +344,10 @@
     padding: 28px;
     overflow: hidden;
     border: 0.5px solid var(--hairline);
+  }
+  .natural {
+    width: max-content;
+    transform-origin: top left;
   }
   .stage.light {
     background: #eef0f3;
