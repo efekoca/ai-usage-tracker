@@ -76,13 +76,13 @@
             {#if busy === kind}
               <span class="spin" aria-hidden="true"></span> {t('cap.working')}
             {:else if kind === 'claude'}
-              {#if !st.claude_candidates_found}<Icon name="warning" size={13} /> {t('cap.msg.claude_not_found')}
-              {:else if on && st.claude.last_error}<Icon name="warning" size={13} /> {explain('claude', st.claude.last_error, false)}
+              {#if !st.claude_candidates_found}<span class="muted">{t('cap.claude.notInstalled')}</span>
+              {:else if on && st.claude.last_error}<Icon name="warning" size={13} /> <span class="msg">{explain('claude', st.claude.last_error, false)}</span>
               {:else if on}<Icon name="check" size={13} /> {t('cap.codex.ok', { t: ago(st.claude.last_ok_ms) })}
               {:else}{t('common.off')}{/if}
             {:else if kind === 'codex'}
-              {#if !st.codex_candidates_found}<Icon name="warning" size={13} /> {t('cap.msg.codex_not_found')}
-              {:else if on && st.codex.last_error}<Icon name="warning" size={13} /> {explain('codex', st.codex.last_error, false)}
+              {#if !st.codex_candidates_found}<span class="muted">{t('cap.codex.notInstalled')}</span>
+              {:else if on && st.codex.last_error}<Icon name="warning" size={13} /> <span class="msg">{explain('codex', st.codex.last_error, false)}</span>
               {:else if on}<Icon name="check" size={13} /> {t('cap.codex.ok', { t: ago(st.codex.last_ok_ms) })}
               {:else}{t('common.off')}{/if}
             {:else if kind === 'statusline'}
@@ -153,6 +153,10 @@
     align-items: center;
     gap: 5px;
     flex-wrap: wrap;
+  }
+  .msg {
+    flex: 1 1 0;
+    min-width: 0;
   }
   code {
     font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;

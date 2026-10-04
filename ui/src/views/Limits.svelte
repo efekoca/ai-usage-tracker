@@ -9,6 +9,7 @@
   import Segmented from '../components/Segmented.svelte'
   import Select from '../components/Select.svelte'
   import LimitHistory from '../components/LimitHistory.svelte'
+  import ClaudeLimitNotice from '../components/ClaudeLimitNotice.svelte'
 
   let plans: PlansFile | null = $state(null)
   onMount(async () => {
@@ -104,6 +105,8 @@
     <p class="subtle small">{plans.notes[i18n.lang]} {plans.providers.anthropic.shared_pool_note?.[i18n.lang] ?? ''}</p>
   </section>
 {/if}
+
+<ClaudeLimitNotice />
 
 {#if app.limits.length === 0}
   <div class="banner"><Icon name="info" size={16} />{t('limits.none')}</div>

@@ -3,6 +3,10 @@ import { mockIPC } from '@tauri-apps/api/mocks'
 import plansJson from '../../../config/plans.json'
 import type { DayPoint, Group, LimitView, Period, Report, Settings, Totals } from './api'
 
+const scenario = new URLSearchParams(location.search)
+const claudeMode = scenario.get('claude')
+const codexMissing = scenario.get('codex') === 'missing'
+
 let seed = 7
 const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
 
@@ -123,6 +127,11 @@ function report(p: Period): Report {
 }
 
 function limits(): LimitView[] {
+  const all = allLimits()
+  return claudeMode ? all.filter((l) => l.provider !== 'anthropic') : all
+}
+
+function allLimits(): LimitView[] {
   const now = Date.now()
   const share = (p: string, s: number, used: number | null) => ({ project_id: projects.indexOf(p) + 1, name: p, hidden: false, totals: totals(Math.round(s * 5e7), s * 30), share: s, estimated_pct: used === null ? null : used * s })
   return [
@@ -366,7 +375,7 @@ export function installMock() {
           return { today: per(18_400_000, 12.84), days7: per(96_000_000, 71.3), month1: per(402_000_000, 288.1), limits: limits().map((l) => ({ provider: l.provider, window: l.window, used_pct: l.used_pct, state: l.state, accuracy: l.accuracy, resets_at: l.resets_at, observed_ms: l.observed_ms })), providers: ['anthropic', 'openai'], updated_ms: Date.now() - 60000 }
         }
         case 'capture_status':
-          return { claude_poll: settings.capture.claude_poll, claude: { binary: 'C:/claude.exe', last_ok_ms: Date.now() - 40000, last_error: null }, claude_candidates_found: true, codex_poll: settings.capture.codex_poll, codex: { binary: 'C:/codex.exe', last_ok_ms: Date.now() - 120000, last_error: null }, codex_candidates_found: true, statusline: settings.capture.statusline, statusline_file: 'C:\\Users\\you\\.claude\\settings.json', statusline_chained: false, statusline_last_ms: Date.now() - 30000, otel: settings.capture.otel, otel_port: 43180, otel_listening: settings.capture.otel, otel_events: 42, otel_last_ms: Date.now() - 5000, otel_error: null, settings_file: 'C:\\Users\\you\\.claude\\settings.json' }
+          return { claude_poll: settings.capture.claude_poll, claude: { binary: claudeMode === 'missing' ? null : 'C:/claude.exe', last_ok_ms: claudeMode ? null : Date.now() - 40000, last_error: claudeMode === 'nologin' ? 'claude_no_plan_limits' : claudeMode === 'missing' ? 'claude_not_found' : null }, claude_candidates_found: claudeMode !== 'missing', codex_poll: settings.capture.codex_poll, codex: { binary: codexMissing ? null : 'C:/codex.exe', last_ok_ms: codexMissing ? null : Date.now() - 120000, last_error: codexMissing ? 'codex_not_found' : null }, codex_candidates_found: !codexMissing, statusline: settings.capture.statusline, statusline_file: 'C:\\Users\\you\\.claude\\settings.json', statusline_chained: false, statusline_last_ms: Date.now() - 30000, otel: settings.capture.otel, otel_port: 43180, otel_listening: settings.capture.otel, otel_events: 42, otel_last_ms: Date.now() - 5000, otel_error: null, settings_file: 'C:\\Users\\you\\.claude\\settings.json' }
         case 'set_capture': {
           const k = a.kind as 'claude' | 'codex' | 'statusline' | 'otel'
           if (k === 'codex') settings.capture.codex_poll = !!a.enabled

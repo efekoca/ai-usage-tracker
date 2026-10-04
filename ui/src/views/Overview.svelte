@@ -11,6 +11,7 @@
   import AccuracyBadge from '../components/AccuracyBadge.svelte'
   import Icon from '../components/Icon.svelte'
   import PlanValue from '../components/PlanValue.svelte'
+  import ClaudeLimitNotice from '../components/ClaudeLimitNotice.svelte'
 
   let metric: 'tokens' | 'cost' = $state(app.settings?.primary_metric ?? 'tokens')
   const r = $derived(app.report)
@@ -97,6 +98,7 @@
         <span class="spacer"></span>
         <button class="btn ghost" aria-label={t('overview.openLimits')} title={t('overview.openLimits')} onclick={() => (app.view = 'limits')}><Icon name="chevron" size={14} /></button>
       </div>
+      <ClaudeLimitNotice />
       {#if headline.length === 0}
         <p class="muted small">{t('limits.none')}</p>
       {:else}
