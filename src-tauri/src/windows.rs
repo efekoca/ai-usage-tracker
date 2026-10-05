@@ -99,6 +99,8 @@ fn build_main(app: &AppHandle) {
         .inner_size(w, h)
         .min_inner_size(min_w, min_h)
         .center()
+        // macOS otherwise spends the first click on an inactive window just activating it
+        .accept_first_mouse(true)
         .visible(true);
     if supports_mica() {
         b = b.transparent(true).effects(EffectsBuilder::new().effect(Effect::Mica).build());
@@ -140,6 +142,7 @@ pub fn ensure_widget(app: &AppHandle, s: &Settings) -> Option<WebviewWindow> {
         .always_on_top(true)
         .skip_taskbar(true)
         .focused(false)
+        .accept_first_mouse(true)
         .visible(false);
     match b.build() {
         Ok(win) => {
