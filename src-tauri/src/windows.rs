@@ -374,6 +374,7 @@ pub fn handle_menu(app: &AppHandle, id: &str) {
 }
 
 /// The uninstaller removes the same value.
+#[cfg(windows)]
 const AUTOSTART_NAME: &str = "AI Usage Tracker";
 
 /// Quoted, so a folder name with spaces cannot be read as another program.
@@ -393,6 +394,7 @@ pub fn apply_autostart(on: bool, user_choice: bool) {
     let _ = (on, user_choice);
 }
 
+#[cfg(any(windows, test))]
 fn autostart_command(exe: &std::path::Path) -> String {
     format!("\"{}\" --autostart", exe.display())
 }
