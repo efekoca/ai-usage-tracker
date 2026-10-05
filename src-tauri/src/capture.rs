@@ -77,6 +77,7 @@ fn short_path(_: &Path) -> Option<String> {
 }
 
 /// Claude Code prefers Git Bash for status-line commands on Windows.
+#[cfg(windows)]
 pub fn git_bash() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("CLAUDE_CODE_GIT_BASH_PATH")
         && Path::new(&p).is_file()
@@ -94,14 +95,21 @@ pub fn git_bash() -> Option<PathBuf> {
     c.into_iter().find(|p| p.is_file())
 }
 
-/// Must work under both Git Bash and PowerShell, whichever Claude Code uses.
+/// Elsewhere Claude Code runs status-line commands with `sh`.
+#[cfg(not(windows))]
+pub fn git_bash() -> Option<PathBuf> {
+    None
+}
+
+/// Must work under both Git Bash and PowerShell on Windows, whichever Claude Code uses.
 pub fn statusline_command(exe: &Path) -> String {
-    quoted_command(&exe.to_string_lossy(), short_path(exe).as_deref(), git_bash().is_some())
+    quoted_command(&exe.to_string_lossy(), short_path(exe).as_deref(), !cfg!(windows) || git_bash().is_some())
 }
 
 /// Single quotes: inside double quotes both shells would still expand `$` and backticks.
 fn quoted_command(full: &str, short: Option<&str>, bash: bool) -> String {
-    let fwd = |s: &str| s.replace('\\', "/");
+    // only Windows paths are turned into forward slashes; a backslash is an ordinary file name character elsewhere
+    let fwd = |s: &str| if cfg!(windows) { s.replace('\\', "/") } else { s.to_owned() };
     let plain = |s: &str| s.chars().all(|c| c.is_ascii_alphanumeric() || "/:._-~".contains(c));
     if let Some(short) = short.map(fwd).filter(|s| plain(s)) {
         return format!("{short} --statusline");
@@ -140,6 +148,11 @@ fn run_chained(cmd: &str, input: Vec<u8>) -> Option<String> {
     let mut c = match git_bash() {
         Some(bash) => {
             let mut c = Command::new(bash);
+            c.arg("-c").arg(cmd);
+            c
+        }
+        None if !cfg!(windows) => {
+            let mut c = Command::new("/bin/sh");
             c.arg("-c").arg(cmd);
             c
         }
@@ -681,6 +694,16 @@ pub fn start(app: &AppHandle) {
 mod tests {
     use super::*;
 
+    #[cfg(not(windows))]
+    #[test]
+    fn status_line_paths_are_quoted_literally_for_sh() {
+        let app = "/Applications/AI Usage Tracker.app/Contents/MacOS/ai-usage-tracker";
+        assert_eq!(statusline_command(Path::new(app)), format!("'{app}' --statusline"));
+        let odd = r"/Users/o'neil/$HOME `x` a\b/ai-usage-tracker";
+        assert_eq!(quoted_command(odd, None, true), r"'/Users/o'\''neil/$HOME `x` a\b/ai-usage-tracker' --statusline");
+    }
+
+    #[cfg(windows)]
     #[test]
     fn status_line_paths_are_quoted_literally_for_each_shell() {
         assert_eq!(quoted_command(r"C:\Users\A\x.exe", Some(r"C:\Users\A\x.exe"), true), "C:/Users/A/x.exe --statusline");
