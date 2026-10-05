@@ -32,8 +32,11 @@
     }
     await tick()
     await document.fonts.ready
-    // let the charts measure their width and draw before printing
-    await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)))
+    // let the charts measure their width and draw before printing; a hidden macOS window gets no frames
+    await Promise.race([
+      new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))),
+      new Promise((res) => setTimeout(res, 500)),
+    ])
     // a page without its data must not be saved as a report
     invoke('report_ready', { ok: !failed }).catch(() => {})
   })
