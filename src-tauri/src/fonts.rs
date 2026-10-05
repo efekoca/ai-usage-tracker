@@ -1,6 +1,6 @@
 /// Names starting with "@" are vertical-writing variants.
 #[cfg(windows)]
-pub fn installed_families() -> Vec<String> {
+pub fn installed_families(_app: &tauri::AppHandle) -> Vec<String> {
     use std::collections::BTreeSet;
     use windows_sys::Win32::Foundation::LPARAM;
     use windows_sys::Win32::Graphics::Gdi::{EnumFontFamiliesExW, GetDC, ReleaseDC, DEFAULT_CHARSET, LOGFONTW, TEXTMETRICW};
@@ -33,7 +33,23 @@ pub fn installed_families() -> Vec<String> {
     v
 }
 
-#[cfg(not(windows))]
-pub fn installed_families() -> Vec<String> {
+/// Names starting with "." are system-only faces that cannot be picked by name.
+#[cfg(target_os = "macos")]
+pub fn installed_families(app: &tauri::AppHandle) -> Vec<String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    // NSFontManager may only be used on the main thread
+    let sent = app.run_on_main_thread(move || {
+        let Some(mtm) = objc2::MainThreadMarker::new() else { return };
+        let names = objc2_app_kit::NSFontManager::sharedFontManager(mtm).availableFontFamilies();
+        let _ = tx.send(names.iter().map(|n| n.to_string()).filter(|n| !n.is_empty() && !n.starts_with('.')).collect::<Vec<_>>());
+    });
+    let mut v = if sent.is_ok() { rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap_or_default() } else { Vec::new() };
+    v.sort_by_key(|s| s.to_lowercase());
+    v.dedup();
+    v
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+pub fn installed_families(_app: &tauri::AppHandle) -> Vec<String> {
     Vec::new()
 }
