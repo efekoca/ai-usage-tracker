@@ -22,16 +22,33 @@ pub fn candidates(env: &Env, configured: Option<&Path>) -> Vec<PathBuf> {
     if let Some(p) = configured {
         v.push(p.to_owned());
     }
-    v.extend(super::path_dirs().into_iter().map(|d| d.join("codex.exe")));
+    let codex = super::exe("codex");
+    #[cfg(windows)]
+    v.extend(super::path_dirs().into_iter().map(|d| d.join(&codex)));
+    #[cfg(not(windows))]
+    v.extend(super::unix_bin_dirs(env).into_iter().map(|d| d.join(&codex)));
     if let Some(home) = codex_homes(env, &ExtraPaths::default()).into_iter().next() {
         // the Codex desktop app keeps a runnable copy of the CLI here
-        v.push(home.join(".sandbox-bin").join("codex.exe"));
+        v.push(home.join(".sandbox-bin").join(&codex));
     }
-    if let Some(r) = &env.roaming {
-        v.push(r.join("npm/node_modules/@openai/codex/vendor/x86_64-pc-windows-msvc/codex/codex.exe"));
+    for root in super::npm_roots(env) {
+        v.push(root.join("@openai/codex/vendor").join(CODEX_TARGET).join("codex").join(&codex));
     }
     v
 }
+
+/// The platform folder inside the npm package's `vendor`.
+const CODEX_TARGET: &str = if cfg!(windows) {
+    "x86_64-pc-windows-msvc"
+} else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+    "aarch64-apple-darwin"
+} else if cfg!(target_os = "macos") {
+    "x86_64-apple-darwin"
+} else if cfg!(target_arch = "aarch64") {
+    "aarch64-unknown-linux-musl"
+} else {
+    "x86_64-unknown-linux-musl"
+};
 
 pub fn find_codex(env: &Env, configured: Option<&Path>) -> Option<PathBuf> {
     candidates(env, configured).into_iter().find(|p| p.is_file())
@@ -79,6 +96,8 @@ pub fn query(bin: &Path, timeout: Duration, now_ms: i64) -> Result<Vec<LimitSnap
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
+    #[cfg(not(windows))]
+    super::set_child_path(&mut cmd);
     let mut child = cmd.spawn().map_err(|e| format!("cannot start codex: {e}"))?;
     let mut stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
@@ -157,8 +176,8 @@ mod tests {
         let home = std::env::temp_dir().join("aiut-home");
         let env = Env { home: Some(home.clone()), roaming: None, local: None, claude_config_dir: None, codex_home: None };
         let c = candidates(&env, None);
-        let sandbox: Vec<&PathBuf> = c.iter().filter(|p| p.starts_with(&home)).collect();
-        assert_eq!(sandbox, [&home.join(".codex").join(".sandbox-bin").join("codex.exe")]);
+        let sandbox: Vec<&PathBuf> = c.iter().filter(|p| p.starts_with(home.join(".codex"))).collect();
+        assert_eq!(sandbox, [&home.join(".codex").join(".sandbox-bin").join(super::super::exe("codex"))]);
         assert!(c.iter().all(|p| p.is_absolute()));
     }
 

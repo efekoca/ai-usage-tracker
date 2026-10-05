@@ -268,6 +268,7 @@ export interface AppInfo {
   data_dir: string
   pricing_origin: 'bundled' | 'user'
   pricing_updated_at: string
+  platform: string
   supports_mica: boolean
   accent_color: string | null
   started_hidden: boolean

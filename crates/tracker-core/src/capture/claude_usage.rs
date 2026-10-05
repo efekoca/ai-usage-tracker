@@ -41,17 +41,29 @@ pub fn candidates(env: &Env, configured: Option<&Path>) -> Vec<PathBuf> {
     if let Some(p) = configured {
         v.push(p.to_owned());
     }
-    if let Some(h) = &env.home {
-        v.push(h.join(".local").join("bin").join("claude.exe"));
+    let claude = super::exe("claude");
+    #[cfg(windows)]
+    {
+        if let Some(h) = &env.home {
+            v.push(h.join(".local").join("bin").join(&claude));
+        }
+        v.extend(super::path_dirs().into_iter().map(|d| d.join(&claude)));
     }
-    v.extend(super::path_dirs().into_iter().map(|d| d.join("claude.exe")));
+    #[cfg(not(windows))]
+    v.extend(super::unix_bin_dirs(env).into_iter().map(|d| d.join(&claude)));
+    for root in super::npm_roots(env) {
+        let bin = root.join("@anthropic-ai/claude-code/bin");
+        v.push(bin.join("claude.exe"));
+        if !cfg!(windows) {
+            v.push(bin.join("claude"));
+        }
+    }
     if let Some(r) = &env.roaming {
-        v.push(r.join("npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe"));
         // newest version folder first
         let dir = r.join("Claude").join("claude-code");
         let mut versions: Vec<PathBuf> = std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.path()).collect();
         versions.sort_by_key(|p| std::cmp::Reverse(version_key(p)));
-        v.extend(versions.into_iter().map(|p| p.join("claude.exe")));
+        v.extend(versions.into_iter().map(|p| p.join(&claude)));
     }
     v
 }
@@ -157,6 +169,8 @@ pub fn query(bin: &Path, work_dir: &Path, config_dir: Option<&Path>, timeout: Du
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
+    #[cfg(not(windows))]
+    super::set_child_path(&mut cmd);
     let mut child = cmd.spawn().map_err(|e| fail(format!("cannot start claude: {e}")))?;
     let mut stdin = child.stdin.take().ok_or_else(|| fail("no stdin".into()))?;
     let stdout = child.stdout.take().ok_or_else(|| fail("no stdout".into()))?;

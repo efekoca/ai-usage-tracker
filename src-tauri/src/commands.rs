@@ -33,6 +33,7 @@ pub struct AppInfo {
     data_dir: String,
     pricing_origin: String,
     pricing_updated_at: String,
+    platform: &'static str,
     supports_mica: bool,
     accent_color: Option<String>,
     started_hidden: bool,
@@ -46,6 +47,7 @@ pub fn app_info(app: AppHandle, state: State<AppState>) -> AppInfo {
         data_dir: state.data_dir.to_string_lossy().into_owned(),
         pricing_origin: state.pricing_origin.read().unwrap().clone(),
         pricing_updated_at: state.book.read().unwrap().file().updated_at.clone(),
+        platform: std::env::consts::OS,
         supports_mica: windows::supports_mica(),
         accent_color: windows::accent_color(),
         started_hidden: state.started_hidden,
@@ -488,7 +490,7 @@ pub async fn wipe_all_data(window: WebviewWindow, app: AppHandle) -> Res<()> {
 #[tauri::command]
 pub fn open_data_folder(window: WebviewWindow, state: State<AppState>) -> Res<()> {
     main_only(&window)?;
-    std::process::Command::new(crate::system_exe("explorer.exe")).arg(&state.data_dir).spawn().map(|_| ()).map_err(err)
+    crate::open_path(&state.data_dir).map_err(err)
 }
 
 #[tauri::command]
@@ -497,7 +499,7 @@ pub fn open_url(window: WebviewWindow, url: String) -> Res<()> {
     if !url.starts_with("https://") {
         return Err("only https links can be opened".into());
     }
-    std::process::Command::new(crate::system_exe(r"System32\rundll32.exe")).args(["url.dll,FileProtocolHandler", &url]).spawn().map(|_| ()).map_err(err)
+    crate::open_link(&url).map_err(err)
 }
 
 #[tauri::command]
@@ -630,7 +632,7 @@ pub fn report_ready(window: WebviewWindow, state: State<AppState>, ok: bool) {
 pub fn open_last_report(window: WebviewWindow, state: State<AppState>) -> Res<()> {
     main_only(&window)?;
     let path = state.last_report.lock().unwrap().clone().ok_or("no report yet")?;
-    std::process::Command::new(crate::system_exe("explorer.exe")).arg(path).spawn().map(|_| ()).map_err(err)
+    crate::open_path(&path).map_err(err)
 }
 
 #[tauri::command]

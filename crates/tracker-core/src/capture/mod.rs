@@ -54,6 +54,38 @@ pub(crate) fn path_dirs() -> Vec<PathBuf> {
     std::env::var_os("PATH").map(|p| std::env::split_paths(&p).filter(|d| d.is_absolute()).collect()).unwrap_or_default()
 }
 
+pub(crate) fn exe(name: &str) -> String {
+    format!("{name}{}", std::env::consts::EXE_SUFFIX)
+}
+
+/// Apps started from Finder or at login get only the system PATH, without Homebrew or ~/.local/bin.
+#[cfg(not(windows))]
+pub(crate) fn unix_bin_dirs(env: &crate::discovery::Env) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = env.home.iter().map(|h| h.join(".local").join("bin")).collect();
+    v.extend(path_dirs());
+    v.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
+    v.dedup();
+    v
+}
+
+/// Global npm package folders: `%APPDATA%\npm` on Windows, the Homebrew or system prefix elsewhere.
+pub(crate) fn npm_roots(env: &crate::discovery::Env) -> Vec<PathBuf> {
+    if cfg!(windows) {
+        return env.roaming.iter().map(|r| r.join("npm/node_modules")).collect();
+    }
+    let mut v: Vec<PathBuf> = ["/opt/homebrew/lib/node_modules", "/usr/local/lib/node_modules"].map(PathBuf::from).into();
+    v.extend(env.home.iter().map(|h| h.join(".npm-global/lib/node_modules")));
+    v
+}
+
+/// The npm-installed CLIs are node scripts, which need `node` on the child's PATH.
+#[cfg(not(windows))]
+pub(crate) fn set_child_path(cmd: &mut std::process::Command) {
+    if let Ok(p) = std::env::join_paths(unix_bin_dirs(&crate::discovery::Env::from_system())) {
+        cmd.env("PATH", p);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

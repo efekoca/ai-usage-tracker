@@ -11,6 +11,7 @@
   import ReportCard from '../components/ReportCard.svelte'
 
   const s = $derived(app.settings!)
+  const autostartKey = $derived(app.info?.platform === 'macos' ? 'settings.autostart.mac' : 'settings.autostart')
   let pricing: PricingFile | null = $state(null)
   let pricingOrigin = $state('bundled')
   let pricingDirty = $state(false)
@@ -216,8 +217,8 @@
     <Segmented label={t('limits.mode')} value={s.limit_display} options={[{ value: 'used', label: t('limits.mode.used') }, { value: 'remaining', label: t('limits.mode.remaining') }]} onchange={(v) => saveSettings({ limit_display: v })} />
   </div>
   <div class="item">
-    <div><span>{t('settings.autostart')}</span><div class="subtle small">{t('settings.autostart.help')}</div></div>
-    <Toggle checked={s.autostart} label={t('settings.autostart')} onchange={(v) => saveSettings({ autostart: v })} />
+    <div><span>{t(autostartKey)}</span><div class="subtle small">{t('settings.autostart.help')}</div></div>
+    <Toggle checked={s.autostart} label={t(autostartKey)} onchange={(v) => saveSettings({ autostart: v })} />
   </div>
   <div class="item">
     <div><span>{t('settings.currency')}</span><div class="subtle small">{t('settings.currency.help')}</div></div>

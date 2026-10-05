@@ -390,13 +390,71 @@ pub fn apply_autostart(on: bool, user_choice: bool) {
             log::warn!("autostart change failed: {e}");
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        let _ = user_choice;
+        if let Err(e) = launch_agent::apply(on) {
+            log::warn!("autostart change failed: {e}");
+        }
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     let _ = (on, user_choice);
 }
 
 #[cfg(any(windows, test))]
 fn autostart_command(exe: &std::path::Path) -> String {
     format!("\"{}\" --autostart", exe.display())
+}
+
+/// A per-user LaunchAgent; launchd starts it at the next login, so nothing is started now.
+#[cfg(any(target_os = "macos", test))]
+mod launch_agent {
+    use std::path::Path;
+
+    const LABEL: &str = "io.aiusagetracker.app";
+
+    #[cfg(target_os = "macos")]
+    pub fn apply(on: bool) -> Result<(), String> {
+        let home = std::env::var_os("HOME").map(std::path::PathBuf::from).filter(|p| p.is_absolute()).ok_or("no home folder")?;
+        let file = home.join("Library/LaunchAgents").join(format!("{LABEL}.plist"));
+        if !on {
+            return match std::fs::remove_file(&file) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
+                _ => Ok(()),
+            };
+        }
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(file.parent().unwrap_or(home.as_path())).map_err(|e| e.to_string())?;
+        std::fs::write(&file, plist(&exe)).map_err(|e| e.to_string())
+    }
+
+    pub fn plist(exe: &Path) -> String {
+        let exe = xml_escape(&exe.to_string_lossy());
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>{LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{exe}</string>
+    <string>--autostart</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+</dict>
+</plist>
+"#
+        )
+    }
+
+    fn xml_escape(s: &str) -> String {
+        s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
+    }
 }
 
 #[cfg(windows)]
@@ -546,5 +604,12 @@ mod tests {
     fn the_autostart_path_is_quoted() {
         let cmd = autostart_command(std::path::Path::new(r"C:\Program Files\AI Usage Tracker\ai-usage-tracker.exe"));
         assert_eq!(cmd, r#""C:\Program Files\AI Usage Tracker\ai-usage-tracker.exe" --autostart"#);
+    }
+
+    #[test]
+    fn the_launch_agent_escapes_the_app_path() {
+        let p = launch_agent::plist(std::path::Path::new("/Applications/A & <B>.app/Contents/MacOS/ai-usage-tracker"));
+        assert!(p.contains("<string>/Applications/A &amp; &lt;B&gt;.app/Contents/MacOS/ai-usage-tracker</string>"));
+        assert!(p.contains("<string>--autostart</string>"));
     }
 }
