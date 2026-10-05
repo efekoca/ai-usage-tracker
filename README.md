@@ -301,6 +301,10 @@ Running `npm --prefix ui run dev` on its own opens the dashboard in a browser wi
 
 Bug reports and pull requests are welcome.
 
+## Code signing policy
+
+See [CODE_SIGNING.md](CODE_SIGNING.md).
+
 ## License
 
 [MIT](LICENSE)

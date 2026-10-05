@@ -295,6 +295,10 @@ Yalnızca `npm --prefix ui run dev` komutunu çalıştırırsanız panel tarayı
 
 Hata bildirimlerinizi, pull request'lerinizi ve geri bildirimlerinizi almaktan mutluluk duyarım.
 
+## Kod imzalama politikası
+
+Bkz. [CODE_SIGNING.md](CODE_SIGNING.md).
+
 ## Lisans
 
 [MIT](LICENSE)
