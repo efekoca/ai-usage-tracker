@@ -61,11 +61,11 @@
     </button>
   </div>
   {#if status}
-    <p class="status small" class:bad={!status.ok} role="status">
-      <Icon name={status.ok ? 'check' : 'warning'} size={13} />
-      {status.text}
+    <div class="status small" class:bad={!status.ok} role={status.ok ? 'status' : 'alert'}>
+      <Icon name={status.ok ? 'check' : 'warning'} size={15} />
+      <span class="msg">{status.text}</span>
       {#if status.ok}<button class="btn ghost small" onclick={() => api.openLastReport()}>{t('report.open')}</button>{/if}
-    </p>
+    </div>
   {/if}
   <div class="item">
     <div><span>{t('report.auto')}</span><div class="subtle small">{t('report.autoHelp')}</div></div>
@@ -112,14 +112,28 @@
     flex-wrap: wrap;
   }
   .status {
+    --tone: var(--good-ink);
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin: 0 0 6px;
-    color: var(--good-ink);
+    gap: 10px;
+    margin: 12px 0;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 0.5px solid color-mix(in srgb, var(--tone) 35%, var(--hairline));
+    background: color-mix(in srgb, var(--tone) 9%, transparent);
+    color: var(--ink-2);
+    line-height: 1.45;
   }
   .status.bad {
-    color: var(--critical-ink, var(--critical));
+    --tone: var(--critical);
+  }
+  .status > :global(svg) {
+    flex: none;
+    color: var(--tone);
+  }
+  .status .msg {
+    flex: 1;
+    min-width: 0;
   }
   .folder {
     min-width: 0;
