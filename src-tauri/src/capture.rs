@@ -385,6 +385,7 @@ pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
         ("statusline", true) => {
             let mut cstate = read_state()?;
             if cstate.statusline.is_some() {
+                refresh_statusline(&data_dir);
                 persist(app, |s| s.capture.statusline = true)?;
                 return Ok("already".into());
             }
@@ -631,6 +632,21 @@ fn wake_codex(app: &AppHandle) {
     }
 }
 
+/// Points Claude Code at this copy of the app when it was moved or reinstalled elsewhere. Debug
+/// builds leave it alone, so switching between a dev and a release build does not rewrite it each time.
+fn refresh_statusline(data_dir: &Path) {
+    if cfg!(debug_assertions) {
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else { return };
+    let mut cstate = cs::load_state(data_dir);
+    match cs::refresh_statusline(&mut cstate, data_dir, &statusline_command(&exe)) {
+        Ok(true) => log::info!("status line now points at this copy of the app"),
+        Ok(false) => {}
+        Err(e) => log::warn!("could not refresh the status line: {e}"),
+    }
+}
+
 pub fn start(app: &AppHandle) {
     let s = app.state::<AppState>().settings.read().unwrap().clone();
     if s.onboarded {
@@ -640,6 +656,9 @@ pub fn start(app: &AppHandle) {
         }
         if s.capture.otel {
             start_otel(app);
+        }
+        if s.capture.statusline {
+            refresh_statusline(&app.state::<AppState>().data_dir);
         }
     }
     start_claude_poller(app);
