@@ -1,4 +1,5 @@
-//! Renders `report.html` in a hidden window and prints it with WebView2's PrintToPdf (no print dialog).
+//! Renders `report.html` in a hidden window and prints it to PDF without a print dialog: WebView2's
+//! PrintToPdf on Windows, a WKWebView print operation on macOS.
 
 use crate::state::AppState;
 use chrono::{Datelike, Days, NaiveDate};
@@ -137,7 +138,115 @@ fn print_to_pdf(win: &tauri::WebviewWindow, out: &Path) -> Result<(), String> {
     rx.recv_timeout(Duration::from_secs(60)).map_err(|_| "pdf_timeout".to_string())?
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+fn print_to_pdf(win: &tauri::WebviewWindow, out: &Path) -> Result<(), String> {
+    use objc2::runtime::ProtocolObject;
+    use objc2::{sel, MainThreadMarker};
+    use objc2_app_kit::{NSPrintInfo, NSPrintJobSavingURL, NSPrintSaveJob, NSPrintingPaginationMode, NSWindow};
+    use objc2_foundation::{NSSize, NSURL};
+    use objc2_web_kit::WKWebView;
+
+    let (tx, rx) = mpsc::channel::<Result<(), String>>();
+    *mac_print::DONE.lock().unwrap() = Some(tx.clone());
+    let out_file = out.to_owned();
+    win.with_webview(move |wv| {
+        let fail = |e: &str| {
+            mac_print::DONE.lock().unwrap().take();
+            let _ = tx.send(Err(e.into()));
+        };
+        let (Some(mtm), Some(url)) = (MainThreadMarker::new(), NSURL::from_file_path(&out_file)) else { return fail("pdf_failed") };
+        // SAFETY: `inner` and `ns_window` are this window's own WKWebView and NSWindow, used on the main thread.
+        let (web, window): (&WKWebView, &NSWindow) = unsafe { (&*wv.inner().cast(), &*wv.ns_window().cast()) };
+        let info = NSPrintInfo::new();
+        // A4 with 12 mm margins, like the Windows output; the page lays itself out for print media
+        info.setPaperSize(NSSize::new(595.28, 841.89));
+        info.setTopMargin(34.0);
+        info.setBottomMargin(34.0);
+        info.setLeftMargin(34.0);
+        info.setRightMargin(34.0);
+        info.setHorizontalPagination(NSPrintingPaginationMode::Fit);
+        info.setHorizontallyCentered(false);
+        info.setVerticallyCentered(false);
+        // SAFETY: AppKit constants and the print info's own attribute dictionary.
+        unsafe {
+            info.setJobDisposition(NSPrintSaveJob);
+            info.dictionary().setObject_forKey(&url, ProtocolObject::from_ref(NSPrintJobSavingURL));
+        }
+        let delegate = mac_print::Delegate::new(mtm);
+        // SAFETY: WebKit pages the document in another process, so the operation must run
+        // asynchronously (the blocking `runOperation` never learns the page count).
+        unsafe {
+            let op = web.printOperationWithPrintInfo(&info);
+            op.setShowsPrintPanel(false);
+            op.setShowsProgressPanel(false);
+            if let Some(v) = op.view() {
+                v.setFrame(web.bounds());
+            }
+            op.runOperationModalForWindow_delegate_didRunSelector_contextInfo(
+                window,
+                Some(&delegate),
+                Some(sel!(printOperationDidRun:success:contextInfo:)),
+                std::ptr::null_mut(),
+            );
+        }
+        mac_print::keep(delegate);
+    })
+    .map_err(|e| e.to_string())?;
+    let r = rx.recv_timeout(Duration::from_secs(60)).map_err(|_| "pdf_timeout".to_string())?;
+    mac_print::DONE.lock().unwrap().take();
+    r?;
+    if out.is_file() {
+        Ok(())
+    } else {
+        Err("pdf_failed".into())
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod mac_print {
+    use objc2::rc::Retained;
+    use objc2::runtime::{AnyObject, Bool, NSObject};
+    use objc2::{define_class, msg_send, MainThreadMarker, MainThreadOnly};
+    use std::cell::RefCell;
+    use std::sync::{mpsc, Mutex};
+
+    pub static DONE: Mutex<Option<mpsc::Sender<Result<(), String>>>> = Mutex::new(None);
+
+    thread_local! {
+        // AppKit does not retain the delegate while the operation runs
+        static ALIVE: RefCell<Option<Retained<Delegate>>> = const { RefCell::new(None) };
+    }
+
+    pub fn keep(d: Retained<Delegate>) {
+        ALIVE.with(|a| *a.borrow_mut() = Some(d));
+    }
+
+    define_class!(
+        #[unsafe(super(NSObject))]
+        #[thread_kind = MainThreadOnly]
+        #[name = "AIUsageTrackerPrintDelegate"]
+        pub struct Delegate;
+
+        impl Delegate {
+            #[unsafe(method(printOperationDidRun:success:contextInfo:))]
+            fn did_run(&self, _op: *mut AnyObject, success: Bool, _ctx: *mut std::ffi::c_void) {
+                if let Some(tx) = DONE.lock().unwrap().take() {
+                    let _ = tx.send(if success.as_bool() { Ok(()) } else { Err("pdf_failed".into()) });
+                }
+                ALIVE.with(|a| a.borrow_mut().take());
+            }
+        }
+    );
+
+    impl Delegate {
+        pub fn new(mtm: MainThreadMarker) -> Retained<Self> {
+            // SAFETY: a plain NSObject subclass without ivars.
+            unsafe { msg_send![Self::alloc(mtm), init] }
+        }
+    }
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 fn print_to_pdf(_win: &tauri::WebviewWindow, _out: &Path) -> Result<(), String> {
     Err("pdf_unsupported".into())
 }
