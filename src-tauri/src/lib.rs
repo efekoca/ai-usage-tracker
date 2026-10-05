@@ -57,6 +57,31 @@ fn relaunched_outside_package() -> bool {
     std::process::Command::new(system_exe("explorer.exe")).arg(exe).spawn().is_ok()
 }
 
+/// Shows a folder, or opens a file in its default app.
+pub(crate) fn open_path(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    let mut c = std::process::Command::new(system_exe("explorer.exe"));
+    #[cfg(target_os = "macos")]
+    let mut c = std::process::Command::new("/usr/bin/open");
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let mut c = std::process::Command::new("xdg-open");
+    c.arg(path).spawn().map(|_| ())
+}
+
+pub(crate) fn open_link(url: &str) -> std::io::Result<()> {
+    #[cfg(windows)]
+    let mut c = {
+        let mut c = std::process::Command::new(system_exe(r"System32\rundll32.exe"));
+        c.arg("url.dll,FileProtocolHandler");
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let mut c = std::process::Command::new("/usr/bin/open");
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let mut c = std::process::Command::new("xdg-open");
+    c.arg(url).spawn().map(|_| ())
+}
+
 /// By full path, so PATH and the current folder play no part in which file runs.
 pub(crate) fn system_exe(relative: &str) -> std::path::PathBuf {
     std::env::var_os("SystemRoot")
