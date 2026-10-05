@@ -56,6 +56,23 @@ fn detects_installed_tools_for_any_user_name() {
     assert_eq!(found(SourceId::Codex).file_count, 2);
     assert!(!found(SourceId::ChatgptDesktop).found);
     assert!(!found(SourceId::ChatgptDesktop).supported);
+    assert!(!found(SourceId::Cowork).cloud_only);
+}
+
+#[test]
+fn cowork_with_only_cloud_sessions_is_cloud_only() {
+    let m = machine();
+    let user = m.roaming.join("Claude").join("local-agent-mode-sessions").join("org-1").join("user-1");
+    fs::write(user.join("remote-session-spaces.json"), r#"{"entries":[{"sessionId":"session_x","folders":[]}]}"#).unwrap();
+    let cowork = |env: &Env| detect(env, &ExtraPaths::default()).into_iter().find(|s| s.id == SourceId::Cowork).unwrap();
+    assert!(!cowork(&m.env).cloud_only, "local logs still exist");
+
+    fs::remove_dir_all(user.join("local_s1")).unwrap();
+    let st = cowork(&m.env);
+    assert!(st.found && st.cloud_only && st.file_count == 0);
+
+    fs::write(user.join("remote-session-spaces.json"), r#"{"entries":[]}"#).unwrap();
+    assert!(!cowork(&m.env).cloud_only);
 }
 
 #[test]

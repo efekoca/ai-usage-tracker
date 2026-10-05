@@ -95,7 +95,11 @@ pub async fn check(app: &AppHandle) -> Result<UpdateStatus, String> {
         s.checking = true;
         s.last_error = None;
     });
-    let result = u.check().await;
+    let result = match u.check().await {
+        // releases without a build for this platform (e.g. macOS for now) mean no update, not a failure
+        Err(tauri_plugin_updater::Error::TargetNotFound(_) | tauri_plugin_updater::Error::TargetsNotFound(_)) => Ok(None),
+        r => r,
+    };
     let now = chrono::Utc::now().timestamp_millis();
     match result {
         Ok(found) => {

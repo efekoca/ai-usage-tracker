@@ -79,6 +79,8 @@ pub struct SourceStatus {
     pub supported: bool,
     pub roots: Vec<PathBuf>,
     pub file_count: usize,
+    /// Cowork with no local logs but with cloud sessions: their token counts live on the server.
+    pub cloud_only: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -246,7 +248,24 @@ pub fn detect(env: &Env, extra: &ExtraPaths) -> Vec<SourceStatus> {
             let file_count = count(id);
             // A tool counts as found if its data directory exists, even with no usage yet.
             let found = !roots.is_empty();
-            SourceStatus { id, found, supported: id.supported(), roots, file_count }
+            let cloud_only = id == SourceId::Cowork && file_count == 0 && roots.iter().any(|r| has_cloud_sessions(r));
+            SourceStatus { id, found, supported: id.supported(), roots, file_count, cloud_only }
         })
         .collect()
+}
+
+/// The desktop app lists cloud Cowork sessions in `<org>/<user>/remote-session-spaces.json`.
+fn has_cloud_sessions(sessions_dir: &Path) -> bool {
+    WalkDir::new(sessions_dir)
+        .max_depth(3)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file() && e.file_name() == "remote-session-spaces.json")
+        .any(|e| {
+            let Ok(text) = std::fs::read_to_string(e.path()) else { return false };
+            serde_json::from_str::<serde_json::Value>(&text)
+                .ok()
+                .and_then(|v| v.get("entries")?.as_array().map(|a| !a.is_empty()))
+                .unwrap_or(false)
+        })
 }
