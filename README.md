@@ -206,7 +206,7 @@ The widget also comes with a tray icon and a shortcut:
 | Source | What is read | Tokens | Limits | Notes |
 |---|---|---|---|---|
 | **Claude Code** (CLI, VS Code, Claude desktop "Code") | `%CLAUDE_CONFIG_DIR%` or `%USERPROFILE%\.claude\projects\**\*.jsonl` | **Exact** | Only when a limit is hit | Background helper calls (e.g., web-search summarization) are not in these logs |
-| **Cowork sessions** (Claude desktop) | `%APPDATA%\Claude\local-agent-mode-sessions\**` | **Exact** | **Exact %** (5 h / 7 d) | |
+| **Cowork sessions** (Claude desktop) | `%APPDATA%\Claude\local-agent-mode-sessions\**` | **Exact** | **Exact %** (5 h / 7 d) | Only tasks that ran on your computer. New Cowork tasks run in the cloud: their token counts are not stored on your computer, but they count toward your plan limits |
 | **Claude desktop: plan usage** | `%APPDATA%\Claude\plan-usage-history.json` | — | **Exact %** | Chat tokens are not stored locally, so **none** |
 | **Codex** (CLI and desktop) | `%CODEX_HOME%` or `%USERPROFILE%\.codex\{sessions,archived_sessions}` | **Exact** | **Exact %** (every request) | |
 | ChatGPT desktop | — | **None** | — | Detection only |

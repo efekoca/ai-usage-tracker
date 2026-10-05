@@ -389,11 +389,11 @@ export function installMock() {
           return ['Arial', 'Bahnschrift', 'Calibri', 'Cascadia Mono', 'Consolas', 'Georgia', 'Segoe UI', 'Segoe UI Variable Display', 'Times New Roman', 'Verdana']
         case 'detect_sources':
           return [
-            { id: 'claude_code', found: true, supported: true, roots: ['C:\\Users\\you\\.claude'], file_count: 27, enabled: true },
-            { id: 'cowork', found: true, supported: true, roots: ['C:\\Users\\you\\AppData\\Roaming\\Claude\\local-agent-mode-sessions'], file_count: 39, enabled: true },
-            { id: 'claude_desktop', found: true, supported: true, roots: ['C:\\Users\\you\\AppData\\Roaming\\Claude'], file_count: 1, enabled: true },
-            { id: 'codex', found: true, supported: true, roots: ['C:\\Users\\you\\.codex'], file_count: 55, enabled: true },
-            { id: 'chatgpt_desktop', found: false, supported: false, roots: [], file_count: 0, enabled: false },
+            { id: 'claude_code', found: true, supported: true, roots: ['C:\\Users\\you\\.claude'], file_count: 27, cloud_only: false, enabled: true },
+            { id: 'cowork', found: true, supported: true, roots: ['C:\\Users\\you\\AppData\\Roaming\\Claude\\local-agent-mode-sessions'], file_count: 39, cloud_only: false, enabled: true },
+            { id: 'claude_desktop', found: true, supported: true, roots: ['C:\\Users\\you\\AppData\\Roaming\\Claude'], file_count: 1, cloud_only: false, enabled: true },
+            { id: 'codex', found: true, supported: true, roots: ['C:\\Users\\you\\.codex'], file_count: 55, cloud_only: false, enabled: true },
+            { id: 'chatgpt_desktop', found: false, supported: false, roots: [], file_count: 0, cloud_only: false, enabled: false },
           ]
         case 'parser_warnings':
           return []

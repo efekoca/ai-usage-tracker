@@ -81,10 +81,10 @@
       {/if}
       {#each sources as s (s.id)}
         <div class="list-row">
-          <div class="state" class:found={s.found} aria-hidden="true"><Icon name={s.found ? 'check' : 'close'} size={14} /></div>
+          <div class="state" class:found={s.found && !s.cloud_only} aria-hidden="true"><Icon name={s.cloud_only ? 'info' : s.found ? 'check' : 'close'} size={14} /></div>
           <div class="body">
-            <div><b>{t(`source.${s.id}`)}</b> <span class="subtle small">· {s.found ? (s.supported ? t('source.found') : t('source.unsupported')) : t('source.notFound')}</span></div>
-            <div class="subtle small">{t(`source.desc.${s.id}`)}</div>
+            <div><b>{t(`source.${s.id}`)}</b> <span class="subtle small">· {s.cloud_only ? t('source.cloud') : s.found ? (s.supported ? t('source.found') : t('source.unsupported')) : t('source.notFound')}</span></div>
+            <div class="subtle small">{t(s.cloud_only ? `source.desc.${s.id}.cloud` : `source.desc.${s.id}`)}</div>
           </div>
           {#if s.supported}
             <Toggle bind:checked={enabled[s.id]} label={t(`source.${s.id}`)} disabled={!s.found && !enabled[s.id]} />

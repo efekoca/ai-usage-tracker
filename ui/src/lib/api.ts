@@ -249,6 +249,7 @@ export interface SourceInfo {
   supported: boolean
   roots: string[]
   file_count: number
+  cloud_only: boolean
   enabled: boolean
 }
 

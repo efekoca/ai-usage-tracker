@@ -74,14 +74,14 @@
 <section class="card list-card">
   {#each sources as s (s.id)}
     <div class="list-row src">
-      <div class="state" class:found={s.found} aria-hidden="true"><Icon name={s.found ? 'check' : 'close'} size={14} /></div>
+      <div class="state" class:found={s.found && !s.cloud_only} aria-hidden="true"><Icon name={s.cloud_only ? 'info' : s.found ? 'check' : 'close'} size={14} /></div>
       <div class="body">
         <div class="title">
           <b>{t(`source.${s.id}`)}</b>
-          <span class="tag">{s.found ? (s.supported ? t('source.found') : t('source.unsupported')) : t('source.notFound')}</span>
+          <span class="tag">{s.cloud_only ? t('source.cloud') : s.found ? (s.supported ? t('source.found') : t('source.unsupported')) : t('source.notFound')}</span>
           {#if s.file_count}<span class="subtle small">{t('source.files', { n: s.file_count })}</span>{/if}
         </div>
-        <div class="subtle small">{t(`source.desc.${s.id}`)}</div>
+        <div class="subtle small">{t(s.cloud_only ? `source.desc.${s.id}.cloud` : `source.desc.${s.id}`)}</div>
         {#each s.roots as r (r)}<div class="path small">{r}</div>{/each}
       </div>
       {#if s.supported}
