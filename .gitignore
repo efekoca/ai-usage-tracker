@@ -21,3 +21,6 @@ node_modules/
 *.key
 *.pem
 .tauri/
+
+# local Claude Code notes
+CLAUDE.md
