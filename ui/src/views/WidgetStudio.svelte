@@ -8,6 +8,11 @@
   import Icon from '../components/Icon.svelte'
   import WidgetView from '../components/WidgetView.svelte'
 
+  // macOS always hides the widget during full-screen apps, so there is nothing to choose there
+  const behaviorKeys = $derived(
+    app.info?.platform === 'macos' ? (['visible', 'always_on_top', 'lock_position'] as const) : (['visible', 'always_on_top', 'lock_position', 'auto_hide_fullscreen'] as const),
+  )
+
   let ws = $state<WidgetSettings>(structuredClone($state.snapshot(app.settings!.widget)) as WidgetSettings)
   let data = $state<WidgetData | null>(null)
   let backdrop: 'light' | 'dark' | 'photo' = $state('photo')
@@ -280,7 +285,7 @@
 
     <section class="card group">
       <h2>{t('ws.behavior')}</h2>
-      {#each ['visible', 'always_on_top', 'lock_position', 'auto_hide_fullscreen'] as const as key (key)}
+      {#each behaviorKeys as key (key)}
         <div class="item">
           <span>{t(`ws.${key}`)}</span>
           <Toggle checked={ws[key]} label={t(`ws.${key}`)} onchange={(v) => set(key, v)} />

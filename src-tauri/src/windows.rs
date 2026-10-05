@@ -58,7 +58,14 @@ pub fn accent_color() -> Option<String> {
         // stored as 0xAABBGGRR
         (rc == 0).then(|| format!("#{:02x}{:02x}{:02x}", data & 0xff, (data >> 8) & 0xff, (data >> 16) & 0xff))
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::{NSColor, NSColorSpace};
+        let c = NSColor::controlAccentColor().colorUsingColorSpace(&NSColorSpace::sRGBColorSpace())?;
+        let byte = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        Some(format!("#{:02x}{:02x}{:02x}", byte(c.redComponent()), byte(c.greenComponent()), byte(c.blueComponent())))
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         None
     }
@@ -264,6 +271,8 @@ pub fn apply_widget_settings(app: &AppHandle, s: &Settings) {
             let _ = w.show();
         }
         let _ = w.set_always_on_top(s.widget.always_on_top);
+        #[cfg(target_os = "macos")]
+        join_all_spaces(w);
     };
     match app.get_webview_window(WIDGET) {
         Some(w) => show(&w, s),
@@ -276,6 +285,20 @@ pub fn apply_widget_settings(app: &AppHandle, s: &Settings) {
             });
         }
     }
+}
+
+/// macOS keeps a window on the Space it opened on. Full-screen apps' Spaces stay off limits:
+/// showing there would need the app to give up its Dock icon, so the widget always hides there.
+#[cfg(target_os = "macos")]
+fn join_all_spaces(w: &WebviewWindow) {
+    let Ok(ptr) = w.ns_window() else { return };
+    let ptr = ptr as usize;
+    let _ = w.run_on_main_thread(move || {
+        use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
+        // SAFETY: the widget's own NSWindow, used on the main thread.
+        let win: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
+        win.setCollectionBehavior(win.collectionBehavior() | NSWindowCollectionBehavior::CanJoinAllSpaces);
+    });
 }
 
 pub fn popup_widget_menu(app: &AppHandle) {
@@ -299,7 +322,13 @@ pub fn popup_widget_menu(app: &AppHandle) {
         let autohide = CheckMenuItem::with_id(app, "w:autohide", t("Hide in full screen", "Tam ekranda gizle"), true, s.widget.auto_hide_fullscreen, None::<&str>)?;
         let hide = MenuItem::with_id(app, "w:hide", t("Hide widget", "Widget'ı gizle"), true, None::<&str>)?;
         let quit = MenuItem::with_id(app, "app:quit", t("Quit", "Çık"), true, None::<&str>)?;
-        Menu::with_items(app, &[&open, &PredefinedMenuItem::separator(app)?, &opacity, &size, &position, &autohide, &PredefinedMenuItem::separator(app)?, &hide, &quit])
+        let sep = || PredefinedMenuItem::separator(app);
+        // macOS always hides the widget in full screen (see `join_all_spaces`)
+        if cfg!(target_os = "macos") {
+            Menu::with_items(app, &[&open, &sep()?, &opacity, &size, &position, &sep()?, &hide, &quit])
+        } else {
+            Menu::with_items(app, &[&open, &sep()?, &opacity, &size, &position, &autohide, &sep()?, &hide, &quit])
+        }
     };
     match build() {
         Ok(menu) => {
@@ -324,7 +353,13 @@ fn user_locale() -> String {
     if n > 1 { String::from_utf16_lossy(&buf[..(n - 1) as usize]) } else { String::new() }
 }
 
-#[cfg(not(windows))]
+/// Apps opened from Finder or at login get no `LANG`, so the system's language list decides.
+#[cfg(target_os = "macos")]
+fn user_locale() -> String {
+    objc2_foundation::NSLocale::preferredLanguages().firstObject().map(|l| l.to_string()).unwrap_or_default()
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 fn user_locale() -> String {
     String::new()
 }

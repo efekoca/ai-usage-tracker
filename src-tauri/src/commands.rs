@@ -516,8 +516,8 @@ pub fn set_widget_visible(window: WebviewWindow, app: AppHandle, state: State<Ap
 }
 
 #[tauri::command]
-pub async fn list_fonts() -> Vec<String> {
-    crate::fonts::installed_families()
+pub async fn list_fonts(app: AppHandle) -> Vec<String> {
+    crate::fonts::installed_families(&app)
 }
 
 /// `remember` makes `corner` the anchor the widget keeps while resizing.
