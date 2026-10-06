@@ -12,14 +12,23 @@ pub fn parse(hotkey: &str) -> Result<Shortcut, String> {
 }
 
 /// The error is kept for the settings screen: another program may already own the combination.
-pub fn apply(app: &AppHandle, hotkey: &str) -> Result<(), String> {
+/// `chosen` is true when the user picked this shortcut just now rather than at startup.
+pub fn apply(app: &AppHandle, hotkey: &str, chosen: bool) -> Result<(), String> {
     let gs = app.global_shortcut();
     let _ = gs.unregister_all();
+    #[cfg(not(target_os = "linux"))]
+    let _ = chosen;
     #[cfg(target_os = "linux")]
     {
         crate::portal_shortcut::clear();
-        if !hotkey.trim().is_empty() && crate::portal_shortcut::wayland_session() && crate::portal_shortcut::available() {
+        crate::kde_shortcut::clear();
+        let wayland = crate::portal_shortcut::wayland_session();
+        if !hotkey.trim().is_empty() && wayland && crate::portal_shortcut::available() {
             parse(hotkey)?;
+            // a GNOME custom shortcut left from before the portal would toggle the widget a second time
+            if crate::gnome_shortcut::is_gnome() {
+                let _ = crate::gnome_shortcut::remove();
+            }
             *app.state::<AppState>().hotkey_error.lock().unwrap() = None;
             let (app, hotkey) = (app.clone(), hotkey.to_owned());
             // the desktop may ask the user first, so the answer is awaited off the caller's thread
@@ -34,6 +43,29 @@ pub fn apply(app: &AppHandle, hotkey: &str) -> Result<(), String> {
                 *app.state::<AppState>().hotkey_error.lock().unwrap() = r.err();
             });
             return Ok(());
+        }
+        if wayland && !hotkey.trim().is_empty() && crate::kde_shortcut::is_kde() && crate::kde_shortcut::available() {
+            parse(hotkey)?;
+            let press = app.clone();
+            match crate::kde_shortcut::bind(hotkey, chosen, move || crate::windows::handle_menu(&press, "tray:widget")) {
+                Ok(()) => {
+                    *app.state::<AppState>().hotkey_error.lock().unwrap() = None;
+                    return Ok(());
+                }
+                Err(e) => log::warn!("KDE shortcut not registered, using an X11 one: {e}"),
+            }
+        }
+        if wayland && crate::gnome_shortcut::is_gnome() {
+            if !hotkey.trim().is_empty() {
+                parse(hotkey)?;
+            }
+            match crate::gnome_shortcut::apply(hotkey, chosen) {
+                Ok(()) => {
+                    *app.state::<AppState>().hotkey_error.lock().unwrap() = None;
+                    return Ok(());
+                }
+                Err(e) => log::warn!("GNOME custom shortcut not set, using an X11 one: {e}"),
+            }
         }
     }
     let result = if hotkey.trim().is_empty() {

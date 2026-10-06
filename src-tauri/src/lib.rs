@@ -3,6 +3,10 @@ mod commands;
 mod fonts;
 mod hotkey;
 #[cfg(target_os = "linux")]
+mod gnome_shortcut;
+#[cfg(target_os = "linux")]
+mod kde_shortcut;
+#[cfg(target_os = "linux")]
 mod portal_shortcut;
 mod pdf;
 mod settings;
@@ -19,6 +23,9 @@ use std::sync::{Mutex, RwLock};
 use tauri::{Manager, RunEvent};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 use tracker_core::store::Store;
+
+/// Shows or hides the widget of the running app; the desktop shortcut on GNOME runs this.
+pub(crate) const TOGGLE_WIDGET: &str = "--toggle-widget";
 
 /// Runs before the GUI so these modes never start it or hit the single-instance check.
 pub fn cli_mode() -> Option<i32> {
@@ -140,13 +147,20 @@ fn prefer_xwayland() {
 pub fn run() {
     #[cfg(target_os = "linux")]
     prefer_xwayland();
-    let started_hidden = std::env::args().any(|a| a == "--autostart");
+    // a desktop shortcut that starts the app with --toggle-widget brings up just the widget
+    let started_hidden = std::env::args().any(|a| a == "--autostart" || a == TOGGLE_WIDGET);
     let data_dir = tracker_core::store::default_data_dir().unwrap_or_else(|| std::env::temp_dir().join("AIUsageTracker"));
     let _ = std::fs::create_dir_all(&data_dir);
 
     let app = tauri::Builder::default()
         // must be registered first: a second launch just focuses the running instance
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| windows::show_main(app)))
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if args.iter().any(|a| a == TOGGLE_WIDGET) {
+                windows::handle_menu(app, "tray:widget");
+            } else {
+                windows::show_main(app);
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -188,7 +202,7 @@ pub fn run() {
             tray::build(app.handle())?;
             tray::start(app.handle().clone());
             // a combination another program owns is reported in settings, not fatal
-            let _ = hotkey::apply(app.handle(), &settings.widget.hotkey);
+            let _ = hotkey::apply(app.handle(), &settings.widget.hotkey, false);
             if !started_hidden || !settings.onboarded {
                 windows::show_main(app.handle());
             }

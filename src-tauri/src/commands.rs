@@ -742,8 +742,8 @@ pub async fn set_hotkey(window: WebviewWindow, app: AppHandle, hotkey: String) -
     let hotkey: String = hotkey.trim().chars().take(64).collect();
     let state = app.state::<AppState>();
     let old = state.settings.read().unwrap().widget.hotkey.clone();
-    if let Err(e) = crate::hotkey::apply(&app, &hotkey) {
-        let _ = crate::hotkey::apply(&app, &old);
+    if let Err(e) = crate::hotkey::apply(&app, &hotkey, true) {
+        let _ = crate::hotkey::apply(&app, &old, true);
         return Err(e);
     }
     let s = state.update_settings(|s| s.widget.hotkey = hotkey)?;
