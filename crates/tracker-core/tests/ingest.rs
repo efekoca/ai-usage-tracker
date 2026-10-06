@@ -141,6 +141,36 @@ fn projects_are_merged_case_insensitively_and_keep_a_readable_name() {
     assert_eq!(names, vec!["Cowork".to_string(), "demo-app".to_string()]);
 }
 
+/// macOS keeps Roaming and Local data in the same `~/Library/Application Support` folder.
+#[test]
+fn a_macos_layout_is_found_and_its_projects_keep_their_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("Users").join("me");
+    let support = home.join("Library").join("Application Support");
+    let env = Env { home: Some(home.clone()), roaming: Some(support.clone()), local: Some(support.clone()), ..Default::default() };
+    let session = fs::read_to_string(std::path::Path::new(FIX).join("claude/session-a.jsonl")).unwrap().replace(r"C:\\Projects\\demo-app", "/Users/me/Projects/demo-app");
+    assert!(session.contains("/Users/me/Projects/demo-app") && !session.contains(r"C:\\"), "the fixture now uses a macOS path");
+    let proj = home.join(".claude/projects/-Users-me-Projects-demo-app");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(proj.join("session-a.jsonl"), session).unwrap();
+    let cw = support.join("Claude/local-agent-mode-sessions/org-1/user-1/local_s1");
+    put("cowork/c1.jsonl", &cw.join(".claude/projects/-sessions-notes/c1.jsonl"));
+    put("claude_desktop/plan-usage-history.json", &support.join("Claude/plan-usage-history.json"));
+
+    let st = detect(&env, &ExtraPaths::default());
+    let of = |id| st.iter().find(|s| s.id == id).unwrap();
+    assert_eq!((of(SourceId::ClaudeCode).found, of(SourceId::ClaudeCode).file_count), (true, 1));
+    assert_eq!((of(SourceId::Cowork).found, of(SourceId::Cowork).file_count, of(SourceId::Cowork).cloud_only), (true, 1, false));
+    assert_eq!((of(SourceId::ClaudeDesktop).found, of(SourceId::ClaudeDesktop).file_count), (true, 1));
+    assert!(!of(SourceId::ChatgptDesktop).found);
+
+    let mut store = Store::open_in_memory().unwrap();
+    let rep = run(&mut store, &env);
+    assert!(rep.errors.is_empty(), "{:?}", rep.errors);
+    let names: Vec<String> = store.projects().unwrap().into_iter().map(|p| p.name).collect();
+    assert_eq!(names, vec!["Cowork".to_string(), "demo-app".to_string()]);
+}
+
 #[test]
 fn second_run_is_a_no_op() {
     let m = machine();

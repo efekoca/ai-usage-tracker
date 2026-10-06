@@ -268,9 +268,10 @@ mod tests {
 
     #[test]
     fn the_partial_file_sits_beside_the_target_under_another_name() {
-        let out = Path::new(r"C:\r\AI-Usage_2026-09-21_2026-09-27.pdf");
-        let p = partial_path(out);
-        assert_eq!(p.parent(), out.parent());
+        let dir = std::env::temp_dir().join("reports");
+        let out = dir.join("AI-Usage_2026-09-21_2026-09-27.pdf");
+        let p = partial_path(&out);
+        assert_eq!(p.parent(), Some(dir.as_path()));
         assert_ne!(p, out);
         assert_eq!(p.extension().unwrap(), "pdf");
     }

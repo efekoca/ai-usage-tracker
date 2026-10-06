@@ -305,8 +305,19 @@ pub fn managed_conflicts(docs: &[Value]) -> Vec<String> {
     v
 }
 
-pub fn managed_files(program_files: &Path) -> Vec<Value> {
-    let dir = program_files.join("ClaudeCode");
+/// Claude Code's system folder for managed settings on this platform.
+pub fn managed_dir() -> Option<PathBuf> {
+    if cfg!(windows) {
+        std::env::var_os("ProgramFiles").map(|p| Path::new(&p).join("ClaudeCode"))
+    } else if cfg!(target_os = "macos") {
+        Some(PathBuf::from("/Library/Application Support/ClaudeCode"))
+    } else {
+        Some(PathBuf::from("/etc/claude-code"))
+    }
+}
+
+/// `managed-settings.json` and the `managed-settings.d` drop-ins in `dir`, in the order Claude Code merges them.
+pub fn managed_files(dir: &Path) -> Vec<Value> {
     let mut paths = vec![dir.join("managed-settings.json")];
     let mut drop_ins: Vec<PathBuf> = fs::read_dir(dir.join("managed-settings.d"))
         .into_iter()
@@ -526,7 +537,7 @@ mod tests {
         fs::write(cc.join("managed-settings.json"), r#"{"a": 1}"#).unwrap();
         fs::write(cc.join("managed-settings.d").join("10-x.json"), "\u{feff}{\"b\": 2}").unwrap();
         fs::write(cc.join("managed-settings.d").join("notes.txt"), "{}").unwrap();
-        assert_eq!(managed_files(dir.path()), vec![json!({"a": 1}), json!({"b": 2})]);
+        assert_eq!(managed_files(&cc), vec![json!({"a": 1}), json!({"b": 2})]);
         assert!(managed_files(&dir.path().join("missing")).is_empty());
     }
 

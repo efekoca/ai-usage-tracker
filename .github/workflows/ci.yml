@@ -16,16 +16,10 @@ jobs:
   check:
     name: check (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # the macOS port is in progress: its failures are reported but do not fail the run
-    continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: windows-latest
-            experimental: false
-          - os: macos-latest
-            experimental: true
+        os: [windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

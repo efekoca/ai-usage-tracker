@@ -454,16 +454,21 @@ mod launch_agent {
     #[cfg(target_os = "macos")]
     pub fn apply(on: bool) -> Result<(), String> {
         let home = std::env::var_os("HOME").map(std::path::PathBuf::from).filter(|p| p.is_absolute()).ok_or("no home folder")?;
-        let file = home.join("Library/LaunchAgents").join(format!("{LABEL}.plist"));
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        apply_in(&home, &exe, on)
+    }
+
+    pub fn apply_in(home: &Path, exe: &Path, on: bool) -> Result<(), String> {
+        let dir = home.join("Library").join("LaunchAgents");
+        let file = dir.join(format!("{LABEL}.plist"));
         if !on {
             return match std::fs::remove_file(&file) {
                 Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
                 _ => Ok(()),
             };
         }
-        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        std::fs::create_dir_all(file.parent().unwrap_or(home.as_path())).map_err(|e| e.to_string())?;
-        std::fs::write(&file, plist(&exe)).map_err(|e| e.to_string())
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        std::fs::write(&file, plist(exe)).map_err(|e| e.to_string())
     }
 
     pub fn plist(exe: &Path) -> String {
@@ -642,6 +647,19 @@ mod tests {
     fn the_autostart_path_is_quoted() {
         let cmd = autostart_command(std::path::Path::new(r"C:\Program Files\AI Usage Tracker\ai-usage-tracker.exe"));
         assert_eq!(cmd, r#""C:\Program Files\AI Usage Tracker\ai-usage-tracker.exe" --autostart"#);
+    }
+
+    #[test]
+    fn the_launch_agent_is_written_and_removed() {
+        let home = std::env::temp_dir().join(format!("aiut-launch-agent-{}", std::process::id()));
+        let file = home.join("Library/LaunchAgents/io.aiusagetracker.app.plist");
+        let exe = std::path::Path::new("/Applications/AI Usage Tracker.app/Contents/MacOS/ai-usage-tracker");
+        launch_agent::apply_in(&home, exe, true).unwrap();
+        assert!(std::fs::read_to_string(&file).unwrap().contains("<string>/Applications/AI Usage Tracker.app/Contents/MacOS/ai-usage-tracker</string>"));
+        launch_agent::apply_in(&home, exe, false).unwrap();
+        assert!(!file.exists());
+        launch_agent::apply_in(&home, exe, false).expect("removing twice is fine");
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

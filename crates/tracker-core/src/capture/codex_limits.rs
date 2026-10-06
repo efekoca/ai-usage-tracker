@@ -183,6 +183,27 @@ mod tests {
 
     #[test]
     fn a_missing_binary_is_an_error_not_a_panic() {
-        assert!(query(Path::new("Z:/nope/codex.exe"), Duration::from_secs(1), 0).is_err());
+        let missing = std::env::temp_dir().join("aiut-nope").join(super::super::exe("codex"));
+        assert!(query(&missing, Duration::from_secs(1), 0).is_err());
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn homebrew_and_npm_codex_installs_are_candidates() {
+        let home = std::env::temp_dir().join("aiut-home-unix");
+        let env = Env { home: Some(home.clone()), roaming: None, local: None, claude_config_dir: None, codex_home: None };
+        let c = candidates(&env, None);
+        for p in [
+            home.join(".local/bin/codex"),
+            PathBuf::from("/opt/homebrew/bin/codex"),
+            PathBuf::from("/usr/local/bin/codex"),
+            PathBuf::from(format!("/opt/homebrew/lib/node_modules/@openai/codex/vendor/{CODEX_TARGET}/codex/codex")),
+            home.join(format!(".npm-global/lib/node_modules/@openai/codex/vendor/{CODEX_TARGET}/codex/codex")),
+        ] {
+            assert!(c.contains(&p), "{} missing", p.display());
+        }
+        if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            assert_eq!(CODEX_TARGET, "aarch64-apple-darwin");
+        }
     }
 }
