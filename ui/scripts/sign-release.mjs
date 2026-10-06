@@ -1,6 +1,7 @@
 // Signs release files built elsewhere (CI has no update signing key) and adds them to latest.json.
 // Usage: npm --prefix ui run sign-release -- <folder>
-// Every package without a .sig is signed; latest.json in the folder (or RELEASE_MANIFEST) is merged.
+// Every package without a .sig is signed; every signature must name this version. latest.json in the
+// folder (or RELEASE_MANIFEST) is merged.
 import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -30,6 +31,7 @@ if (!env.TAURI_SIGNING_PRIVATE_KEY && !existsSync(keyPath)) {
   process.exit(1)
 }
 env.TAURI_SIGNING_PRIVATE_KEY ??= readFileSync(keyPath, 'utf8')
+delete env.TAURI_SIGNING_PRIVATE_KEY_PATH // the CLI refuses a key and a key path together
 env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ??= ''
 
 const platforms = {}
@@ -37,10 +39,16 @@ for (const file of readdirSync(dir).filter((f) => f.includes(`_${version}_`))) {
   const kind = kinds.find(([re]) => re.test(file))
   if (!kind) continue
   if (!existsSync(join(dir, `${file}.sig`))) {
-    const r = spawnSync('npx', ['--prefix', 'ui', 'tauri', 'signer', 'sign', `"${join(dir, file)}"`], { cwd: repo, env, stdio: 'inherit', shell: true })
+    // installed apps require the version in the signature (`requireSignedVersion`)
+    const r = spawnSync('npx', ['--prefix', 'ui', 'tauri', 'signer', 'sign', '--app-version', version, `"${join(dir, file)}"`], { cwd: repo, env, stdio: 'inherit', shell: true })
     if (r.status !== 0) process.exit(r.status ?? 1)
   }
   const signature = readFileSync(join(dir, `${file}.sig`), 'utf8').trim()
+  const trusted = Buffer.from(signature, 'base64').toString('utf8').split('\n').find((l) => l.startsWith('trusted comment:')) ?? ''
+  if (!trusted.split('\t').includes(`version:${version}`)) {
+    console.error(`${file}.sig is not bound to v${version}, so installed apps would reject the update. Delete it and run this again.`)
+    process.exit(1)
+  }
   for (const key of kind[1](file.match(kind[0])[1])) platforms[key] = { signature, file }
 }
 if (!Object.keys(platforms).length) {
