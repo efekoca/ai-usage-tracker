@@ -38,13 +38,18 @@ fn turkish(s: &Settings) -> bool {
 fn menu(app: &AppHandle, tr: bool, update: Option<&str>, hotkey: &str) -> tauri::Result<Menu<tauri::Wry>> {
     let t = |en: &str, tr_: &str| if tr { tr_.to_owned() } else { en.to_owned() };
     let open = MenuItem::with_id(app, "tray:open", t("Open dashboard", "Paneli aç"), true, None::<&str>)?;
-    // the shortcut goes in the accelerator column (after a tab) as plain text, so a combination
-    // the menu's own parser does not know can never break the menu
-    let mut widget_text = t("Show/hide widget", "Widget'ı göster/gizle");
-    if !hotkey.is_empty() {
-        widget_text = format!("{widget_text}\t{}", hotkey.replace("Super", "Win"));
-    }
-    let widget = MenuItem::with_id(app, "tray:widget", widget_text, true, None::<&str>)?;
+    let widget_text = t("Show/hide widget", "Widget'ı göster/gizle");
+    // macOS draws the shortcut (⌃⌥⇧W) in the menu's key column; a combination the menu cannot
+    // parse just goes without it, so it can never break the menu
+    #[cfg(target_os = "macos")]
+    let widget = MenuItem::with_id(app, "tray:widget", &widget_text, true, (!hotkey.is_empty()).then_some(hotkey))
+        .or_else(|_| MenuItem::with_id(app, "tray:widget", &widget_text, true, None::<&str>))?;
+    // elsewhere it goes in the accelerator column (after a tab) as plain text, for the same reason
+    #[cfg(not(target_os = "macos"))]
+    let widget = {
+        let text = if hotkey.is_empty() { widget_text } else { format!("{widget_text}\t{}", hotkey.replace("Super", "Win")) };
+        MenuItem::with_id(app, "tray:widget", text, true, None::<&str>)?
+    };
     let rescan = MenuItem::with_id(app, "tray:rescan", t("Rescan now", "Şimdi tara"), true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
