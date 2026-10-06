@@ -10,7 +10,8 @@
   let sources: SourceInfo[] = $state([])
   let enabled: Record<string, boolean> = $state({})
   let plans: PlansFile | null = $state(null)
-  let chosen: Record<string, string> = $state({ ...(app.settings?.plans ?? {}) })
+  // every provider starts as '' (no plan): binding undefined to the plan picker throws and stops the page
+  let chosen: Record<string, string> = $state({ anthropic: '', openai: '', ...(app.settings?.plans ?? {}) })
   let showPrivacy = $state(false)
   let busy = $state(false)
   let loaded = $state(false)
