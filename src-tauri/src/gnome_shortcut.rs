@@ -23,7 +23,7 @@ pub fn apply(hotkey: &str, keys: bool) -> Result<(), String> {
     let ours = format!("{SCHEMA}.custom-keybinding:{PATH}");
     let fresh = !list.iter().any(|p| p == PATH);
     gsettings(&["set", &ours, "name", &quote("AI Usage Tracker widget")])?;
-    gsettings(&["set", &ours, "command", &quote(&command(&exe()?))])?;
+    gsettings(&["set", &ours, "command", &quote(&command(&crate::app_path()?))])?;
     if keys || fresh {
         gsettings(&["set", &ours, "binding", &quote(&binding(hotkey))])?;
     }
@@ -41,14 +41,6 @@ pub fn remove() -> Result<(), String> {
         gsettings(&["set", SCHEMA, LIST, &format_list(&kept)])?;
     }
     gsettings(&["reset-recursively", &format!("{SCHEMA}.custom-keybinding:{PATH}")]).map(|_| ())
-}
-
-fn exe() -> Result<std::path::PathBuf, String> {
-    // an AppImage runs from a temporary mount; the file it was started from stays put
-    match std::env::var_os("APPIMAGE").map(std::path::PathBuf::from).filter(|p| p.is_file()) {
-        Some(p) => Ok(p),
-        None => std::env::current_exe().map_err(|e| e.to_string()),
-    }
 }
 
 fn gsettings(args: &[&str]) -> Result<String, String> {

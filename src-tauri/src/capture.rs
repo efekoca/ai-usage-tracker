@@ -407,7 +407,7 @@ pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
                 persist(app, |s| s.capture.statusline = true)?;
                 return Ok("already".into());
             }
-            let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+            let exe = crate::app_path()?;
             let file = claude_settings_file(&settings);
             let ch = cs::install_statusline(&mut cstate, &data_dir, &file, &statusline_command(&exe), now_ms()).map_err(code)?;
             persist(app, |s| s.capture.statusline = true)?;
@@ -656,7 +656,7 @@ fn refresh_statusline(data_dir: &Path) {
     if cfg!(debug_assertions) {
         return;
     }
-    let Ok(exe) = std::env::current_exe() else { return };
+    let Ok(exe) = crate::app_path() else { return };
     let mut cstate = cs::load_state(data_dir);
     match cs::refresh_statusline(&mut cstate, data_dir, &statusline_command(&exe)) {
         Ok(true) => log::info!("status line now points at this copy of the app"),
