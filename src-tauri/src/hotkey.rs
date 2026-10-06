@@ -15,6 +15,27 @@ pub fn parse(hotkey: &str) -> Result<Shortcut, String> {
 pub fn apply(app: &AppHandle, hotkey: &str) -> Result<(), String> {
     let gs = app.global_shortcut();
     let _ = gs.unregister_all();
+    #[cfg(target_os = "linux")]
+    {
+        crate::portal_shortcut::clear();
+        if !hotkey.trim().is_empty() && crate::portal_shortcut::wayland_session() && crate::portal_shortcut::available() {
+            parse(hotkey)?;
+            *app.state::<AppState>().hotkey_error.lock().unwrap() = None;
+            let (app, hotkey) = (app.clone(), hotkey.to_owned());
+            // the desktop may ask the user first, so the answer is awaited off the caller's thread
+            std::thread::spawn(move || {
+                let press = app.clone();
+                let r = crate::portal_shortcut::bind(&hotkey, "Show or hide the AI Usage Tracker widget", move || {
+                    crate::windows::handle_menu(&press, "tray:widget");
+                });
+                if let Err(e) = &r {
+                    log::warn!("widget shortcut not registered through the portal: {e}");
+                }
+                *app.state::<AppState>().hotkey_error.lock().unwrap() = r.err();
+            });
+            return Ok(());
+        }
+    }
     let result = if hotkey.trim().is_empty() {
         Ok(())
     } else {

@@ -257,7 +257,8 @@
     <div>
       <span>{t('settings.hotkey')}</span>
       <div class="subtle small">{t('settings.hotkey.help')}</div>
-      {#if hkError || hk?.error}<div class="small err" role="alert">{hkError || t('settings.hotkey.err.taken')}</div>{/if}
+      {#if hk?.desktop}<div class="subtle small">{t('settings.hotkey.desktop')}</div>{/if}
+      {#if hkError || hk?.error}<div class="small err" role="alert">{hkError || t(hk?.error === 'hotkey_declined' ? 'settings.hotkey.err.declined' : 'settings.hotkey.err.taken')}</div>{/if}
     </div>
     <div class="row wrap end">
       {#if recording}
