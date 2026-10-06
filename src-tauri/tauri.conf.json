@@ -3,7 +3,7 @@
   "productName": "AI Usage Tracker",
   "mainBinaryName": "ai-usage-tracker",
   "version": "0.2.8",
-  "identifier": "io.aiusagetracker.app",
+  "identifier": "io.aiusagetracker.desktop",
   "build": {
     "frontendDist": "../ui/dist",
     "devUrl": "http://localhost:5173",
