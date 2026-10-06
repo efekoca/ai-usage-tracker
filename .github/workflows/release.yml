@@ -37,3 +37,44 @@ jobs:
           name: installer
           path: target/release/bundle/release/*.exe
           if-no-files-found: error
+
+  # 22.04 has the oldest glibc we support, so the packages also run on newer systems
+  linux:
+    runs-on: ubuntu-22.04
+    env:
+      # the AppImage tools are AppImages themselves; runners have no FUSE
+      APPIMAGE_EXTRACT_AND_RUN: 1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Linux system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev file
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Install UI dependencies
+        run: npm --prefix ui ci
+
+      # no update signing key on the runner: the packages are signed afterwards on the maintainer's machine
+      - name: Build packages
+        run: npm --prefix ui run release
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-packages
+          path: |
+            target/release/bundle/release/*.deb
+            target/release/bundle/release/*.rpm
+            target/release/bundle/release/*.AppImage
+          if-no-files-found: error

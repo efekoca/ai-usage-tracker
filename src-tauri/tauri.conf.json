@@ -28,7 +28,10 @@
     "targets": [
       "nsis",
       "app",
-      "dmg"
+      "dmg",
+      "deb",
+      "rpm",
+      "appimage"
     ],
     "publisher": "AI Usage Tracker contributors",
     "copyright": "MIT License",
@@ -42,6 +45,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "linux": {
+      "deb": {
+        "postInstallScript": "linux/postinst.sh",
+        "postRemoveScript": "linux/postrm.sh"
+      },
+      "rpm": {
+        "postInstallScript": "linux/postinst.sh",
+        "postRemoveScript": "linux/postrm.sh"
+      }
+    },
     "macOS": {
       "minimumSystemVersion": "11.0",
       "dmg": {
