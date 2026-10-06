@@ -48,10 +48,12 @@
     "linux": {
       "deb": {
         "postInstallScript": "linux/postinst.sh",
+        "preRemoveScript": "linux/prerm.sh",
         "postRemoveScript": "linux/postrm.sh"
       },
       "rpm": {
         "postInstallScript": "linux/postinst.sh",
+        "preRemoveScript": "linux/prerm.sh",
         "postRemoveScript": "linux/postrm.sh"
       }
     },
