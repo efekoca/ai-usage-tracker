@@ -27,9 +27,9 @@ const targetAt = cliArgs.indexOf('--target')
 // one package for Apple silicon and Intel Macs
 const target = targetAt >= 0 ? cliArgs[targetAt + 1] : mac ? 'universal-apple-darwin' : null
 if (mac && targetAt < 0) cliArgs.push('--target', target)
+const notarize = ['APPLE_API_KEY', 'APPLE_API_ISSUER', 'APPLE_API_KEY_PATH'].filter((k) => !process.env[k])
 if (mac) {
   // Tauri signs with this Keychain identity and notarizes with the App Store Connect API key
-  const notarize = ['APPLE_API_KEY', 'APPLE_API_ISSUER', 'APPLE_API_KEY_PATH'].filter((k) => !process.env[k])
   if (!process.env.APPLE_SIGNING_IDENTITY) {
     console.log('APPLE_SIGNING_IDENTITY is not set: the app will not be signed, and macOS will block it on first open.')
   } else if (notarize.length) {
@@ -79,6 +79,17 @@ if (mac) {
   const dmgDir = join(bundle, 'dmg')
   const dmg = existsSync(dmgDir) && readdirSync(dmgDir).find((f) => f.endsWith(`_${version}_${arch}.dmg`))
   if (!dmg) fail(`No disk image for v${version} in ${dmgDir}`)
+  // Tauri notarizes the app but not the disk image, which Gatekeeper also checks when a download is opened
+  if (process.env.APPLE_SIGNING_IDENTITY && notarize.length === 0) {
+    const image = join(dmgDir, dmg)
+    const run = (cmd, a) => {
+      const r = spawnSync(cmd, a, { stdio: 'inherit' })
+      if (r.status !== 0) fail(`${cmd} ${a[0]} failed for ${image}`)
+    }
+    run('codesign', ['--force', '--sign', process.env.APPLE_SIGNING_IDENTITY, '--timestamp', image])
+    run('xcrun', ['notarytool', 'submit', image, '--key', process.env.APPLE_API_KEY_PATH, '--key-id', process.env.APPLE_API_KEY, '--issuer', process.env.APPLE_API_ISSUER, '--wait'])
+    run('xcrun', ['stapler', 'staple', image])
+  }
   take(dmgDir, dmg, `AI-Usage-Tracker_${version}_${arch}.dmg`)
   if (signing) {
     const app = join(bundle, 'macos')
