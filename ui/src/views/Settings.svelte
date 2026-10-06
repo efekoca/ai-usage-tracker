@@ -11,7 +11,8 @@
   import ReportCard from '../components/ReportCard.svelte'
 
   const s = $derived(app.settings!)
-  const autostartKey = $derived(app.info?.platform === 'macos' ? 'settings.autostart.mac' : 'settings.autostart')
+  // "Start with Windows" only on Windows; elsewhere it starts at login
+  const autostartKey = $derived(app.info && app.info.platform !== 'windows' ? 'settings.autostart.mac' : 'settings.autostart')
   let pricing: PricingFile | null = $state(null)
   let pricingOrigin = $state('bundled')
   let pricingDirty = $state(false)

@@ -1,5 +1,5 @@
 //! Renders `report.html` in a hidden window and prints it to PDF without a print dialog: WebView2's
-//! PrintToPdf on Windows, a WKWebView print operation on macOS.
+//! PrintToPdf on Windows, a WKWebView print operation on macOS, a WebKitGTK one on Linux.
 
 use crate::state::AppState;
 use chrono::{Datelike, Days, NaiveDate};
@@ -246,7 +246,53 @@ mod mac_print {
     }
 }
 
-#[cfg(not(any(windows, target_os = "macos")))]
+#[cfg(target_os = "linux")]
+fn print_to_pdf(win: &tauri::WebviewWindow, out: &Path) -> Result<(), String> {
+    use webkit2gtk::{PrintOperation, PrintOperationExt};
+
+    let uri = gtk::glib::filename_to_uri(out, None).map_err(|e| e.to_string())?.to_string();
+    let (tx, rx) = mpsc::channel::<Result<(), String>>();
+    win.with_webview(move |wv| {
+        let settings = gtk::PrintSettings::new();
+        // GTK's file printer has a translated name, so it is looked up in GTK's own catalog
+        settings.set_printer(&gtk::glib::dgettext(Some("gtk30"), "Print to File"));
+        settings.set(gtk::PRINT_SETTINGS_OUTPUT_FILE_FORMAT, Some("pdf"));
+        settings.set(gtk::PRINT_SETTINGS_OUTPUT_URI, Some(&uri));
+        // A4 with 12 mm margins, like the other platforms; the page lays itself out for print media
+        let setup = gtk::PageSetup::new();
+        setup.set_paper_size(&gtk::PaperSize::new(Some(gtk::PAPER_NAME_A4)));
+        setup.set_orientation(gtk::PageOrientation::Portrait);
+        setup.set_top_margin(12.0, gtk::Unit::Mm);
+        setup.set_bottom_margin(12.0, gtk::Unit::Mm);
+        setup.set_left_margin(12.0, gtk::Unit::Mm);
+        setup.set_right_margin(12.0, gtk::Unit::Mm);
+
+        let op = PrintOperation::new(&wv.inner());
+        op.set_print_settings(&settings);
+        op.set_page_setup(&setup);
+        let failed = tx.clone();
+        // "failed" comes before "finished", so the first message decides
+        op.connect_failed(move |_, e| {
+            let _ = failed.send(Err(e.to_string()));
+        });
+        // the operation keeps itself alive until it finishes
+        let keep = std::cell::RefCell::new(Some(op.clone()));
+        op.connect_finished(move |_| {
+            let _ = tx.send(Ok(()));
+            keep.borrow_mut().take();
+        });
+        op.print();
+    })
+    .map_err(|e| e.to_string())?;
+    rx.recv_timeout(Duration::from_secs(60)).map_err(|_| "pdf_timeout".to_string())??;
+    if out.is_file() {
+        Ok(())
+    } else {
+        Err("pdf_failed".into())
+    }
+}
+
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 fn print_to_pdf(_win: &tauri::WebviewWindow, _out: &Path) -> Result<(), String> {
     Err("pdf_unsupported".into())
 }

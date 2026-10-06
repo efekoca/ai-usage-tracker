@@ -41,3 +41,8 @@ objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSURL", "NSDictionary", "NSGeometry", "NSLocale", "NSArray"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPrintInfo", "NSPrintOperation", "NSView", "NSResponder", "NSWindow", "NSColor", "NSColorSpace", "NSFontManager", "objc2-core-foundation"] }
 objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "WKWebView", "objc2-app-kit"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# the versions Tauri's own WebKitGTK binding uses (report printing)
+webkit2gtk = "2.0"
+gtk = "0.18"

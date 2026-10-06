@@ -49,7 +49,35 @@ pub fn installed_families(app: &tauri::AppHandle) -> Vec<String> {
     v
 }
 
-#[cfg(not(any(windows, target_os = "macos")))]
+#[cfg(target_os = "linux")]
+pub fn installed_families(_app: &tauri::AppHandle) -> Vec<String> {
+    let Ok(out) = std::process::Command::new("fc-list").args([":", "family"]).output() else { return Vec::new() };
+    let mut v = families_from_fc_list(&String::from_utf8_lossy(&out.stdout));
+    v.sort_by_key(|s| s.to_lowercase());
+    v.dedup();
+    v
+}
+
+/// One line per face, its names comma-separated (localized ones after the first); `\` escapes `-`, `,` and `:`.
+#[cfg(any(target_os = "linux", test))]
+fn families_from_fc_list(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|l| l.split(',').next())
+        .map(|f| f.replace('\\', "").trim().to_owned())
+        .filter(|f| !f.is_empty() && !f.starts_with('.'))
+        .collect()
+}
+
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 pub fn installed_families(_app: &tauri::AppHandle) -> Vec<String> {
     Vec::new()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn fc_list_lines_give_their_first_family_name() {
+        let text = "DejaVu Sans\nNoto Sans CJK JP,Noto Sans CJK JP Regular\nSource Code Pro\\-Light\n\n.LastResort\n";
+        assert_eq!(super::families_from_fc_list(text), ["DejaVu Sans", "Noto Sans CJK JP", "Source Code Pro-Light"]);
+    }
 }

@@ -436,7 +436,12 @@ pub fn apply_autostart(on: bool, user_choice: bool) {
         }
     }
     #[cfg(not(any(windows, target_os = "macos")))]
-    let _ = (on, user_choice);
+    {
+        let _ = user_choice;
+        if let Err(e) = xdg_autostart::apply(on) {
+            log::warn!("autostart change failed: {e}");
+        }
+    }
 }
 
 #[cfg(any(windows, test))]
@@ -444,12 +449,62 @@ fn autostart_command(exe: &std::path::Path) -> String {
     format!("\"{}\" --autostart", exe.display())
 }
 
+/// An XDG autostart entry, which GNOME, KDE, XFCE and most other desktops start at login.
+#[cfg(any(not(any(windows, target_os = "macos")), test))]
+mod xdg_autostart {
+    use std::path::Path;
+
+    const FILE: &str = "ai-usage-tracker.desktop";
+
+    #[cfg(not(any(windows, target_os = "macos")))]
+    pub fn apply(on: bool) -> Result<(), String> {
+        use std::path::PathBuf;
+        let config = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+            .ok_or("no config folder")?;
+        // an AppImage runs from a temporary mount; the file it was started from stays put
+        let exe = match std::env::var_os("APPIMAGE").map(PathBuf::from).filter(|p| p.is_file()) {
+            Some(p) => p,
+            None => std::env::current_exe().map_err(|e| e.to_string())?,
+        };
+        apply_in(&config, &exe, on)
+    }
+
+    pub fn apply_in(config: &Path, exe: &Path, on: bool) -> Result<(), String> {
+        let dir = config.join("autostart");
+        let file = dir.join(FILE);
+        if !on {
+            return match std::fs::remove_file(&file) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
+                _ => Ok(()),
+            };
+        }
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        std::fs::write(&file, entry(exe)).map_err(|e| e.to_string())
+    }
+
+    pub fn entry(exe: &Path) -> String {
+        format!(
+            "[Desktop Entry]\nType=Application\nName=AI Usage Tracker\nExec={} --autostart\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",
+            exec_arg(&exe.to_string_lossy())
+        )
+    }
+
+    /// Quoted per the Desktop Entry spec; the string-level escape doubles backslashes once more.
+    fn exec_arg(s: &str) -> String {
+        let quoted = s.replace('\\', "\\\\").replace('"', "\\\"").replace('`', "\\`").replace('$', "\\$");
+        format!("\"{}\"", quoted.replace('\\', "\\\\")).replace('%', "%%")
+    }
+}
+
 /// A per-user LaunchAgent; launchd starts it at the next login, so nothing is started now.
 #[cfg(any(target_os = "macos", test))]
 mod launch_agent {
     use std::path::Path;
 
-    const LABEL: &str = "io.aiusagetracker.app";
+    const LABEL: &str = "io.aiusagetracker.desktop";
 
     #[cfg(target_os = "macos")]
     pub fn apply(on: bool) -> Result<(), String> {
@@ -650,9 +705,24 @@ mod tests {
     }
 
     #[test]
+    fn the_autostart_entry_quotes_the_path_per_the_desktop_entry_spec() {
+        let e = xdg_autostart::entry(std::path::Path::new(r"/opt/AI Usage/a\b$x`y%z/ai-usage-tracker"));
+        assert!(e.contains(r#"Exec="/opt/AI Usage/a\\\\b\\$x\\`y%%z/ai-usage-tracker" --autostart"#), "{e}");
+        assert!(e.starts_with("[Desktop Entry]\nType=Application\n"));
+
+        let config = std::env::temp_dir().join(format!("aiut-xdg-{}", std::process::id()));
+        let file = config.join("autostart/ai-usage-tracker.desktop");
+        xdg_autostart::apply_in(&config, std::path::Path::new("/usr/bin/ai-usage-tracker"), true).unwrap();
+        assert!(std::fs::read_to_string(&file).unwrap().contains(r#"Exec="/usr/bin/ai-usage-tracker" --autostart"#));
+        xdg_autostart::apply_in(&config, std::path::Path::new("/usr/bin/ai-usage-tracker"), false).unwrap();
+        assert!(!file.exists());
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
     fn the_launch_agent_is_written_and_removed() {
         let home = std::env::temp_dir().join(format!("aiut-launch-agent-{}", std::process::id()));
-        let file = home.join("Library/LaunchAgents/io.aiusagetracker.app.plist");
+        let file = home.join("Library/LaunchAgents/io.aiusagetracker.desktop.plist");
         let exe = std::path::Path::new("/Applications/AI Usage Tracker.app/Contents/MacOS/ai-usage-tracker");
         launch_agent::apply_in(&home, exe, true).unwrap();
         assert!(std::fs::read_to_string(&file).unwrap().contains("<string>/Applications/AI Usage Tracker.app/Contents/MacOS/ai-usage-tracker</string>"));
