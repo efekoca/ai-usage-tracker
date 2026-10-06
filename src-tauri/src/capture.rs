@@ -296,7 +296,7 @@ fn outcome_text(o: RevertOutcome) -> &'static str {
 }
 
 fn managed_settings() -> Vec<serde_json::Value> {
-    let mut docs = std::env::var_os("ProgramFiles").map(|p| cs::managed_files(Path::new(&p))).unwrap_or_default();
+    let mut docs = cs::managed_dir().map(|d| cs::managed_files(&d)).unwrap_or_default();
     docs.extend(policy_values().iter().filter_map(|s| serde_json::from_str(s).ok()));
     docs
 }
@@ -325,7 +325,25 @@ fn policy_values() -> Vec<String> {
     out
 }
 
-#[cfg(not(windows))]
+/// MDM configuration profiles land as `com.anthropic.claudecode` managed preferences, per user or machine-wide.
+#[cfg(target_os = "macos")]
+fn policy_values() -> Vec<String> {
+    let base = Path::new("/Library/Managed Preferences");
+    let mut plists = Vec::new();
+    if let Ok(user) = std::env::var("USER") {
+        plists.push(base.join(user).join("com.anthropic.claudecode.plist"));
+    }
+    plists.push(base.join("com.anthropic.claudecode.plist"));
+    plists
+        .iter()
+        .filter(|p| p.is_file())
+        .filter_map(|p| std::process::Command::new("/usr/bin/plutil").args(["-convert", "json", "-o", "-"]).arg(p).output().ok())
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .collect()
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 fn policy_values() -> Vec<String> {
     Vec::new()
 }
