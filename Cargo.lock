@@ -22,6 +22,7 @@ name = "ai-usage-tracker"
 version = "0.2.8"
 dependencies = [
  "chrono",
+ "gtk",
  "log",
  "notify",
  "objc2",
@@ -39,6 +40,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tokio",
  "tracker-core",
+ "webkit2gtk",
  "webview2-com",
  "windows",
  "windows-sys 0.61.2",
