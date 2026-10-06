@@ -26,7 +26,9 @@
   "bundle": {
     "active": true,
     "targets": [
-      "nsis"
+      "nsis",
+      "app",
+      "dmg"
     ],
     "publisher": "AI Usage Tracker contributors",
     "copyright": "MIT License",
@@ -37,8 +39,17 @@
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
+      "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "dmg": {
+        "windowSize": { "width": 660, "height": 400 },
+        "appPosition": { "x": 180, "y": 150 },
+        "applicationFolderPosition": { "x": 480, "y": 150 }
+      }
+    },
     "windows": {
       "webviewInstallMode": {
         "type": "embedBootstrapper"
