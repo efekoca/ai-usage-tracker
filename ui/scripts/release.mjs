@@ -28,6 +28,7 @@ const targetAt = cliArgs.indexOf('--target')
 const target = targetAt >= 0 ? cliArgs[targetAt + 1] : mac ? 'universal-apple-darwin' : null
 if (mac && targetAt < 0) cliArgs.push('--target', target)
 const notarize = ['APPLE_API_KEY', 'APPLE_API_ISSUER', 'APPLE_API_KEY_PATH'].filter((k) => !process.env[k])
+const notarized = !!process.env.APPLE_SIGNING_IDENTITY && notarize.length === 0
 if (mac) {
   // Tauri signs with this Keychain identity and notarizes with the App Store Connect API key
   if (!process.env.APPLE_SIGNING_IDENTITY) {
@@ -38,7 +39,10 @@ if (mac) {
 }
 
 const keyPath = process.env.TAURI_SIGNING_PRIVATE_KEY_PATH ?? join(homedir(), '.tauri', 'ai-usage-tracker.key')
-const signing = !!process.env.TAURI_SIGNING_PRIVATE_KEY || existsSync(keyPath)
+const hasKey = !!process.env.TAURI_SIGNING_PRIVATE_KEY || existsSync(keyPath)
+// the updater skips Gatekeeper, so a Mac update must be signed and notarized before it is offered
+const signing = hasKey && (!mac || notarized)
+if (hasKey && !signing) console.log('Without Apple signing and notarization the Mac build gets no update artifacts.')
 const args = ['--prefix', 'ui', 'tauri', 'build', ...cliArgs]
 const scratch = signing ? mkdtempSync(join(tmpdir(), 'ai-usage-tracker-')) : null
 if (signing) {
@@ -80,7 +84,7 @@ if (mac) {
   const dmg = existsSync(dmgDir) && readdirSync(dmgDir).find((f) => f.endsWith(`_${version}_${arch}.dmg`))
   if (!dmg) fail(`No disk image for v${version} in ${dmgDir}`)
   // Tauri notarizes the app but not the disk image, which Gatekeeper also checks when a download is opened
-  if (process.env.APPLE_SIGNING_IDENTITY && notarize.length === 0) {
+  if (notarized) {
     const image = join(dmgDir, dmg)
     const run = (cmd, a) => {
       const r = spawnSync(cmd, a, { stdio: 'inherit' })
@@ -93,6 +97,15 @@ if (mac) {
   take(dmgDir, dmg, `AI-Usage-Tracker_${version}_${arch}.dmg`)
   if (signing) {
     const app = join(bundle, 'macos')
+    const check = (cmd, a) => {
+      const r = spawnSync(cmd, a, { stdio: 'inherit' })
+      if (r.status !== 0) fail(`${cmd} ${a.join(' ')} failed: not publishing a Mac update`)
+    }
+    const bundled = join(app, `${conf.productName}.app`)
+    check('codesign', ['--verify', '--deep', '--strict', bundled])
+    check('spctl', ['--assess', '--type', 'execute', bundled])
+    check('xcrun', ['stapler', 'validate', bundled])
+    check('xcrun', ['stapler', 'validate', join(dmgDir, dmg)])
     const archive = `${conf.productName}.app.tar.gz`
     if (!existsSync(join(app, archive))) fail(`No update archive in ${app}`)
     const asset = `AI-Usage-Tracker_${version}_${arch}.app.tar.gz`
