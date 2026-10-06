@@ -21,9 +21,25 @@ const flags = [...inherited.filter(Boolean), ...remaps.map(([from, to]) => `--re
 const env = { ...process.env, CARGO_ENCODED_RUSTFLAGS: flags.join(sep) }
 delete env.RUSTFLAGS
 
+const mac = process.platform === 'darwin'
+const cliArgs = process.argv.slice(2)
+const targetAt = cliArgs.indexOf('--target')
+// one package for Apple silicon and Intel Macs
+const target = targetAt >= 0 ? cliArgs[targetAt + 1] : mac ? 'universal-apple-darwin' : null
+if (mac && targetAt < 0) cliArgs.push('--target', target)
+if (mac) {
+  // Tauri signs with this Keychain identity and notarizes with the App Store Connect API key
+  const notarize = ['APPLE_API_KEY', 'APPLE_API_ISSUER', 'APPLE_API_KEY_PATH'].filter((k) => !process.env[k])
+  if (!process.env.APPLE_SIGNING_IDENTITY) {
+    console.log('APPLE_SIGNING_IDENTITY is not set: the app will not be signed, and macOS will block it on first open.')
+  } else if (notarize.length) {
+    console.log(`${notarize.join(', ')} not set: the app will be signed but not notarized, and macOS will warn on first open.`)
+  }
+}
+
 const keyPath = process.env.TAURI_SIGNING_PRIVATE_KEY_PATH ?? join(homedir(), '.tauri', 'ai-usage-tracker.key')
 const signing = !!process.env.TAURI_SIGNING_PRIVATE_KEY || existsSync(keyPath)
-const args = ['--prefix', 'ui', 'tauri', 'build', ...process.argv.slice(2)]
+const args = ['--prefix', 'ui', 'tauri', 'build', ...cliArgs]
 const scratch = signing ? mkdtempSync(join(tmpdir(), 'ai-usage-tracker-')) : null
 if (signing) {
   env.TAURI_SIGNING_PRIVATE_KEY ??= keyPath // the CLI takes a path or the key itself
@@ -40,20 +56,53 @@ const r = spawnSync('npx', args, { cwd: repo, env, stdio: 'inherit', shell: true
 if (scratch) rmSync(scratch, { recursive: true, force: true })
 if (r.status !== 0) process.exit(r.status ?? 1)
 
-const version = JSON.parse(readFileSync(join(repo, 'src-tauri', 'tauri.conf.json'), 'utf8')).version
-const nsis = join(repo, 'target', 'release', 'bundle', 'nsis')
-const setup = readdirSync(nsis).find((f) => f.endsWith(`_${version}_x64-setup.exe`))
-if (!setup) {
-  console.error(`No installer for v${version} in ${nsis}`)
-  process.exit(1)
-}
+const conf = JSON.parse(readFileSync(join(repo, 'src-tauri', 'tauri.conf.json'), 'utf8'))
+const version = conf.version
+const bundle = join(repo, 'target', ...(target ? [target] : []), 'release', 'bundle')
 const out = join(repo, 'target', 'release', 'bundle', 'release')
 rmSync(out, { recursive: true, force: true })
 mkdirSync(out, { recursive: true })
-// a name without spaces: release pages rewrite spaces, which would break the update URL
-const asset = `AI-Usage-Tracker_${version}_x64-setup.exe`
-copyFileSync(join(nsis, setup), join(out, asset))
-const files = [asset]
+const files = []
+const platforms = {}
+// names without spaces: release pages rewrite spaces, which would break the update URL
+const take = (dir, name, asset) => {
+  copyFileSync(join(dir, name), join(out, asset))
+  files.push(asset)
+}
+const fail = (msg) => {
+  console.error(msg)
+  process.exit(1)
+}
+
+if (mac) {
+  const arch = target === 'universal-apple-darwin' ? 'universal' : target.startsWith('aarch64') ? 'aarch64' : 'x64'
+  const dmgDir = join(bundle, 'dmg')
+  const dmg = existsSync(dmgDir) && readdirSync(dmgDir).find((f) => f.endsWith(`_${version}_${arch}.dmg`))
+  if (!dmg) fail(`No disk image for v${version} in ${dmgDir}`)
+  take(dmgDir, dmg, `AI-Usage-Tracker_${version}_${arch}.dmg`)
+  if (signing) {
+    const app = join(bundle, 'macos')
+    const archive = `${conf.productName}.app.tar.gz`
+    if (!existsSync(join(app, archive))) fail(`No update archive in ${app}`)
+    const asset = `AI-Usage-Tracker_${version}_${arch}.app.tar.gz`
+    take(app, archive, asset)
+    take(app, `${archive}.sig`, `${asset}.sig`)
+    const keys = arch === 'universal' ? ['darwin-aarch64', 'darwin-x86_64'] : [arch === 'aarch64' ? 'darwin-aarch64' : 'darwin-x86_64']
+    for (const k of keys) platforms[k] = { signature: readFileSync(join(app, `${archive}.sig`), 'utf8').trim(), asset }
+  }
+  // the disk image and the update archive carry the app; the loose copy would show up in Launchpad
+  rmSync(join(bundle, 'macos', `${conf.productName}.app`), { recursive: true, force: true })
+} else {
+  const nsis = join(bundle, 'nsis')
+  const setup = readdirSync(nsis).find((f) => f.endsWith(`_${version}_x64-setup.exe`))
+  if (!setup) fail(`No installer for v${version} in ${nsis}`)
+  const asset = `AI-Usage-Tracker_${version}_x64-setup.exe`
+  take(nsis, setup, asset)
+  if (signing) {
+    take(nsis, `${setup}.sig`, `${asset}.sig`)
+    platforms['windows-x86_64'] = { signature: readFileSync(join(nsis, `${setup}.sig`), 'utf8').trim(), asset }
+  }
+}
 
 const updates = JSON.parse(readFileSync(join(repo, 'config', 'updates.json'), 'utf8'))
 const base = updates.endpoint?.startsWith('https://')
@@ -61,20 +110,19 @@ const base = updates.endpoint?.startsWith('https://')
   : /^[\w.-]+\/[\w.-]+$/.test(updates.github_repo ?? '')
     ? `https://github.com/${updates.github_repo}/releases/download/v${version}`
     : null
-if (signing) {
-  const sig = readFileSync(join(nsis, `${setup}.sig`), 'utf8').trim()
-  copyFileSync(join(nsis, `${setup}.sig`), join(out, `${asset}.sig`))
-  files.push(`${asset}.sig`)
-  if (base) {
-    const manifest = {
-      version,
-      notes: process.env.RELEASE_NOTES ?? `AI Usage Tracker v${version}`,
-      pub_date: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
-      platforms: { 'windows-x86_64': { signature: sig, url: `${base}/${asset}` } },
-    }
-    writeFileSync(join(out, 'latest.json'), JSON.stringify(manifest, null, 2) + '\n')
-    files.push('latest.json')
+if (signing && base) {
+  // the other platform's latest.json for this version, so one manifest serves both
+  const other = process.env.RELEASE_MANIFEST ? JSON.parse(readFileSync(process.env.RELEASE_MANIFEST, 'utf8')) : null
+  if (other && other.version !== version) fail(`RELEASE_MANIFEST is for v${other.version}, not v${version}`)
+  const manifest = {
+    version,
+    notes: process.env.RELEASE_NOTES ?? other?.notes ?? `AI Usage Tracker v${version}`,
+    pub_date: other?.pub_date ?? new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    platforms: { ...other?.platforms },
   }
+  for (const [k, p] of Object.entries(platforms)) manifest.platforms[k] = { signature: p.signature, url: `${base}/${p.asset}` }
+  writeFileSync(join(out, 'latest.json'), JSON.stringify(manifest, null, 2) + '\n')
+  files.push('latest.json')
 }
 
 console.log(`\nRelease files for v${version} in ${out}:`)

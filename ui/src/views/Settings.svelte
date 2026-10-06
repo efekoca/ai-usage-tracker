@@ -65,7 +65,7 @@
     const key = keyName(e.code)
     if (!key) return
     if (mods.length === 0) {
-      hkError = t('settings.hotkey.err.hotkey_needs_modifier')
+      hkError = needsModifier()
       return
     }
     setHotkey([...mods, key].join('+'))
@@ -78,10 +78,19 @@
       recording = false
       flash(t('settings.hotkey.saved'))
     } catch (e) {
-      hkError = String(e) === 'hotkey_needs_modifier' ? t('settings.hotkey.err.hotkey_needs_modifier') : t('settings.hotkey.err.taken')
+      hkError = String(e) === 'hotkey_needs_modifier' ? needsModifier() : t('settings.hotkey.err.taken')
     }
   }
-  const keycaps = (v: string) => v.split('+').map((k) => (k === 'Super' ? 'Win' : k))
+  const MAC_KEYS: Record<string, string> = { Ctrl: '⌃', Alt: '⌥', Shift: '⇧', Super: '⌘', Up: '↑', Down: '↓', Left: '←', Right: '→' }
+  const MAC_ORDER = ['Ctrl', 'Alt', 'Shift', 'Super']
+  // macOS writes modifiers as symbols, in the order ⌃ ⌥ ⇧ ⌘
+  const keycaps = (v: string) => {
+    const parts = v.split('+')
+    if (app.info?.platform !== 'macos') return parts.map((k) => (k === 'Super' ? 'Win' : k))
+    const rank = (k: string) => (MAC_ORDER.includes(k) ? MAC_ORDER.indexOf(k) : MAC_ORDER.length)
+    return [...parts].sort((a, b) => rank(a) - rank(b)).map((k) => MAC_KEYS[k] ?? k)
+  }
+  const needsModifier = () => t(app.info?.platform === 'macos' ? 'settings.hotkey.err.hotkey_needs_modifier.mac' : 'settings.hotkey.err.hotkey_needs_modifier')
 
   const upd = $derived(app.update)
   let checking = $state(false)
@@ -479,7 +488,6 @@
   }
   .group {
     margin-bottom: 16px;
-    max-width: 900px;
   }
   .group h2 {
     margin-bottom: 6px;

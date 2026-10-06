@@ -82,7 +82,6 @@
 <style>
   .group {
     margin-bottom: 16px;
-    max-width: 900px;
   }
   .item {
     display: flex;
