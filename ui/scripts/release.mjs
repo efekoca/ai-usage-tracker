@@ -92,6 +92,22 @@ if (mac) {
   }
   // the disk image and the update archive carry the app; the loose copy would show up in Launchpad
   rmSync(join(bundle, 'macos', `${conf.productName}.app`), { recursive: true, force: true })
+} else if (process.platform === 'linux') {
+  // Tauri names the arch differently per format; assets and manifest keys use the updater's names
+  const arch = { x64: 'x86_64', arm64: 'aarch64' }[process.arch] ?? process.arch
+  for (const [dir, ext, kind] of [['deb', '.deb', 'deb'], ['rpm', '.rpm', 'rpm'], ['appimage', '.AppImage', 'appimage']]) {
+    const from = join(bundle, dir)
+    const file = existsSync(from) && readdirSync(from).find((f) => f.endsWith(ext) && f.includes(version))
+    if (!file) fail(`No ${ext} package for v${version} in ${from}`)
+    const asset = `AI-Usage-Tracker_${version}_${arch}${ext}`
+    take(from, file, asset)
+    if (signing) {
+      take(from, `${file}.sig`, `${asset}.sig`)
+      platforms[`linux-${arch}-${kind}`] = { signature: readFileSync(join(from, `${file}.sig`), 'utf8').trim(), asset }
+    }
+  }
+  // an updater that does not know its package type falls back to the AppImage
+  if (signing) platforms[`linux-${arch}`] = platforms[`linux-${arch}-appimage`]
 } else {
   const nsis = join(bundle, 'nsis')
   const setup = readdirSync(nsis).find((f) => f.endsWith(`_${version}_x64-setup.exe`))
