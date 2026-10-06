@@ -27,6 +27,16 @@ use tracker_core::store::Store;
 /// Shows or hides the widget of the running app; the desktop shortcut on GNOME runs this.
 pub(crate) const TOGGLE_WIDGET: &str = "--toggle-widget";
 
+/// The file the app was started from, for commands that other programs run later.
+pub(crate) fn app_path() -> Result<std::path::PathBuf, String> {
+    // an AppImage runs from a temporary mount; the file it was started from stays put
+    #[cfg(target_os = "linux")]
+    if let Some(p) = std::env::var_os("APPIMAGE").map(std::path::PathBuf::from).filter(|p| p.is_file()) {
+        return Ok(p);
+    }
+    std::env::current_exe().map_err(|e| e.to_string())
+}
+
 /// Runs before the GUI so these modes never start it or hit the single-instance check.
 pub fn cli_mode() -> Option<i32> {
     let args: Vec<String> = std::env::args().collect();

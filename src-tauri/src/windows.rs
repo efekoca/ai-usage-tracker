@@ -464,12 +464,7 @@ mod xdg_autostart {
             .filter(|p| p.is_absolute())
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
             .ok_or("no config folder")?;
-        // an AppImage runs from a temporary mount; the file it was started from stays put
-        let exe = match std::env::var_os("APPIMAGE").map(PathBuf::from).filter(|p| p.is_file()) {
-            Some(p) => p,
-            None => std::env::current_exe().map_err(|e| e.to_string())?,
-        };
-        apply_in(&config, &exe, on)
+        apply_in(&config, &crate::app_path()?, on)
     }
 
     pub fn apply_in(config: &Path, exe: &Path, on: bool) -> Result<(), String> {
