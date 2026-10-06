@@ -234,8 +234,25 @@ mod tests {
 
     #[test]
     fn a_missing_binary_is_an_error_not_a_panic() {
-        let r = query(Path::new("Z:/nope/claude.exe"), &std::env::temp_dir(), None, Duration::from_secs(1), 0);
+        let missing = std::env::temp_dir().join("aiut-nope").join(super::super::exe("claude"));
+        let r = query(&missing, &std::env::temp_dir(), None, Duration::from_secs(1), 0);
         assert!(matches!(r, Err(UsageError::Failed(_))));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn native_homebrew_and_npm_claude_installs_are_candidates() {
+        let home = std::env::temp_dir().join("aiut-home-unix");
+        let env = Env { home: Some(home.clone()), roaming: None, local: None, claude_config_dir: None, codex_home: None };
+        let c = candidates(&env, None);
+        for p in [
+            home.join(".local/bin/claude"),
+            PathBuf::from("/opt/homebrew/bin/claude"),
+            PathBuf::from("/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/bin/claude"),
+        ] {
+            assert!(c.contains(&p), "{} missing", p.display());
+        }
+        assert!(c.iter().all(|p| p.extension().is_none_or(|e| e == "exe")));
     }
 
     #[test]
