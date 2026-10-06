@@ -417,10 +417,10 @@ export function installMock() {
         case 'get_day_detail':
           return mockDay(String(a.date))
         case 'hotkey_status':
-          return { hotkey: settings.widget.hotkey, error: null }
+          return { hotkey: settings.widget.hotkey, error: null, desktop: false }
         case 'set_hotkey':
           settings.widget.hotkey = String(a.hotkey)
-          return { hotkey: settings.widget.hotkey, error: null }
+          return { hotkey: settings.widget.hotkey, error: null, desktop: false }
         case 'update_status':
           return update
         case 'check_update':

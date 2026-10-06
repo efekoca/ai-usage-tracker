@@ -46,3 +46,5 @@ objc2-web-kit = { version = "0.3", default-features = false, features = ["std", 
 # the versions Tauri's own WebKitGTK binding uses (report printing)
 webkit2gtk = "2.0"
 gtk = "0.18"
+# already pulled in by the single-instance plugin; talks to xdg-desktop-portal for Wayland shortcuts
+zbus = "5"

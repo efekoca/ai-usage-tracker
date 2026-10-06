@@ -2,6 +2,8 @@ mod capture;
 mod commands;
 mod fonts;
 mod hotkey;
+#[cfg(target_os = "linux")]
+mod portal_shortcut;
 mod pdf;
 mod settings;
 mod state;
@@ -123,7 +125,21 @@ fn relaunched_outside_package() -> bool {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Wayland lets no app place its windows, keep one on top or grab a key for itself, so under a
+/// Wayland session the app runs through XWayland, which allows all three. GTK falls back to
+/// Wayland when XWayland cannot be reached, and `GDK_BACKEND` overrides the choice.
+#[cfg(target_os = "linux")]
+fn prefer_xwayland() {
+    let set = |k: &str| std::env::var_os(k).is_some_and(|v| !v.is_empty());
+    if set("WAYLAND_DISPLAY") && set("DISPLAY") && !set("GDK_BACKEND") {
+        // SAFETY: runs first in `run`, before any other thread exists
+        unsafe { std::env::set_var("GDK_BACKEND", "x11,wayland") };
+    }
+}
+
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    prefer_xwayland();
     let started_hidden = std::env::args().any(|a| a == "--autostart");
     let data_dir = tracker_core::store::default_data_dir().unwrap_or_else(|| std::env::temp_dir().join("AIUsageTracker"));
     let _ = std::fs::create_dir_all(&data_dir);

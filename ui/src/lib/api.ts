@@ -574,6 +574,7 @@ export interface DayDetail {
 export interface HotkeyStatus {
   hotkey: string
   error: string | null
+  desktop: boolean
 }
 export interface UpdateStatus {
   current: string

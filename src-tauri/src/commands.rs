@@ -722,11 +722,17 @@ pub async fn get_limit_history(app: AppHandle, days: Option<i64>) -> Res<LimitHi
 pub struct HotkeyStatus {
     hotkey: String,
     error: Option<String>,
+    /// The desktop owns the shortcut (Wayland portal) and may have assigned other keys.
+    desktop: bool,
 }
 
 #[tauri::command]
 pub fn hotkey_status(state: State<AppState>) -> HotkeyStatus {
-    HotkeyStatus { hotkey: state.settings.read().unwrap().widget.hotkey.clone(), error: state.hotkey_error.lock().unwrap().clone() }
+    #[cfg(target_os = "linux")]
+    let desktop = crate::portal_shortcut::active();
+    #[cfg(not(target_os = "linux"))]
+    let desktop = false;
+    HotkeyStatus { hotkey: state.settings.read().unwrap().widget.hotkey.clone(), error: state.hotkey_error.lock().unwrap().clone(), desktop }
 }
 
 /// Empty clears the shortcut; one owned by another program is refused and the old one restored.
