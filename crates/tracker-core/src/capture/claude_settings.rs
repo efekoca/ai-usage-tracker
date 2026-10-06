@@ -219,6 +219,30 @@ pub fn revert_statusline(change: &StatuslineChange) -> Result<RevertOutcome, Set
     Ok(RevertOutcome::Restored)
 }
 
+/// Points our status line at `command` when it changed (the app moved), keeping the user's previous
+/// one and the backup. A value the user edited meanwhile is left as is. Returns whether it rewrote.
+pub fn refresh_statusline(st: &mut CaptureState, data_dir: &Path, command: &str) -> Result<bool, SettingsError> {
+    let Some(old) = st.statusline.clone() else { return Ok(false) };
+    let wanted = statusline_value(command);
+    if old.installed == wanted {
+        return Ok(false);
+    }
+    let (mut doc, original) = read_doc(&old.settings_file)?;
+    if doc.get("statusLine") != Some(&old.installed) {
+        return Ok(false);
+    }
+    doc.insert("statusLine".into(), wanted.clone());
+    st.statusline = Some(StatuslineChange { installed: wanted, ..old.clone() });
+    // the record goes first, so a revert never meets a value it does not know
+    let result = save_state(data_dir, st).map_err(SettingsError::from).and_then(|_| write_doc(&old.settings_file, &doc, &original));
+    if let Err(e) = result {
+        st.statusline = Some(old);
+        let _ = save_state(data_dir, st);
+        return Err(e);
+    }
+    Ok(true)
+}
+
 /// The record is dropped only once the revert worked, so a failed undo can be retried.
 pub fn uninstall_statusline(st: &mut CaptureState, data_dir: &Path) -> Result<RevertOutcome, SettingsError> {
     let Some(ch) = st.statusline.clone() else { return Ok(RevertOutcome::NothingToDo) };
@@ -434,6 +458,34 @@ mod tests {
         fs::write(&file, doc.to_string()).unwrap();
         assert_eq!(revert_statusline(&ch).unwrap(), RevertOutcome::LeftUserValue);
         assert_eq!(read(&file)["statusLine"]["command"], "user-changed");
+    }
+
+    #[test]
+    fn a_moved_app_refreshes_its_status_line_and_still_reverts_to_the_users_own() {
+        let user_sl = json!({"type": "command", "command": "~/.claude/mine.sh"});
+        let (_d, file, data) = setup(Some(&json!({"statusLine": user_sl}).to_string()));
+        let mut st = CaptureState::default();
+        let ch = install_statusline(&mut st, &data, &file, "'/old/aiut' --statusline", 1).unwrap();
+        assert!(!refresh_statusline(&mut st, &data, "'/old/aiut' --statusline").unwrap(), "same place, nothing to do");
+
+        assert!(refresh_statusline(&mut st, &data, "'/new/aiut' --statusline").unwrap());
+        assert_eq!(read(&file)["statusLine"]["command"], "'/new/aiut' --statusline");
+        let now = read_state(&data).unwrap().statusline.unwrap();
+        assert_eq!((now.previous, now.backup.clone()), (ch.previous.clone(), ch.backup.clone()));
+
+        assert_eq!(uninstall_statusline(&mut st, &data).unwrap(), RevertOutcome::Restored);
+        assert_eq!(read(&file), json!({"statusLine": user_sl}));
+    }
+
+    #[test]
+    fn a_status_line_the_user_edited_is_not_refreshed() {
+        let (_d, file, data) = setup(None);
+        let mut st = CaptureState::default();
+        install_statusline(&mut st, &data, &file, "'/old/aiut' --statusline", 1).unwrap();
+        fs::write(&file, json!({"statusLine": {"type": "command", "command": "user-changed"}}).to_string()).unwrap();
+        assert!(!refresh_statusline(&mut st, &data, "'/new/aiut' --statusline").unwrap());
+        assert_eq!(read(&file)["statusLine"]["command"], "user-changed");
+        assert_eq!(read_state(&data).unwrap().statusline.unwrap().installed["command"], "'/old/aiut' --statusline");
     }
 
     #[test]
