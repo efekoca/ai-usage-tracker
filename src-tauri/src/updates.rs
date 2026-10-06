@@ -164,6 +164,12 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
         });
         return Err(msg);
     }
+    // macOS and Linux replace the app on disk but keep the old version running
+    log::info!("update installed; restarting");
+    let state = app.state::<AppState>();
+    state.quitting.store(true, Ordering::SeqCst);
+    state.worker.send(crate::worker::Msg::Shutdown);
+    app.request_restart();
     Ok(())
 }
 
