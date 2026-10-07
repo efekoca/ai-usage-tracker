@@ -87,11 +87,20 @@
   // macOS writes modifiers as symbols, in the order ⌃ ⌥ ⇧ ⌘
   const keycaps = (v: string) => {
     const parts = v.split('+')
-    if (app.info?.platform !== 'macos') return parts.map((k) => (k === 'Super' ? 'Win' : k))
+    // Linux desktops name the key Super
+    if (app.info?.platform === 'windows') return parts.map((k) => (k === 'Super' ? 'Win' : k))
+    if (app.info?.platform !== 'macos') return parts
     const rank = (k: string) => (MAC_ORDER.includes(k) ? MAC_ORDER.indexOf(k) : MAC_ORDER.length)
     return [...parts].sort((a, b) => rank(a) - rank(b)).map((k) => MAC_KEYS[k] ?? k)
   }
-  const needsModifier = () => t(app.info?.platform === 'macos' ? 'settings.hotkey.err.hotkey_needs_modifier.mac' : 'settings.hotkey.err.hotkey_needs_modifier')
+  const needsModifier = () =>
+    t(
+      app.info?.platform === 'macos'
+        ? 'settings.hotkey.err.hotkey_needs_modifier.mac'
+        : app.info?.platform === 'windows'
+          ? 'settings.hotkey.err.hotkey_needs_modifier'
+          : 'settings.hotkey.err.hotkey_needs_modifier.linux',
+    )
 
   const upd = $derived(app.update)
   let checking = $state(false)

@@ -47,7 +47,9 @@ fn menu(app: &AppHandle, tr: bool, update: Option<&str>, hotkey: &str) -> tauri:
     // elsewhere it goes in the accelerator column (after a tab) as plain text, for the same reason
     #[cfg(not(target_os = "macos"))]
     let widget = {
-        let text = if hotkey.is_empty() { widget_text } else { format!("{widget_text}\t{}", hotkey.replace("Super", "Win")) };
+        // Linux desktops call the key Super, as stored
+        let shown = if cfg!(windows) { hotkey.replace("Super", "Win") } else { hotkey.to_owned() };
+        let text = if hotkey.is_empty() { widget_text } else { format!("{widget_text}\t{shown}") };
         MenuItem::with_id(app, "tray:widget", text, true, None::<&str>)?
     };
     let rescan = MenuItem::with_id(app, "tray:rescan", t("Rescan now", "Şimdi tara"), true, None::<&str>)?;
