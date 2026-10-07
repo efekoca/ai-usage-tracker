@@ -60,6 +60,7 @@ pub fn clear() {
 /// Binds `hotkey` (`Ctrl+Alt+Shift+W`) in a new session and calls `on_press` for each press.
 /// Blocks until the desktop answers, which may wait for the user.
 pub fn bind(hotkey: &str, description: &str, on_press: impl Fn() + Send + 'static) -> Result<(), String> {
+    let preferred = trigger(hotkey)?;
     let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     SESSION.lock().unwrap().take();
     let conn = Connection::session().map_err(err)?;
@@ -78,7 +79,7 @@ pub fn bind(hotkey: &str, description: &str, on_press: impl Fn() + Send + 'stati
     let handle = OwnedObjectPath::try_from(handle).map_err(err)?;
 
     let bind_token = format!("aiut{generation}b");
-    let props = HashMap::from([("description", Value::from(description)), ("preferred_trigger", Value::from(trigger(hotkey)))]);
+    let props = HashMap::from([("description", Value::from(description)), ("preferred_trigger", Value::from(preferred.as_str()))]);
     let shortcuts = vec![(ID, props)];
     let bind_opts = HashMap::from([("handle_token", Value::from(bind_token.as_str()))]);
     let session_path = ObjectPath::from(&handle);
@@ -123,22 +124,18 @@ fn request(conn: &Connection, token: &str, call: impl FnOnce() -> zbus::Result<(
 }
 
 /// The XDG shortcut format: CTRL, ALT, SHIFT and LOGO, then an XKB key name.
-fn trigger(hotkey: &str) -> String {
+fn trigger(hotkey: &str) -> Result<String, String> {
     hotkey
         .split('+')
         .map(|k| match k {
-            "Ctrl" => "CTRL".to_owned(),
-            "Alt" => "ALT".to_owned(),
-            "Shift" => "SHIFT".to_owned(),
-            "Super" => "LOGO".to_owned(),
-            "Space" => "space".to_owned(),
-            "PageUp" => "Prior".to_owned(),
-            "PageDown" => "Next".to_owned(),
-            k if k.len() == 1 => k.to_lowercase(),
-            k => k.to_owned(),
+            "Ctrl" => Ok("CTRL".to_owned()),
+            "Alt" => Ok("ALT".to_owned()),
+            "Shift" => Ok("SHIFT".to_owned()),
+            "Super" => Ok("LOGO".to_owned()),
+            k => crate::hotkey::xkb_key(k).ok_or_else(|| "hotkey_unknown_key".to_owned()),
         })
-        .collect::<Vec<_>>()
-        .join("+")
+        .collect::<Result<Vec<_>, _>>()
+        .map(|keys| keys.join("+"))
 }
 
 /// The portal names the app by a .desktop file whose program exists. The packages install one; an
@@ -182,8 +179,10 @@ mod tests {
 
     #[test]
     fn shortcuts_use_the_xdg_trigger_format() {
-        assert_eq!(super::trigger("Ctrl+Alt+Shift+W"), "CTRL+ALT+SHIFT+w");
-        assert_eq!(super::trigger("Super+F9"), "LOGO+F9");
-        assert_eq!(super::trigger("Ctrl+Space"), "CTRL+space");
+        assert_eq!(super::trigger("Ctrl+Alt+Shift+W").unwrap(), "CTRL+ALT+SHIFT+w");
+        assert_eq!(super::trigger("Super+F9").unwrap(), "LOGO+F9");
+        assert_eq!(super::trigger("Ctrl+Space").unwrap(), "CTRL+space");
+        assert_eq!(super::trigger("Ctrl+Shift+Quote").unwrap(), "CTRL+SHIFT+apostrophe");
+        assert!(super::trigger("Ctrl+Banana").is_err());
     }
 }

@@ -11,6 +11,38 @@ pub fn parse(hotkey: &str) -> Result<Shortcut, String> {
     Ok(s)
 }
 
+/// The XKB keysym for a key as the settings name it (`Minus`, `Numpad1`), which GNOME and the
+/// shortcut portal expect; None for a key without one.
+#[cfg(any(target_os = "linux", test))]
+pub(crate) fn xkb_key(key: &str) -> Option<String> {
+    let named = match key {
+        "Space" => "space",
+        "PageUp" => "Page_Up",
+        "PageDown" => "Page_Down",
+        "Up" | "Down" | "Left" | "Right" | "Home" | "End" | "Insert" | "Delete" | "Pause" => key,
+        "PrintScreen" => "Print",
+        "Backquote" => "grave",
+        "Minus" => "minus",
+        "Equal" => "equal",
+        "BracketLeft" => "bracketleft",
+        "BracketRight" => "bracketright",
+        "Backslash" => "backslash",
+        "Semicolon" => "semicolon",
+        "Quote" => "apostrophe",
+        "Comma" => "comma",
+        "Period" => "period",
+        "Slash" => "slash",
+        _ if key.len() == 1 && key.chars().all(|c| c.is_ascii_alphanumeric()) => return Some(key.to_ascii_lowercase()),
+        _ => {
+            if let Some(n) = key.strip_prefix("Numpad").filter(|n| n.len() == 1 && n.chars().all(|c| c.is_ascii_digit())) {
+                return Some(format!("KP_{n}"));
+            }
+            return key.strip_prefix('F').and_then(|n| n.parse::<u8>().ok()).filter(|n| (1..=24).contains(n)).map(|_| key.to_owned());
+        }
+    };
+    Some(named.to_owned())
+}
+
 /// The error is kept for the settings screen: another program may already own the combination.
 /// `chosen` is true when the user picked this shortcut just now rather than at startup.
 pub fn apply(app: &AppHandle, hotkey: &str, chosen: bool) -> Result<(), String> {
@@ -104,6 +136,15 @@ fn without_portal(app: &AppHandle, hotkey: &str, chosen: bool) -> Result<(), Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keys_get_their_xkb_names() {
+        for (key, xkb) in [("W", "w"), ("7", "7"), ("F9", "F9"), ("Numpad1", "KP_1"), ("Minus", "minus"), ("Comma", "comma"), ("Quote", "apostrophe"), ("Backquote", "grave"), ("BracketLeft", "bracketleft"), ("PrintScreen", "Print"), ("PageUp", "Page_Up"), ("Space", "space")] {
+            assert_eq!(xkb_key(key).as_deref(), Some(xkb), "{key}");
+        }
+        assert_eq!(xkb_key("F25"), None);
+        assert_eq!(xkb_key("Banana"), None);
+    }
 
     #[test]
     fn shortcuts_need_a_modifier_and_a_known_key() {
