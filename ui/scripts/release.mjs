@@ -1,7 +1,7 @@
 // Rust embeds source paths (panic locations) that would carry the builder's user name, so they
 // are remapped to neutral prefixes computed here rather than stored in the repository.
 import { spawnSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { releaseBase, tauri } from './release-common.mjs'
@@ -63,19 +63,24 @@ if (r.status !== 0) process.exit(r.status ?? 1)
 
 const conf = JSON.parse(readFileSync(join(repo, 'src-tauri', 'tauri.conf.json'), 'utf8'))
 const version = conf.version
-const bundle = join(repo, 'target', ...(target ? [target] : []), 'release', 'bundle')
-const out = join(repo, 'target', 'release', 'bundle', 'release')
-rmSync(out, { recursive: true, force: true })
-mkdirSync(out, { recursive: true })
+// cargo resolves a relative CARGO_TARGET_DIR from the repository root, where the CLI runs
+const targetDir = resolve(repo, process.env.CARGO_TARGET_DIR || 'target')
+const bundle = join(targetDir, ...(target ? [target] : []), 'release', 'bundle')
+const out = join(targetDir, 'release', 'bundle', 'release')
+// collected aside first, so a failed run leaves the previous release files where they are
+const staging = `${out}.partial`
+rmSync(staging, { recursive: true, force: true })
+mkdirSync(staging, { recursive: true })
 const files = []
 const platforms = {}
 // names without spaces: release pages rewrite spaces, which would break the update URL
 const take = (dir, name, asset) => {
-  copyFileSync(join(dir, name), join(out, asset))
+  copyFileSync(join(dir, name), join(staging, asset))
   files.push(asset)
 }
 const fail = (msg) => {
   console.error(msg)
+  rmSync(staging, { recursive: true, force: true })
   process.exit(1)
 }
 
@@ -157,10 +162,12 @@ if (signing && base) {
     platforms: { ...other?.platforms },
   }
   for (const [k, p] of Object.entries(platforms)) manifest.platforms[k] = { signature: p.signature, url: `${base}/${p.asset}` }
-  writeFileSync(join(out, 'latest.json'), JSON.stringify(manifest, null, 2) + '\n')
+  writeFileSync(join(staging, 'latest.json'), JSON.stringify(manifest, null, 2) + '\n')
   files.push('latest.json')
 }
 
+rmSync(out, { recursive: true, force: true })
+renameSync(staging, out)
 console.log(`\nRelease files for v${version} in ${out}:`)
 for (const f of files) console.log(`  ${f}`)
 if (signing && base) {
