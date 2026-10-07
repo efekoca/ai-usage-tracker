@@ -1,6 +1,8 @@
 [package]
 name = "ai-usage-tracker"
 version.workspace = true
+# the Linux packages name their maintainer from this; Windows and macOS use bundle.publisher
+authors = ["Efe Koca <52746944+efekoca@users.noreply.github.com>"]
 description = "Local, private tracker for AI tool token usage, API-equivalent cost and plan limits"
 edition = "2024"
 license.workspace = true

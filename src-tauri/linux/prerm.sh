@@ -1,6 +1,7 @@
 #!/bin/sh
 # Like the Windows uninstaller: undo each user's opt-in edits to Claude Code's settings.json and
 # drop the login entry while the program is still here. dpkg passes "remove", rpm passes 0.
+set -e
 case "$1" in
   remove|0) ;;
   *) exit 0 ;;
@@ -11,6 +12,6 @@ getent passwd | while IFS=: read -r user _ uid _ _ home _; do
   [ -d "$home/.local/share/AIUsageTracker" ] || continue
   runuser -u "$user" -- env -i HOME="$home" PATH=/usr/bin:/bin timeout 30 /usr/bin/ai-usage-tracker --revert-capture </dev/null \
     || echo "ai-usage-tracker: could not undo the Claude Code settings changes for $user; see $home/.claude/settings.json" >&2
-  runuser -u "$user" -- rm -f "$home/.config/autostart/ai-usage-tracker.desktop"
+  runuser -u "$user" -- rm -f "$home/.config/autostart/ai-usage-tracker.desktop" || true
 done
 exit 0

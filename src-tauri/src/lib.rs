@@ -123,6 +123,8 @@ pub(crate) fn open_path(path: &std::path::Path) -> std::io::Result<()> {
     let mut c = std::process::Command::new("/usr/bin/open");
     #[cfg(not(any(windows, target_os = "macos")))]
     let mut c = std::process::Command::new("xdg-open");
+    #[cfg(target_os = "linux")]
+    desktop_env(&mut c);
     c.arg(path).spawn().map(|_| ())
 }
 
@@ -137,6 +139,8 @@ pub(crate) fn open_link(url: &str) -> std::io::Result<()> {
     let mut c = std::process::Command::new("/usr/bin/open");
     #[cfg(not(any(windows, target_os = "macos")))]
     let mut c = std::process::Command::new("xdg-open");
+    #[cfg(target_os = "linux")]
+    desktop_env(&mut c);
     c.arg(url).spawn().map(|_| ())
 }
 
@@ -190,7 +194,35 @@ fn prefer_xwayland() {
     if set("WAYLAND_DISPLAY") && set("DISPLAY") && !set("GDK_BACKEND") {
         // SAFETY: runs first in `run`, before any other thread exists
         unsafe { std::env::set_var("GDK_BACKEND", "x11,wayland") };
+        CHOSE_GDK_BACKEND.store(true, Ordering::Relaxed);
     }
+}
+
+#[cfg(target_os = "linux")]
+static CHOSE_GDK_BACKEND: AtomicBool = AtomicBool::new(false);
+
+/// Programs started for the user (file manager, browser, PDF viewer, gsettings) get the desktop's
+/// own setup back: not the app's XWayland choice, nor the GTK modules an AppImage brings along.
+#[cfg(target_os = "linux")]
+pub(crate) fn desktop_env(c: &mut std::process::Command) -> &mut std::process::Command {
+    if CHOSE_GDK_BACKEND.load(Ordering::Relaxed) {
+        c.env_remove("GDK_BACKEND");
+    }
+    let Some(appdir) = std::env::var_os("APPDIR").filter(|d| !d.is_empty() && std::env::var_os("APPIMAGE").is_some()) else { return c };
+    let inside = |v: &std::ffi::OsStr| std::env::split_paths(v).any(|p| p.starts_with(&appdir));
+    for k in ["GTK_PATH", "GTK_DATA_PREFIX", "GTK_EXE_PREFIX", "GTK_IM_MODULE_FILE", "GIO_MODULE_DIR", "GDK_PIXBUF_MODULE_FILE", "GSETTINGS_SCHEMA_DIR"] {
+        if std::env::var_os(k).is_some_and(|v| inside(&v)) {
+            c.env_remove(k);
+        }
+    }
+    if let Some(dirs) = std::env::var_os("XDG_DATA_DIRS") {
+        let kept: Vec<_> = std::env::split_paths(&dirs).filter(|p| !p.starts_with(&appdir)).collect();
+        match std::env::join_paths(kept) {
+            Ok(v) if !v.is_empty() => c.env("XDG_DATA_DIRS", v),
+            _ => c.env_remove("XDG_DATA_DIRS"),
+        };
+    }
+    c
 }
 
 /// The single-instance plugin panics on a session bus address it cannot parse; without one it

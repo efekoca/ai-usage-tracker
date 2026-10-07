@@ -3,6 +3,7 @@
 import { spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
+import { gzipSync } from 'node:zlib'
 import { join, resolve } from 'node:path'
 import { releaseBase, tauri } from './release-common.mjs'
 
@@ -49,26 +50,33 @@ const hasKey = !!process.env.TAURI_SIGNING_PRIVATE_KEY || existsSync(keyPath)
 // the updater skips Gatekeeper, so a Mac update must be signed and notarized before it is offered
 const signing = hasKey && (!mac || notarized)
 if (hasKey && !signing) console.log('Without Apple signing and notarization the Mac build gets no update artifacts.')
+const conf = JSON.parse(readFileSync(join(repo, 'src-tauri', 'tauri.conf.json'), 'utf8'))
+const version = conf.version
 const args = ['build', ...cliArgs]
-const scratch = signing ? mkdtempSync(join(tmpdir(), 'ai-usage-tracker-')) : null
+const scratch = mkdtempSync(join(tmpdir(), 'ai-usage-tracker-'))
+const extra = { bundle: {} }
 if (signing) {
   env.TAURI_SIGNING_PRIVATE_KEY ??= keyPath // the CLI takes a path or the key itself
   env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ??= ''
-  const extra = join(scratch, 'release.json')
-  writeFileSync(extra, JSON.stringify({ bundle: { createUpdaterArtifacts: true } }))
-  args.push('--config', extra)
+  extra.bundle.createUpdaterArtifacts = true
 } else {
   console.log('No update signing key found: building without update artifacts.')
 }
-args.push('--', ...cargoArgs)
+if (process.platform === 'linux') {
+  // Tauri files the changelog under the product name; Debian looks for it under the package name
+  const changelog = join(scratch, 'changelog.gz')
+  writeFileSync(changelog, gzipSync(debianChangelog(conf.mainBinaryName, version), { level: 9 }))
+  extra.bundle.linux = { deb: { files: { [`/usr/share/doc/${conf.mainBinaryName}/changelog.gz`]: changelog } } }
+}
+const extraFile = join(scratch, 'release.json')
+writeFileSync(extraFile, JSON.stringify(extra))
+args.push('--config', extraFile, '--', ...cargoArgs)
 
 // the Tauri CLI finds src-tauri from the repository root
 const r = tauri(repo, args, env)
-if (scratch) rmSync(scratch, { recursive: true, force: true })
+rmSync(scratch, { recursive: true, force: true })
 if (r.status !== 0) process.exit(r.status ?? 1)
 
-const conf = JSON.parse(readFileSync(join(repo, 'src-tauri', 'tauri.conf.json'), 'utf8'))
-const version = conf.version
 // cargo resolves a relative CARGO_TARGET_DIR from the repository root, where the CLI runs
 const targetDir = resolve(repo, process.env.CARGO_TARGET_DIR || 'target')
 const bundle = join(targetDir, ...(target ? [target] : []), 'release', 'bundle')
@@ -182,4 +190,12 @@ if (signing && base) {
     : `\nCreate the release "v${version}" (tag v${version}) on github.com/${updates.github_repo} and attach all of them.`)
 } else if (signing) {
   console.log('\nconfig/updates.json names no release location, so no latest.json was written and the app will not look for updates.')
+}
+
+// one entry for this version, pointing at its release notes
+function debianChangelog(pkg, version) {
+  const maintainer = readFileSync(join(repo, 'src-tauri', 'Cargo.toml'), 'utf8').match(/^authors = \["([^"]+)"/m)?.[1] ?? conf.bundle.publisher
+  const date = new Date().toUTCString().replace('GMT', '+0000')
+  const repoName = releaseBase(repo, version).updates.github_repo
+  return `${pkg} (${version}) stable; urgency=medium\n\n  * Release notes:\n    https://github.com/${repoName}/releases/tag/v${version}\n\n -- ${maintainer}  ${date}\n`
 }

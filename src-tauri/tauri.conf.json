@@ -40,19 +40,26 @@
     "longDescription": "Reads usage metadata that Claude Code, Cowork, the Claude desktop app and Codex already write on your computer, keeps a local archive and shows API-equivalent cost and plan limits. No content is stored and nothing leaves your machine.",
     "icon": [
       "icons/32x32.png",
+      "icons/48x48.png",
+      "icons/64x64.png",
       "icons/128x128.png",
-      "icons/128x128@2x.png",
+      "icons/256x256.png",
+      "icons/icon.png",
       "icons/icon.icns",
       "icons/icon.ico"
     ],
     "linux": {
       "deb": {
+        "section": "utils",
+        "depends": ["libc6 (>= 2.35)"],
         "files": {
-          "/usr/share/applications/ai-usage-tracker.desktop": "linux/ai-usage-tracker.desktop"
+          "/usr/share/applications/ai-usage-tracker.desktop": "linux/ai-usage-tracker.desktop",
+          "/usr/share/doc/ai-usage-tracker/copyright": "linux/copyright"
         },
         "preRemoveScript": "linux/prerm.sh"
       },
       "rpm": {
+        "depends": ["glibc >= 2.35"],
         "files": {
           "/usr/share/applications/ai-usage-tracker.desktop": "linux/ai-usage-tracker.desktop"
         },
