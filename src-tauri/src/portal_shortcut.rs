@@ -15,6 +15,8 @@ const ID: &str = "toggle-widget";
 /// Matches the .desktop file the Linux packages install; the portal cannot tell who an unsandboxed app is otherwise.
 const APP_ID: &str = "ai-usage-tracker";
 const REGISTRY: &str = "org.freedesktop.host.portal.Registry";
+/// Starts the error when the portal found no `ai-usage-tracker.desktop` for this app.
+pub const UNREGISTERED: &str = "portal: app not registered";
 
 /// The live session; replacing it closes the old one, which also ends its listener.
 static SESSION: Mutex<Option<Session>> = Mutex::new(None);
@@ -62,7 +64,11 @@ pub fn bind(hotkey: &str, description: &str, on_press: impl Fn() + Send + 'stati
     SESSION.lock().unwrap().take();
     let conn = Connection::session().map_err(err)?;
     // once per connection and before any other portal call, so each binding gets a fresh connection
-    Proxy::new(&conn, DEST, PATH, REGISTRY).map_err(err)?.call_method("Register", &(APP_ID, HashMap::<&str, Value>::new())).map_err(err)?;
+    write_appimage_entry();
+    Proxy::new(&conn, DEST, PATH, REGISTRY)
+        .map_err(err)?
+        .call_method("Register", &(APP_ID, HashMap::<&str, Value>::new()))
+        .map_err(|e| format!("{UNREGISTERED}: {e}"))?;
     let portal = Proxy::new(&conn, DEST, PATH, IFACE).map_err(err)?;
 
     let token = format!("aiut{generation}");
@@ -135,12 +141,45 @@ fn trigger(hotkey: &str) -> String {
         .join("+")
 }
 
+/// The portal names the app by a .desktop file whose program exists. The packages install one; an
+/// AppImage gets one in the user's applications folder that points at the AppImage itself.
+fn write_appimage_entry() {
+    let Some(appimage) = std::env::var_os("APPIMAGE").map(std::path::PathBuf::from).filter(|p| p.is_file()) else { return };
+    let data = std::env::var_os("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share")));
+    let Some(dir) = data.map(|d| d.join("applications")) else { return };
+    let file = dir.join(format!("{APP_ID}.desktop"));
+    let entry = appimage_entry(&appimage);
+    if std::fs::read_to_string(&file).is_ok_and(|s| s == entry) {
+        return;
+    }
+    if let Err(e) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&file, entry)) {
+        log::warn!("could not write {}: {e}", file.display());
+    }
+}
+
+fn appimage_entry(appimage: &std::path::Path) -> String {
+    format!(
+        "[Desktop Entry]\nType=Application\nName=AI Usage Tracker\nComment=Shows the AI Usage Tracker widget\nExec={} --toggle-widget\nTerminal=false\nCategories=Utility;\nNoDisplay=true\n",
+        crate::windows::desktop_exec_arg(&appimage.to_string_lossy())
+    )
+}
+
 fn err(e: impl std::fmt::Display) -> String {
     format!("portal: {e}")
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_appimage_entry_runs_the_appimage_itself() {
+        let e = super::appimage_entry(std::path::Path::new("/home/u/Apps/AI Usage Tracker.AppImage"));
+        assert!(e.contains("Exec=\"/home/u/Apps/AI Usage Tracker.AppImage\" --toggle-widget\n"), "{e}");
+        assert!(e.contains("NoDisplay=true"));
+    }
+
     #[test]
     fn shortcuts_use_the_xdg_trigger_format() {
         assert_eq!(super::trigger("Ctrl+Alt+Shift+W"), "CTRL+ALT+SHIFT+w");
