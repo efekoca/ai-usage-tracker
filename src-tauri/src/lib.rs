@@ -193,9 +193,41 @@ fn prefer_xwayland() {
     }
 }
 
+/// The single-instance plugin panics on a session bus address it cannot parse; without one it
+/// starts anyway and the instance lock below keeps a second copy out.
+#[cfg(target_os = "linux")]
+fn drop_unusable_session_bus() {
+    use std::str::FromStr;
+    const KEY: &str = "DBUS_SESSION_BUS_ADDRESS";
+    if std::env::var(KEY).is_ok_and(|a| zbus::Address::from_str(&a).is_err()) || std::env::var_os(KEY).is_some_and(|a| a.to_str().is_none()) {
+        // SAFETY: runs first in `run`, before any other thread exists
+        unsafe { std::env::remove_var(KEY) };
+    }
+}
+
+/// Kept for the life of the process. A restart after an update starts the new copy just before
+/// the old one exits, so it waits a moment for the lock.
+#[cfg(target_os = "linux")]
+fn instance_lock(data_dir: &std::path::Path) -> bool {
+    let Ok(file) = std::fs::File::options().create(true).truncate(false).write(true).open(data_dir.join("instance.lock")) else { return true };
+    for _ in 0..20 {
+        match file.try_lock() {
+            Ok(()) => {
+                std::mem::forget(file);
+                return true;
+            }
+            Err(std::fs::TryLockError::WouldBlock) => std::thread::sleep(std::time::Duration::from_millis(250)),
+            Err(_) => return true,
+        }
+    }
+    false
+}
+
 pub fn run() {
     #[cfg(target_os = "linux")]
     prefer_xwayland();
+    #[cfg(target_os = "linux")]
+    drop_unusable_session_bus();
     // a desktop shortcut that starts the app with --toggle-widget brings up just the widget
     let started_hidden = std::env::args().any(|a| a == "--autostart" || a == TOGGLE_WIDGET);
     let data_dir = tracker_core::store::default_data_dir().unwrap_or_else(|| std::env::temp_dir().join("AIUsageTracker"));
@@ -227,6 +259,13 @@ pub fn run() {
                 .build(),
         )
         .setup(move |app| {
+            // the plugin above cannot tell a second copy apart without a session bus
+            #[cfg(target_os = "linux")]
+            if !instance_lock(&data_dir) {
+                log::info!("already running; exiting");
+                app.handle().cleanup_before_exit();
+                std::process::exit(0);
+            }
             let db_path = data_dir.join("tracker.db");
             let store = Store::open(&db_path)?;
             let settings = Settings::load(&store);
