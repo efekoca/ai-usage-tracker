@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # the same compiler as release.yml, so a new Rust release cannot fail an unrelated pull request
+  RUST_TOOLCHAIN: 1.99.0
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -23,6 +27,9 @@ jobs:
         os: [windows-latest, macos-latest, ubuntu-22.04]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # later steps run third-party code (npm, build scripts) that has no use for the token
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -38,13 +45,13 @@ jobs:
 
       - name: Rust toolchain
         run: |
-          rustup toolchain install stable --profile minimal --component clippy
-          rustup default stable
+          rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --component clippy
+          rustup default ${{ env.RUST_TOOLCHAIN }}
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Install UI dependencies
-        run: npm --prefix ui ci
+        run: npm --prefix ui ci --ignore-scripts
 
       - name: Type-check UI
         run: npm --prefix ui run check

@@ -8,11 +8,18 @@ on:
 permissions:
   contents: read
 
+env:
+  # a fixed compiler, so the same tag always builds the same way; raise it on purpose
+  RUST_TOOLCHAIN: 1.99.0
+
 jobs:
   installer:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # later steps run third-party code (npm, build scripts) that has no use for the token
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -22,11 +29,11 @@ jobs:
 
       - name: Rust toolchain
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+          rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+          rustup default ${{ env.RUST_TOOLCHAIN }}
 
       - name: Install UI dependencies
-        run: npm --prefix ui ci
+        run: npm --prefix ui ci --ignore-scripts
 
       # no update signing key on the runner: the updater signature is added after code signing
       - name: Build installer
@@ -46,6 +53,8 @@ jobs:
       APPIMAGE_EXTRACT_AND_RUN: 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -60,11 +69,11 @@ jobs:
 
       - name: Rust toolchain
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+          rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+          rustup default ${{ env.RUST_TOOLCHAIN }}
 
       - name: Install UI dependencies
-        run: npm --prefix ui ci
+        run: npm --prefix ui ci --ignore-scripts
 
       # no update signing key on the runner: the packages are signed afterwards on the maintainer's machine
       - name: Build packages
