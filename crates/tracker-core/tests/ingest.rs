@@ -256,6 +256,16 @@ fn claude_config_dir_overrides_the_default_location() {
 }
 
 #[test]
+fn a_claude_config_dir_with_a_comma_in_its_name_stays_one_folder() {
+    let m = machine();
+    let alt = m.home.join("Doe, John").join(".claude");
+    put("claude/session-b.jsonl", &alt.join("projects").join("x").join("only.jsonl"));
+    let env = Env { claude_config_dir: Some(alt.to_string_lossy().into_owned()), ..m.env.clone() };
+    let files = enumerate_files(&env, &ExtraPaths::default(), &[SourceId::ClaudeCode].into_iter().collect());
+    assert_eq!(files.len(), 1);
+}
+
+#[test]
 fn user_added_paths_are_scanned() {
     let m = machine();
     let extra_dir = m.home.join("portable-codex");

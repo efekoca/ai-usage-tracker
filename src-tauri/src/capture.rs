@@ -94,6 +94,16 @@ pub fn git_bash() -> Option<PathBuf> {
             c.push(base.join("Programs").join("Git").join("bin").join("bash.exe"));
         }
     }
+    // Scoop keeps only a shim on PATH; the install itself lives under its apps folder
+    let scoop = std::env::var_os("SCOOP").map(PathBuf::from).or_else(|| std::env::var_os("USERPROFILE").map(|h| PathBuf::from(h).join("scoop")));
+    c.extend(scoop.map(|s| s.join(r"apps\git\current\bin\bash.exe")));
+    // like Claude Code itself: the bash.exe that belongs to the git.exe on PATH
+    for dir in std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default() {
+        if dir.join("git.exe").is_file() {
+            c.push(dir.join("bash.exe"));
+            c.extend(dir.parent().map(|g| g.join(r"bin\bash.exe")));
+        }
+    }
     c.into_iter().find(|p| p.is_file())
 }
 

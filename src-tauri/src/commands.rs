@@ -438,11 +438,9 @@ pub struct ImportResult {
 #[tauri::command]
 pub fn import_database(window: WebviewWindow, app: AppHandle, state: State<AppState>, path: PathBuf) -> Res<ImportResult> {
     main_only(&window)?;
-    if path == state.db_path {
-        return Err("cannot import the live database into itself".into());
-    }
     let (events, limits) = state.db().merge_from(&path).map_err(|e| match e {
         tracker_core::rusqlite::Error::InvalidQuery => "not an AI Usage Tracker database".to_string(),
+        tracker_core::rusqlite::Error::InvalidPath(_) => "cannot import the live database into itself".to_string(),
         e => e.to_string(),
     })?;
     let _ = app.emit("data-changed", ());

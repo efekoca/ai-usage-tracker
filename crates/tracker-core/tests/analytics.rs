@@ -258,6 +258,9 @@ fn backup_merges_back_without_duplicates() {
     // a non-tracker file is rejected
     std::fs::write(dir.path().join("junk.db"), b"").unwrap();
     assert!(fresh.merge_from(&dir.path().join("junk.db")).is_err());
+    // the live file itself, under another spelling of its path, is refused before it is attached
+    let other_spelling = dir.path().join(".").join("fresh.db");
+    assert!(matches!(fresh.merge_from(&other_spelling), Err(tracker_core::rusqlite::Error::InvalidPath(_))));
 }
 
 #[test]

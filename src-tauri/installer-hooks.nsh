@@ -28,5 +28,12 @@
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" "AI Usage Tracker"
   ${If} $DeleteAppDataCheckboxState = 1
     RMDir /r "$LOCALAPPDATA\AIUsageTracker"
+    ; the private copy left when the app was started from the Claude desktop app (MSIX)
+    FindFirst $0 $1 "$LOCALAPPDATA\Packages\Claude_*"
+    ${DoWhile} $1 != ""
+      RMDir /r "$LOCALAPPDATA\Packages\$1\LocalCache\Local\AIUsageTracker"
+      FindNext $0 $1
+    ${Loop}
+    FindClose $0
   ${EndIf}
 !macroend
