@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { releaseBase, tauri } from './release-common.mjs'
 
 const repo = resolve(import.meta.dirname, '..', '..')
 const cargoHome = process.env.CARGO_HOME ?? join(homedir(), '.cargo')
@@ -43,20 +44,20 @@ const hasKey = !!process.env.TAURI_SIGNING_PRIVATE_KEY || existsSync(keyPath)
 // the updater skips Gatekeeper, so a Mac update must be signed and notarized before it is offered
 const signing = hasKey && (!mac || notarized)
 if (hasKey && !signing) console.log('Without Apple signing and notarization the Mac build gets no update artifacts.')
-const args = ['--prefix', 'ui', 'tauri', 'build', ...cliArgs]
+const args = ['build', ...cliArgs]
 const scratch = signing ? mkdtempSync(join(tmpdir(), 'ai-usage-tracker-')) : null
 if (signing) {
   env.TAURI_SIGNING_PRIVATE_KEY ??= keyPath // the CLI takes a path or the key itself
   env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ??= ''
   const extra = join(scratch, 'release.json')
   writeFileSync(extra, JSON.stringify({ bundle: { createUpdaterArtifacts: true } }))
-  args.push('--config', `"${extra}"`)
+  args.push('--config', extra)
 } else {
   console.log('No update signing key found: building without update artifacts.')
 }
 
 // the Tauri CLI finds src-tauri from the repository root
-const r = spawnSync('npx', args, { cwd: repo, env, stdio: 'inherit', shell: true })
+const r = tauri(repo, args, env)
 if (scratch) rmSync(scratch, { recursive: true, force: true })
 if (r.status !== 0) process.exit(r.status ?? 1)
 
@@ -144,12 +145,7 @@ if (mac) {
   }
 }
 
-const updates = JSON.parse(readFileSync(join(repo, 'config', 'updates.json'), 'utf8'))
-const base = updates.endpoint?.startsWith('https://')
-  ? updates.endpoint.slice(0, updates.endpoint.lastIndexOf('/'))
-  : /^[\w.-]+\/[\w.-]+$/.test(updates.github_repo ?? '')
-    ? `https://github.com/${updates.github_repo}/releases/download/v${version}`
-    : null
+const { base, updates } = releaseBase(repo, version)
 if (signing && base) {
   // the other platform's latest.json for this version, so one manifest serves both
   const other = process.env.RELEASE_MANIFEST ? JSON.parse(readFileSync(process.env.RELEASE_MANIFEST, 'utf8')) : null
