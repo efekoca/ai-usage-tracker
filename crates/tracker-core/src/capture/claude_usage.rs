@@ -63,7 +63,12 @@ pub fn candidates(env: &Env, configured: Option<&Path>) -> Vec<PathBuf> {
         let dir = r.join("Claude").join("claude-code");
         let mut versions: Vec<PathBuf> = std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.path()).collect();
         versions.sort_by_key(|p| std::cmp::Reverse(version_key(p)));
-        v.extend(versions.into_iter().map(|p| p.join(&claude)));
+        for p in versions {
+            v.push(p.join(&claude));
+            // on macOS each version holds `<build>/claude.app`
+            #[cfg(target_os = "macos")]
+            v.extend(std::fs::read_dir(&p).into_iter().flatten().flatten().map(|b| b.path().join("claude.app/Contents/MacOS/claude")));
+        }
     }
     v
 }
@@ -253,6 +258,16 @@ mod tests {
             assert!(c.contains(&p), "{} missing", p.display());
         }
         assert!(c.iter().all(|p| p.extension().is_none_or(|e| e == "exe")));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_claude_desktop_apps_copy_is_a_candidate() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("Claude/claude-code/2.1.288/48d54124d3c3/claude.app/Contents/MacOS");
+        std::fs::create_dir_all(&app).unwrap();
+        let env = Env { home: None, roaming: Some(dir.path().to_owned()), local: None, claude_config_dir: None, codex_home: None };
+        assert!(candidates(&env, None).contains(&app.join("claude")));
     }
 
     #[test]

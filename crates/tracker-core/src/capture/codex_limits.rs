@@ -31,6 +31,13 @@ pub fn candidates(env: &Env, configured: Option<&Path>) -> Vec<PathBuf> {
         // the Codex desktop app keeps a runnable copy of the CLI here
         v.push(home.join(".sandbox-bin").join(&codex));
     }
+    #[cfg(target_os = "macos")]
+    {
+        // the Codex desktop app bundles the CLI
+        let bundled = "Codex.app/Contents/Resources/codex";
+        v.push(Path::new("/Applications").join(bundled));
+        v.extend(env.home.iter().map(|h| h.join("Applications").join(bundled)));
+    }
     for root in super::npm_roots(env) {
         v.push(root.join("@openai/codex/vendor").join(CODEX_TARGET).join("codex").join(&codex));
     }
@@ -199,6 +206,8 @@ mod tests {
             PathBuf::from("/usr/local/bin/codex"),
             PathBuf::from(format!("/opt/homebrew/lib/node_modules/@openai/codex/vendor/{CODEX_TARGET}/codex/codex")),
             home.join(format!(".npm-global/lib/node_modules/@openai/codex/vendor/{CODEX_TARGET}/codex/codex")),
+            #[cfg(target_os = "macos")]
+            PathBuf::from("/Applications/Codex.app/Contents/Resources/codex"),
         ] {
             assert!(c.contains(&p), "{} missing", p.display());
         }
