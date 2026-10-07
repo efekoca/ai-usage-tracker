@@ -128,6 +128,12 @@ pub async fn check(app: &AppHandle) -> Result<UpdateStatus, String> {
 }
 
 pub async fn install(app: &AppHandle) -> Result<(), String> {
+    // where the app may not be replaced directly, the updater moves it with an AppleScript that
+    // breaks on these characters in its path
+    #[cfg(target_os = "macos")]
+    if std::env::current_exe().is_ok_and(|e| e.to_string_lossy().contains(['\'', '"', '\\'])) {
+        return Err("update_install_manual".into());
+    }
     let u = updater(app)?;
     let update = u.check().await.map_err(|e| e.to_string())?.ok_or("no_update")?;
     set(app, |s| {

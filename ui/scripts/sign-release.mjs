@@ -2,10 +2,10 @@
 // Usage: npm --prefix ui run sign-release -- <folder>
 // Every package without a .sig is signed; every signature must name this version. latest.json in the
 // folder (or RELEASE_MANIFEST) is merged.
-import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { releaseBase, tauri } from './release-common.mjs'
 
 const repo = resolve(import.meta.dirname, '..', '..')
 const dir = process.argv[2] ? resolve(process.cwd(), process.argv[2]) : null
@@ -19,6 +19,7 @@ const version = JSON.parse(readFileSync(join(repo, 'src-tauri', 'tauri.conf.json
 const kinds = [
   [/_x64-setup\.exe$/, () => ['windows-x86_64']],
   [/_universal\.app\.tar\.gz$/, () => ['darwin-aarch64', 'darwin-x86_64']],
+  [/_(aarch64|x64)\.app\.tar\.gz$/, (a) => [a === 'x64' ? 'darwin-x86_64' : 'darwin-aarch64']],
   [/_(aarch64|x86_64)\.deb$/, (a) => [`linux-${a}-deb`]],
   [/_(aarch64|x86_64)\.rpm$/, (a) => [`linux-${a}-rpm`]],
   [/_(aarch64|x86_64)\.AppImage$/, (a) => [`linux-${a}-appimage`, `linux-${a}`]],
@@ -37,10 +38,14 @@ env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ??= ''
 const platforms = {}
 for (const file of readdirSync(dir).filter((f) => f.includes(`_${version}_`))) {
   const kind = kinds.find(([re]) => re.test(file))
-  if (!kind) continue
+  if (!kind) {
+    // disk images, signatures and the manifest are expected; anything else may be a missed package
+    if (!/\.(dmg|sig|json)$/.test(file)) console.warn(`Skipping ${file}: not a package the updater knows`)
+    continue
+  }
   if (!existsSync(join(dir, `${file}.sig`))) {
     // installed apps require the version in the signature (`requireSignedVersion`)
-    const r = spawnSync('npx', ['--prefix', 'ui', 'tauri', 'signer', 'sign', '--app-version', version, `"${join(dir, file)}"`], { cwd: repo, env, stdio: 'inherit', shell: true })
+    const r = tauri(repo, ['signer', 'sign', '--app-version', version, join(dir, file)], env)
     if (r.status !== 0) process.exit(r.status ?? 1)
   }
   const signature = readFileSync(join(dir, `${file}.sig`), 'utf8').trim()
@@ -49,17 +54,24 @@ for (const file of readdirSync(dir).filter((f) => f.includes(`_${version}_`))) {
     console.error(`${file}.sig is not bound to v${version}, so installed apps would reject the update. Delete it and run this again.`)
     process.exit(1)
   }
-  for (const key of kind[1](file.match(kind[0])[1])) platforms[key] = { signature, file }
+  for (const key of kind[1](file.match(kind[0])[1])) {
+    if (platforms[key]) {
+      console.error(`${platforms[key].file} and ${file} are both for ${key}; keep one of them`)
+      process.exit(1)
+    }
+    platforms[key] = { signature, file }
+  }
 }
 if (!Object.keys(platforms).length) {
   console.error(`No release files for v${version} in ${dir}`)
   process.exit(1)
 }
 
-const updates = JSON.parse(readFileSync(join(repo, 'config', 'updates.json'), 'utf8'))
-const base = updates.endpoint?.startsWith('https://')
-  ? updates.endpoint.slice(0, updates.endpoint.lastIndexOf('/'))
-  : `https://github.com/${updates.github_repo}/releases/download/v${version}`
+const { base } = releaseBase(repo, version)
+if (!base) {
+  console.error('config/updates.json names no release location (an https endpoint or an owner/name github_repo)')
+  process.exit(1)
+}
 const existing = process.env.RELEASE_MANIFEST ?? join(dir, 'latest.json')
 const other = existsSync(existing) ? JSON.parse(readFileSync(existing, 'utf8')) : null
 if (other && other.version !== version) {
