@@ -8,9 +8,9 @@
   import Icon from '../components/Icon.svelte'
   import WidgetView from '../components/WidgetView.svelte'
 
-  // macOS always hides the widget during full-screen apps, so there is nothing to choose there
+  // only Windows lets the app see a full-screen program; macOS always hides the widget then
   const behaviorKeys = $derived(
-    app.info?.platform === 'macos' ? (['visible', 'always_on_top', 'lock_position'] as const) : (['visible', 'always_on_top', 'lock_position', 'auto_hide_fullscreen'] as const),
+    app.info?.platform === 'windows' ? (['visible', 'always_on_top', 'lock_position', 'auto_hide_fullscreen'] as const) : (['visible', 'always_on_top', 'lock_position'] as const),
   )
 
   let ws = $state<WidgetSettings>(structuredClone($state.snapshot(app.settings!.widget)) as WidgetSettings)
