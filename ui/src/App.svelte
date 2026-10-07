@@ -70,7 +70,7 @@
     try {
       await api.installUpdate()
     } catch (e) {
-      app.error = String(e)
+      app.error = String(e) === 'update_install_manual' ? t('settings.updates.manual') : String(e)
     }
   }
 

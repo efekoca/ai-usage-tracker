@@ -138,8 +138,9 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
     });
     let handle = app.clone();
     let mut last_emit = std::time::Instant::now();
+    let data_dir = app.state::<AppState>().data_dir.clone();
     let result = update
-        .download_and_install(
+        .download(
             move |chunk, total| {
                 let state = handle.state::<AppState>();
                 let mut s = state.updates.lock().unwrap();
@@ -153,10 +154,11 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
             },
             || log::info!("update downloaded and verified; starting the installer"),
         )
-        .await;
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|bytes| install_package(&update, &bytes, &data_dir));
     // on Windows a successful install exits the process before this point
-    if let Err(e) = result {
-        let msg = e.to_string();
+    if let Err(msg) = result {
         log::warn!("update install failed: {msg}");
         set(app, |s| {
             s.installing = false;
@@ -171,6 +173,60 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
     state.worker.send(crate::worker::Msg::Shutdown);
     app.request_restart();
     Ok(())
+}
+
+/// Linux packages go through the distribution's own package tool, which also brings in new
+/// dependencies. Without a working pkexec nothing else is tried: the updater plugin would ask
+/// for the password in a plain dialog of its own.
+#[cfg(target_os = "linux")]
+fn install_package(update: &tauri_plugin_updater::Update, bytes: &[u8], data_dir: &std::path::Path) -> Result<(), String> {
+    use tauri::utils::config::BundleType;
+    let ext = match tauri::utils::platform::bundle_type() {
+        Some(BundleType::Deb) => "deb",
+        Some(BundleType::Rpm) => "rpm",
+        _ => return update.install(bytes).map_err(|e| e.to_string()),
+    };
+    let dir = data_dir.join("update");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let file = dir.join(format!("ai-usage-tracker.{ext}"));
+    std::fs::write(&file, bytes).map_err(|e| e.to_string())?;
+    let has = |tool: &str| ["/usr/bin", "/bin", "/usr/sbin", "/sbin"].iter().any(|d| std::path::Path::new(d).join(tool).is_file());
+    let args = package_command(ext, &file, has);
+    log::info!("installing the update with pkexec {}", args.join(" "));
+    let status = std::process::Command::new("pkexec").args(&args).status();
+    let _ = std::fs::remove_dir_all(&dir);
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        // 126: the user dismissed the prompt; 127: not authorized or no polkit agent
+        Ok(s) => {
+            log::warn!("package install ended with {s}");
+            Err("update_install_manual".into())
+        }
+        Err(e) => {
+            log::warn!("pkexec could not start: {e}");
+            Err("update_install_manual".into())
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn install_package(update: &tauri_plugin_updater::Update, bytes: &[u8], _data_dir: &std::path::Path) -> Result<(), String> {
+    update.install(bytes).map_err(|e| e.to_string())
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn package_command(ext: &str, file: &std::path::Path, has: impl Fn(&str) -> bool) -> Vec<String> {
+    let file = file.to_string_lossy().into_owned();
+    let v = |a: &[&str]| a.iter().map(|s| s.to_string()).chain([file.clone()]).collect();
+    match ext {
+        "deb" if has("apt-get") => v(&["apt-get", "install", "-y", "--allow-downgrades"]),
+        "deb" => v(&["dpkg", "-i"]),
+        _ if has("dnf") => v(&["dnf", "install", "-y"]),
+        // the packages are not GPG-signed; the updater already checked their own signature
+        _ if has("zypper") => v(&["zypper", "--non-interactive", "install", "--allow-unsigned-rpm"]),
+        _ => v(&["rpm", "-U"]),
+    }
 }
 
 pub fn start(app: AppHandle) {
@@ -197,6 +253,19 @@ pub fn start(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn packages_are_installed_with_the_distributions_tool() {
+        let f = Path::new("/home/u/.local/share/AIUsageTracker/update/ai-usage-tracker.deb");
+        let only = |tools: &'static [&'static str]| move |t: &str| tools.contains(&t);
+        assert_eq!(package_command("deb", f, only(&["apt-get", "dpkg"])), ["apt-get", "install", "-y", "--allow-downgrades", f.to_str().unwrap()]);
+        assert_eq!(package_command("deb", f, only(&["dpkg"]))[..2], ["dpkg", "-i"]);
+        let r = Path::new("/x/ai-usage-tracker.rpm");
+        assert_eq!(package_command("rpm", r, only(&["dnf", "rpm"]))[..3], ["dnf", "install", "-y"]);
+        assert!(package_command("rpm", r, only(&["zypper", "rpm"])).contains(&"--allow-unsigned-rpm".to_string()));
+        assert_eq!(package_command("rpm", r, only(&["rpm"])), ["rpm", "-U", "/x/ai-usage-tracker.rpm"]);
+    }
 
     #[test]
     fn only_a_plain_owner_and_name_make_a_github_location() {

@@ -107,7 +107,11 @@
   }
   async function installNow(v: string) {
     if (!(await ask(t('settings.updates.confirm', { v }), { title: t('settings.updates'), kind: 'info' }))) return
-    await guard(() => api.installUpdate())
+    try {
+      await api.installUpdate()
+    } catch (e) {
+      flash(String(e) === 'update_install_manual' ? t('settings.updates.manual') : t('common.error', { e: String(e) }))
+    }
   }
   const trayLimits = [
     ['anthropic', 'five_hour'],
