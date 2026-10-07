@@ -47,14 +47,16 @@
     ],
     "linux": {
       "deb": {
-        "postInstallScript": "linux/postinst.sh",
-        "preRemoveScript": "linux/prerm.sh",
-        "postRemoveScript": "linux/postrm.sh"
+        "files": {
+          "/usr/share/applications/ai-usage-tracker.desktop": "linux/ai-usage-tracker.desktop"
+        },
+        "preRemoveScript": "linux/prerm.sh"
       },
       "rpm": {
-        "postInstallScript": "linux/postinst.sh",
-        "preRemoveScript": "linux/prerm.sh",
-        "postRemoveScript": "linux/postrm.sh"
+        "files": {
+          "/usr/share/applications/ai-usage-tracker.desktop": "linux/ai-usage-tracker.desktop"
+        },
+        "preRemoveScript": "linux/prerm.sh"
       }
     },
     "macOS": {

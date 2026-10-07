@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=AI Usage Tracker
+Comment=Shows the AI Usage Tracker widget
+Exec=ai-usage-tracker --toggle-widget
+Icon=ai-usage-tracker
+Terminal=false
+Categories=Utility;
+NoDisplay=true
