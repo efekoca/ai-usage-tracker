@@ -29,6 +29,7 @@ pub struct CaptureRuntime {
     codex_wake: Mutex<Option<Sender<()>>>,
     pub claude: Mutex<PollStatus>,
     claude_wake: Mutex<Option<Sender<()>>>,
+    claude_last_read_ms: Mutex<i64>,
     /// Bumped by "delete all data": a limit read started before it is not stored.
     wipes: AtomicU64,
 }
@@ -42,6 +43,7 @@ impl CaptureRuntime {
             codex_wake: Mutex::new(None),
             claude: Mutex::new(PollStatus::default()),
             claude_wake: Mutex::new(None),
+            claude_last_read_ms: Mutex::new(0),
             wipes: AtomicU64::new(0),
         }
     }
@@ -273,7 +275,23 @@ fn claude_binary(s: &Settings) -> Option<PathBuf> {
 }
 
 /// Runs in an empty folder of the app's own so no project settings, files or trust prompts apply.
+/// Claude throttles `get_usage` server-side, so reads are kept this far apart wherever they start.
+const CLAUDE_MIN_GAP_MS: i64 = 5 * 60_000;
+
+/// Takes the next read slot unless the previous read is less than `gap_ms` old.
+fn claim_read(last_ms: &Mutex<i64>, now: i64, gap_ms: i64) -> bool {
+    let mut last = last_ms.lock().unwrap();
+    if *last != 0 && now - *last < gap_ms {
+        return false;
+    }
+    *last = now;
+    true
+}
+
 fn read_claude(state: &AppState, s: &Settings, bin: &Path) -> Result<Vec<tracker_core::model::LimitSnapshot>, String> {
+    if !claim_read(&state.capture.claude_last_read_ms, now_ms(), CLAUDE_MIN_GAP_MS) {
+        return Err("claude_throttled".into());
+    }
     let work = state.data_dir.join("claude-usage");
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
     let env = Env::from_system();
@@ -730,6 +748,16 @@ pub fn start(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn claude_reads_stay_five_minutes_apart() {
+        let last = Mutex::new(0);
+        assert!(claim_read(&last, 1_000_000, CLAUDE_MIN_GAP_MS));
+        assert!(!claim_read(&last, 1_000_000 + 10_000, CLAUDE_MIN_GAP_MS));
+        assert!(!claim_read(&last, 1_000_000 + CLAUDE_MIN_GAP_MS - 1, CLAUDE_MIN_GAP_MS));
+        assert!(claim_read(&last, 1_000_000 + CLAUDE_MIN_GAP_MS, CLAUDE_MIN_GAP_MS));
+        assert_eq!(*last.lock().unwrap(), 1_000_000 + CLAUDE_MIN_GAP_MS);
+    }
 
     #[cfg(not(windows))]
     #[test]
