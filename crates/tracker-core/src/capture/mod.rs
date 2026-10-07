@@ -64,7 +64,28 @@ pub(crate) fn unix_bin_dirs(env: &crate::discovery::Env) -> Vec<PathBuf> {
     let mut v: Vec<PathBuf> = env.home.iter().map(|h| h.join(".local").join("bin")).collect();
     v.extend(path_dirs());
     v.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
+    v.extend(node_manager_bins(env));
     v.dedup();
+    v
+}
+
+/// Where Node version managers put `node` and globally installed CLIs, newest Node first.
+#[cfg(not(windows))]
+fn node_manager_bins(env: &crate::discovery::Env) -> Vec<PathBuf> {
+    let Some(home) = &env.home else { return Vec::new() };
+    let newest_first = |dir: PathBuf, bin: &str| {
+        let mut versions: Vec<PathBuf> = std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.path()).collect();
+        let key = |p: &PathBuf| -> Vec<u64> {
+            p.file_name().and_then(|n| n.to_str()).unwrap_or("").trim_start_matches('v').split('.').map(|x| x.parse().unwrap_or(0)).collect()
+        };
+        versions.sort_by_key(|p| std::cmp::Reverse(key(p)));
+        versions.into_iter().map(|p| p.join(bin)).collect::<Vec<_>>()
+    };
+    let mut v = vec![home.join(".volta/bin"), home.join(".bun/bin")];
+    v.extend(newest_first(home.join(".nvm/versions/node"), "bin"));
+    for fnm in [home.join(".local/share/fnm"), home.join("Library/Application Support/fnm")] {
+        v.extend(newest_first(fnm.join("node-versions"), "installation/bin"));
+    }
     v
 }
 
@@ -78,10 +99,12 @@ pub(crate) fn npm_roots(env: &crate::discovery::Env) -> Vec<PathBuf> {
     v
 }
 
-/// The npm-installed CLIs are node scripts, which need `node` on the child's PATH.
+/// The npm-installed CLIs are node scripts, which need `node` on the child's PATH; the CLI's own
+/// folder comes first, so a copy under a version manager runs with that manager's `node`.
 #[cfg(not(windows))]
-pub(crate) fn set_child_path(cmd: &mut std::process::Command) {
-    if let Ok(p) = std::env::join_paths(unix_bin_dirs(&crate::discovery::Env::from_system())) {
+pub(crate) fn set_child_path(cmd: &mut std::process::Command, bin: &std::path::Path) {
+    let own = bin.parent().filter(|d| d.is_absolute()).map(|d| d.to_path_buf());
+    if let Ok(p) = std::env::join_paths(own.into_iter().chain(unix_bin_dirs(&crate::discovery::Env::from_system()))) {
         cmd.env("PATH", p);
     }
 }
