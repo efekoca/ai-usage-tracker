@@ -25,7 +25,7 @@ pub fn apply(hotkey: &str, keys: bool) -> Result<(), String> {
     gsettings(&["set", &ours, "name", &quote("AI Usage Tracker widget")])?;
     gsettings(&["set", &ours, "command", &quote(&command(&crate::app_path()?))])?;
     if keys || fresh {
-        gsettings(&["set", &ours, "binding", &quote(&binding(hotkey))])?;
+        gsettings(&["set", &ours, "binding", &quote(&binding(hotkey)?)])?;
     }
     if fresh {
         list.push(PATH.to_owned());
@@ -74,19 +74,15 @@ fn command(exe: &std::path::Path) -> String {
 }
 
 /// `Ctrl+Alt+Shift+W` becomes `<Control><Alt><Shift>w`, GTK's accelerator format.
-fn binding(hotkey: &str) -> String {
+fn binding(hotkey: &str) -> Result<String, String> {
     hotkey
         .split('+')
         .map(|k| match k {
-            "Ctrl" => "<Control>".to_owned(),
-            "Alt" => "<Alt>".to_owned(),
-            "Shift" => "<Shift>".to_owned(),
-            "Super" => "<Super>".to_owned(),
-            "Space" => "space".to_owned(),
-            "PageUp" => "Page_Up".to_owned(),
-            "PageDown" => "Page_Down".to_owned(),
-            k if k.len() == 1 => k.to_lowercase(),
-            k => k.to_owned(),
+            "Ctrl" => Ok("<Control>".to_owned()),
+            "Alt" => Ok("<Alt>".to_owned()),
+            "Shift" => Ok("<Shift>".to_owned()),
+            "Super" => Ok("<Super>".to_owned()),
+            k => crate::hotkey::xkb_key(k).ok_or_else(|| "hotkey_unknown_key".to_owned()),
         })
         .collect()
 }
@@ -107,8 +103,11 @@ mod tests {
 
     #[test]
     fn keys_and_command_use_gnome_formats() {
-        assert_eq!(binding("Ctrl+Alt+Shift+W"), "<Control><Alt><Shift>w");
-        assert_eq!(binding("Super+F9"), "<Super>F9");
+        assert_eq!(binding("Ctrl+Alt+Shift+W").unwrap(), "<Control><Alt><Shift>w");
+        assert_eq!(binding("Super+F9").unwrap(), "<Super>F9");
+        assert_eq!(binding("Ctrl+Alt+Minus").unwrap(), "<Control><Alt>minus");
+        assert_eq!(binding("Ctrl+Numpad1").unwrap(), "<Control>KP_1");
+        assert!(binding("Ctrl+Banana").is_err());
         assert_eq!(command(std::path::Path::new("/opt/AI Usage/o'neil/ai-usage-tracker")), r"'/opt/AI Usage/o'\''neil/ai-usage-tracker' --toggle-widget");
         assert_eq!(quote(r"a'b\c"), r"'a\'b\\c'");
     }
