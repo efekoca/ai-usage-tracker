@@ -286,13 +286,17 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building AI Usage Tracker");
 
-    app.run(|app, event| {
-        if let RunEvent::ExitRequested { api, code, .. } = event {
+    app.run(|app, event| match event {
+        RunEvent::ExitRequested { api, code, .. } => {
             // closing the last window keeps the app in the tray; only an explicit quit exits
             let quitting = app.try_state::<AppState>().is_some_and(|s| s.quitting.load(Ordering::SeqCst));
             if code.is_none() && !quitting {
                 api.prevent_exit();
             }
         }
+        // a Dock click brings back the main window, even while only the widget is open
+        #[cfg(target_os = "macos")]
+        RunEvent::Reopen { .. } => windows::show_main(app),
+        _ => {}
     });
 }
