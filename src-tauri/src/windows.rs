@@ -450,6 +450,9 @@ fn autostart_command(exe: &std::path::Path) -> String {
 }
 
 /// An XDG autostart entry, which GNOME, KDE, XFCE and most other desktops start at login.
+#[cfg(target_os = "linux")]
+pub(crate) use xdg_autostart::exec_arg as desktop_exec_arg;
+
 #[cfg(any(not(any(windows, target_os = "macos")), test))]
 mod xdg_autostart {
     use std::path::Path;
@@ -488,7 +491,7 @@ mod xdg_autostart {
     }
 
     /// Quoted per the Desktop Entry spec; the string-level escape doubles backslashes once more.
-    fn exec_arg(s: &str) -> String {
+    pub(crate) fn exec_arg(s: &str) -> String {
         let quoted = s.replace('\\', "\\\\").replace('"', "\\\"").replace('`', "\\`").replace('$', "\\$");
         format!("\"{}\"", quoted.replace('\\', "\\\\")).replace('%', "%%")
     }

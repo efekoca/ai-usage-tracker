@@ -14,16 +14,12 @@ pub fn parse(hotkey: &str) -> Result<Shortcut, String> {
 /// The error is kept for the settings screen: another program may already own the combination.
 /// `chosen` is true when the user picked this shortcut just now rather than at startup.
 pub fn apply(app: &AppHandle, hotkey: &str, chosen: bool) -> Result<(), String> {
-    let gs = app.global_shortcut();
-    let _ = gs.unregister_all();
-    #[cfg(not(target_os = "linux"))]
-    let _ = chosen;
+    let _ = app.global_shortcut().unregister_all();
     #[cfg(target_os = "linux")]
     {
         crate::portal_shortcut::clear();
         crate::kde_shortcut::clear();
-        let wayland = crate::portal_shortcut::wayland_session();
-        if !hotkey.trim().is_empty() && wayland && crate::portal_shortcut::available() {
+        if !hotkey.trim().is_empty() && crate::portal_shortcut::wayland_session() && crate::portal_shortcut::available() {
             parse(hotkey)?;
             // a GNOME custom shortcut left from before the portal would toggle the widget a second time
             if crate::gnome_shortcut::is_gnome() {
@@ -37,13 +33,31 @@ pub fn apply(app: &AppHandle, hotkey: &str, chosen: bool) -> Result<(), String> 
                 let r = crate::portal_shortcut::bind(&hotkey, "Show or hide the AI Usage Tracker widget", move || {
                     crate::windows::handle_menu(&press, "tray:widget");
                 });
-                if let Err(e) = &r {
-                    log::warn!("widget shortcut not registered through the portal: {e}");
+                match r {
+                    Ok(()) => *app.state::<AppState>().hotkey_error.lock().unwrap() = None,
+                    // the portal could not tell which app this is; the other ways still give a shortcut
+                    Err(e) if e.starts_with(crate::portal_shortcut::UNREGISTERED) => {
+                        log::warn!("{e}; using another way");
+                        let _ = without_portal(&app, &hotkey, chosen);
+                    }
+                    Err(e) => {
+                        log::warn!("widget shortcut not registered through the portal: {e}");
+                        *app.state::<AppState>().hotkey_error.lock().unwrap() = Some(e);
+                    }
                 }
-                *app.state::<AppState>().hotkey_error.lock().unwrap() = r.err();
             });
             return Ok(());
         }
+    }
+    without_portal(app, hotkey, chosen)
+}
+
+fn without_portal(app: &AppHandle, hotkey: &str, chosen: bool) -> Result<(), String> {
+    #[cfg(not(target_os = "linux"))]
+    let _ = chosen;
+    #[cfg(target_os = "linux")]
+    {
+        let wayland = crate::portal_shortcut::wayland_session();
         if wayland && !hotkey.trim().is_empty() && crate::kde_shortcut::is_kde() && crate::kde_shortcut::available() {
             parse(hotkey)?;
             let press = app.clone();
@@ -72,7 +86,7 @@ pub fn apply(app: &AppHandle, hotkey: &str, chosen: bool) -> Result<(), String> 
         Ok(())
     } else {
         parse(hotkey).and_then(|s| {
-            gs.on_shortcut(s, |app, _, e| {
+            app.global_shortcut().on_shortcut(s, |app, _, e| {
                 if e.state == ShortcutState::Pressed {
                     crate::windows::handle_menu(app, "tray:widget");
                 }
