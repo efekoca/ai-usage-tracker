@@ -68,6 +68,10 @@
     },
     "macOS": {
       "minimumSystemVersion": "11.0",
+      "files": {
+        "Resources/en.lproj/InfoPlist.strings": "macos/en.lproj/InfoPlist.strings",
+        "Resources/tr.lproj/InfoPlist.strings": "macos/tr.lproj/InfoPlist.strings"
+      },
       "dmg": {
         "windowSize": { "width": 660, "height": 400 },
         "appPosition": { "x": 180, "y": 150 },

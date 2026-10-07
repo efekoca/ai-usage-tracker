@@ -147,11 +147,11 @@ fn print_to_pdf(win: &tauri::WebviewWindow, out: &Path) -> Result<(), String> {
     use objc2_web_kit::WKWebView;
 
     let (tx, rx) = mpsc::channel::<Result<(), String>>();
-    *mac_print::DONE.lock().unwrap() = Some(tx.clone());
+    let id = mac_print::start(tx.clone());
     let out_file = out.to_owned();
     win.with_webview(move |wv| {
         let fail = |e: &str| {
-            mac_print::DONE.lock().unwrap().take();
+            mac_print::finish(id);
             let _ = tx.send(Err(e.into()));
         };
         let (Some(mtm), Some(url)) = (MainThreadMarker::new(), NSURL::from_file_path(&out_file)) else { return fail("pdf_failed") };
@@ -186,15 +186,18 @@ fn print_to_pdf(win: &tauri::WebviewWindow, out: &Path) -> Result<(), String> {
                 window,
                 Some(&delegate),
                 Some(sel!(printOperationDidRun:success:contextInfo:)),
-                std::ptr::null_mut(),
+                id as *mut std::ffi::c_void,
             );
         }
         mac_print::keep(delegate);
     })
-    .map_err(|e| e.to_string())?;
-    let r = rx.recv_timeout(Duration::from_secs(60)).map_err(|_| "pdf_timeout".to_string())?;
-    mac_print::DONE.lock().unwrap().take();
-    r?;
+    .map_err(|e| {
+        mac_print::finish(id);
+        e.to_string()
+    })?;
+    let r = rx.recv_timeout(Duration::from_secs(60));
+    mac_print::finish(id);
+    r.map_err(|_| "pdf_timeout".to_string())??;
     if out.is_file() {
         Ok(())
     } else {
@@ -208,17 +211,36 @@ mod mac_print {
     use objc2::runtime::{AnyObject, Bool, NSObject};
     use objc2::{define_class, msg_send, MainThreadMarker, MainThreadOnly};
     use std::cell::RefCell;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{mpsc, Mutex};
 
-    pub static DONE: Mutex<Option<mpsc::Sender<Result<(), String>>>> = Mutex::new(None);
+    /// The render waiting for an answer, by number: a late answer from an earlier, timed-out
+    /// operation must not settle a newer one.
+    static DONE: Mutex<Option<(usize, Answer)>> = Mutex::new(None);
+    static NEXT: AtomicUsize = AtomicUsize::new(1);
 
     thread_local! {
-        // AppKit does not retain the delegate while the operation runs
-        static ALIVE: RefCell<Option<Retained<Delegate>>> = const { RefCell::new(None) };
+        // AppKit does not retain the delegate while the operation runs; one per running operation,
+        // so a new render never frees the delegate of one still in progress
+        static ALIVE: RefCell<Vec<Retained<Delegate>>> = const { RefCell::new(Vec::new()) };
+    }
+
+    type Answer = mpsc::Sender<Result<(), String>>;
+
+    pub fn start(tx: Answer) -> usize {
+        let id = NEXT.fetch_add(1, Ordering::Relaxed);
+        *DONE.lock().unwrap() = Some((id, tx));
+        id
+    }
+
+    /// The sender of render `id`, unless another render has taken its place.
+    pub fn finish(id: usize) -> Option<Answer> {
+        let mut done = DONE.lock().unwrap();
+        if done.as_ref().is_some_and(|d| d.0 == id) { done.take().map(|d| d.1) } else { None }
     }
 
     pub fn keep(d: Retained<Delegate>) {
-        ALIVE.with(|a| *a.borrow_mut() = Some(d));
+        ALIVE.with(|a| a.borrow_mut().push(d));
     }
 
     define_class!(
@@ -229,11 +251,11 @@ mod mac_print {
 
         impl Delegate {
             #[unsafe(method(printOperationDidRun:success:contextInfo:))]
-            fn did_run(&self, _op: *mut AnyObject, success: Bool, _ctx: *mut std::ffi::c_void) {
-                if let Some(tx) = DONE.lock().unwrap().take() {
+            fn did_run(&self, _op: *mut AnyObject, success: Bool, ctx: *mut std::ffi::c_void) {
+                if let Some(tx) = finish(ctx as usize) {
                     let _ = tx.send(if success.as_bool() { Ok(()) } else { Err("pdf_failed".into()) });
                 }
-                ALIVE.with(|a| a.borrow_mut().take());
+                ALIVE.with(|a| a.borrow_mut().retain(|d| !std::ptr::eq(&**d, self)));
             }
         }
     );
