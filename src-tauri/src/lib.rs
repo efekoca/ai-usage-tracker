@@ -34,7 +34,46 @@ pub(crate) fn app_path() -> Result<std::path::PathBuf, String> {
     if let Some(p) = std::env::var_os("APPIMAGE").map(std::path::PathBuf::from).filter(|p| p.is_file()) {
         return Ok(p);
     }
-    std::env::current_exe().map_err(|e| e.to_string())
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    #[cfg(target_os = "macos")]
+    if temporary_location(&exe) {
+        return Err("app_not_installed".into());
+    }
+    Ok(exe)
+}
+
+/// A copy opened from the disk image or moved aside by App Translocation disappears later.
+#[cfg(target_os = "macos")]
+pub(crate) fn temporary_location(exe: &std::path::Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    if exe.to_string_lossy().contains("/AppTranslocation/") {
+        return true;
+    }
+    let Ok(path) = std::ffi::CString::new(exe.as_os_str().as_bytes()) else { return false };
+    let mut fs: libc::statfs = unsafe { std::mem::zeroed() };
+    // SAFETY: `path` is NUL-terminated and `fs` is a valid out-parameter
+    unsafe { libc::statfs(path.as_ptr(), &mut fs) == 0 && fs.f_flags & libc::MNT_RDONLY as u32 != 0 }
+}
+
+/// Start at login, the status line and updates need the app where it stays.
+#[cfg(target_os = "macos")]
+fn warn_if_temporary(app: &tauri::AppHandle, s: &Settings) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+    if !std::env::current_exe().is_ok_and(|e| temporary_location(&e)) {
+        return;
+    }
+    let (title, text) = if tray::turkish(s) {
+        ("Uygulamayı taşıyın", "AI Usage Tracker şu an disk görüntüsünden ya da geçici bir konumdan çalışıyor. Girişte başlatma, Claude Code durum satırı ve güncellemeler için uygulamayı Uygulamalar klasörüne taşıyıp oradan açın.")
+    } else {
+        ("Move the app", "AI Usage Tracker is running from the disk image or a temporary location. Move it to the Applications folder and open it from there so start at login, the Claude Code status line and updates work.")
+    };
+    let app = app.clone();
+    std::thread::spawn(move || {
+        // once the window is up: an alert without one opens off screen
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        let Some(w) = app.get_webview_window(windows::MAIN) else { return };
+        app.dialog().message(text).title(title).kind(MessageDialogKind::Warning).parent(&w).show(|_| {});
+    });
 }
 
 /// Runs before the GUI so these modes never start it or hit the single-instance check.
@@ -228,6 +267,8 @@ pub fn run() {
             capture::start(app.handle());
             pdf::start_weekly(app.handle().clone());
             updates::start(app.handle().clone());
+            #[cfg(target_os = "macos")]
+            warn_if_temporary(app.handle(), &settings);
             log::info!("started v{}", app.package_info().version);
             Ok(())
         })
@@ -299,4 +340,18 @@ pub fn run() {
         RunEvent::Reopen { .. } => windows::show_main(app),
         _ => {}
     });
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::temporary_location;
+    use std::path::Path;
+
+    #[test]
+    fn disk_images_and_translocated_copies_are_temporary() {
+        assert!(temporary_location(Path::new("/private/var/folders/x/T/AppTranslocation/ABC/d/AI Usage Tracker.app/Contents/MacOS/ai-usage-tracker")));
+        // the sealed system volume is mounted read-only, like a disk image
+        assert!(temporary_location(Path::new("/System/Applications/Calculator.app/Contents/MacOS/Calculator")));
+        assert!(!temporary_location(&std::env::temp_dir()));
+    }
 }

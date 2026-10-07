@@ -31,7 +31,7 @@ pub fn refresh_soon() {
     DIRTY.store(true, Ordering::SeqCst);
 }
 
-fn turkish(s: &Settings) -> bool {
+pub(crate) fn turkish(s: &Settings) -> bool {
     s.language == "tr" || (s.language == "system" && system_is_turkish())
 }
 
