@@ -340,7 +340,10 @@ pub fn popup_widget_menu(app: &AppHandle) {
 }
 
 pub fn system_is_turkish() -> bool {
-    std::env::var("LANG").map(|l| l.starts_with("tr")).unwrap_or(false) || user_locale().starts_with("tr")
+    #[cfg(not(any(windows, target_os = "macos")))]
+    return user_locale().starts_with("tr");
+    #[cfg(any(windows, target_os = "macos"))]
+    return std::env::var("LANG").map(|l| l.starts_with("tr")).unwrap_or(false) || user_locale().starts_with("tr");
 }
 
 #[cfg(windows)]
@@ -360,9 +363,21 @@ fn user_locale() -> String {
     objc2_foundation::NSLocale::preferredLanguages().firstObject().map(|l| l.to_string()).unwrap_or_default()
 }
 
+/// The message language the way gettext picks it: LANGUAGE (unless the locale is C), LC_ALL,
+/// LC_MESSAGES, then LANG.
 #[cfg(not(any(windows, target_os = "macos")))]
 fn user_locale() -> String {
-    String::new()
+    locale_from(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
+}
+
+#[cfg(any(not(any(windows, target_os = "macos")), test))]
+fn locale_from(var: impl Fn(&str) -> Option<String>) -> String {
+    let locale = ["LC_ALL", "LC_MESSAGES", "LANG"].into_iter().find_map(&var).unwrap_or_default();
+    let plain = locale.is_empty() || locale == "C" || locale == "POSIX" || locale.starts_with("C.");
+    match var("LANGUAGE").and_then(|l| l.split(':').find(|x| !x.is_empty()).map(str::to_owned)) {
+        Some(first) if !plain => first,
+        _ => locale,
+    }
 }
 
 pub fn handle_menu(app: &AppHandle, id: &str) {
@@ -678,6 +693,17 @@ fn fullscreen_app_active() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_language_follows_gettext_order() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| move |k: &str| pairs.iter().find(|p| p.0 == k).map(|p| p.1.to_owned());
+        assert_eq!(locale_from(env(&[("LANG", "tr_TR.UTF-8")])), "tr_TR.UTF-8");
+        assert_eq!(locale_from(env(&[("LANG", "tr_TR.UTF-8"), ("LC_MESSAGES", "en_US.UTF-8")])), "en_US.UTF-8");
+        assert_eq!(locale_from(env(&[("LANG", "en_US.UTF-8"), ("LC_ALL", "tr_TR.UTF-8"), ("LC_MESSAGES", "en_US.UTF-8")])), "tr_TR.UTF-8");
+        assert_eq!(locale_from(env(&[("LANG", "en_US.UTF-8"), ("LANGUAGE", "tr:en")])), "tr");
+        // gettext ignores LANGUAGE under the C locale
+        assert_eq!(locale_from(env(&[("LANG", "C"), ("LANGUAGE", "tr")])), "C");
+    }
 
     #[test]
     fn the_main_window_fits_small_scaled_screens() {

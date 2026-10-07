@@ -44,7 +44,7 @@ pub fn remove() -> Result<(), String> {
 }
 
 fn gsettings(args: &[&str]) -> Result<String, String> {
-    let out = Command::new("gsettings").args(args).output().map_err(|e| format!("gsettings: {e}"))?;
+    let out = crate::desktop_env(&mut Command::new("gsettings")).args(args).output().map_err(|e| format!("gsettings: {e}"))?;
     if !out.status.success() {
         return Err(format!("gsettings: {}", String::from_utf8_lossy(&out.stderr).trim()));
     }
