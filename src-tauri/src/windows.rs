@@ -504,8 +504,7 @@ mod launch_agent {
     #[cfg(target_os = "macos")]
     pub fn apply(on: bool) -> Result<(), String> {
         let home = std::env::var_os("HOME").map(std::path::PathBuf::from).filter(|p| p.is_absolute()).ok_or("no home folder")?;
-        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        apply_in(&home, &exe, on)
+        apply_in(&home, &crate::app_path()?, on)
     }
 
     pub fn apply_in(home: &Path, exe: &Path, on: bool) -> Result<(), String> {

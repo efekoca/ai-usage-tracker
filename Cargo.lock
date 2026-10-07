@@ -23,6 +23,7 @@ version = "0.2.8"
 dependencies = [
  "chrono",
  "gtk",
+ "libc",
  "log",
  "notify",
  "objc2",
