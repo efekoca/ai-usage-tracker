@@ -23,7 +23,12 @@ const env = { ...process.env, CARGO_ENCODED_RUSTFLAGS: flags.join(sep) }
 delete env.RUSTFLAGS
 
 const mac = process.platform === 'darwin'
-const cliArgs = process.argv.slice(2)
+// arguments after `--` go to cargo
+const argv = process.argv.slice(2)
+const split = argv.includes('--') ? argv.indexOf('--') : argv.length
+const cliArgs = argv.slice(0, split)
+// the lock file is part of the release: a stale one stops the build instead of being rewritten
+const cargoArgs = [...new Set([...argv.slice(split + 1), '--locked'])]
 const targetAt = cliArgs.indexOf('--target')
 // one package for Apple silicon and Intel Macs
 const target = targetAt >= 0 ? cliArgs[targetAt + 1] : mac ? 'universal-apple-darwin' : null
@@ -55,6 +60,7 @@ if (signing) {
 } else {
   console.log('No update signing key found: building without update artifacts.')
 }
+args.push('--', ...cargoArgs)
 
 // the Tauri CLI finds src-tauri from the repository root
 const r = tauri(repo, args, env)
