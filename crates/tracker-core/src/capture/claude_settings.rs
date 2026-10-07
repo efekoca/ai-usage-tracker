@@ -142,10 +142,34 @@ fn write_doc(path: &Path, doc: &Map<String, Value>, original: &Option<String>) -
 
 static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
+/// Settings can hold API keys, so new files are readable by the owner only.
+fn create_private(path: &Path, content: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
+    opts.open(path)?.write_all(content)
+}
+
+/// The replaced file keeps whatever permissions the user gave it.
+#[cfg(unix)]
+fn keep_mode(path: &Path, tmp: &Path) -> std::io::Result<()> {
+    match fs::metadata(path) {
+        Ok(m) => fs::set_permissions(tmp, m.permissions()),
+        Err(_) => Ok(()),
+    }
+}
+
+#[cfg(not(unix))]
+fn keep_mode(_path: &Path, _tmp: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
 fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let tmp = path.with_file_name(format!("{name}.{}-{}.aiut-tmp", std::process::id(), TMP_SEQ.fetch_add(1, Ordering::Relaxed)));
-    let r = fs::write(&tmp, content).and_then(|_| fs::rename(&tmp, path));
+    let r = create_private(&tmp, content.as_bytes()).and_then(|_| keep_mode(path, &tmp)).and_then(|_| fs::rename(&tmp, path));
     if r.is_err() {
         let _ = fs::remove_file(&tmp);
     }
@@ -158,9 +182,9 @@ fn backup(path: &Path, data_dir: &Path, now_ms: i64) -> std::io::Result<PathBuf>
     let dest = dir.join(format!("claude-settings-{now_ms}.json"));
     // read + write rather than copy, so the backup never inherits a read-only attribute
     match fs::read(path) {
-        Ok(bytes) => fs::write(&dest, bytes)?,
+        Ok(bytes) => create_private(&dest, &bytes)?,
         // nothing to back up: record that the file did not exist
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => fs::write(&dest, "")?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => create_private(&dest, b"")?,
         Err(e) => return Err(e),
     }
     Ok(dest)
@@ -432,6 +456,24 @@ mod tests {
 
     fn read(p: &Path) -> Value {
         serde_json::from_str(&fs::read_to_string(p).unwrap()).unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn edits_keep_the_settings_mode_and_new_files_are_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        let (_d, file, data) = setup(Some(r#"{"apiKeyHelper": "x"}"#));
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o640)).unwrap();
+        let mut st = CaptureState::default();
+        let ch = install_statusline(&mut st, &data, &file, "bridge", 1).unwrap();
+        assert_eq!(mode(&file), 0o640);
+        assert_eq!(mode(&ch.backup), 0o600);
+        assert_eq!(mode(&state_file(&data)), 0o600);
+
+        let (_d, file, data) = setup(None);
+        install_statusline(&mut CaptureState::default(), &data, &file, "bridge", 1).unwrap();
+        assert_eq!(mode(&file), 0o600);
     }
 
     #[test]

@@ -161,6 +161,9 @@ pub fn run() {
     let started_hidden = std::env::args().any(|a| a == "--autostart" || a == TOGGLE_WIDGET);
     let data_dir = tracker_core::store::default_data_dir().unwrap_or_else(|| std::env::temp_dir().join("AIUsageTracker"));
     let _ = std::fs::create_dir_all(&data_dir);
+    // the database and the settings backups are the user's alone
+    #[cfg(unix)]
+    let _ = std::fs::set_permissions(&data_dir, std::os::unix::fs::PermissionsExt::from_mode(0o700));
 
     let app = tauri::Builder::default()
         // must be registered first: a second launch just focuses the running instance
