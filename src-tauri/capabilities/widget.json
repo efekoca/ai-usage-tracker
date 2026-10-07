@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "widget",
+  "description": "The widget: local IPC, and moving and sizing its own window. No dialogs, network or shell access.",
+  "windows": ["widget"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-size"
+  ]
+}

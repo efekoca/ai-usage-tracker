@@ -97,7 +97,12 @@ pub struct DiscoveredFile {
 pub fn claude_config_roots(env: &Env, extra: &ExtraPaths) -> Vec<PathBuf> {
     let mut v: Vec<PathBuf> = Vec::new();
     if let Some(list) = &env.claude_config_dir {
-        v.extend(list.split([',', ';']).map(str::trim).filter(|s| !s.is_empty()).map(PathBuf::from));
+        // a folder whose name holds a comma (`C:\Users\Doe, John\.claude`) is one root, not two
+        if Path::new(list.trim()).is_dir() {
+            v.push(PathBuf::from(list.trim()));
+        } else {
+            v.extend(list.split([',', ';']).map(str::trim).filter(|s| !s.is_empty()).map(PathBuf::from));
+        }
     } else if let Some(h) = &env.home {
         v.push(h.join(".claude"));
         v.push(h.join(".config").join("claude"));

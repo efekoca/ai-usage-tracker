@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The dashboard: local IPC plus the open, save and confirm dialogs. No network or shell access is granted to the web content.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:allow-save",
+    "dialog:allow-open",
+    "dialog:allow-ask",
+    "dialog:allow-message"
+  ]
+}

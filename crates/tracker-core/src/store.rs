@@ -443,6 +443,10 @@ impl Store {
     /// Merges another tracker database (e.g. a backup) into this one using the same de-dup
     /// rules as ingestion. Nothing is deleted. Returns (events touched, snapshots added).
     pub fn merge_from(&mut self, other: &Path) -> Result<(usize, usize)> {
+        // by canonical path: another spelling of the live file must not be attached to itself
+        if self.is_live_file(other) {
+            return Err(rusqlite::Error::InvalidPath(other.to_owned()));
+        }
         self.conn.execute("ATTACH DATABASE ?1 AS other", [other.to_string_lossy()])?;
         let result = (|| {
             let theirs: i64 = self.conn.query_row("PRAGMA other.user_version", [], |r| r.get(0))?;

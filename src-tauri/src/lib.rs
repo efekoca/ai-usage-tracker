@@ -111,12 +111,47 @@ fn relaunched_outside_package() -> bool {
         return false;
     }
     let _ = std::fs::write(&marker, b"");
+    // Explorer starts the exe without arguments, so the flags wait in a file for the new copy
+    let flags: Vec<String> = std::env::args().filter(|a| a == "--autostart" || a == TOGGLE_WIDGET).collect();
+    let _ = std::fs::write(data_dir.join(RELAUNCH_FLAGS), flags.join("\n"));
     let Ok(exe) = std::env::current_exe() else { return false };
     std::process::Command::new(system_exe("explorer.exe")).arg(exe).spawn().is_ok()
 }
 
+#[cfg(windows)]
+const RELAUNCH_FLAGS: &str = ".relaunch-flags";
+
+/// The flags of a start that relaunched itself through Explorer moments ago; read once.
+fn relaunch_flags(data_dir: &std::path::Path) -> Vec<String> {
+    #[cfg(windows)]
+    {
+        let file = data_dir.join(RELAUNCH_FLAGS);
+        let fresh = std::fs::metadata(&file).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|a| a < std::time::Duration::from_secs(30));
+        let text = std::fs::read_to_string(&file).unwrap_or_default();
+        let _ = std::fs::remove_file(&file);
+        if fresh {
+            return text.lines().map(str::to_owned).collect();
+        }
+    }
+    let _ = data_dir;
+    Vec::new()
+}
+
 /// Shows a folder, or opens a file in its default app.
 pub(crate) fn open_path(path: &std::path::Path) -> std::io::Result<()> {
+    // Explorer reads commas in its argument as switches, so a file goes to its app directly
+    #[cfg(windows)]
+    if path.is_file() {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::UI::Shell::ShellExecuteW;
+        use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+        let wide = |s: &std::ffi::OsStr| s.encode_wide().chain([0]).collect::<Vec<u16>>();
+        let (verb, file) = (wide("open".as_ref()), wide(path.as_os_str()));
+        // SAFETY: both strings are NUL-terminated and outlive the call
+        let r = unsafe { ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), file.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL) };
+        // values above 32 mean success
+        return if r as usize > 32 { Ok(()) } else { Err(std::io::Error::last_os_error()) };
+    }
     #[cfg(windows)]
     let mut c = std::process::Command::new(system_exe("explorer.exe"));
     #[cfg(target_os = "macos")]
@@ -261,8 +296,8 @@ pub fn run() {
     #[cfg(target_os = "linux")]
     drop_unusable_session_bus();
     // a desktop shortcut that starts the app with --toggle-widget brings up just the widget
-    let started_hidden = std::env::args().any(|a| a == "--autostart" || a == TOGGLE_WIDGET);
     let data_dir = tracker_core::store::default_data_dir().unwrap_or_else(|| std::env::temp_dir().join("AIUsageTracker"));
+    let started_hidden = std::env::args().chain(relaunch_flags(&data_dir)).any(|a| a == "--autostart" || a == TOGGLE_WIDGET);
     let _ = std::fs::create_dir_all(&data_dir);
     // the database and the settings backups are the user's alone
     #[cfg(unix)]
