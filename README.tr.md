@@ -4,11 +4,11 @@
 
 **Claude Code ve Codex kullanımınızı, API eşdeğeri maliyetinizi ve plan limitlerinizi tek yerden izleyin.**
 
-AI Usage Tracker, yapay zekâ araçlarınızın bilgisayarınıza zaten yazdığı kullanım kayıtlarını okur ve size anlaşılır bir panelde sunar. Ne kadar token harcadığınızı, bu kullanımın API fiyatlarıyla ne tutacağını ve limitlerinizin ne zaman dolacağını görürsünüz. Hesap açmanız gerekmez; verileriniz bulutta değil, kendi bilgisayarınızda kalır.
+AI Usage Tracker, Windows, macOS ve Linux'ta çalışan bir uygulamadır. Yapay zekâ araçlarınızın bilgisayarınıza zaten yazdığı kullanım kayıtlarını okur ve size anlaşılır bir panelde sunar. Ne kadar token harcadığınızı, bu kullanımın API fiyatlarıyla ne tutacağını ve limitlerinizin ne zaman dolacağını görürsünüz. Hesap açmanız gerekmez; verileriniz bulutta değil, kendi bilgisayarınızda kalır.
 
-[![Windows için indir](https://img.shields.io/badge/%C4%B0ndir-Windows%20kurulumu-2563eb?style=for-the-badge&logo=windows&logoColor=white)](../../releases/latest)
+[![Windows, macOS ve Linux için indir](https://img.shields.io/badge/%C4%B0ndir-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-2563eb?style=for-the-badge)](../../releases/latest)
 
-![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square&logo=windows&logoColor=white) [![Lisans: MIT](https://img.shields.io/badge/lisans-MIT-64748b?style=flat-square)](LICENSE)
+![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square&logo=windows&logoColor=white) ![macOS 11+](https://img.shields.io/badge/macOS-11%2B-000000?style=flat-square&logo=apple&logoColor=white) ![Linux x86_64](https://img.shields.io/badge/Linux-x86__64-FCC624?style=flat-square&logo=linux&logoColor=black) [![Lisans: MIT](https://img.shields.io/badge/lisans-MIT-64748b?style=flat-square)](LICENSE)
 
 [Özellikler](#özellikler) · [Kurulum](#kurulum) · [Gizlilik](#gizlilik) · [Nasıl çalışır](#nasıl-çalışır) · [Kaynaktan derleme](#kaynaktan-derleme) · [English](README.md)
 
@@ -150,7 +150,7 @@ Net tasarruf eksi çıkıyorsa, yazılan önbellek maliyetini karşılayacak kad
 
 ### Limitlerinizi masaüstünde görün
 
-Widget her zaman üstte duran küçük bir penceredir. Varsayılan olarak ekranın sağ alt köşesinde, görev çubuğunun hemen üstünde durur. Neleri gösterdiğini ve nasıl göründüğünü **Widget stüdyosu**'nda canlı önizlemeyle değiştirirsiniz.
+Widget her zaman üstte duran küçük bir penceredir. Varsayılan olarak ekranın sağ alt köşesinde durur. Neleri gösterdiğini ve nasıl göründüğünü **Widget stüdyosu**'nda canlı önizlemeyle değiştirirsiniz.
 
 ![Bugünkü token ve maliyeti, Claude ve Codex'in 5 saatlik limit halkalarıyla gösteren masaüstü widget'ı](assets/readme/widget-tr.webp)
 
@@ -164,18 +164,18 @@ Widget her zaman üstte duran küçük bir penceredir. Varsayılan olarak ekran�
 - **Görünüm:** tema, vurgu rengi, ölçek, arka plan opaklığı, köşe yuvarlaklığı, kenarlık, gölge, etiketler, sıfırlanmaya kalan süre.
 - **Yazı:** bilgisayarınızda yüklü herhangi bir yazı tipi (aranabilir; her biri kendi görünümüyle listelenir), yazı boyutu, ana sayı boyutu, sayı kalınlığı, sabit genişlikli rakamlar.
 - **Uyarı eşikleri:** dikkat ve kritik seviyeleri.
-- **Davranış:** her zaman üstte, konum kilidi, tıklayınca ne olacağı, tam ekranda gizlenme, köşeye yerleştirme, hangi sağlayıcıların gösterileceği.
+- **Davranış:** her zaman üstte, konum kilidi, tıklayınca ne olacağı, tam ekran uygulamalarda gizlenme (Windows), köşeye yerleştirme, hangi sağlayıcıların gösterileceği.
 
 Widget boyutunu içeriğe göre kendisi ayarlar. Bir köşeye sabitlediyseniz büyüyüp küçülürken o köşede kalır; sürüklerseniz bıraktığınız yerde durur. Sağ tıklayarak hızlı ayarlara ulaşabilirsiniz. Sistem tepsisindeki simge her zaman görünür.
 
-- **Tepsi simgesi** (görev çubuğunda saatin yanında): Bir limitin yüzdesini (o an en dolu olanı ya da sizin seçtiğinizi) widget'ın uyarı renkleriyle gösterebilir. Üzerine geldiğinizde tüm limitler listelenir. Ayarı **Ayarlar → Tepsi simgesi** bölümündedir.
-- **Kısayol:** Sistem genelinde bir tuş kısayoluyla widget'ı gösterip gizleyebilirsiniz (varsayılan **Ctrl+Alt+Shift+W**). Değiştirmek için **Ayarlar → Widget** bölümünü kullanabilirsiniz. Başka bir programın kullandığı kısayol kabul edilmez.
+- **Tepsi simgesi** (Windows'ta saatin yanında, macOS'te menü çubuğunda, Linux'ta sistem tepsisinde): Bir limitin yüzdesini (o an en dolu olanı ya da sizin seçtiğinizi) widget'ın uyarı renkleriyle gösterebilir. Üzerine geldiğinizde tüm limitler listelenir. Ayarı **Ayarlar → Tepsi simgesi** bölümündedir.
+- **Kısayol:** Sistem genelinde bir tuş kısayoluyla widget'ı gösterip gizleyebilirsiniz (varsayılan **Ctrl+Alt+Shift+W**, macOS'te **⌃⌥⇧W**). Değiştirmek için **Ayarlar → Widget** bölümünü kullanabilirsiniz. Başka bir programın kullandığı kısayol kabul edilmez.
 
 ### Haftalık rapor alın, verilerinizi yönetin
 
 Haftalık kullanımınızı PDF olarak kaydedebilir, verilerinizi dışa aktarıp yedekleyebilir ve fiyatları kendinize göre düzenleyebilirsiniz.
 
-**Haftalık özet (PDF).** **Ayarlar → Haftalık özet (PDF)** bölümünden geçen haftayı, bu haftayı ya da son 7 günü A4 PDF olarak kaydedebilirsiniz. Özette şunlar yer alır: önceki döneme göre değişimiyle toplamlar, günlük grafik, araçlar, abonelik değeri, tahminleriyle güncel limitler, bağlam, modeller, projeler (gizlediğiniz adlar gizli kalır), en maliyetli oturumlar ve notlar. Yazdırma penceresi açılmaz. İsterseniz son tam haftanın (pazartesi–pazar) özeti, klasörde henüz yoksa her hafta kendiliğinden kaydedilir. Bilgisayar kapalıyken kaçırılan hafta bir sonraki açılışta kaydedilir (varsayılan klasör `Belgeler\AI Usage Tracker`).
+**Haftalık özet (PDF).** **Ayarlar → Haftalık özet (PDF)** bölümünden geçen haftayı, bu haftayı ya da son 7 günü A4 PDF olarak kaydedebilirsiniz. Özette şunlar yer alır: önceki döneme göre değişimiyle toplamlar, günlük grafik, araçlar, abonelik değeri, tahminleriyle güncel limitler, bağlam, modeller, projeler (gizlediğiniz adlar gizli kalır), en maliyetli oturumlar ve notlar. Yazdırma penceresi açılmaz. İsterseniz son tam haftanın (pazartesi–pazar) özeti, klasörde henüz yoksa her hafta kendiliğinden kaydedilir. Bilgisayar kapalıyken kaçırılan hafta bir sonraki açılışta kaydedilir (varsayılan olarak Belgeler klasörünün içindeki **AI Usage Tracker** klasörüne kaydedilir).
 
 **Kalıcı arşiv.** Araçlar kendi kayıtlarını zamanla silebilir. Örneğin Claude Code CLI eski oturumları varsayılan olarak **30 gün** sonra siler; Claude Desktop/Cowork oturumları bunun dışındadır. Uygulama içe aldığı her kaydı kendi veri tabanında tuttuğu için geçmişiniz kaybolmaz. Hiçbir kayıt iki kez sayılmaz (bkz. [Nasıl çalışır](#nasıl-çalışır)).
 
@@ -191,17 +191,19 @@ Haftalık kullanımınızı PDF olarak kaydedebilir, verilerinizi dışa aktarı
 - Fiyatlar [`config/pricing.json`](config/pricing.json) dosyasındadır ve 2026-10-02'de resmi sayfalardan doğrulanmıştır: [Anthropic](https://platform.claude.com/docs/en/about-claude/pricing), [OpenAI](https://developers.openai.com/api/docs/pricing).
 - Hesaba katılan fiyat kalemleri: önbelleğe yazma (5 dk / 1 sa), önbellekten okuma, OpenAI uzun bağlam katmanı (>272K), hızlı mod (fast mode) ve ABD veri yerleşimi çarpanları, web araması ücreti.
 - Fiyatı bilinmeyen modeller **maliyete eklenmez** ve "fiyat tanımsız" uyarısıyla listelenir. Ad benzerliğine bakılarak tahmini fiyat atanmaz. **Genel bakış**'taki bu uyarıyı kapatabilirsiniz; yalnızca başka bir model fiyatsız kalırsa yeniden çıkar. Uyarıyı **Ayarlar → Fiyatlar → Uyarıyı tekrar göster** ile de geri getirebilirsiniz.
-- Fiyatları **Ayarlar → Fiyatlar** ekranında düzenleyebilirsiniz; düzenlemeleriniz `%LOCALAPPDATA%\AIUsageTracker\pricing.json` dosyasına kaydedilir. Aynı ekranda fiyatsız bir modeli başka bir modelin fiyatıyla hesaplatabilir ya da varsayılan fiyatlara dönebilirsiniz.
+- Fiyatları **Ayarlar → Fiyatlar** ekranında düzenleyebilirsiniz; düzenlemeleriniz uygulamanın veri klasöründeki `pricing.json` dosyasına kaydedilir (bkz. [Gizlilik](#gizlilik)). Aynı ekranda fiyatsız bir modeli başka bir modelin fiyatıyla hesaplatabilir ya da varsayılan fiyatlara dönebilirsiniz.
 
 ## Desteklenen kaynaklar
 
 | Kaynak                                                 | Okunan konum                                                             | Token     | Limit                      | Not                                                                                 |
 | ------------------------------------------------------ | ------------------------------------------------------------------------ | --------- | -------------------------- | ----------------------------------------------------------------------------------- |
-| **Claude Code** (CLI, VS Code, Claude masaüstü "Code") | `%CLAUDE_CONFIG_DIR%` ya da `%USERPROFILE%\.claude\projects\**\*.jsonl`  | **Kesin** | Yalnızca limit dolduğunda  | Yardımcı arka plan çağrıları (örneğin web araması özetleme) bu kayıtlarda yer almaz |
-| **Cowork oturumları** (Claude masaüstü)                | `%APPDATA%\Claude\local-agent-mode-sessions\**`                          | **Kesin** | **Kesin %** (5 sa / 7 gün) | Yalnızca bilgisayarınızda çalışan işler. Yeni Cowork işleri bulutta çalışır: token sayıları bilgisayarınızda tutulmaz ancak plan limitlerinize dahil edilir |
-| **Claude masaüstü: plan kullanımı**                    | `%APPDATA%\Claude\plan-usage-history.json`                               | —         | **Kesin %**                | Sohbet token'ları yerelde tutulmadığı için token verisi **yok**                     |
-| **Codex** (CLI ve masaüstü)                            | `%CODEX_HOME%` ya da `%USERPROFILE%\.codex\{sessions,archived_sessions}` | **Kesin** | **Kesin %** (her istekte)  |                                                                                     |
+| **Claude Code** (CLI, VS Code, Claude masaüstü "Code") | `$CLAUDE_CONFIG_DIR` ya da `~/.claude/projects/**/*.jsonl` | **Kesin** | Yalnızca limit dolduğunda  | Yardımcı arka plan çağrıları (örneğin web araması özetleme) bu kayıtlarda yer almaz |
+| **Cowork oturumları** (Claude masaüstü)                | *Claude klasörü*`/local-agent-mode-sessions/**` | **Kesin** | **Kesin %** (5 sa / 7 gün) | Yalnızca bilgisayarınızda çalışan işler. Yeni Cowork işleri bulutta çalışır: token sayıları bilgisayarınızda tutulmaz ancak plan limitlerinize dahil edilir |
+| **Claude masaüstü: plan kullanımı**                    | *Claude klasörü*`/plan-usage-history.json` | —         | **Kesin %**                | Sohbet token'ları yerelde tutulmadığı için token verisi **yok**                     |
+| **Codex** (CLI ve masaüstü)                            | `$CODEX_HOME` ya da `~/.codex/{sessions,archived_sessions}` | **Kesin** | **Kesin %** (her istekte)  |                                                                                     |
 | ChatGPT masaüstü                                       | —                                                                        | **Yok**   | —                          | Yalnızca algılanır                                                                  |
+
+`~` kullanıcı klasörünüzü gösterir (Windows'ta `%USERPROFILE%`, örneğin `C:\Users\adınız`). *Claude klasörü* Windows'ta `%APPDATA%\Claude`, macOS'te `~/Library/Application Support/Claude` klasörüdür; Claude masaüstü uygulamasının Linux sürümü yoktur.
 
 Her sayının yanında bir doğruluk etiketi bulunur:
 
@@ -211,26 +213,67 @@ Her sayının yanında bir doğruluk etiketi bulunur:
 
 ## Kurulum
 
-1. [Son sürümden](../../releases/latest) `AI-Usage-Tracker_x.y.z_x64-setup.exe` dosyasını indirip çalıştırın. Kurulum yalnızca sizin kullanıcı hesabınıza yapılır ve yönetici yetkisi istemez; uygulama `%LOCALAPPDATA%\AI Usage Tracker` klasörüne kurulur.
+[Son sürümden](../../releases/latest) sisteminize uygun dosyayı indirin. İlk açılışta bilgisayarınızda bulunan araçlar listelenir. İstediğiniz kaynakları seçip **Başla**'ya basın. Siz onay vermeden hiçbir kayıt okunmaz.
+
+### Windows
+
+Windows 10 ve 11.
+
+1. `AI-Usage-Tracker_x.y.z_x64-setup.exe` dosyasını çalıştırın. Kurulum yalnızca sizin kullanıcı hesabınıza yapılır ve yönetici yetkisi istemez; uygulama `%LOCALAPPDATA%\AI Usage Tracker` klasörüne kurulur.
 2. WebView2 Windows 11'de zaten yüklüdür. Windows 10'da eksikse kurulum dosyası onu da yükler.
-3. İlk açılışta bilgisayarınızda bulunan araçlar listelenir. İstediğiniz kaynakları seçip **Başla**'ya basın. Siz onay vermeden hiçbir kayıt okunmaz.
 
 > **SmartScreen uyarısı.** Kurulum dosyası henüz kod imzası taşımadığı için Windows "Bilinmeyen yayımcı" uyarısı gösterebilir. Bu durumda **Ek bilgi → Yine de çalıştır**'ı seçin.
 
-**Kaldırma.** Windows'ta **Ayarlar → Uygulamalar → AI Usage Tracker → Kaldır** yolunu izleyin. Kaldırıcıdaki "Uygulama verilerini sil" kutusunu işaretlerseniz `%LOCALAPPDATA%\AIUsageTracker` klasörü de silinir. "Windows ile başlat" kaydı her durumda temizlenir.
+**Kaldırma.** **Ayarlar → Uygulamalar → AI Usage Tracker → Kaldır** yolunu izleyin. Uygulama kaldırılırken **Canlı yakalama** ile Claude Code ayarlarında yapılan değişiklikler geri alınır. "Uygulama verilerini sil" kutusunu işaretlerseniz `%LOCALAPPDATA%\AIUsageTracker` klasörü de silinir. "Windows ile başlat" kaydı her durumda temizlenir.
+
+### macOS
+
+macOS 11 ve sonrası; Apple Silicon ve Intel Mac'lerde çalışır.
+
+1. `AI-Usage-Tracker_x.y.z_universal.dmg` dosyasını açın ve **AI Usage Tracker**'ı **Uygulamalar** klasörüne sürükleyin.
+2. Uygulamayı **Uygulamalar** klasöründen açın. Apple tarafından imzalanıp onaylandığı (notarize) için uyarı göstermeden açılır.
+
+Uygulamayı disk görüntüsünden değil, Uygulamalar klasöründen çalıştırın. Disk görüntüsünden açılan kopya oturum açılışında başlayamaz, Claude Code durum satırını koruyamaz ve kendini güncelleyemez; böyle açtığınızda uygulama sizi uyarır.
+
+**Kaldırma.** macOS'te uygulama silinirken bu değişiklikler geri alınamadığı için önce **Kaynaklar → Canlı yakalama** bölümünde açtığınız anahtarları ve **Ayarlar → Oturum açınca başlat** seçeneğini kapatın. Ardından uygulamayı Çöp Sepeti'ne sürükleyin. Verileriniz siz silene kadar `~/Library/Application Support/AIUsageTracker` klasöründe kalır.
+
+### Linux
+
+Debian 12, Ubuntu 22.04 ve sonrası, Fedora, openSUSE ve WebKitGTK 4.1 bulunan diğer x86_64 dağıtımlarda çalışır.
+
+- **Debian, Ubuntu, Mint:** `AI-Usage-Tracker_x.y.z_x86_64.deb` dosyasını `sudo apt install ./AI-Usage-Tracker_x.y.z_x86_64.deb` ile kurun.
+- **Fedora:** `AI-Usage-Tracker_x.y.z_x86_64.rpm` dosyasını `sudo dnf install ./AI-Usage-Tracker_x.y.z_x86_64.rpm` ile kurun.
+- **openSUSE:** Paketler GPG imzası taşımadığı için zypper'a `sudo zypper install --allow-unsigned-rpm ./AI-Usage-Tracker_x.y.z_x86_64.rpm` komutunu verin. Önce dosyayı `SHA256SUMS` ile doğrulayabilirsiniz (bkz. [Dosyanın doğruluğunu kontrol edin](#dosyanın-doğruluğunu-kontrol-edin)).
+- **Her dağıtım:** `AI-Usage-Tracker_x.y.z_x86_64.AppImage` dosyasını çalıştırılabilir yapın (`chmod +x`) ve açın. Hiçbir şey kurulmaz. Açılmazsa FUSE 3'ü kurun (Debian ve Ubuntu'da `sudo apt install fuse3`) ya da dosyayı `APPIMAGE_EXTRACT_AND_RUN=1 ./AI-Usage-Tracker_x.y.z_x86_64.AppImage` ile başlatın.
+
+Uygulama üç biçimde de kendini günceller. `.deb` ve `.rpm` için sisteminiz parolanızı sorar ve güncellemeyi paket yöneticiniz kurar. Bu mümkün olmazsa uygulama yeni paketi elle kurmanızı ister.
+
+**GNOME'da tepsi simgesi.** GNOME tepsi simgelerini yalnızca AppIndicator eklentisiyle gösterir. Ubuntu'da hazır gelir; diğer GNOME sistemlerinde "AppIndicator and KStatusNotifierItem Support" eklentisini kurun.
+
+**Widget kısayolu.** KDE Plasma ve GNOME'da, Wayland'de de, hangi programda olursanız olun çalışır. GNOME 47 ve öncesinde uygulama bunun için bir GNOME özel kısayolu ekler (Ayarlar → Klavye → Özel Kısayollar). Sway ya da Hyprland kullanıyorsanız `ai-usage-tracker --toggle-widget` komutuna kendiniz bir tuş atayın; örneğin Sway'de `bindsym Ctrl+Alt+Shift+w exec ai-usage-tracker --toggle-widget`, Hyprland'de `bind = CTRL ALT SHIFT, W, exec, ai-usage-tracker --toggle-widget`.
+
+**Kaldırma.** `sudo apt remove ai-usage-tracker` ya da `sudo dnf remove ai-usage-tracker`. Paketi kaldırdığınızda, uygulamayı kullanan her kullanıcı için **Canlı yakalama** ile Claude Code ayarlarında yapılan değişiklikler ve oturum açılışında başlatma kaydı geri alınır. AppImage kullanıyorsanız önce bu anahtarları kapatın, sonra dosyayı silin. Verileriniz siz silene kadar `~/.local/share/AIUsageTracker` klasöründe kalır. GNOME'da widget kısayolunu da **Ayarlar → Widget kısayolu → Kaldır** bölümünden ya da GNOME'un klavye ayarlarından kaldırın.
+
+### Dosyanın doğruluğunu kontrol edin
+
+Her sürümde, her dosyanın sağlama değerini içeren bir `SHA256SUMS` dosyası bulunur. Bu dosyayı indirdiğiniz dosyanın yanına koyup şu komutu çalıştırın:
+
+- **Linux:** `sha256sum -c SHA256SUMS --ignore-missing`
+- **macOS:** `shasum -a 256 -c SHA256SUMS --ignore-missing`
+- **Windows (PowerShell):** `Get-FileHash .\AI-Usage-Tracker_x.y.z_x64-setup.exe` komutunun verdiği değeri `SHA256SUMS` içindeki ilgili satırla karşılaştırın.
 
 ## Gizlilik
 
 > **Prompt ve yanıtlarınız hiçbir zaman saklanmaz.** Uygulama kayıtlardan yalnızca token sayısı, model ve zaman gibi bilgileri alır; prompt ve yanıt metinleri hiçbir yere kaydedilmez. Kullanım verileriniz bilgisayarınızdan hiçbir yere gönderilmez ve uygulamada telemetri yoktur.
 
 - **Okunanlar:** Araçların kendi kayıtlarındaki zaman damgası, model adı, proje klasörü, oturum kimliği, token sayıları ve limit yüzdeleri.
-- **Saklananlar:** Yalnızca bu sayılar ve meta veriler (`%LOCALAPPDATA%\AIUsageTracker\tracker.db`, SQLite). Proje adları bu bilgisayardan çıkmaz. İsterseniz adları tek tek ya da toplu olarak gizleyebilirsiniz; gizlenen adlar dışa aktarımlarda da maskelenir.
+- **Saklananlar:** Yalnızca bu sayılar ve meta veriler. Hepsi uygulamanın veri klasöründeki `tracker.db` (SQLite) dosyasında durur: Windows'ta `%LOCALAPPDATA%\AIUsageTracker`, macOS'te `~/Library/Application Support/AIUsageTracker`, Linux'ta `~/.local/share/AIUsageTracker`. Proje adları bu bilgisayardan çıkmaz. İsterseniz adları tek tek ya da toplu olarak gizleyebilirsiniz; gizlenen adlar dışa aktarımlarda da maskelenir.
 - **Hiçbir zaman saklanmayanlar:** Prompt ve yanıtlar, dosya içerikleri, kimlik bilgileri ve erişim token'ları. Uygulama, araçların oturum anahtarlarını tutan dosyaları (`.credentials.json`, `auth.json`) **okumaz**.
 - **İnternet bağlantısı:** Uygulamanın kendisi internete yalnızca güncelleme denetimi için bağlanır. Bu denetimde yalnızca sürüm dosyası indirilir, hiçbir veri gönderilmez (**Ayarlar → Güncellemeler**). Varsayılan olarak açık gelen limit okumaları bilgisayarınızdaki Claude Code ve Codex'i çalıştırır; bu araçlar limit yüzdenizi kendi servislerinden sorar. Uygulama onları telemetri ve hata raporlaması kapalı olarak başlatır. Limit okumalarını **Kaynaklar → Canlı yakalama** bölümünden kapatabilirsiniz. Fiyat ve plan dosyaları uygulamayla birlikte gelir. Döviz kuru için de internetten veri çekilmez; kuru kendiniz girersiniz.
 
 ### Canlı yakalama
 
-**Kaynaklar → Canlı yakalama** bölümünde dört yöntem bulunur. **Claude ve Codex limit okuma varsayılan olarak açıktır.** Bu ikisi için uygulama hiçbir dosyayı değiştirmez, modele istek göndermez ve yalnızca kendi Claude Code / Codex oturumunuzu kullanır. Claude Code'un ayar dosyasını değiştiren diğer iki yöntem **varsayılan olarak kapalıdır**. Her yöntemin neyi değiştirdiği ekranda yazar; yöntemi kapattığınızda değişiklik geri alınır. Uygulamayı kaldırdığınızda da kaldırıcı bu değişiklikleri kendiliğinden geri alır; güncellemelerde ise dokunulmaz.
+**Kaynaklar → Canlı yakalama** bölümünde dört yöntem bulunur. **Claude ve Codex limit okuma varsayılan olarak açıktır.** Bu ikisi için uygulama hiçbir dosyayı değiştirmez, modele istek göndermez ve yalnızca kendi Claude Code / Codex oturumunuzu kullanır. Claude Code'un ayar dosyasını değiştiren diğer iki yöntem **varsayılan olarak kapalıdır**. Her yöntemin neyi değiştirdiği ekranda yazar; yöntemi kapattığınızda değişiklik geri alınır. Windows'ta uygulama, Linux'ta paket kaldırılırken bu değişiklikler kendiliğinden geri alınır; güncellemelerde ise dokunulmaz. macOS'te ve AppImage'da uygulamayı silmeden önce bu anahtarları kapatın.
 
 ![Canlı yakalama paneli: dört anahtar ve her birinin neyi değiştirdiği](assets/readme/capture-tr.webp)
 
@@ -275,13 +318,17 @@ Uygulama açılışta ve 6 saatte bir yeni sürüm olup olmadığına bakar. Bun
 
 ## Kaynaktan derleme
 
-Gereksinimler: Rust 1.90+ (MSVC), Node 20.19+ veya 22.12+, Visual Studio Build Tools (C++).
+Gereksinimler: Rust 1.90+ ve Node 20.19+ veya 22.12+; bunlara ek olarak:
+
+- **Windows:** Visual Studio Build Tools (C++)
+- **macOS:** Xcode Command Line Tools
+- **Linux:** WebKitGTK 4.1 ve geliştirme dosyaları; örneğin Debian ve Ubuntu'da `sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev`
 
 ```bash
 npm --prefix ui install
 cargo test -p tracker-core              # parser, hesaplama ve içe aktarma testleri
 npx --prefix ui tauri dev               # geliştirme modu
-npm --prefix ui run release             # kurulum dosyası → target/release/bundle/
+npm --prefix ui run release             # paketler → target/release/bundle/release/
 ```
 
 Yalnızca `npm --prefix ui run dev` komutunu çalıştırırsanız panel tarayıcıda örnek verilerle açılır.

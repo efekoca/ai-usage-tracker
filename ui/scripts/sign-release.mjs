@@ -1,7 +1,8 @@
 // Signs release files built elsewhere (CI has no update signing key) and adds them to latest.json.
 // Usage: npm --prefix ui run sign-release -- <folder>
 // Every package without a .sig is signed; every signature must name this version. latest.json in the
-// folder (or RELEASE_MANIFEST) is merged.
+// folder (or RELEASE_MANIFEST) is merged, and SHA256SUMS lists every download of this version.
+import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -87,3 +88,9 @@ const manifest = {
 for (const [key, p] of Object.entries(platforms)) manifest.platforms[key] = { signature: p.signature, url: `${base}/${p.file}` }
 writeFileSync(join(dir, 'latest.json'), JSON.stringify(manifest, null, 2) + '\n')
 console.log(`\nlatest.json for v${version} now lists: ${Object.keys(manifest.platforms).join(', ')}`)
+
+// for people who download by hand: `sha256sum -c SHA256SUMS --ignore-missing`
+const downloads = readdirSync(dir).filter((f) => f.includes(`_${version}_`) && !f.endsWith('.sig')).sort()
+const sums = downloads.map((f) => `${createHash('sha256').update(readFileSync(join(dir, f))).digest('hex')}  ${f}\n`).join('')
+writeFileSync(join(dir, 'SHA256SUMS'), sums)
+console.log(`SHA256SUMS lists ${downloads.length} files`)

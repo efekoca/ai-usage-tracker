@@ -4,11 +4,11 @@
 
 **Your Claude Code and Codex usage, cost, and plan limits, on your own computer.**
 
-A private Windows app that reads the usage logs your AI tools already write, keeps its own archive, and shows tokens, API-equivalent cost, and live limit percentages. No account, no cloud, no telemetry.
+A private app for Windows, macOS, and Linux that reads the usage logs your AI tools already write, keeps its own archive, and shows tokens, API-equivalent cost, and live limit percentages. No account, no cloud, no telemetry.
 
-[![Download for Windows](https://img.shields.io/badge/Download-Windows%20installer-2563eb?style=for-the-badge&logo=windows&logoColor=white)](../../releases/latest)
+[![Download for Windows, macOS, and Linux](https://img.shields.io/badge/Download-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-2563eb?style=for-the-badge)](../../releases/latest)
 
-![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square&logo=windows&logoColor=white) [![License: MIT](https://img.shields.io/badge/license-MIT-64748b?style=flat-square)](LICENSE)
+![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square&logo=windows&logoColor=white) ![macOS 11+](https://img.shields.io/badge/macOS-11%2B-000000?style=flat-square&logo=apple&logoColor=white) ![Linux x86_64](https://img.shields.io/badge/Linux-x86__64-FCC624?style=flat-square&logo=linux&logoColor=black) [![License: MIT](https://img.shields.io/badge/license-MIT-64748b?style=flat-square)](LICENSE)
 
 [Features](#features) · [Install](#install) · [Privacy](#privacy) · [How it works](#how-it-works) · [Build from source](#build-from-source) · [Türkçe](README.tr.md)
 
@@ -161,7 +161,7 @@ Negative savings mean that written cache was not read enough to pay off.
 
 ### A widget that stays out of the way
 
-An always-on-top mini window sits by default in the bottom-right corner, just above the taskbar. It sizes itself to its content and, when snapped to a corner, stays flush with that corner while it resizes. Dragging it leaves it where you drop it.
+An always-on-top mini window sits by default in the bottom-right corner of the screen. It sizes itself to its content and, when snapped to a corner, stays flush with that corner while it resizes. Dragging it leaves it where you drop it.
 
 ![The desktop widget showing today's tokens and cost with rings for the Claude and Codex five-hour limits](assets/readme/widget-en.webp)
 
@@ -175,16 +175,16 @@ The **Widget studio** page changes what the widget shows and how it looks, with 
 - **Look:** theme, accent color, scale, background opacity, corner radius, border, shadow, labels, and time until reset
 - **Text:** any font installed on the computer (searchable and shown in its own face), text size, main-number size, number weight, and fixed-width digits
 - **Thresholds:** caution and critical levels
-- **Behavior:** always on top, position lock, click action, full-screen hiding, snap to a corner, and which providers to show
+- **Behavior:** always on top, position lock, click action, hiding during full-screen apps, snap to a corner, and which providers to show
 
 The widget also comes with a tray icon and a shortcut:
 
-- **Tray icon** (next to the clock on the taskbar): it can show a limit's percentage, either the fullest current one or one you pick, in the widget's warning colors. Hovering over it lists every limit. Set it up under **Settings → Tray icon**.
-- **Shortcut:** a system-wide key combination shows or hides the widget (default **Ctrl+Alt+Shift+W**). To change it, open **Settings → Widget** and press the new combination. A combination that another program owns is refused.
+- **Tray icon** (next to the clock on Windows, in the menu bar on macOS, in the system tray on Linux): it can show a limit's percentage, either the fullest current one or one you pick, in the widget's warning colors. Hovering over it lists every limit. Set it up under **Settings → Tray icon**.
+- **Shortcut:** a system-wide key combination shows or hides the widget (default **Ctrl+Alt+Shift+W**, on macOS **⌃⌥⇧W**). To change it, open **Settings → Widget** and press the new combination. A combination that another program owns is refused.
 
 ### Weekly PDF, export, and your own prices
 
-**Weekly summary (PDF).** **Settings → Weekly summary (PDF)** saves last week, this week, or the last 7 days as an A4 PDF. It contains totals with the change from the previous period, a daily chart, tools, plan value, current limits with their forecast, context, models, projects (hidden names stay hidden), the most expensive sessions, and notes. No print dialog opens. Optionally, the app saves the last full week (Monday to Sunday) to a folder (default `Documents\AI Usage Tracker`) whenever its file is not there yet, so a week missed while the computer was off is saved at the next start.
+**Weekly summary (PDF).** **Settings → Weekly summary (PDF)** saves last week, this week, or the last 7 days as an A4 PDF. It contains totals with the change from the previous period, a daily chart, tools, plan value, current limits with their forecast, context, models, projects (hidden names stay hidden), the most expensive sessions, and notes. No print dialog opens. Optionally, the app saves the last full week (Monday to Sunday) to a folder (by default the **AI Usage Tracker** folder inside your Documents folder) whenever its file is not there yet, so a week missed while the computer was off is saved at the next start.
 
 **Archive and data.** Source tools may delete old logs; the Claude Code CLI, for example, deletes sessions after 30 days by default. Everything this app has imported stays in its archive, and no record is ever counted twice (see [How it works](#how-it-works)).
 
@@ -199,17 +199,19 @@ The widget also comes with a tray icon and a shortcut:
 
 - **Pricing rules covered:** 5-minute and 1-hour cache writes, the OpenAI long-context tier (>272K input tokens), fast-mode and US data-residency multipliers, and web-search fees.
 - **Unknown models:** never priced by guesswork. They are listed as "no price" and left out of costs. You can dismiss the overview warning about them; it returns only if another model becomes unpriced, or through **Settings → Prices → Show the warning again**.
-- **Edits:** change prices in **Settings → Prices**. Your copy is stored in `%LOCALAPPDATA%\AIUsageTracker\pricing.json`. You can also map an unpriced model to another model's price or restore the defaults.
+- **Edits:** change prices in **Settings → Prices**. Your copy is stored as `pricing.json` in the app's data folder (see [Privacy](#privacy)). You can also map an unpriced model to another model's price or restore the defaults.
 
 ## Supported sources
 
 | Source | What is read | Tokens | Limits | Notes |
 |---|---|---|---|---|
-| **Claude Code** (CLI, VS Code, Claude desktop "Code") | `%CLAUDE_CONFIG_DIR%` or `%USERPROFILE%\.claude\projects\**\*.jsonl` | **Exact** | Only when a limit is hit | Background helper calls (e.g., web-search summarization) are not in these logs |
-| **Cowork sessions** (Claude desktop) | `%APPDATA%\Claude\local-agent-mode-sessions\**` | **Exact** | **Exact %** (5 h / 7 d) | Only tasks that ran on your computer. New Cowork tasks run in the cloud: their token counts are not stored on your computer, but they count toward your plan limits |
-| **Claude desktop: plan usage** | `%APPDATA%\Claude\plan-usage-history.json` | — | **Exact %** | Chat tokens are not stored locally, so **none** |
-| **Codex** (CLI and desktop) | `%CODEX_HOME%` or `%USERPROFILE%\.codex\{sessions,archived_sessions}` | **Exact** | **Exact %** (every request) | |
+| **Claude Code** (CLI, VS Code, Claude desktop "Code") | `$CLAUDE_CONFIG_DIR` or `~/.claude/projects/**/*.jsonl` | **Exact** | Only when a limit is hit | Background helper calls (e.g., web-search summarization) are not in these logs |
+| **Cowork sessions** (Claude desktop) | *Claude folder*`/local-agent-mode-sessions/**` | **Exact** | **Exact %** (5 h / 7 d) | Only tasks that ran on your computer. New Cowork tasks run in the cloud: their token counts are not stored on your computer, but they count toward your plan limits |
+| **Claude desktop: plan usage** | *Claude folder*`/plan-usage-history.json` | — | **Exact %** | Chat tokens are not stored locally, so **none** |
+| **Codex** (CLI and desktop) | `$CODEX_HOME` or `~/.codex/{sessions,archived_sessions}` | **Exact** | **Exact %** (every request) | |
 | ChatGPT desktop | — | **None** | — | Detection only |
+
+`~` is your home folder (`%USERPROFILE%` on Windows). The *Claude folder* is `%APPDATA%\Claude` on Windows and `~/Library/Application Support/Claude` on macOS; the Claude desktop app is not available for Linux.
 
 Every figure carries a label:
 
@@ -219,26 +221,67 @@ Every figure carries a label:
 
 ## Install
 
-1. Download `AI-Usage-Tracker_x.y.z_x64-setup.exe` from the [latest release](../../releases/latest) and run it. The installer is **per-user** (it installs to `%LOCALAPPDATA%\AI Usage Tracker`) and needs no administrator rights.
+Download the file for your system from the [latest release](../../releases/latest). On first launch, the app lists the tools it found on this computer. Choose the sources you want and press **Get started**. Nothing is read until you confirm.
+
+### Windows
+
+Windows 10 and 11.
+
+1. Run `AI-Usage-Tracker_x.y.z_x64-setup.exe`. The installer is **per-user** (it installs to `%LOCALAPPDATA%\AI Usage Tracker`) and needs no administrator rights.
 2. Windows 11 already includes WebView2. On Windows 10, the installer adds it if it is missing.
-3. On first launch, the app lists the tools it found on this computer. Choose the sources you want and press **Get started**. Nothing is read until you confirm.
 
-> **SmartScreen.** The installer is not code-signed, so Windows may show "Unknown publisher". Choose **More info → Run anyway**.
+> **SmartScreen.** The installer is not code-signed yet, so Windows may show "Unknown publisher". Choose **More info → Run anyway**.
 
-**Uninstall.** Use Windows Settings → Apps. Ticking "Delete the application data" also removes `%LOCALAPPDATA%\AIUsageTracker`. The start-with-Windows entry is always removed.
+**Uninstall.** Use Windows Settings → Apps. The uninstaller reverts the Claude Code settings changed under **Live capture**. Ticking "Delete the application data" also removes `%LOCALAPPDATA%\AIUsageTracker`. The start-with-Windows entry is always removed.
+
+### macOS
+
+macOS 11 or newer, on Apple silicon and Intel Macs.
+
+1. Open `AI-Usage-Tracker_x.y.z_universal.dmg` and drag **AI Usage Tracker** to **Applications**.
+2. Open the app from **Applications**. It is signed and notarized by Apple, so it opens without a warning.
+
+Run the app from Applications, not from the disk image. A copy opened from the disk image cannot start at login, keep the Claude Code status line, or update itself; the app tells you so when that happens.
+
+**Uninstall.** macOS has no uninstaller, so first turn off the switches you turned on under **Sources → Live capture** and **Settings → Start at login**. Then drag the app to the Trash. Your data stays in `~/Library/Application Support/AIUsageTracker` until you delete it.
+
+### Linux
+
+Debian 12, Ubuntu 22.04 and newer, Fedora, openSUSE, and other x86_64 distributions with WebKitGTK 4.1.
+
+- **Debian, Ubuntu, Mint:** install `AI-Usage-Tracker_x.y.z_x86_64.deb` with `sudo apt install ./AI-Usage-Tracker_x.y.z_x86_64.deb`.
+- **Fedora:** install `AI-Usage-Tracker_x.y.z_x86_64.rpm` with `sudo dnf install ./AI-Usage-Tracker_x.y.z_x86_64.rpm`.
+- **openSUSE:** the packages carry no GPG signature, so zypper needs `sudo zypper install --allow-unsigned-rpm ./AI-Usage-Tracker_x.y.z_x86_64.rpm`. You can check the file against `SHA256SUMS` first (see [Verify a download](#verify-a-download)).
+- **Any distribution:** make `AI-Usage-Tracker_x.y.z_x86_64.AppImage` executable (`chmod +x`) and run it. Nothing is installed. If it does not start, install FUSE 3 (`sudo apt install fuse3` on Debian and Ubuntu), or start it with `APPIMAGE_EXTRACT_AND_RUN=1 ./AI-Usage-Tracker_x.y.z_x86_64.AppImage`.
+
+The app updates itself in all three forms. For the `.deb` and `.rpm`, your system asks for your password and your package manager installs the update. If that is not possible, the app asks you to install the new package by hand.
+
+**Tray icon on GNOME.** GNOME shows tray icons only with the AppIndicator extension. Ubuntu includes it; on other GNOME systems install "AppIndicator and KStatusNotifierItem Support".
+
+**Widget shortcut.** It works from any app on KDE Plasma and GNOME, also under Wayland. On GNOME 47 and older the app adds a GNOME custom shortcut for it (Settings → Keyboard → Custom Shortcuts). On Sway or Hyprland, bind a key to `ai-usage-tracker --toggle-widget` yourself, for example `bindsym Ctrl+Alt+Shift+w exec ai-usage-tracker --toggle-widget` (Sway) or `bind = CTRL ALT SHIFT, W, exec, ai-usage-tracker --toggle-widget` (Hyprland).
+
+**Uninstall.** `sudo apt remove ai-usage-tracker` or `sudo dnf remove ai-usage-tracker`. Removing the package reverts the Claude Code settings changed under **Live capture** and the start-at-login entry, for every user who used the app. For the AppImage, turn those switches off first, then delete the file. Your data stays in `~/.local/share/AIUsageTracker` until you delete it. On GNOME, also remove the widget shortcut under **Settings → Widget shortcut → Remove**, or in GNOME's keyboard settings.
+
+### Verify a download
+
+Every release includes `SHA256SUMS`, the checksum of each file. Put it next to your download and run:
+
+- **Linux:** `sha256sum -c SHA256SUMS --ignore-missing`
+- **macOS:** `shasum -a 256 -c SHA256SUMS --ignore-missing`
+- **Windows (PowerShell):** `Get-FileHash .\AI-Usage-Tracker_x.y.z_x64-setup.exe`, then compare the hash with the line for that file in `SHA256SUMS`.
 
 ## Privacy
 
 > **Content is never stored.** The app takes only details such as token counts, model, and time from the logs; prompt and response text is never saved anywhere. Your usage data never leaves your computer, and the app has no telemetry.
 
 - **Read:** timestamps, model, project folder, session ID, token counts, and limit percentages from the tools' own logs.
-- **Stored:** only those values, in `%LOCALAPPDATA%\AIUsageTracker\tracker.db` (SQLite). Project names stay local. You can hide them one by one or all at once, and hidden names are masked in exports too.
+- **Stored:** only those values, in `tracker.db` (SQLite) in the app's data folder: `%LOCALAPPDATA%\AIUsageTracker` on Windows, `~/Library/Application Support/AIUsageTracker` on macOS, and `~/.local/share/AIUsageTracker` on Linux. Project names stay local. You can hide them one by one or all at once, and hidden names are masked in exports too.
 - **Never stored:** prompts, responses, file contents, credentials, or tokens. The app does **not** read the tools' credential files.
 - **Network:** the app itself connects only to check for updates. The check downloads the release's version file and sends nothing (**Settings → Updates**). The limit reads, on by default, run your own Claude Code and Codex, which ask their own services for your plan's limit percentages; the app starts them with their telemetry and error reporting turned off. You can turn the reads off under **Sources → Live capture**. Prices and plans ship with the app, and currency conversion uses a rate you enter yourself.
 
 ### Live capture
 
-**Sources → Live capture** has four switches. The two **limit reads are on by default**: they change no files, make no model request, and use only your own Claude Code or Codex sign-in. The two methods that edit Claude Code's settings file are **off by default**. Each switch shows exactly what it changes, and turning it off undoes the change. The uninstaller reverts them too, but not during updates.
+**Sources → Live capture** has four switches. The two **limit reads are on by default**: they change no files, make no model request, and use only your own Claude Code or Codex sign-in. The two methods that edit Claude Code's settings file are **off by default**. Each switch shows exactly what it changes, and turning it off undoes the change. The Windows uninstaller and removing the Linux package revert them too, but updates leave them alone. On macOS and with the AppImage, turn them off before you delete the app.
 
 ![Live capture panel with the four switches and what each one changes](assets/readme/capture-en.webp)
 
@@ -281,13 +324,17 @@ The app checks for a new version at startup and every 6 hours. The check downloa
 
 ## Build from source
 
-Requirements: Rust 1.90+ (MSVC), Node 20.19+ or 22.12+, and Visual Studio Build Tools (C++).
+Requirements: Rust 1.90+ and Node 20.19+ or 22.12+, plus:
+
+- **Windows:** Visual Studio Build Tools (C++)
+- **macOS:** Xcode Command Line Tools
+- **Linux:** WebKitGTK 4.1 and its build files, for example on Debian and Ubuntu: `sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev`
 
 ```bash
 npm --prefix ui install
 cargo test -p tracker-core
 npx --prefix ui tauri dev
-npm --prefix ui run release        # installer → target/release/bundle/
+npm --prefix ui run release        # packages → target/release/bundle/release/
 ```
 
 Running `npm --prefix ui run dev` on its own opens the dashboard in a browser with sample data.
