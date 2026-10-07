@@ -152,19 +152,24 @@ fn create_private(path: &Path, content: &[u8]) -> std::io::Result<()> {
     opts.open(path)?.write_all(content)
 }
 
+/// The replaced file keeps whatever permissions the user gave it.
+#[cfg(unix)]
+fn keep_mode(path: &Path, tmp: &Path) -> std::io::Result<()> {
+    match fs::metadata(path) {
+        Ok(m) => fs::set_permissions(tmp, m.permissions()),
+        Err(_) => Ok(()),
+    }
+}
+
+#[cfg(not(unix))]
+fn keep_mode(_path: &Path, _tmp: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
 fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let tmp = path.with_file_name(format!("{name}.{}-{}.aiut-tmp", std::process::id(), TMP_SEQ.fetch_add(1, Ordering::Relaxed)));
-    let r = create_private(&tmp, content.as_bytes())
-        .and_then(|_| {
-            // the replaced file keeps whatever permissions the user gave it
-            #[cfg(unix)]
-            if let Ok(m) = fs::metadata(path) {
-                fs::set_permissions(&tmp, m.permissions())?;
-            }
-            Ok(())
-        })
-        .and_then(|_| fs::rename(&tmp, path));
+    let r = create_private(&tmp, content.as_bytes()).and_then(|_| keep_mode(path, &tmp)).and_then(|_| fs::rename(&tmp, path));
     if r.is_err() {
         let _ = fs::remove_file(&tmp);
     }
