@@ -175,7 +175,7 @@ pub fn query(bin: &Path, work_dir: &Path, config_dir: Option<&Path>, timeout: Du
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
     #[cfg(not(windows))]
-    super::set_child_path(&mut cmd);
+    super::set_child_path(&mut cmd, bin);
     let mut child = cmd.spawn().map_err(|e| fail(format!("cannot start claude: {e}")))?;
     let mut stdin = child.stdin.take().ok_or_else(|| fail("no stdin".into()))?;
     let stdout = child.stdout.take().ok_or_else(|| fail("no stdout".into()))?;
@@ -242,6 +242,23 @@ mod tests {
         let missing = std::env::temp_dir().join("aiut-nope").join(super::super::exe("claude"));
         let r = query(&missing, &std::env::temp_dir(), None, Duration::from_secs(1), 0);
         assert!(matches!(r, Err(UsageError::Failed(_))));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn node_version_manager_installs_are_candidates_newest_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().to_owned();
+        for d in [".nvm/versions/node/v9.11.2/bin", ".nvm/versions/node/v22.3.0/bin", ".local/share/fnm/node-versions/v20.1.0/installation/bin"] {
+            std::fs::create_dir_all(home.join(d)).unwrap();
+        }
+        let env = Env { home: Some(home.clone()), roaming: None, local: None, claude_config_dir: None, codex_home: None };
+        let c = candidates(&env, None);
+        let at = |p: &str| c.iter().position(|x| x == &home.join(p)).unwrap_or_else(|| panic!("{p} missing"));
+        assert!(at(".nvm/versions/node/v22.3.0/bin/claude") < at(".nvm/versions/node/v9.11.2/bin/claude"));
+        at(".volta/bin/claude");
+        at(".bun/bin/claude");
+        at(".local/share/fnm/node-versions/v20.1.0/installation/bin/claude");
     }
 
     #[cfg(not(windows))]

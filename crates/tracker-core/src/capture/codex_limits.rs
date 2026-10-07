@@ -104,7 +104,7 @@ pub fn query(bin: &Path, timeout: Duration, now_ms: i64) -> Result<Vec<LimitSnap
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
     #[cfg(not(windows))]
-    super::set_child_path(&mut cmd);
+    super::set_child_path(&mut cmd, bin);
     let mut child = cmd.spawn().map_err(|e| format!("cannot start codex: {e}"))?;
     let mut stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
