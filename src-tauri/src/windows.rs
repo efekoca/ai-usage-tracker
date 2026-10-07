@@ -323,11 +323,12 @@ pub fn popup_widget_menu(app: &AppHandle) {
         let hide = MenuItem::with_id(app, "w:hide", t("Hide widget", "Widget'ı gizle"), true, None::<&str>)?;
         let quit = MenuItem::with_id(app, "app:quit", t("Quit", "Çık"), true, None::<&str>)?;
         let sep = || PredefinedMenuItem::separator(app);
-        // macOS always hides the widget in full screen (see `join_all_spaces`)
-        if cfg!(target_os = "macos") {
-            Menu::with_items(app, &[&open, &sep()?, &opacity, &size, &position, &sep()?, &hide, &quit])
-        } else {
+        // only Windows can tell a full-screen app is in front; macOS always hides the widget then
+        // (see `join_all_spaces`)
+        if cfg!(windows) {
             Menu::with_items(app, &[&open, &sep()?, &opacity, &size, &position, &autohide, &sep()?, &hide, &quit])
+        } else {
+            Menu::with_items(app, &[&open, &sep()?, &opacity, &size, &position, &sep()?, &hide, &quit])
         }
     };
     match build() {
