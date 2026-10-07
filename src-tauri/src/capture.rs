@@ -2,7 +2,7 @@
 
 use crate::settings::Settings;
 use crate::state::AppState;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -204,8 +204,13 @@ pub fn revert_all_main() -> i32 {
             return 2;
         }
     };
+    let had = (state.statusline.is_some(), state.otel.is_some());
     let statusline_ok = cs::uninstall_statusline(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: status line: {e}")).is_ok();
     let otel_ok = cs::uninstall_otel(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: telemetry: {e}")).is_ok();
+    let reverted = Reverted { statusline: had.0 && statusline_ok, otel: had.1 && otel_ok, at_ms: now_ms() };
+    if reverted.statusline || reverted.otel {
+        let _ = std::fs::write(reverted_file(&data_dir), serde_json::to_string(&reverted).unwrap_or_default());
+    }
     if let Ok(store) = Store::open(&data_dir.join("tracker.db")) {
         let mut s = Settings::load(&store);
         s.capture.statusline &= !statusline_ok;
@@ -213,6 +218,43 @@ pub fn revert_all_main() -> i32 {
         let _ = s.save(&store);
     }
     if statusline_ok && otel_ok { 0 } else { 1 }
+}
+
+/// What an uninstaller turned off. A manual upgrade runs the old uninstaller first, so a start
+/// soon after turns the same captures back on.
+#[derive(Debug, Serialize, Deserialize)]
+struct Reverted {
+    statusline: bool,
+    otel: bool,
+    at_ms: i64,
+}
+
+const REINSTALL_WINDOW_MS: i64 = 60 * 60_000;
+
+fn reverted_file(data_dir: &Path) -> PathBuf {
+    data_dir.join("capture").join("reverted-by-uninstall.json")
+}
+
+impl Reverted {
+    fn to_restore(&self, now: i64) -> Vec<&'static str> {
+        if !(0..REINSTALL_WINDOW_MS).contains(&(now - self.at_ms)) {
+            return Vec::new();
+        }
+        [("statusline", self.statusline), ("otel", self.otel)].into_iter().filter(|k| k.1).map(|k| k.0).collect()
+    }
+}
+
+fn restore_after_upgrade(app: &AppHandle) {
+    let file = reverted_file(&app.state::<AppState>().data_dir);
+    let Ok(raw) = std::fs::read_to_string(&file) else { return };
+    let _ = std::fs::remove_file(&file);
+    let Ok(reverted) = serde_json::from_str::<Reverted>(&raw) else { return };
+    for kind in reverted.to_restore(now_ms()) {
+        match set(app, kind, true) {
+            Ok(r) => log::info!("{kind} turned back on after the upgrade: {r}"),
+            Err(e) => log::warn!("{kind} could not be turned back on after the upgrade: {e}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -696,6 +738,7 @@ pub fn start(app: &AppHandle) {
         if s.capture.statusline {
             refresh_statusline(&app.state::<AppState>().data_dir);
         }
+        restore_after_upgrade(app);
     }
     start_claude_poller(app);
     let (tx, rx) = channel::<()>();
@@ -748,6 +791,15 @@ pub fn start(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_recent_uninstall_turns_captures_back_on() {
+        let r = Reverted { statusline: true, otel: false, at_ms: 1_000_000 };
+        assert_eq!(r.to_restore(1_000_000 + 5 * 60_000), ["statusline"]);
+        assert!(r.to_restore(1_000_000 + REINSTALL_WINDOW_MS).is_empty());
+        // a clock set back is no reason to touch the user's settings
+        assert!(r.to_restore(1_000_000 - 1).is_empty());
+    }
 
     #[test]
     fn claude_reads_stay_five_minutes_apart() {

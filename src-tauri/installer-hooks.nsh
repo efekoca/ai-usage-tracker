@@ -1,4 +1,5 @@
-; Uninstall reverts the opt-in edits to Claude Code's settings.json before files go. App data
+; Uninstall reverts the opt-in edits to Claude Code's settings.json before files go; a manual
+; upgrade runs this too, and the new version turns them back on at its first start. App data
 ; lives in %LOCALAPPDATA%\AIUsageTracker, not the bundle-id folder NSIS knows, so remove it here.
 
 !macro NSIS_HOOK_POSTINSTALL
@@ -8,6 +9,9 @@
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
+  ; close the app first: a running copy would write its capture settings back, and cancelling
+  ; here must leave them untouched
+  !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
   ; an update also runs the old uninstaller (with /UPDATE); keep capture settings then
   ${If} $UpdateMode <> 1
   ${AndIf} ${FileExists} "$INSTDIR\ai-usage-tracker.exe"
