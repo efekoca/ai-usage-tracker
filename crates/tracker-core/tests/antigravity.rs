@@ -383,6 +383,23 @@ fn a_custom_data_folder_is_scanned() {
 }
 
 #[test]
+fn backups_and_copies_of_a_conversation_are_not_read_again() {
+    let g = gemini();
+    copy_dir(&g.gemini.join("antigravity"), &g.gemini.join("antigravity-backup"));
+    let copy = g._dir.path().join("elsewhere");
+    copy_dir(&g.gemini.join("antigravity-ide"), &copy);
+    let env = Env { antigravity_data_dir: Some(copy.to_string_lossy().into_owned()), ..g.env.clone() };
+    let files = enumerate_files(&env, &ExtraPaths::default(), &antigravity_only());
+    assert_eq!(files.len(), 4);
+    assert!(files.iter().all(|f| !f.path.starts_with(g.gemini.join("antigravity-backup")) && !f.path.starts_with(&copy)));
+    let mut store = Store::open_in_memory().unwrap();
+    run_ag(&mut store, &env);
+    let r = rows(&store);
+    assert_eq!(r.len(), 5);
+    assert!(r.iter().all(|x| x.client != "antigravity_backup" && x.client != "elsewhere"));
+}
+
+#[test]
 fn unreadable_or_foreign_databases_do_not_stop_the_scan() {
     let g = gemini();
     let conv = g.gemini.join("antigravity").join("conversations");

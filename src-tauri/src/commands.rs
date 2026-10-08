@@ -556,6 +556,12 @@ pub async fn set_capture(window: WebviewWindow, app: AppHandle, kind: String, en
 }
 
 #[tauri::command]
+pub async fn install_cli(window: WebviewWindow, app: AppHandle, kind: String) -> Res<String> {
+    main_only(&window)?;
+    tauri::async_runtime::spawn_blocking(move || crate::capture::install_cli(&app, &kind)).await.map_err(err)?
+}
+
+#[tauri::command]
 pub fn quit_app(window: WebviewWindow, app: AppHandle, state: State<AppState>) {
     if main_only(&window).is_err() {
         return;

@@ -24,7 +24,11 @@ pub fn candidates(env: &Env, configured: Option<&Path>) -> Vec<PathBuf> {
     }
     let codex = super::exe("codex");
     #[cfg(windows)]
-    v.extend(super::path_dirs().into_iter().map(|d| d.join(&codex)));
+    {
+        // Codex's own installer; on PATH only for processes started after it ran
+        v.extend(env.local.iter().map(|l| l.join("Programs").join("OpenAI").join("Codex").join("bin").join(&codex)));
+        v.extend(super::path_dirs().into_iter().map(|d| d.join(&codex)));
+    }
     #[cfg(not(windows))]
     v.extend(super::unix_bin_dirs(env).into_iter().map(|d| d.join(&codex)));
     if let Some(home) = codex_homes(env, &ExtraPaths::default()).into_iter().next() {
@@ -93,6 +97,9 @@ pub fn parse_result(result: &Value, now_ms: i64) -> Vec<LimitSnapshot> {
     snaps
 }
 
+/// Codex answers `codex account authentication required to read rate limits` without a sign-in.
+pub const NOT_SIGNED_IN: &str = "codex_not_signed_in";
+
 pub fn query(bin: &Path, timeout: Duration, now_ms: i64) -> Result<Vec<LimitSnapshot>, String> {
     let mut cmd = Command::new(bin);
     // even when the user's config.toml turns analytics on
@@ -119,7 +126,8 @@ pub fn query(bin: &Path, timeout: Duration, now_ms: i64) -> Result<Vec<LimitSnap
             let msg = rx.recv_timeout(left).map_err(|_| "codex did not answer in time".to_string())?;
             if msg.get("id").and_then(Value::as_i64) == Some(id) {
                 if let Some(err) = msg.get("error") {
-                    return Err(str_at(err, "message").unwrap_or("codex returned an error").to_owned());
+                    let text = str_at(err, "message").unwrap_or("codex returned an error");
+                    return Err(if text.contains("authentication required") { NOT_SIGNED_IN.into() } else { text.to_owned() });
                 }
                 return Ok(msg.get("result").cloned().unwrap_or(Value::Null));
             }
@@ -137,7 +145,8 @@ pub fn query(bin: &Path, timeout: Duration, now_ms: i64) -> Result<Vec<LimitSnap
     let result = result?;
     let snaps = parse_result(&result, now_ms);
     if snaps.is_empty() {
-        return Err("codex returned no limit windows (not signed in with ChatGPT?)".into());
+        // signed in with an API key: only a ChatGPT sign-in has plan limits
+        return Err(NOT_SIGNED_IN.into());
     }
     Ok(snaps)
 }
@@ -186,6 +195,29 @@ mod tests {
         let sandbox: Vec<&PathBuf> = c.iter().filter(|p| p.starts_with(home.join(".codex"))).collect();
         assert_eq!(sandbox, [&home.join(".codex").join(".sandbox-bin").join(super::super::exe("codex"))]);
         assert!(c.iter().all(|p| p.is_absolute()));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn codexs_own_installer_location_is_a_candidate() {
+        let local = std::env::temp_dir().join("aiut-local");
+        let env = Env { local: Some(local.clone()), ..Default::default() };
+        assert!(candidates(&env, None).contains(&local.join(r"Programs\OpenAI\Codex\bin\codex.exe")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_codex_without_a_sign_in_says_so() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("codex");
+        std::fs::write(
+            &bin,
+            "#!/bin/sh\nread l; echo '{\"id\":0,\"result\":{}}'\nread l; read l\necho '{\"error\":{\"code\":-32600,\"message\":\"codex account authentication required to read rate limits\"},\"id\":1}'\nsleep 1\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(query(&bin, Duration::from_secs(5), 0), Err(NOT_SIGNED_IN.to_owned()));
     }
 
     #[test]

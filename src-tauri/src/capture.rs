@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tracker_core::capture::claude_settings::{self as cs, RevertOutcome};
-use tracker_core::capture::{antigravity_limits, claude_usage, codex_limits, otlp, statusline};
+use tracker_core::capture::{antigravity_limits, claude_usage, codex_limits, otlp, statusline, Cli};
 use tracker_core::discovery::{self, Env, SourceId};
 use tracker_core::store::Store;
 
@@ -334,6 +334,33 @@ fn codex_binary(s: &Settings) -> Option<PathBuf> {
 fn agy_binary(s: &Settings) -> Option<PathBuf> {
     let configured = (!s.capture.antigravity_path.trim().is_empty()).then(|| PathBuf::from(s.capture.antigravity_path.trim()));
     antigravity_limits::find_agy(&Env::from_system(), configured.as_deref())
+}
+
+/// Installs a CLI with its maker's installer, then reads its limits.
+pub fn install_cli(app: &AppHandle, kind: &str) -> Result<String, String> {
+    type Find = fn(&Settings) -> Option<PathBuf>;
+    let (cli, find, code): (Cli, Find, &str) = match kind {
+        "claude" => (Cli::Claude, claude_binary, "claude"),
+        "codex" => (Cli::Codex, codex_binary, "codex"),
+        "antigravity" => (Cli::Antigravity, agy_binary, "agy"),
+        _ => return Err(format!("unknown capture kind {kind}")),
+    };
+    let state = app.state::<AppState>();
+    if find(&state.settings.read().unwrap()).is_none() {
+        tracker_core::capture::install(cli, Duration::from_secs(15 * 60))?;
+    }
+    find(&state.settings.read().unwrap()).ok_or(format!("{code}_not_found"))?;
+    persist(app, |s| match cli {
+        Cli::Claude => s.capture.claude_poll = true,
+        Cli::Codex => s.capture.codex_poll = true,
+        Cli::Antigravity => s.capture.antigravity_poll = true,
+    })?;
+    match cli {
+        Cli::Claude => wake_claude(app),
+        Cli::Codex => wake_codex(app),
+        Cli::Antigravity => wake_antigravity(app),
+    }
+    Ok(format!("{code}_installed"))
 }
 
 /// Runs in an empty folder of the app's own, never in one of the user's projects.

@@ -654,6 +654,7 @@ export const api = {
   quit: () => invoke<void>('quit_app'),
   captureStatus: () => invoke<CaptureStatus>('capture_status'),
   setCapture: (kind: CaptureKind, enabled: boolean) => invoke<string>('set_capture', { kind, enabled }),
+  installCli: (kind: CaptureKind) => invoke<string>('install_cli', { kind }),
   placeWidget: (corner: string, remember = true) => invoke<void>('place_widget', { corner, remember }),
   listFonts: () => invoke<string[]>('list_fonts'),
   branches: (period: Period, filter?: Filter) => invoke<Branches>('get_branches', { period, filter }),

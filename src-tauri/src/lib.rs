@@ -419,6 +419,7 @@ pub fn run() {
             commands::quit_app,
             commands::capture_status,
             commands::set_capture,
+            commands::install_cli,
             commands::get_branches,
             commands::get_agents_tools,
             commands::get_tips,

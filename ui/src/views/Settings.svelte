@@ -438,7 +438,7 @@
 
     <div class="row wrap actions">
       {#each Object.entries(pricing.sources ?? {}) as [prov, url] (prov)}
-        <button class="btn ghost small" onclick={() => api.openUrl(url)}><Icon name="external" size={13} />{prov === 'openai' ? 'OpenAI' : prov === 'google' ? 'Google' : 'Anthropic'}</button>
+        <button class="btn ghost small" onclick={() => api.openUrl(url)}><Icon name="external" size={13} />{prov === 'openai' ? 'OpenAI' : prov === 'google' ? 'Google' : prov === 'vertex_ai' ? 'Vertex AI' : 'Anthropic'}</button>
       {/each}
       <span class="spacer"></span>
       <button class="btn" onclick={resetPricing} disabled={pricingOrigin === 'bundled' && !pricingDirty}>{t('settings.pricing.reset')}</button>

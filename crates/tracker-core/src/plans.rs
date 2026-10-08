@@ -77,4 +77,14 @@ mod tests {
         assert!(!pro.windows.iter().any(|w| w == "five_hour"), "Pro has no five-hour limit");
         assert!(f.plans(Provider::OpenAI).iter().all(|p| p.session_multiple.is_none()), "OpenAI publishes no ratio");
     }
+
+    #[test]
+    fn antigravity_plans_name_the_windows_agy_reports() {
+        let f = PlansFile::bundled();
+        let free = f.find(Provider::Google, "free").unwrap();
+        assert_eq!(free.windows, ["seven_day"], "below Pro the quota refreshes weekly");
+        let pro = f.above(Provider::Google, f.find(Provider::Google, "plus").unwrap()).unwrap();
+        assert_eq!((pro.id.as_str(), pro.windows.as_slice()), ("pro", ["five_hour".to_owned(), "seven_day".to_owned()].as_slice()));
+        assert!(f.find(Provider::Google, "api").unwrap().windows.is_empty());
+    }
 }

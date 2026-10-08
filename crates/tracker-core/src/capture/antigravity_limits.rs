@@ -92,6 +92,9 @@ fn json_document(stdout: &str) -> Option<Value> {
     stdout.lines().rev().filter_map(|l| serde_json::from_str::<Value>(l.trim()).ok()).find(Value::is_object)
 }
 
+/// Without a Google sign-in agy prints no usage document.
+pub const NOT_SIGNED_IN: &str = "agy_not_signed_in";
+
 pub fn query(bin: &Path, work_dir: &Path, timeout: Duration, now_ms: i64) -> Result<Vec<LimitSnapshot>, String> {
     let mut cmd = Command::new(bin);
     cmd.args(["-p", "/usage", "--output-format", "json", "--print-timeout"])
@@ -122,13 +125,13 @@ pub fn query(bin: &Path, work_dir: &Path, timeout: Duration, now_ms: i64) -> Res
     let _ = child.kill();
     let _ = child.wait();
     let out = out.map_err(|_| "agy did not answer in time".to_string())?;
-    let doc = json_document(&String::from_utf8_lossy(&out)).ok_or("agy returned no usage (not signed in?)")?;
+    let doc = json_document(&String::from_utf8_lossy(&out)).ok_or(NOT_SIGNED_IN)?;
     if let Some(status) = str_at(&doc, "status").filter(|s| !s.eq_ignore_ascii_case("success")) {
         return Err(format!("agy reported {status}"));
     }
     let snaps = parse_output(&doc, now_ms);
     if snaps.is_empty() {
-        return Err("agy returned no limit windows (not signed in?)".into());
+        return Err(NOT_SIGNED_IN.into());
     }
     Ok(snaps)
 }
