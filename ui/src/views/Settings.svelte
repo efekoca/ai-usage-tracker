@@ -390,7 +390,7 @@
         <tbody>
           {#each pricing.models as m (m.id)}
             <tr>
-              <th scope="row" title={m.notes ?? ''}>{m.id}{#if m.long_context}<span class="subtle small"> · &gt;{fmtInt(m.long_context.threshold / 1000)}K</span>{/if}</th>
+              <th scope="row" title={m.notes ?? ''}>{m.id}{#if m.long_context}<span class="subtle small">{' · '}&gt;{fmtInt(m.long_context.threshold / 1000)}K</span>{/if}</th>
               {#each ['input', 'output', 'cache_read', 'cache_write_5m', 'cache_write_1h'] as const as k (k)}
                 <td class="num">
                   <input

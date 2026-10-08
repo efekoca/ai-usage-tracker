@@ -132,6 +132,8 @@ const tr: Dict = {
   'limits.status.outdated': 'Güncel değil',
   'limits.val.used': '{pct} kullanıldı',
   'limits.val.remaining': '{pct} kaldı',
+  'limits.val.used.future': '{pct} kullanılmış olacak',
+  'limits.val.remaining.future': '{pct} kalmış olacak',
   'limits.mode': 'Limit yüzdeleri',
   'limits.mode.used': 'Kullanılan',
   'limits.mode.remaining': 'Kalan',
@@ -147,6 +149,8 @@ const tr: Dict = {
   'limits.none': 'Henüz limit bilgisi yok. Araçları kullandıkça burada görünür; isterseniz aşağıdan kendi bütçenizi tanımlayın.',
   'limits.claudeSignIn': "Claude limitleri okunamıyor: Claude Code'da oturumunuz açık değil.",
   'limits.claudeSignIn.action': 'Nasıl düzeltilir?',
+  'limits.agyMissing': "Antigravity limitlerini görmek için Antigravity CLI'ını (agy) kurmanız gerekmektedir.",
+  'limits.agyMissing.action': 'Ayrıntılar',
   'limits.thresholds': 'Kendi bütçeleriniz',
   'limits.thresholds.help': 'Gerçek limit yüzdesi okunamadığında kullanılır ve “Tahmini” olarak gösterilir. Resmi limitler sayı olarak yayınlanmıyor.',
   'limits.addThreshold': 'Bütçe ekle',
@@ -1007,6 +1011,8 @@ const en: Dict = {
   'limits.status.outdated': 'Outdated',
   'limits.val.used': '{pct} used',
   'limits.val.remaining': '{pct} left',
+  'limits.val.used.future': '{pct} will be used',
+  'limits.val.remaining.future': '{pct} will be left',
   'limits.mode': 'Limit percentages',
   'limits.mode.used': 'Used',
   'limits.mode.remaining': 'Left',
@@ -1022,6 +1028,8 @@ const en: Dict = {
   'limits.none': 'No limit readings yet. They appear as you use the tools; you can also set your own budget below.',
   'limits.claudeSignIn': 'Claude limits cannot be read: Claude Code is not signed in.',
   'limits.claudeSignIn.action': 'How to fix',
+  'limits.agyMissing': 'You need to install the Antigravity CLI (agy) to see your Antigravity limits.',
+  'limits.agyMissing.action': 'Details',
   'limits.thresholds': 'Your budgets',
   'limits.thresholds.help': 'Used only when no real limit reading exists, and shown as “Estimated”. Official limits are not published as numbers.',
   'limits.addThreshold': 'Add budget',
@@ -1791,8 +1799,9 @@ export function limitShown(used: number, mode: LimitMode): number {
   const u = Math.max(0, Math.min(100, used))
   return mode === 'remaining' ? 100 - u : u
 }
-export function fmtLimit(used: number, mode: LimitMode): string {
-  return t(`limits.val.${mode}`, { pct: fmtPct(limitShown(used, mode)) })
+/** `future` words it as a projection ("%47 kullanılmış olacak"). */
+export function fmtLimit(used: number, mode: LimitMode, future = false): string {
+  return t(`limits.val.${mode}${future ? '.future' : ''}`, { pct: fmtPct(limitShown(used, mode)) })
 }
 
 export function fmtDec(n: number, digits = 0): string {

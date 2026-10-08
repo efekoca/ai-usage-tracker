@@ -11,7 +11,7 @@
   import AccuracyBadge from '../components/AccuracyBadge.svelte'
   import Icon from '../components/Icon.svelte'
   import PlanValue from '../components/PlanValue.svelte'
-  import ClaudeLimitNotice from '../components/ClaudeLimitNotice.svelte'
+  import LimitNotices from '../components/LimitNotices.svelte'
 
   let metric: 'tokens' | 'cost' = $state(app.settings?.primary_metric ?? 'tokens')
   const r = $derived(app.report)
@@ -22,6 +22,16 @@
   const headline = $derived(
     app.limits.filter((l) => l.window === 'five_hour' || l.window === 'seven_day' || l.source === 'user_threshold'),
   )
+  // the by-tool card joins the column that leaves the smaller difference at the bottom
+  let hComposition = $state(0)
+  let hModels = $state(0)
+  let hLimits = $state(0)
+  let hTools = $state(0)
+  const byToolLeft = $derived.by(() => {
+    const left = hComposition + 16 + hModels
+    const tools = hTools + 16
+    return Math.abs(left + tools - hLimits) < Math.abs(hLimits + tools - left)
+  })
   const hasClaude = $derived(toolsPresent.includes('claude_code'))
   // dismissal covers only the listed models; a newly unpriced one still warns
   const unpriced = $derived((app.report?.unpriced_models ?? []).filter((m) => !(app.settings?.dismissed_unpriced ?? []).includes(m)))
@@ -87,53 +97,10 @@
     />
   </section>
 
-  <div class="grid2">
-    <section class="card">
-      <div class="card-head"><h2>{t('overview.composition')}</h2></div>
-      <Composition tokens={r.totals.tokens} />
-    </section>
-    <section class="card">
-      <div class="card-head">
-        <h2>{t('overview.limitsNow')}</h2>
-        <span class="spacer"></span>
-        <button class="btn ghost" aria-label={t('overview.openLimits')} title={t('overview.openLimits')} onclick={() => (app.view = 'limits')}><Icon name="chevron" size={14} /></button>
-      </div>
-      <ClaudeLimitNotice />
-      {#if headline.length === 0}
-        <p class="muted small">{t('limits.none')}</p>
-      {:else}
-        <div class="meters">
-          {#each headline as l (l.provider + l.limit_id + l.window)}
-            <LimitMeter
-              compact
-              title="{limitName(l.provider, l.limit_id)} · {t(`limits.window.${l.window}`)}"
-              window={l.window}
-              used={l.used_pct}
-              state={l.state}
-              accuracy={l.accuracy}
-              resetsAt={l.resets_at}
-              observedMs={l.observed_ms}
-              forecast={l.forecast}
-            />
-          {/each}
-        </div>
-      {/if}
-    </section>
-  </div>
+  <div class="plan"><PlanValue /></div>
 
-  <PlanValue />
-
-  <div class="grid2">
-    <section class="card">
-      <div class="card-head"><h2>{t('overview.topModels')}</h2></div>
-      <BarList
-        ariaLabel={t('overview.topModels')}
-        max={6}
-        items={r.by_model.map((g) => ({ key: g.key, label: g.label, value: metric === 'tokens' ? g.totals.total_tokens : g.totals.cost_usd, sub: g.totals.unpriced_events ? '—' : undefined }))}
-        format={fmt}
-      />
-    </section>
-    <section class="card">
+  {#snippet byTool()}
+    <section class="card" bind:offsetHeight={hTools}>
       <div class="card-head"><h2>{t('overview.byTool')}</h2></div>
       <BarList
         ariaLabel={t('overview.byTool')}
@@ -145,6 +112,55 @@
         {#if r.peak_weekday !== null}<span>{weekdayNames()[r.peak_weekday]}</span>{/if}
       </div>
     </section>
+  {/snippet}
+
+  <div class="grid2">
+    <div class="col">
+      <section class="card" bind:offsetHeight={hComposition}>
+        <div class="card-head"><h2>{t('overview.composition')}</h2></div>
+        <Composition tokens={r.totals.tokens} />
+      </section>
+      <section class="card" bind:offsetHeight={hModels}>
+        <div class="card-head"><h2>{t('overview.topModels')}</h2></div>
+        <BarList
+          ariaLabel={t('overview.topModels')}
+          max={6}
+          items={r.by_model.map((g) => ({ key: g.key, label: g.label, value: metric === 'tokens' ? g.totals.total_tokens : g.totals.cost_usd, sub: g.totals.unpriced_events ? '—' : undefined }))}
+          format={fmt}
+        />
+      </section>
+      {#if byToolLeft}{@render byTool()}{/if}
+    </div>
+    <div class="col">
+      <section class="card" bind:offsetHeight={hLimits}>
+        <div class="card-head">
+          <h2>{t('overview.limitsNow')}</h2>
+          <span class="spacer"></span>
+          <button class="btn ghost" aria-label={t('overview.openLimits')} title={t('overview.openLimits')} onclick={() => (app.view = 'limits')}><Icon name="chevron" size={14} /></button>
+        </div>
+        <LimitNotices />
+        {#if headline.length === 0}
+          <p class="muted small">{t('limits.none')}</p>
+        {:else}
+          <div class="meters">
+            {#each headline as l (l.provider + l.limit_id + l.window)}
+              <LimitMeter
+                compact
+                title="{limitName(l.provider, l.limit_id)} · {t(`limits.window.${l.window}`)}"
+                window={l.window}
+                used={l.used_pct}
+                state={l.state}
+                accuracy={l.accuracy}
+                resetsAt={l.resets_at}
+                observedMs={l.observed_ms}
+                forecast={l.forecast}
+              />
+            {/each}
+          </div>
+        {/if}
+      </section>
+      {#if !byToolLeft}{@render byTool()}{/if}
+    </div>
   </div>
 
   {#if hasClaude}
@@ -180,6 +196,20 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 16px;
+    align-items: start;
+    margin-bottom: 16px;
+  }
+  .plan {
+    margin-bottom: 16px;
+  }
+  .col {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+  }
+  .col section {
+    margin-bottom: 0;
   }
   @container main (max-width: 900px) {
     .grid2 {

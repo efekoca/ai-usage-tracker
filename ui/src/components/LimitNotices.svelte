@@ -11,24 +11,42 @@
     api.captureStatus().then((s) => (st = s)).catch(() => {})
   })
 
+  const sources = $derived(app.settings?.enabled_sources ?? [])
   const claudeSources = ['claude_code', 'cowork', 'claude_desktop']
-  const show = $derived(
+  const claude = $derived(
     !!st &&
       st.claude_poll &&
       st.claude_candidates_found &&
       st.claude.last_error === 'claude_no_plan_limits' &&
       app.settings?.plans.anthropic !== 'api' &&
-      (app.settings?.enabled_sources ?? []).some((s) => claudeSources.includes(s)) &&
+      sources.some((s) => claudeSources.includes(s)) &&
       !app.limits.some((l) => l.provider === 'anthropic' && l.source !== 'user_threshold'),
+  )
+  // Antigravity is in use (app or IDE) but only the agy CLI can read its limits
+  const agy = $derived(
+    !!st &&
+      st.antigravity_poll &&
+      !st.antigravity_candidates_found &&
+      sources.includes('antigravity') &&
+      (app.report?.by_tool ?? []).some((g) => g.key === 'antigravity') &&
+      !app.limits.some((l) => l.provider === 'google' && l.source !== 'user_threshold'),
   )
 </script>
 
-{#if show}
+{#if claude}
   <div class="banner" role="status">
     <Icon name="warning" size={16} />
     <span>{t('limits.claudeSignIn')}</span>
     <span class="spacer"></span>
     <button class="btn small" onclick={() => (app.view = 'sources')}>{t('limits.claudeSignIn.action')}</button>
+  </div>
+{/if}
+{#if agy}
+  <div class="banner" role="status">
+    <Icon name="info" size={16} />
+    <span>{t('limits.agyMissing')}</span>
+    <span class="spacer"></span>
+    <button class="btn small" onclick={() => (app.view = 'sources')}>{t('limits.agyMissing.action')}</button>
   </div>
 {/if}
 

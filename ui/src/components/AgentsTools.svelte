@@ -87,7 +87,7 @@
               <tr class="group">
                 <th scope="rowgroup" colspan="6">
                   <i class="dot" style="background:{toolColor[tool]}"></i>{toolLabel(tool)}
-                  {#if data.agents.some((a) => a.tool === tool && a.agent !== null)}<span class="subtle small"> · {subShare(tool)}</span>{/if}
+                  {#if data.agents.some((a) => a.tool === tool && a.agent !== null)}<span class="subtle small">{' · '}{subShare(tool)}</span>{/if}
                 </th>
               </tr>
               {#each data.agents.filter((a) => a.tool === tool) as a (a.agent ?? '')}
