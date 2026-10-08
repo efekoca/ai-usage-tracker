@@ -24,7 +24,9 @@
 
   function limit(p: Provider, kind: WidgetItemKind) {
     const w = kind === 'limit_five_hour' ? 'five_hour' : 'seven_day'
-    const l = data?.limits.find((x) => x.provider === p && x.window === w)
+    // with several pools (Antigravity) the fullest current one is shown, as in the tray
+    const rank = (x: { state: string; used_pct: number | null }) => (x.state === 'fresh' ? 1000 : 0) + (x.used_pct ?? -1)
+    const l = (data?.limits ?? []).filter((x) => x.provider === p && x.window === w).sort((a, b) => rank(b) - rank(a))[0]
     if (!l) return null
     const known = l.state === 'fresh' && l.used_pct !== null
     // 'behind': the current value is unknown, so only the last reading is shown

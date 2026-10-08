@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tracker_core::capture::claude_settings::{self as cs, RevertOutcome};
-use tracker_core::capture::{claude_usage, codex_limits, otlp, statusline};
+use tracker_core::capture::{antigravity_limits, claude_usage, codex_limits, otlp, statusline};
 use tracker_core::discovery::{self, Env, SourceId};
 use tracker_core::store::Store;
 
@@ -30,6 +30,8 @@ pub struct CaptureRuntime {
     pub claude: Mutex<PollStatus>,
     claude_wake: Mutex<Option<Sender<()>>>,
     claude_last_read_ms: Mutex<i64>,
+    pub antigravity: Mutex<PollStatus>,
+    antigravity_wake: Mutex<Option<Sender<()>>>,
     /// Bumped by "delete all data": a limit read started before it is not stored.
     wipes: AtomicU64,
 }
@@ -44,6 +46,8 @@ impl CaptureRuntime {
             claude: Mutex::new(PollStatus::default()),
             claude_wake: Mutex::new(None),
             claude_last_read_ms: Mutex::new(0),
+            antigravity: Mutex::new(PollStatus::default()),
+            antigravity_wake: Mutex::new(None),
             wipes: AtomicU64::new(0),
         }
     }
@@ -275,6 +279,9 @@ pub struct CaptureStatus {
     pub claude_poll: bool,
     pub claude: PollStatus,
     pub claude_candidates_found: bool,
+    pub antigravity_poll: bool,
+    pub antigravity: PollStatus,
+    pub antigravity_candidates_found: bool,
     pub statusline: bool,
     pub statusline_file: String,
     pub statusline_chained: bool,
@@ -302,6 +309,9 @@ pub fn status(app: &AppHandle) -> CaptureStatus {
         claude_poll: s.capture.claude_poll,
         claude: rt.claude.lock().unwrap().clone(),
         claude_candidates_found: claude_binary(&s).is_some(),
+        antigravity_poll: s.capture.antigravity_poll,
+        antigravity: rt.antigravity.lock().unwrap().clone(),
+        antigravity_candidates_found: agy_binary(&s).is_some(),
         statusline: s.capture.statusline,
         statusline_file: st.statusline.as_ref().map(|c| c.settings_file.to_string_lossy().into_owned()).unwrap_or_default(),
         statusline_chained: st.statusline.as_ref().is_some_and(|c| c.previous.is_some()),
@@ -319,6 +329,18 @@ pub fn status(app: &AppHandle) -> CaptureStatus {
 fn codex_binary(s: &Settings) -> Option<PathBuf> {
     let configured = (!s.capture.codex_path.trim().is_empty()).then(|| PathBuf::from(s.capture.codex_path.trim()));
     codex_limits::find_codex(&Env::from_system(), configured.as_deref())
+}
+
+fn agy_binary(s: &Settings) -> Option<PathBuf> {
+    let configured = (!s.capture.antigravity_path.trim().is_empty()).then(|| PathBuf::from(s.capture.antigravity_path.trim()));
+    antigravity_limits::find_agy(&Env::from_system(), configured.as_deref())
+}
+
+/// Runs in an empty folder of the app's own, never in one of the user's projects.
+fn read_antigravity(state: &AppState, bin: &Path) -> Result<Vec<tracker_core::model::LimitSnapshot>, String> {
+    let work = state.data_dir.join("antigravity-usage");
+    std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+    antigravity_limits::query(bin, &work, Duration::from_secs(30), now_ms())
 }
 
 fn claude_binary(s: &Settings) -> Option<PathBuf> {
@@ -448,6 +470,22 @@ pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
         }
         ("codex", false) => {
             persist(app, |s| s.capture.codex_poll = false)?;
+            Ok("disabled".into())
+        }
+        ("antigravity", true) => {
+            let bin = agy_binary(&settings).ok_or("agy_not_found")?;
+            let epoch = state.capture.wipes.load(Ordering::SeqCst);
+            let snaps = read_antigravity(&state, &bin)?;
+            store_limits(&state, epoch, &snaps)?;
+            *state.capture.antigravity.lock().unwrap() =
+                PollStatus { binary: Some(bin.to_string_lossy().into_owned()), last_ok_ms: Some(now_ms()), last_error: None };
+            persist(app, |s| s.capture.antigravity_poll = true)?;
+            wake_antigravity(app);
+            let _ = app.emit("data-changed", ());
+            Ok("enabled".into())
+        }
+        ("antigravity", false) => {
+            persist(app, |s| s.capture.antigravity_poll = false)?;
             Ok("disabled".into())
         }
         ("claude", true) => {
@@ -596,6 +634,7 @@ pub fn pause(app: &AppHandle) -> std::io::Result<()> {
     stop_receiver(app);
     *state.capture.codex.lock().unwrap() = PollStatus::default();
     *state.capture.claude.lock().unwrap() = PollStatus::default();
+    *state.capture.antigravity.lock().unwrap() = PollStatus::default();
     statusline::set_paused(&state.data_dir, true)
 }
 
@@ -618,6 +657,61 @@ fn reads_allowed(s: &Settings, sources: &[SourceId]) -> bool {
 pub fn wake_readers(app: &AppHandle) {
     wake_claude(app);
     wake_codex(app);
+    wake_antigravity(app);
+}
+
+fn wake_antigravity(app: &AppHandle) {
+    if let Some(tx) = app.state::<AppState>().capture.antigravity_wake.lock().unwrap().as_ref() {
+        let _ = tx.send(());
+    }
+}
+
+fn start_antigravity_poller(app: &AppHandle) {
+    let (tx, rx) = channel::<()>();
+    *app.state::<AppState>().capture.antigravity_wake.lock().unwrap() = Some(tx);
+    let app = app.clone();
+    let _ = std::thread::Builder::new().name("antigravity-limits".into()).spawn(move || {
+        let mut wait = Duration::from_secs(25);
+        loop {
+            match rx.recv_timeout(wait) {
+                Ok(()) | Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return,
+            }
+            let state = app.state::<AppState>();
+            if state.quitting.load(Ordering::SeqCst) {
+                return;
+            }
+            let s = state.settings.read().unwrap().clone();
+            wait = Duration::from_secs(60 * s.capture.antigravity_poll_minutes.clamp(1, 120));
+            if !s.capture.antigravity_poll || !reads_allowed(&s, &[SourceId::Antigravity]) {
+                continue;
+            }
+            let Some(bin) = agy_binary(&s) else {
+                state.capture.antigravity.lock().unwrap().last_error = Some("agy_not_found".into());
+                wait = Duration::from_secs(30 * 60);
+                continue;
+            };
+            let epoch = state.capture.wipes.load(Ordering::SeqCst);
+            match read_antigravity(&state, &bin).and_then(|snaps| store_limits(&state, epoch, &snaps)) {
+                Ok(()) => {
+                    let mut c = state.capture.antigravity.lock().unwrap();
+                    c.binary = Some(bin.to_string_lossy().into_owned());
+                    c.last_ok_ms = Some(now_ms());
+                    c.last_error = None;
+                    drop(c);
+                    let _ = app.emit("data-changed", ());
+                }
+                Err(e) if e == DISCARDED => {}
+                Err(e) => {
+                    let mut c = state.capture.antigravity.lock().unwrap();
+                    if c.last_error.as_deref() != Some(e.as_str()) {
+                        log::warn!("antigravity limit read failed: {e}");
+                    }
+                    c.last_error = Some(e);
+                }
+            }
+        }
+    });
 }
 
 fn wake_claude(app: &AppHandle) {
@@ -751,6 +845,7 @@ pub fn start(app: &AppHandle) {
         restore_after_upgrade(app);
     }
     start_claude_poller(app);
+    start_antigravity_poller(app);
     let (tx, rx) = channel::<()>();
     *app.state::<AppState>().capture.codex_wake.lock().unwrap() = Some(tx);
     let app = app.clone();

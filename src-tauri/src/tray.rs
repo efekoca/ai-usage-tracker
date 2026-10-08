@@ -167,7 +167,7 @@ fn tooltip(limits: &[Current], s: &Settings, update: Option<&str>) -> String {
     let tr = turkish(s);
     let remaining = s.limit_display == "remaining";
     let mut lines = vec!["AI Usage Tracker".to_owned()];
-    for (p, name) in [(Provider::Anthropic, "Claude"), (Provider::OpenAI, "Codex")] {
+    for (p, name) in [(Provider::Anthropic, "Claude"), (Provider::OpenAI, "Codex"), (Provider::Google, "Antigravity")] {
         let mut parts = Vec::new();
         for (w, en, tr_) in [("five_hour", "5h", "5 sa"), ("seven_day", "week", "haftalık")] {
             let Some(c) = limits.iter().find(|c| c.provider == p && c.window == w) else { continue };

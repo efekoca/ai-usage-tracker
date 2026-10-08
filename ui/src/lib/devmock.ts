@@ -14,9 +14,10 @@ const settings: Settings = {
   onboarded: new URLSearchParams(location.search).get('onboarding') !== '1',
   language: (new URLSearchParams(location.search).get('lang') as 'tr' | 'en') ?? 'system',
   theme: (new URLSearchParams(location.search).get('theme') as 'light' | 'dark') ?? 'system',
-  enabled_sources: ['claude_code', 'cowork', 'claude_desktop', 'codex'],
+  enabled_sources: ['claude_code', 'cowork', 'claude_desktop', 'codex', 'antigravity'],
+  known_sources: ['claude_code', 'cowork', 'claude_desktop', 'codex', 'chatgpt_desktop', 'antigravity'],
   extra_paths: { claude_config_dirs: [], codex_homes: [] },
-  plans: { anthropic: 'max5x', openai: 'plus' },
+  plans: { anthropic: 'max5x', openai: 'plus', google: 'pro' },
   thresholds: [],
   hide_project_names: false,
   currency: 'USD',
@@ -28,7 +29,7 @@ const settings: Settings = {
     border: true, shadow: false, show_labels: true, show_reset_time: false, warn_at: 70, high_at: 90, always_on_top: true, lock_position: false, click_action: 'open_dashboard',
     font_family: '', text_scale: 1, number_scale: 1, number_weight: 700, tabular_nums: true, hotkey: 'Ctrl+Alt+Shift+W',
   },
-  capture: { codex_poll: true, codex_poll_minutes: 5, codex_path: '', statusline: false, otel: false, otel_port: 43180, claude_poll: true, claude_poll_minutes: 5, claude_path: '' },
+  capture: { codex_poll: true, codex_poll_minutes: 5, codex_path: '', statusline: false, otel: false, otel_port: 43180, claude_poll: true, claude_poll_minutes: 5, claude_path: '', antigravity_poll: true, antigravity_poll_minutes: 5, antigravity_path: '' },
   autostart: false,
   allow_config_updates: false,
   primary_metric: 'tokens',
@@ -43,12 +44,13 @@ const settings: Settings = {
 
 const day = 864e5
 const models = [
-  ['claude-opus-5', 'claude_code', 0.55, 5, 25, 0.5],
+  ['claude-opus-5', 'claude_code', 0.5, 5, 25, 0.5],
   ['gpt-5.6-sol', 'codex', 0.2, 4, 20, 0.4],
   ['claude-sonnet-5', 'claude_code', 0.12, 2, 10, 0.2],
   ['claude-opus-5-5', 'claude_code', 0.08, 4, 20, 0.2],
   ['gpt-5.6-terra', 'codex', 0.04, 2, 12, 0.2],
   ['codex-auto-review', 'codex', 0.01, 0, 0, 0],
+  ['gemini-3.8-flash', 'antigravity', 0.05, 0.75, 3.75, 0.075],
 ] as const
 const projects = ['demo-app', 'website', 'notes', 'data-pipeline', 'mobile-client']
 
@@ -86,30 +88,33 @@ function report(p: Period): Report {
     const active = rnd() > 0.35 || i === 0
     const cc = active ? Math.round(2e6 + rnd() * 30e6) : 0
     const cx = active && rnd() > 0.5 ? Math.round(rnd() * 8e6) : 0
+    const ag = active && i % 3 === 0 ? Math.round(1e6 + rnd() * 3e6) : 0
+    const all = cc + cx + ag
     daily.push({
       date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
-      tokens: cc + cx,
-      cost_usd: cc * 0.75e-6 + cx * 0.6e-6,
-      events: Math.round((cc + cx) / 120000),
-      by_tool: { ...(cc ? { claude_code: cc } : {}), ...(cx ? { codex: cx } : {}) },
-      cost_by_tool: { ...(cc ? { claude_code: cc * 0.75e-6 } : {}), ...(cx ? { codex: cx * 0.6e-6 } : {}) },
-      prompt_tokens: Math.round((cc + cx) * 0.99),
-      cache_read: Math.round((cc + cx) * (0.85 + rnd() * 0.12)),
+      tokens: all,
+      cost_usd: cc * 0.75e-6 + cx * 0.6e-6 + ag * 0.15e-6,
+      events: Math.round(all / 120000),
+      by_tool: { ...(cc ? { claude_code: cc } : {}), ...(cx ? { codex: cx } : {}), ...(ag ? { antigravity: ag } : {}) },
+      cost_by_tool: { ...(cc ? { claude_code: cc * 0.75e-6 } : {}), ...(cx ? { codex: cx * 0.6e-6 } : {}), ...(ag ? { antigravity: ag * 0.15e-6 } : {}) },
+      prompt_tokens: Math.round(all * 0.99),
+      cache_read: Math.round(all * (0.85 + rnd() * 0.12)),
       cache_write: Math.round((cc + cx) * 0.04),
-      cache_savings_usd: (cc + cx) * 0.6e-6,
+      cache_savings_usd: all * 0.6e-6,
     })
   }
   const total = daily.reduce((a, d) => a + d.tokens, 0)
   const cost = daily.reduce((a, d) => a + d.cost_usd, 0)
   const cc = daily.reduce((a, d) => a + (d.by_tool.claude_code ?? 0), 0)
+  const ag = daily.reduce((a, d) => a + (d.by_tool.antigravity ?? 0), 0)
   const g = (key: string, label: string, share: number, unpriced = false): Group => ({ key, label, hidden: false, totals: totals(Math.round(total * share), cost * share, unpriced) })
   const heat = Array.from({ length: 7 }, (_, d) => Array.from({ length: 24 }, (_, h) => (h > 8 && h < 23 ? Math.round(rnd() * 4e6 * (d < 5 ? 1 : 0.4)) : 0)))
   return {
     range: { from_ms: end.getTime() - (n - 1) * day, to_ms: end.getTime() + day },
     totals: { ...totals(total, cost), unpriced_events: 3, unpriced_tokens: Math.round(total * 0.01) },
     previous: totals(Math.round(total * 0.82), cost * 0.85),
-    by_tool: [g('claude_code', 'claude_code', cc / total), g('codex', 'codex', 1 - cc / total)],
-    by_client: [g('claude_code:claude-desktop', 'claude-desktop', 0.6), g('claude_code:cowork', 'cowork', 0.15), g('codex:Codex Desktop', 'Codex Desktop', 0.25)],
+    by_tool: [g('claude_code', 'claude_code', cc / total), g('codex', 'codex', 1 - (cc + ag) / total), ...(ag ? [g('antigravity', 'antigravity', ag / total)] : [])],
+    by_client: [g('claude_code:claude-desktop', 'claude-desktop', 0.57), g('claude_code:cowork', 'cowork', 0.14), g('codex:Codex Desktop', 'Codex Desktop', 0.23), g('antigravity:antigravity_ide', 'antigravity_ide', 0.04), g('antigravity:antigravity_cli', 'antigravity_cli', 0.02)],
     by_model: models.map(([m, , s]) => g(m, m, s, m === 'codex-auto-review')),
     by_project: projects.map((p, i) => ({ ...g(String(i + 1), p, [0.4, 0.25, 0.15, 0.12, 0.08][i]), hidden: i === 4 })),
     daily,
@@ -139,6 +144,9 @@ function allLimits(): LimitView[] {
     { provider: 'anthropic', limit_id: '', window: 'seven_day', window_minutes: 10080, used_pct: 73, resets_at: Math.round(now / 1000 + 2.6 * 86400), observed_ms: now - 4 * 60000, source: 'cowork_audit', status: 'allowed_warning', plan: null, accuracy: 'exact', state: 'fresh', window_start_ms: now - 4.4 * 86400e3, window_usage: totals(612e6, 402.5), usage_since: totals(0, 0), forecast: { kind: 'fills', rate_per_hour: 0.9, fills_at_ms: now + 30 * 3600e3, at_reset_pct: null, basis_minutes: 5760 }, projects: [share('demo-app', 0.5, 73), share('website', 0.3, 73), share('notes', 0.2, 73)] },
     { provider: 'openai', limit_id: 'codex', window: 'five_hour', window_minutes: 300, used_pct: 12, resets_at: Math.round(now / 1000 + 4 * 3600), observed_ms: now - 20 * 60000, source: 'codex_rollout', status: null, plan: 'plus', accuracy: 'exact', state: 'fresh', window_start_ms: now - 3600e3, window_usage: totals(5e6, 3.1), usage_since: totals(0, 0), forecast: { kind: 'safe', rate_per_hour: 4.2, fills_at_ms: null, at_reset_pct: 29, basis_minutes: 60 }, projects: [share('data-pipeline', 1, 12)] },
     { provider: 'openai', limit_id: 'codex', window: 'seven_day', window_minutes: 10080, used_pct: 31, resets_at: null, observed_ms: now - 9 * 86400e3, source: 'codex_rollout', status: null, plan: 'plus', accuracy: 'exact', state: 'reset', window_start_ms: now - 7 * 86400e3, window_usage: totals(0, 0), usage_since: totals(0, 0), forecast: null, projects: [] },
+    { provider: 'google', limit_id: 'gemini', window: 'five_hour', window_minutes: 300, used_pct: 18, resets_at: Math.round(now / 1000 + 3.1 * 3600), observed_ms: now - 90000, source: 'antigravity_cli_usage', status: null, plan: null, accuracy: 'captured', state: 'fresh', window_start_ms: now - 1.9 * 3600e3, window_usage: totals(2.4e6, 0.6), usage_since: totals(0, 0), forecast: { kind: 'safe', rate_per_hour: 6.1, fills_at_ms: null, at_reset_pct: 37, basis_minutes: 114 }, projects: [share('website', 1, 18)] },
+    { provider: 'google', limit_id: 'gemini', window: 'seven_day', window_minutes: 10080, used_pct: 9, resets_at: Math.round(now / 1000 + 4.2 * 86400), observed_ms: now - 90000, source: 'antigravity_cli_usage', status: null, plan: null, accuracy: 'captured', state: 'fresh', window_start_ms: now - 2.8 * 86400e3, window_usage: totals(9e6, 2.1), usage_since: totals(0, 0), forecast: null, projects: [share('website', 1, 9)] },
+    { provider: 'google', limit_id: '3p', window: 'five_hour', window_minutes: 300, used_pct: 0, resets_at: Math.round(now / 1000 + 5 * 3600), observed_ms: now - 90000, source: 'antigravity_cli_usage', status: null, plan: null, accuracy: 'captured', state: 'fresh', window_start_ms: now, window_usage: totals(0, 0), usage_since: totals(0, 0), forecast: null, projects: [] },
   ]
 }
 
@@ -165,7 +173,7 @@ function mockSessions() {
 
 function mockCompare() {
   const actual = 288.1
-  const ids: [string, 'anthropic' | 'openai', number][] = [['gpt-5.6-luna', 'openai', 0.07], ['claude-haiku-4-5', 'anthropic', 0.24], ['gpt-5.3-codex', 'openai', 0.38], ['claude-sonnet-5', 'anthropic', 0.48], ['gpt-5.6-terra', 'openai', 0.52], ['claude-opus-5-5', 'anthropic', 0.9], ['gpt-5.6-sol', 'openai', 1.05], ['claude-opus-5', 'anthropic', 1.21], ['claude-fable-5-1', 'anthropic', 1.63], ['claude-opus-4-1', 'anthropic', 3.6]]
+  const ids: [string, 'anthropic' | 'openai' | 'google', number][] = [['gpt-5.6-luna', 'openai', 0.07], ['gemini-3.8-flash', 'google', 0.15], ['claude-haiku-4-5', 'anthropic', 0.24], ['gpt-5.3-codex', 'openai', 0.38], ['claude-sonnet-5', 'anthropic', 0.48], ['gpt-5.6-terra', 'openai', 0.52], ['claude-opus-5-5', 'anthropic', 0.9], ['gpt-5.6-sol', 'openai', 1.05], ['claude-opus-5', 'anthropic', 1.21], ['claude-fable-5-1', 'anthropic', 1.63], ['claude-opus-4-1', 'anthropic', 3.6]]
   return {
     basis_events: 1180, basis_tokens: 402_000_000, excluded_events: 3, actual_cost_usd: actual,
     actual_by_model: [['claude-opus-5-5', 221.4], ['gpt-5.6-terra', 51.2], ['claude-sonnet-5', 15.5]],
@@ -238,12 +246,14 @@ function mockAgentsTools() {
       { tool: 'claude_code', agent: 'Explore', totals: totals(9_000_000, 4.1), runs: 9, sessions: 4 },
       { tool: 'codex', agent: null, totals: totals(52_000_000, 13.3), runs: 0, sessions: 12 },
       { tool: 'codex', agent: 'guardian', totals: { ...totals(1_200_000, 0, true), events: 40, unpriced_events: 40 }, runs: 5, sessions: 3 },
+      { tool: 'antigravity', agent: null, totals: totals(21_000_000, 3.2), runs: 0, sessions: 5 },
     ],
     tools: [
       t('claude_code', 'Bash', 1180, 1176, 41, 160), t('claude_code', 'Edit', 402, 402, 3, 0), t('claude_code', 'Read', 360, 358, 6, 120),
       t('codex', 'shell', 310, 310, 84, 0), t('claude_code', 'Write', 141, 141, 2, 0), t('claude_code', 'mcp__Claude_Browser__navigate', 96, 96, 9, 0),
       t('codex', 'apply_patch', 88, 88, 1, 0), t('claude_code', 'Grep', 64, 64, 1, 30), t('claude_code', 'WebSearch', 37, 37, 0, 21),
       t('codex', 'mcp__node_repl__js', 33, 33, 4, 0), t('codex', 'web_search', 19, 0, 0, 0), t('claude_code', 'TaskUpdate', 17, 17, 0, 0),
+      t('antigravity', 'view_file', 188, 188, 0, 0), t('antigravity', 'run_command', 54, 52, 6, 0),
     ],
     tool_calls: 2747,
     filtered_by_session: false,
@@ -338,9 +348,9 @@ const pricing = {
   schema_version: 1,
   updated_at: '2026-10-02',
   currency: 'USD',
-  sources: { anthropic: 'https://platform.claude.com/docs/en/about-claude/pricing', openai: 'https://developers.openai.com/api/docs/pricing' },
+  sources: { anthropic: 'https://platform.claude.com/docs/en/about-claude/pricing', openai: 'https://developers.openai.com/api/docs/pricing', google: 'https://ai.google.dev/gemini-api/docs/pricing' },
   notes: [],
-  models: models.filter((m) => m[3] > 0).map(([id, tool, , i, o, cr]) => ({ id, provider: tool === 'codex' ? 'openai' : 'anthropic', input: i, output: o, cache_read: cr, cache_write_5m: i * 1.25, cache_write_1h: tool === 'codex' ? null : i * 2, verified_at: '2026-10-02' })),
+  models: models.filter((m) => m[3] > 0).map(([id, tool, , i, o, cr]) => ({ id, provider: tool === 'codex' ? 'openai' : tool === 'antigravity' ? 'google' : 'anthropic', input: i, output: o, cache_read: cr, cache_write_5m: i * 1.25, cache_write_1h: tool === 'codex' ? null : i * 2, verified_at: '2026-10-02' })),
   user_aliases: {},
 }
 
@@ -371,14 +381,15 @@ export function installMock() {
         case 'get_limits':
           return limits()
         case 'get_widget_data': {
-          const per = (tok: number, cost: number) => ({ tokens: tok, cost_usd: cost, has_unpriced: false, tools: [{ tool: 'claude_code', tokens: tok * 0.8, cost_usd: cost * 0.85 }, { tool: 'codex', tokens: tok * 0.2, cost_usd: cost * 0.15 }] })
-          return { today: per(18_400_000, 12.84), days7: per(96_000_000, 71.3), month1: per(402_000_000, 288.1), limits: limits().map((l) => ({ provider: l.provider, window: l.window, used_pct: l.used_pct, state: l.state, accuracy: l.accuracy, resets_at: l.resets_at, observed_ms: l.observed_ms })), providers: ['anthropic', 'openai'], updated_ms: Date.now() - 60000 }
+          const per = (tok: number, cost: number) => ({ tokens: tok, cost_usd: cost, has_unpriced: false, tools: [{ tool: 'claude_code', tokens: tok * 0.75, cost_usd: cost * 0.83 }, { tool: 'codex', tokens: tok * 0.18, cost_usd: cost * 0.14 }, { tool: 'antigravity', tokens: tok * 0.07, cost_usd: cost * 0.03 }] })
+          return { today: per(18_400_000, 12.84), days7: per(96_000_000, 71.3), month1: per(402_000_000, 288.1), limits: limits().map((l) => ({ provider: l.provider, window: l.window, used_pct: l.used_pct, state: l.state, accuracy: l.accuracy, resets_at: l.resets_at, observed_ms: l.observed_ms })), providers: ['anthropic', 'openai', 'google'], updated_ms: Date.now() - 60000 }
         }
         case 'capture_status':
-          return { claude_poll: settings.capture.claude_poll, claude: { binary: claudeMode === 'missing' ? null : 'C:/claude.exe', last_ok_ms: claudeMode ? null : Date.now() - 40000, last_error: claudeMode === 'nologin' ? 'claude_no_plan_limits' : claudeMode === 'missing' ? 'claude_not_found' : null }, claude_candidates_found: claudeMode !== 'missing', codex_poll: settings.capture.codex_poll, codex: { binary: codexMissing ? null : 'C:/codex.exe', last_ok_ms: codexMissing ? null : Date.now() - 120000, last_error: codexMissing ? 'codex_not_found' : null }, codex_candidates_found: !codexMissing, statusline: settings.capture.statusline, statusline_file: 'C:\\Users\\you\\.claude\\settings.json', statusline_chained: false, statusline_last_ms: Date.now() - 30000, otel: settings.capture.otel, otel_port: 43180, otel_listening: settings.capture.otel, otel_events: 42, otel_last_ms: Date.now() - 5000, otel_error: null, settings_file: 'C:\\Users\\you\\.claude\\settings.json' }
+          return { claude_poll: settings.capture.claude_poll, claude: { binary: claudeMode === 'missing' ? null : 'C:/claude.exe', last_ok_ms: claudeMode ? null : Date.now() - 40000, last_error: claudeMode === 'nologin' ? 'claude_no_plan_limits' : claudeMode === 'missing' ? 'claude_not_found' : null }, claude_candidates_found: claudeMode !== 'missing', codex_poll: settings.capture.codex_poll, codex: { binary: codexMissing ? null : 'C:/codex.exe', last_ok_ms: codexMissing ? null : Date.now() - 120000, last_error: codexMissing ? 'codex_not_found' : null }, codex_candidates_found: !codexMissing, antigravity_poll: settings.capture.antigravity_poll, antigravity: { binary: 'C:/Users/you/AppData/Local/agy/bin/agy.exe', last_ok_ms: Date.now() - 90000, last_error: null }, antigravity_candidates_found: true, statusline: settings.capture.statusline, statusline_file: 'C:\\Users\\you\\.claude\\settings.json', statusline_chained: false, statusline_last_ms: Date.now() - 30000, otel: settings.capture.otel, otel_port: 43180, otel_listening: settings.capture.otel, otel_events: 42, otel_last_ms: Date.now() - 5000, otel_error: null, settings_file: 'C:\\Users\\you\\.claude\\settings.json' }
         case 'set_capture': {
-          const k = a.kind as 'claude' | 'codex' | 'statusline' | 'otel'
+          const k = a.kind as 'claude' | 'codex' | 'antigravity' | 'statusline' | 'otel'
           if (k === 'codex') settings.capture.codex_poll = !!a.enabled
+          else if (k === 'antigravity') settings.capture.antigravity_poll = !!a.enabled
           else if (k === 'claude') settings.capture.claude_poll = !!a.enabled
           else settings.capture[k] = !!a.enabled
           return a.enabled ? 'enabled' : 'restored'
@@ -393,6 +404,7 @@ export function installMock() {
             { id: 'cowork', found: true, supported: true, roots: ['C:\\Users\\you\\AppData\\Roaming\\Claude\\local-agent-mode-sessions'], file_count: 39, cloud_only: false, enabled: true },
             { id: 'claude_desktop', found: true, supported: true, roots: ['C:\\Users\\you\\AppData\\Roaming\\Claude'], file_count: 1, cloud_only: false, enabled: true },
             { id: 'codex', found: true, supported: true, roots: ['C:\\Users\\you\\.codex'], file_count: 55, cloud_only: false, enabled: true },
+            { id: 'antigravity', found: true, supported: true, roots: ['C:\\Users\\you\\.gemini\\antigravity', 'C:\\Users\\you\\.gemini\\antigravity-ide', 'C:\\Users\\you\\.gemini\\antigravity-cli'], file_count: 12, cloud_only: false, enabled: true },
             { id: 'chatgpt_desktop', found: false, supported: false, roots: [], file_count: 0, cloud_only: false, enabled: false },
           ]
         case 'parser_warnings':

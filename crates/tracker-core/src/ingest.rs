@@ -4,7 +4,7 @@
 
 use crate::discovery::DiscoveredFile;
 use crate::capture::statusline;
-use crate::sources::{claude_code, claude_plan, codex, cowork_audit, ParseOutput, ParserKind};
+use crate::sources::{antigravity, claude_code, claude_plan, codex, cowork_audit, ParseOutput, ParserKind};
 use crate::store::Store;
 use serde::Serialize;
 use std::time::UNIX_EPOCH;
@@ -68,17 +68,25 @@ pub fn ingest(store: &mut Store, files: &[DiscoveredFile], mut on_progress: impl
     rep
 }
 
+fn size_and_mtime(path: &std::path::Path) -> std::io::Result<(u64, i64)> {
+    let meta = std::fs::metadata(path)?;
+    let mtime_ms = meta.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64).unwrap_or(0);
+    Ok((meta.len(), mtime_ms))
+}
+
 /// Returns `Ok(None)` when the file was unchanged and skipped, otherwise the parse warnings
 /// and the number of records written.
 pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<(Vec<String>, usize)>, String> {
-    let meta = std::fs::metadata(&f.path).map_err(|e| e.to_string())?;
-    let size = meta.len();
-    let mtime_ms = meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0);
+    let (mut size, mut mtime_ms) = size_and_mtime(&f.path).map_err(|e| e.to_string())?;
+    if f.parser == ParserKind::AntigravityDb {
+        // new rows land in the WAL until SQLite checkpoints them into the database file
+        let mut wal = f.path.clone().into_os_string();
+        wal.push("-wal");
+        if let Ok((s, m)) = size_and_mtime(std::path::Path::new(&wal)) {
+            size += s;
+            mtime_ms = mtime_ms.max(m);
+        }
+    }
     let key = f.path.to_string_lossy().into_owned();
     let cp = store.checkpoint(&key).map_err(|e| e.to_string())?;
 
@@ -105,6 +113,7 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<(Vec<
         ParserKind::ClaudePlanHistory => claude_plan::parse_file(&f.path),
         ParserKind::CodexRollout => codex::parse_file(&f.path, offset, &state),
         ParserKind::StatuslineCapture => statusline::parse_file(&f.path, offset),
+        ParserKind::AntigravityDb => antigravity::parse_file(&f.path),
     }
     .map_err(|e| e.to_string())?;
 

@@ -449,3 +449,38 @@ fn cache_reuse_counts_codex_models_that_log_their_writes() {
     let r = report(&store, &PriceBook::default_book(), range, &Filter::default(), &tz()).unwrap();
     assert_eq!((r.totals.cache_read_with_writes, r.totals.cache_write_with_reads), (4_000, 1_000));
 }
+
+#[test]
+fn antigravity_pools_count_only_their_own_models() {
+    let now = 1_791_440_000_000;
+    let resets = (now + 3_600_000) / 1000;
+    let mut store = Store::open_in_memory().unwrap();
+    {
+        let mut tx = store.transaction().unwrap();
+        tx.upsert_events(&[
+            ev("g1", now - 3_600_000, Tool::Antigravity, "gemini-3.8-flash-n", r"C:\p\a", 4_000, 0),
+            ev("g2", now - 1_800_000, Tool::Antigravity, "gemini-3-flash-a", r"C:\p\b", 1_000, 0),
+            ev("c1", now - 1_200_000, Tool::Antigravity, "claude-opus-4-6-thinking", r"C:\p\a", 2_000, 0),
+            // another provider's model with "gemini" nowhere near Antigravity
+            ev("x", now - 600_000, Tool::Codex, "gpt-5.6-terra", r"C:\p\a", 9_000, 0),
+        ])
+        .unwrap();
+        let pool = |id: &str, used: f64| LimitSnapshot {
+            limit_id: id.into(),
+            ..snap(now - 60_000, Provider::Google, Tool::Antigravity, "five_hour", used, Some(resets), None, "antigravity_cli_usage")
+        };
+        tx.insert_limits(&[pool("gemini", 30.0), pool("3p", 10.0)]).unwrap();
+        tx.commit().unwrap();
+    }
+    let views = limits_view(&store, &PriceBook::default_book(), now, &[]).unwrap();
+    let find = |id: &str| views.iter().find(|v| v.provider == Provider::Google && v.limit_id == id).unwrap();
+    assert_eq!((find("gemini").used_pct, find("gemini").window_usage.events), (Some(30.0), 2));
+    assert_eq!((find("3p").used_pct, find("3p").window_usage.events), (Some(10.0), 1));
+    assert_eq!(find("3p").projects.len(), 1);
+
+    // a budget the user set for Antigravity covers both pools
+    let th = [Threshold { provider: Provider::Google, window: "seven_day".into(), tokens: Some(70_000), cost_usd: None }];
+    let v = limits_view(&store, &PriceBook::default_book(), now, &th).unwrap();
+    let b = v.iter().find(|v| v.provider == Provider::Google && v.window == "seven_day").unwrap();
+    assert_eq!((b.window_usage.events, b.used_pct), (3, Some(10.0)));
+}

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { app, saveSettings, toolColor } from '../lib/store.svelte'
   import type { Accuracy } from '../lib/api'
-  import { fmtCompact, fmtDate, fmtHour, fmtMoney, fmtPct, t, toolLabel, weekdayNames } from '../lib/i18n.svelte'
+  import { fmtCompact, fmtDate, fmtHour, fmtMoney, fmtPct, limitName, t, toolLabel, weekdayNames } from '../lib/i18n.svelte'
   import StatTile from '../components/StatTile.svelte'
   import Segmented from '../components/Segmented.svelte'
   import AreaChart from '../components/charts/AreaChart.svelte'
@@ -106,7 +106,7 @@
           {#each headline as l (l.provider + l.limit_id + l.window)}
             <LimitMeter
               compact
-              title="{t(`provider.${l.provider}`)} · {t(`limits.window.${l.window}`)}"
+              title="{limitName(l.provider, l.limit_id)} · {t(`limits.window.${l.window}`)}"
               window={l.window}
               used={l.used_pct}
               state={l.state}

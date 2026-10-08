@@ -1,6 +1,6 @@
 //! Finds the data sources installed on *this* machine for *this* user. Nothing is hardcoded:
 //! roots come from Known Folders (`dirs`), tool-specific environment variables
-//! (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) and user-added paths. MSIX packages expose the same
+//! (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `ANTIGRAVITY_APP_DATA_DIR`) and user-added paths. MSIX packages expose the same
 //! folder under two paths, so files are de-duplicated by their NTFS file id.
 
 use crate::sources::ParserKind;
@@ -17,11 +17,18 @@ pub enum SourceId {
     ClaudeDesktop,
     Codex,
     ChatgptDesktop,
+    Antigravity,
 }
 
 impl SourceId {
-    pub const ALL: [SourceId; 5] =
-        [SourceId::ClaudeCode, SourceId::Cowork, SourceId::ClaudeDesktop, SourceId::Codex, SourceId::ChatgptDesktop];
+    pub const ALL: [SourceId; 6] = [
+        SourceId::ClaudeCode,
+        SourceId::Cowork,
+        SourceId::ClaudeDesktop,
+        SourceId::Codex,
+        SourceId::Antigravity,
+        SourceId::ChatgptDesktop,
+    ];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -30,6 +37,7 @@ impl SourceId {
             SourceId::ClaudeDesktop => "claude_desktop",
             SourceId::Codex => "codex",
             SourceId::ChatgptDesktop => "chatgpt_desktop",
+            SourceId::Antigravity => "antigravity",
         }
     }
     /// Whether usage can actually be read (ChatGPT desktop is detection-only).
@@ -48,6 +56,7 @@ pub struct Env {
     pub local: Option<PathBuf>,
     pub claude_config_dir: Option<String>,
     pub codex_home: Option<String>,
+    pub antigravity_data_dir: Option<String>,
 }
 
 impl Env {
@@ -59,6 +68,7 @@ impl Env {
             local: dirs::data_local_dir(),
             claude_config_dir: var("CLAUDE_CONFIG_DIR"),
             codex_home: var("CODEX_HOME"),
+            antigravity_data_dir: var("ANTIGRAVITY_APP_DATA_DIR"),
         }
     }
 }
@@ -159,6 +169,45 @@ fn chatgpt_desktop_dirs(env: &Env) -> Vec<PathBuf> {
     v
 }
 
+/// Data folders of the Antigravity 2.0 app, IDE and CLI under `~/.gemini`, plus any other
+/// `antigravity*` folder holding conversations and an absolute `ANTIGRAVITY_APP_DATA_DIR`.
+pub fn antigravity_dirs(env: &Env) -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(gemini) = env.home.as_ref().map(|h| h.join(".gemini")) {
+        for name in ["antigravity", "antigravity-ide", "antigravity-cli"] {
+            v.push(gemini.join(name));
+        }
+        if let Ok(rd) = std::fs::read_dir(&gemini) {
+            let mut more: Vec<PathBuf> = rd
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.file_name().is_some_and(|n| n.to_string_lossy().to_ascii_lowercase().starts_with("antigravity"))
+                        && p.join("conversations").is_dir()
+                        && !v.contains(p)
+                })
+                .collect();
+            more.sort();
+            v.extend(more);
+        }
+        if let Some(d) = &env.antigravity_data_dir {
+            let p = if Path::new(d).is_absolute() { PathBuf::from(d) } else { gemini.join(d) };
+            if !v.contains(&p) {
+                v.push(p);
+            }
+        }
+    }
+    v
+}
+
+fn files_with_ext(dir: &Path, ext: &str) -> Vec<PathBuf> {
+    let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut v: Vec<PathBuf> =
+        rd.flatten().map(|e| e.path()).filter(|p| p.is_file() && p.extension().is_some_and(|x| x == ext)).collect();
+    v.sort();
+    v
+}
+
 fn jsonl_under(dir: &Path) -> impl Iterator<Item = PathBuf> {
     WalkDir::new(dir)
         .follow_links(false)
@@ -213,6 +262,14 @@ pub fn enumerate_files(env: &Env, extra: &ExtraPaths, enabled: &HashSet<SourceId
         }
     }
 
+    if enabled.contains(&SourceId::Antigravity) {
+        for dir in antigravity_dirs(env) {
+            for p in files_with_ext(&dir.join("conversations"), "db") {
+                candidates.push((p, ParserKind::AntigravityDb, SourceId::Antigravity));
+            }
+        }
+    }
+
     let mut seen = HashSet::new();
     let mut out = Vec::with_capacity(candidates.len());
     for (path, parser, source) in candidates {
@@ -249,6 +306,7 @@ pub fn detect(env: &Env, extra: &ExtraPaths) -> Vec<SourceStatus> {
                 SourceId::ClaudeDesktop => desktop.clone(),
                 SourceId::Codex => existing(codex_homes(env, extra)),
                 SourceId::ChatgptDesktop => existing(chatgpt_desktop_dirs(env)),
+                SourceId::Antigravity => existing(antigravity_dirs(env)),
             };
             let file_count = count(id);
             // A tool counts as found if its data directory exists, even with no usage yet.

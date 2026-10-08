@@ -1,6 +1,7 @@
 //! Source parsers. Each parser is tolerant: unknown fields are ignored, malformed lines are
 //! counted as warnings and skipped, and nothing ever panics on unexpected input.
 
+pub mod antigravity;
 pub mod claude_code;
 pub mod claude_plan;
 pub mod codex;
@@ -21,6 +22,7 @@ pub enum ParserKind {
     CodexRollout,
     /// This app's own Claude Code status-line capture file.
     StatuslineCapture,
+    AntigravityDb,
 }
 
 impl ParserKind {
@@ -32,12 +34,13 @@ impl ParserKind {
             ParserKind::ClaudePlanHistory => "claude_plan_history",
             ParserKind::CodexRollout => "codex_rollout",
             ParserKind::StatuslineCapture => "statusline_capture",
+            ParserKind::AntigravityDb => antigravity::SOURCE,
         }
     }
-    /// Whole-file JSON documents are re-read completely when they change;
+    /// Whole-file documents (JSON, SQLite) are re-read completely when they change;
     /// JSONL files are read incrementally from a byte offset.
     pub fn is_incremental(self) -> bool {
-        !matches!(self, ParserKind::ClaudePlanHistory)
+        !matches!(self, ParserKind::ClaudePlanHistory | ParserKind::AntigravityDb)
     }
 }
 

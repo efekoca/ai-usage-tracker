@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { api, type LimitHistoryView, type Provider, type WindowRecord } from '../lib/api'
+  import { api, providersOf, type LimitHistoryView, type Provider, type WindowRecord } from '../lib/api'
   import { app, latest } from '../lib/store.svelte'
-  import { fmtCompact, fmtDateTime, fmtDuration, fmtInt, fmtMoney, fmtPct, i18n, t, windowLabel } from '../lib/i18n.svelte'
+  import { fmtCompact, fmtDateTime, fmtDuration, fmtInt, fmtMoney, fmtPct, i18n, limitName, t, windowLabel } from '../lib/i18n.svelte'
   import Segmented from './Segmented.svelte'
   import Select from './Select.svelte'
   import StatTile from './StatTile.svelte'
@@ -37,20 +37,13 @@
     )
   })
 
-  const enabled = $derived.by(() => {
-    const s = new Set<Provider>()
-    for (const src of app.settings?.enabled_sources ?? []) {
-      if (src === 'codex') s.add('openai')
-      else if (src !== 'chatgpt_desktop') s.add('anthropic')
-    }
-    return [...s].sort()
-  })
+  const enabled = $derived(providersOf(app.settings?.enabled_sources ?? []).filter((p) => (view?.advice ?? []).some((a) => a.provider === p) || (view?.history.series ?? []).some((x) => x.provider === p)))
   const providers = $derived(provider === 'all' ? enabled : [provider])
   const series = $derived((view?.history.series ?? []).filter((s) => s.window === win && providers.includes(s.provider)))
-  type Row = WindowRecord & { provider: Provider }
+  type Row = WindowRecord & { provider: Provider; limit_id: string }
   const startOf = (w: WindowRecord) => w.start_ms ?? w.first_ms
   const toFull = (w: WindowRecord) => (w.full_at_ms !== null && w.start_ms !== null ? w.full_at_ms - w.start_ms : null)
-  const all = $derived<Row[]>(series.flatMap((s) => s.windows.map((w) => ({ ...w, provider: s.provider }))))
+  const all = $derived<Row[]>(series.flatMap((s) => s.windows.map((w) => ({ ...w, provider: s.provider, limit_id: s.limit_id }))))
   const rows = $derived.by(() => {
     const kept = all.filter((w) =>
       status === 'full' ? w.full : status === 'high' ? w.peak_pct >= 80 : status === 'complete' ? w.complete && !w.in_progress : true,
@@ -59,8 +52,8 @@
     return kept.sort((a, b) => (sortDesc ? key(b) - key(a) : key(a) - key(b)))
   })
   const visible = $derived(showAll ? rows : rows.slice(0, 30))
-  const keyOf = (p: Provider, w: WindowRecord) => `${p}:${w.first_ms}:${w.resets_at_ms ?? 0}`
-  const kept = $derived(new Set(rows.map((w) => keyOf(w.provider, w))))
+  const keyOf = (p: Provider, id: string, w: WindowRecord) => `${p}:${id}:${w.first_ms}:${w.resets_at_ms ?? 0}`
+  const kept = $derived(new Set(rows.map((w) => keyOf(w.provider, w.limit_id, w))))
   // range >= 3650 means "all": start at the first window shown
   const chartFrom = $derived(
     range >= 3650 && all.length ? Math.min(...all.map(startOf)) : (view?.history.to_ms ?? Date.now()) - range * DAY,
@@ -153,7 +146,7 @@
       {#each series.filter((s) => s.capacity) as s (s.provider + s.limit_id)}
         {@const c = s.capacity!}
         <div class="cap" title={t('history.stat.capacityHelp')}>
-          <div class="small muted">{t('history.stat.capacity', { p: t(`provider.${s.provider}`) })} · {windowLabel(s.window)}</div>
+          <div class="small muted">{t('history.stat.capacity', { p: limitName(s.provider, s.limit_id) })} · {windowLabel(s.window)}</div>
           <div class="capv">≈ {fmtMoney(c.median_usd)} <AccuracyBadge kind="estimated" compact /></div>
           <div class="subtle small">{t('history.stat.capacitySub', { n: c.windows, min: fmtMoney(c.min_usd), max: fmtMoney(c.max_usd) })}</div>
         </div>
@@ -174,15 +167,15 @@
         <p class="muted empty">{t('history.empty')}</p>
       {/if}
       {#each series as s (s.provider + s.limit_id)}
-        {@const shownW = s.windows.filter((w) => kept.has(keyOf(s.provider, w)))}
+        {@const shownW = s.windows.filter((w) => kept.has(keyOf(s.provider, s.limit_id, w)))}
         <div class="chart">
-          {#if series.length > 1}<h3>{t(`provider.${s.provider}`)}</h3>{/if}
+          {#if series.length > 1}<h3>{limitName(s.provider, s.limit_id)}</h3>{/if}
           <WindowHistory
             windows={shownW}
             fromMs={chartFrom}
             toMs={view.history.to_ms}
             height={190}
-            ariaLabel="{t(`provider.${s.provider}`)} · {windowLabel(win)}"
+            ariaLabel="{limitName(s.provider, s.limit_id)} · {windowLabel(win)}"
           />
         </div>
       {/each}
@@ -221,10 +214,10 @@
           </tr>
         </thead>
         <tbody>
-          {#each visible as w (keyOf(w.provider, w))}
+          {#each visible as w (keyOf(w.provider, w.limit_id, w))}
             {@const st = stateOf(w)}
             <tr>
-              {#if providers.length > 1}<td>{t(`provider.${w.provider}`)}</td>{/if}
+              {#if providers.length > 1}<td>{limitName(w.provider, w.limit_id)}</td>{/if}
               <td>{fmtDateTime(startOf(w))}</td>
               <td>
                 {fmtDateTime(w.end_ms ?? w.resets_at_ms ?? w.last_ms)}

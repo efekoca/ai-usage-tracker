@@ -3,7 +3,7 @@
   import { onMount, tick } from 'svelte'
   import { invoke } from '@tauri-apps/api/core'
   import { applyAppearance, toolColor } from './lib/store.svelte'
-  import { api, type ContextStats, type LimitView, type PlansFile, type Provider, type Report, type Sessions, type Settings } from './lib/api'
+  import { api, providerOfSource, providersOf, type ContextStats, type LimitView, type PlansFile, type Provider, type Report, type Sessions, type Settings } from './lib/api'
   import { fmtCompact, fmtDate, fmtDateTime, fmtDec, fmtInt, fmtLimit, fmtMoney, fmtPct, fmtSpan, i18n, t, toolLabel, windowLabel } from './lib/i18n.svelte'
   import Columns from './components/charts/Columns.svelte'
 
@@ -59,12 +59,12 @@
     const plan = planId ? plans?.providers[p]?.plans.find((x) => x.id === planId) : undefined
     const own = s?.plan_prices?.[p]
     const price = typeof own === 'number' && own > 0 ? own : plan?.monthly_usd ?? null
-    const cost = (r?.by_tool ?? []).filter((g) => (g.key === 'codex' ? 'openai' : 'anthropic') === p).reduce((a, g) => a + g.totals.cost_usd, 0)
+    const cost = (r?.by_tool ?? []).filter((g) => providerOfSource(g.key) === p).reduce((a, g) => a + g.totals.cost_usd, 0)
     const share = typeof price === 'number' && price > 0 ? (price * days) / (365.25 / 12) : null
     return { plan, cost, share, ratio: share ? cost / share : null }
   }
   const providers = $derived(
-    [...new Set((r?.by_tool ?? []).map((g) => (g.key === 'codex' ? 'openai' : 'anthropic') as Provider))].sort(),
+    providersOf((r?.by_tool ?? []).map((g) => g.key)),
   )
   const currentLimits = $derived(limits.filter((l) => l.window === 'five_hour' || l.window === 'seven_day'))
 </script>

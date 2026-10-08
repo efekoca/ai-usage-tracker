@@ -3,13 +3,15 @@
 use serde::{Deserialize, Serialize};
 
 /// The product that produced the usage. Cowork sessions are Claude Code under the hood,
-/// so they share `ClaudeCode` and are told apart by [`UsageEvent::client`].
+/// so they share `ClaudeCode` and are told apart by [`UsageEvent::client`]; the Antigravity
+/// app, IDE and CLI likewise share `Antigravity`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Tool {
     ClaudeCode,
     Codex,
     ClaudeDesktop,
+    Antigravity,
 }
 
 impl Tool {
@@ -18,6 +20,7 @@ impl Tool {
             Tool::ClaudeCode => "claude_code",
             Tool::Codex => "codex",
             Tool::ClaudeDesktop => "claude_desktop",
+            Tool::Antigravity => "antigravity",
         }
     }
     pub fn parse(s: &str) -> Option<Tool> {
@@ -25,6 +28,7 @@ impl Tool {
             "claude_code" => Some(Tool::ClaudeCode),
             "codex" => Some(Tool::Codex),
             "claude_desktop" => Some(Tool::ClaudeDesktop),
+            "antigravity" => Some(Tool::Antigravity),
             _ => None,
         }
     }
@@ -32,6 +36,7 @@ impl Tool {
         match self {
             Tool::ClaudeCode | Tool::ClaudeDesktop => Provider::Anthropic,
             Tool::Codex => Provider::OpenAI,
+            Tool::Antigravity => Provider::Google,
         }
     }
 }
@@ -42,6 +47,7 @@ pub enum Provider {
     Anthropic,
     #[serde(rename = "openai")]
     OpenAI,
+    Google,
 }
 
 impl Provider {
@@ -49,12 +55,14 @@ impl Provider {
         match self {
             Provider::Anthropic => "anthropic",
             Provider::OpenAI => "openai",
+            Provider::Google => "google",
         }
     }
     pub fn parse(s: &str) -> Option<Provider> {
         match s {
             "anthropic" => Some(Provider::Anthropic),
             "openai" => Some(Provider::OpenAI),
+            "google" => Some(Provider::Google),
             _ => None,
         }
     }

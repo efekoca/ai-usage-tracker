@@ -184,6 +184,11 @@ pub struct CaptureSettings {
     pub claude_poll_minutes: u64,
     /// Empty = auto-detect.
     pub claude_path: String,
+    /// Reads Antigravity's limits through the `agy` CLI's `/usage` command.
+    pub antigravity_poll: bool,
+    pub antigravity_poll_minutes: u64,
+    /// Empty = auto-detect.
+    pub antigravity_path: String,
 }
 
 impl Default for CaptureSettings {
@@ -198,6 +203,9 @@ impl Default for CaptureSettings {
             claude_poll: true,
             claude_poll_minutes: 5,
             claude_path: String::new(),
+            antigravity_poll: true,
+            antigravity_poll_minutes: 5,
+            antigravity_path: String::new(),
         }
     }
 }
@@ -211,6 +219,9 @@ pub struct Settings {
     /// "system" | "light" | "dark"
     pub theme: String,
     pub enabled_sources: Vec<SourceId>,
+    /// Sources this install has offered; one added by a later version starts enabled.
+    #[serde(default = "sources_before_antigravity")]
+    pub known_sources: Vec<SourceId>,
     pub extra_paths: ExtraPaths,
     /// Provider ("anthropic" / "openai") → plan id from plans.json.
     pub plans: std::collections::BTreeMap<String, String>,
@@ -249,6 +260,7 @@ impl Default for Settings {
             language: "system".into(),
             theme: "system".into(),
             enabled_sources: SourceId::ALL.into_iter().filter(|s| s.supported()).collect(),
+            known_sources: SourceId::ALL.to_vec(),
             extra_paths: ExtraPaths::default(),
             plans: Default::default(),
             thresholds: Vec::new(),
@@ -271,12 +283,17 @@ impl Default for Settings {
     }
 }
 
+fn sources_before_antigravity() -> Vec<SourceId> {
+    vec![SourceId::ClaudeCode, SourceId::Cowork, SourceId::ClaudeDesktop, SourceId::Codex, SourceId::ChatgptDesktop]
+}
+
 impl Settings {
     pub fn load(store: &Store) -> Settings {
         match store.setting(KEY) {
             Ok(Some(s)) => serde_json::from_str::<Settings>(&s)
                 .map(|mut s| {
                     s.widget.normalize();
+                    s.adopt_new_sources();
                     s
                 })
                 .unwrap_or_else(|e| {
@@ -284,6 +301,18 @@ impl Settings {
                     Settings::default()
                 }),
             _ => Settings::default(),
+        }
+    }
+
+    /// A source the user switched off stays off; one they were never offered is switched on.
+    fn adopt_new_sources(&mut self) {
+        for id in SourceId::ALL {
+            if !self.known_sources.contains(&id) {
+                if id.supported() && !self.enabled_sources.contains(&id) {
+                    self.enabled_sources.push(id);
+                }
+                self.known_sources.push(id);
+            }
         }
     }
 
@@ -308,7 +337,7 @@ mod tests {
     #[test]
     fn limit_reads_are_on_and_file_editing_methods_off_by_default() {
         let c = Settings::default().capture;
-        assert!(c.claude_poll && c.codex_poll);
+        assert!(c.claude_poll && c.codex_poll && c.antigravity_poll);
         assert!(!c.statusline && !c.otel);
     }
 
@@ -316,11 +345,25 @@ mod tests {
     fn settings_saved_by_an_older_version_get_the_new_defaults() {
         // written before the Claude limit read existed
         let s: Settings = serde_json::from_str(r#"{"onboarded":true,"capture":{"codex_poll":false}}"#).unwrap();
-        assert!(s.capture.claude_poll);
+        assert!(s.capture.claude_poll && s.capture.antigravity_poll);
         assert!(!s.capture.codex_poll, "an explicit choice is kept");
         assert_eq!(s.limit_display, "used");
         assert!(s.tray.show_percent && s.update_check);
         assert_eq!(s.widget.hotkey, DEFAULT_HOTKEY);
+    }
+
+    #[test]
+    fn a_source_added_by_an_update_starts_on_without_reviving_switched_off_ones() {
+        let store = Store::open_in_memory().unwrap();
+        store.set_setting(KEY, r#"{"onboarded":true,"enabled_sources":["claude_code","cowork"]}"#).unwrap();
+        let mut s = Settings::load(&store);
+        assert_eq!(s.enabled_sources, [SourceId::ClaudeCode, SourceId::Cowork, SourceId::Antigravity]);
+        assert!(SourceId::ALL.iter().all(|x| s.known_sources.contains(x)) && s.known_sources.len() == SourceId::ALL.len());
+
+        s.enabled_sources.retain(|x| *x != SourceId::Antigravity);
+        s.save(&store).unwrap();
+        assert_eq!(Settings::load(&store).enabled_sources, [SourceId::ClaudeCode, SourceId::Cowork], "an explicit choice is kept");
+        assert!(Settings::default().enabled_sources.contains(&SourceId::Antigravity));
     }
 
     #[test]

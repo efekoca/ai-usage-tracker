@@ -1,8 +1,8 @@
 <script lang="ts">
   // Chat use is not in local logs, so the figure is a lower bound.
   import { untrack } from 'svelte'
-  import { app, latest, saveSettings } from '../lib/store.svelte'
-  import { api, type PlanDef, type PlansFile, type PlanValue, type Provider } from '../lib/api'
+  import { app, latest, providerColor, saveSettings } from '../lib/store.svelte'
+  import { api, providersOf, type PlanDef, type PlansFile, type PlanValue, type Provider } from '../lib/api'
   import { fmtDate, fmtDec, fmtInt, fmtMoney, i18n, t } from '../lib/i18n.svelte'
   import Icon from './Icon.svelte'
   import AccuracyBadge from './AccuracyBadge.svelte'
@@ -25,14 +25,7 @@
     )
   })
 
-  const providers = $derived.by(() => {
-    const s = new Set<Provider>()
-    for (const src of app.settings?.enabled_sources ?? []) {
-      if (src === 'codex') s.add('openai')
-      else if (src !== 'chatgpt_desktop') s.add('anthropic')
-    }
-    return (['anthropic', 'openai'] as Provider[]).filter((p) => s.has(p))
-  })
+  const providers = $derived(providersOf(app.settings?.enabled_sources ?? []))
 
   const DAYS_PER_MONTH = 365.25 / 12
   function planOf(p: Provider): PlanDef | undefined {
@@ -133,12 +126,12 @@
             </div>
             <svg class="spark" viewBox="0 0 {W} {H}" preserveAspectRatio="none" role="img"
               aria-label="{t('value.chart.api')}: {fmtMoney(r.cost)}; {t('value.chart.plan')}: {fmtMoney(r.share ?? 0)}">
-              <path d={g.area} class="area" style="--c:var(--{p === 'openai' ? 's1' : 's2'})" />
-              <path d={g.line} class="line" style="--c:var(--{p === 'openai' ? 's1' : 's2'})" />
+              <path d={g.area} class="area" style="--c:{providerColor[p]}" />
+              <path d={g.line} class="line" style="--c:{providerColor[p]}" />
               <line x1="0" x2={W} y1={planY} y2={planY} class="plan" />
             </svg>
             <div class="legend small subtle">
-              <span><i class="sw" style="background:var(--{p === 'openai' ? 's1' : 's2'})"></i>{t('value.chart.api')}</span>
+              <span><i class="sw" style="background:{providerColor[p]}"></i>{t('value.chart.api')}</span>
               <span><i class="sw dash"></i>{t('value.chart.plan')}</span>
               <span class="spacer"></span>
               <span>{fmtDate(value.dates[0], 'short')} – {fmtDate(value.dates[value.dates.length - 1], 'short')}</span>

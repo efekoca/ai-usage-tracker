@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { app, saveSettings } from '../lib/store.svelte'
-  import { api, type PlansFile, type Provider, type Threshold } from '../lib/api'
-  import { fmtCompact, fmtMoney, fmtPct, i18n, t, windowLabel } from '../lib/i18n.svelte'
+  import { api, providersOf, type PlansFile, type Provider, type Threshold } from '../lib/api'
+  import { fmtCompact, fmtMoney, fmtPct, i18n, limitName, t, windowLabel } from '../lib/i18n.svelte'
   import LimitMeter from '../components/LimitMeter.svelte'
   import AccuracyBadge from '../components/AccuracyBadge.svelte'
   import Icon from '../components/Icon.svelte'
@@ -16,14 +16,7 @@
     plans = await api.plans()
   })
 
-  const providers = $derived.by(() => {
-    const s = new Set<Provider>()
-    for (const src of app.settings?.enabled_sources ?? []) {
-      if (src === 'codex') s.add('openai')
-      else if (src !== 'chatgpt_desktop') s.add('anthropic')
-    }
-    return [...s]
-  })
+  const providers = $derived(providersOf(app.settings?.enabled_sources ?? []))
 
   function setPlan(p: Provider, id: string) {
     saveSettings((c) => {
@@ -102,7 +95,7 @@
         {/if}
       </div>
     {/each}
-    <p class="subtle small">{plans.notes[i18n.lang]} {plans.providers.anthropic.shared_pool_note?.[i18n.lang] ?? ''}</p>
+    <p class="subtle small">{plans.notes[i18n.lang]} {providers.map((p) => plans?.providers[p]?.shared_pool_note?.[i18n.lang] ?? '').filter(Boolean).join(' ')}</p>
   </section>
 {/if}
 
@@ -116,7 +109,7 @@
   {#each app.limits as l (l.provider + l.limit_id + l.window + l.source)}
     <section class="card limit">
       <div class="who">
-        <span class="prov">{t(`provider.${l.provider}`)}</span>
+        <span class="prov">{limitName(l.provider, l.limit_id)}</span>
         {#if l.plan}<span class="pill">{l.plan}</span>{/if}
       </div>
       <LimitMeter window={l.window} used={l.used_pct} state={l.state} accuracy={l.accuracy} resetsAt={l.resets_at} observedMs={l.observed_ms} source={l.source} sinceTokens={l.usage_since.total_tokens} provider={l.provider} forecast={l.forecast} />

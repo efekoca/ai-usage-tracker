@@ -55,7 +55,7 @@
   function toolName(r: ToolRow): { main: string; sub: string } {
     const mcp = r.name.match(/^mcp__(.+?)__(.+)$/)
     if (mcp) return { main: mcp[2], sub: t('tools.mcp', { server: mcp[1].replaceAll('_', ' ') }) }
-    if (r.tool === 'codex' && has(`tools.codex.${r.name}`)) return { main: t(`tools.codex.${r.name}`), sub: r.name }
+    if (has(`tools.${r.tool}.${r.name}`)) return { main: t(`tools.${r.tool}.${r.name}`), sub: r.name }
     return { main: r.name, sub: '' }
   }
 </script>
