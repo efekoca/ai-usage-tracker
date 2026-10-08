@@ -1,5 +1,6 @@
 //! UI aggregations. Periods and daily buckets use the user's local time zone.
 
+use crate::capture::antigravity_limits::GEMINI_POOL;
 use crate::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool};
 use crate::pricing::{Cost, CostInput, PriceBook};
 use crate::store::{EventRow, ProjectRow, Store};
@@ -417,16 +418,25 @@ fn provider_tools(p: Provider) -> &'static [Tool] {
     match p {
         Provider::Anthropic => &[Tool::ClaudeCode],
         Provider::OpenAI => &[Tool::Codex],
+        Provider::Google => &[Tool::Antigravity],
     }
 }
 
-pub(crate) fn counts_toward(provider: Provider, window: &str, e: &EventRow) -> bool {
+pub(crate) fn counts_toward(provider: Provider, limit_id: &str, window: &str, e: &EventRow) -> bool {
+    let model = e.model.to_ascii_lowercase();
     let family = match window {
         "seven_day_opus" => Some("opus"),
         "seven_day_sonnet" => Some("sonnet"),
         _ => None,
     };
-    provider_tools(provider).contains(&e.tool) && family.is_none_or(|f| e.model.to_ascii_lowercase().contains(f))
+    // Antigravity's Gemini models and its other models (Claude, GPT-OSS) have separate pools
+    let pool = match (provider, limit_id) {
+        (Provider::Google, "") => true,
+        (Provider::Google, GEMINI_POOL) => model.starts_with("gemini"),
+        (Provider::Google, _) => !model.starts_with("gemini"),
+        _ => true,
+    };
+    provider_tools(provider).contains(&e.tool) && pool && family.is_none_or(|f| model.contains(f))
 }
 
 pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[Threshold]) -> Result<Vec<LimitView>> {
@@ -474,7 +484,7 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
         if state == LimitState::Fresh {
             let age = now_ms - s.ts_ms;
             if age >= BEHIND_GRACE_MS {
-                for e in store.events_between(s.ts_ms + 1, now_ms + 1)?.iter().filter(|e| counts_toward(s.provider, &s.window, e)) {
+                for e in store.events_between(s.ts_ms + 1, now_ms + 1)?.iter().filter(|e| counts_toward(s.provider, &s.limit_id, &s.window, e)) {
                     usage_since.add(e, cost_of(book, e).as_ref(), savings_of(book, e));
                 }
             }
@@ -493,7 +503,7 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
             _ => None,
         };
         let (usage, shares) = match start {
-            Some(st) => window_usage(store, book, &projects, s.provider, &s.window, st, now_ms, used)?,
+            Some(st) => window_usage(store, book, &projects, s.provider, &s.limit_id, &s.window, st, now_ms, used)?,
             None => (Totals::default(), Vec::new()),
         };
         out.push(LimitView {
@@ -524,7 +534,7 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
         }
         let Some(minutes) = window_minutes(&t.window) else { continue };
         let start = now_ms - minutes * 60_000;
-        let (usage, mut shares) = window_usage(store, book, &projects, t.provider, &t.window, start, now_ms, None)?;
+        let (usage, mut shares) = window_usage(store, book, &projects, t.provider, "", &t.window, start, now_ms, None)?;
         let pct = match (t.cost_usd, t.tokens) {
             (Some(c), _) if c > 0.0 => Some(usage.cost_usd / c * 100.0),
             (_, Some(n)) if n > 0 => Some(usage.total_tokens as f64 / n as f64 * 100.0),
@@ -569,6 +579,7 @@ fn window_usage(
     book: &PriceBook,
     projects: &HashMap<i64, ProjectRow>,
     provider: Provider,
+    limit_id: &str,
     window: &str,
     from_ms: i64,
     to_ms: i64,
@@ -576,7 +587,7 @@ fn window_usage(
 ) -> Result<(Totals, Vec<ProjectShare>)> {
     let mut total = Totals::default();
     let mut per: HashMap<Option<i64>, Totals> = HashMap::new();
-    for e in store.events_between(from_ms, to_ms + 1)?.iter().filter(|e| counts_toward(provider, window, e)) {
+    for e in store.events_between(from_ms, to_ms + 1)?.iter().filter(|e| counts_toward(provider, limit_id, window, e)) {
         let c = cost_of(book, e);
         let sv = savings_of(book, e);
         total.add(e, c.as_ref(), sv);

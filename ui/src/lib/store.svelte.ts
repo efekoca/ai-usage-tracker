@@ -160,4 +160,11 @@ export const toolColor: Record<string, string> = {
   codex: 'var(--s1)',
   claude_code: 'var(--s2)',
   claude_desktop: 'var(--s3)',
+  antigravity: 'var(--s4)',
+}
+
+export const providerColor: Record<string, string> = {
+  openai: 'var(--s1)',
+  anthropic: 'var(--s2)',
+  google: 'var(--s4)',
 }

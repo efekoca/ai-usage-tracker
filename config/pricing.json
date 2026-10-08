@@ -1,11 +1,12 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-03",
+  "updated_at": "2026-10-08",
   "currency": "USD",
   "unit": "per_million_tokens",
   "sources": {
     "anthropic": "https://platform.claude.com/docs/en/about-claude/pricing",
-    "openai": "https://developers.openai.com/api/docs/pricing"
+    "openai": "https://developers.openai.com/api/docs/pricing",
+    "google": "https://ai.google.dev/gemini-api/docs/pricing"
   },
   "notes": [
     "Prices are the public API list prices. Usage on a subscription plan is shown as an 'API equivalent', not as money actually spent.",
@@ -13,16 +14,18 @@
     "cache_write_5m missing => cache writes billed as normal input; cache_write_1h missing => same as cache_write_5m.",
     "long_context applies per request when the full prompt size exceeds 'threshold' input tokens.",
     "speed_multipliers / geo_multipliers multiply every token category (not per-request fees).",
-    "For Claude 4.x models the price page lists input/output; their cache prices here are derived from the documented standard multipliers (5m write 1.25x, 1h write 2x, read 0.1x)."
+    "For Claude 4.x models the price page lists input/output; their cache prices here are derived from the documented standard multipliers (5m write 1.25x, 1h write 2x, read 0.1x).",
+    "Gemini prices are the Gemini Developer API Standard tier. Gemini 3.6/3.7/3.8 Flash list an introductory price until 2026-12-31 (input 1.50, output 7.50, cache read 0.15 from 2027-01-01). Gemini caching has no write fee; thinking tokens are billed as output.",
+    "Antigravity names some models by internal ids (gemini-3.8-flash-n, gemini-3-flash-a, claude-*-thinking); they are aliases of the model Antigravity shows for them. Antigravity does not report cache writes for Claude models, so those are counted as input."
   ],
   "models": [
-    { "id": "claude-opus-5-5", "provider": "anthropic", "input": 4, "output": 20, "cache_read": 0.2, "cache_write_5m": 5, "cache_write_1h": 8,
+    { "id": "claude-opus-5-5", "provider": "anthropic", "aliases": ["claude-opus-5-5-thinking"], "input": 4, "output": 20, "cache_read": 0.2, "cache_write_5m": 5, "cache_write_1h": 8,
       "speed_multipliers": { "fast": 2 }, "geo_multipliers": { "us": 1.1 }, "web_search_per_1k": 10, "verified_at": "2026-10-02" },
     { "id": "claude-fable-5-1", "provider": "anthropic", "input": 10, "output": 50, "cache_read": 0.25, "cache_write_5m": 12.5, "cache_write_1h": 20,
       "geo_multipliers": { "us": 1.1 }, "web_search_per_1k": 10, "verified_at": "2026-10-02" },
     { "id": "claude-mythos-5-1", "provider": "anthropic", "input": 10, "output": 50, "cache_read": 0.25, "cache_write_5m": 12.5, "cache_write_1h": 20,
       "geo_multipliers": { "us": 1.1 }, "web_search_per_1k": 10, "verified_at": "2026-10-02", "notes": "Limited availability (Project Glasswing)." },
-    { "id": "claude-sonnet-5-5", "provider": "anthropic", "input": 2, "output": 10, "cache_read": 0.2, "cache_write_5m": 2.5, "cache_write_1h": 4,
+    { "id": "claude-sonnet-5-5", "provider": "anthropic", "aliases": ["claude-sonnet-5-5-thinking"], "input": 2, "output": 10, "cache_read": 0.2, "cache_write_5m": 2.5, "cache_write_1h": 4,
       "geo_multipliers": { "us": 1.1 }, "web_search_per_1k": 10, "verified_at": "2026-10-02" },
     { "id": "claude-haiku-4-5", "provider": "anthropic", "aliases": ["claude-haiku-4-5-20251001"], "input": 1, "output": 5, "cache_read": 0.1, "cache_write_5m": 1.25, "cache_write_1h": 2,
       "web_search_per_1k": 10, "verified_at": "2026-10-02", "notes": "Retirement announced for no sooner than 2026-10-15." },
@@ -38,13 +41,13 @@
       "speed_multipliers": { "fast": 2 }, "geo_multipliers": { "us": 1.1 }, "web_search_per_1k": 10, "verified_at": "2026-10-02", "notes": "Legacy (still available)." },
     { "id": "claude-opus-4-7", "provider": "anthropic", "input": 5, "output": 25, "cache_read": 0.5, "cache_write_5m": 6.25, "cache_write_1h": 10,
       "geo_multipliers": { "us": 1.1 }, "web_search_per_1k": 10, "verified_at": "2026-10-02" },
-    { "id": "claude-opus-4-6", "provider": "anthropic", "input": 5, "output": 25, "cache_read": 0.5, "cache_write_5m": 6.25, "cache_write_1h": 10,
+    { "id": "claude-opus-4-6", "provider": "anthropic", "aliases": ["claude-opus-4-6-thinking"], "input": 5, "output": 25, "cache_read": 0.5, "cache_write_5m": 6.25, "cache_write_1h": 10,
       "geo_multipliers": { "us": 1.1 }, "web_search_per_1k": 10, "verified_at": "2026-10-02" },
-    { "id": "claude-opus-4-5", "provider": "anthropic", "input": 5, "output": 25, "cache_read": 0.5, "cache_write_5m": 6.25, "cache_write_1h": 10,
+    { "id": "claude-opus-4-5", "provider": "anthropic", "aliases": ["claude-opus-4-5-thinking"], "input": 5, "output": 25, "cache_read": 0.5, "cache_write_5m": 6.25, "cache_write_1h": 10,
       "web_search_per_1k": 10, "verified_at": "2026-10-02" },
-    { "id": "claude-sonnet-4-6", "provider": "anthropic", "input": 3, "output": 15, "cache_read": 0.3, "cache_write_5m": 3.75, "cache_write_1h": 6,
+    { "id": "claude-sonnet-4-6", "provider": "anthropic", "aliases": ["claude-sonnet-4-6-thinking"], "input": 3, "output": 15, "cache_read": 0.3, "cache_write_5m": 3.75, "cache_write_1h": 6,
       "geo_multipliers": { "us": 1.1 }, "web_search_per_1k": 10, "verified_at": "2026-10-02" },
-    { "id": "claude-sonnet-4-5", "provider": "anthropic", "input": 3, "output": 15, "cache_read": 0.3, "cache_write_5m": 3.75, "cache_write_1h": 6,
+    { "id": "claude-sonnet-4-5", "provider": "anthropic", "aliases": ["claude-sonnet-4-5-thinking"], "input": 3, "output": 15, "cache_read": 0.3, "cache_write_5m": 3.75, "cache_write_1h": 6,
       "web_search_per_1k": 10, "verified_at": "2026-10-02" },
     { "id": "claude-opus-4-1", "provider": "anthropic", "input": 15, "output": 75, "cache_read": 1.5, "cache_write_5m": 18.75, "cache_write_1h": 30,
       "web_search_per_1k": 10, "verified_at": "2026-10-02", "notes": "Retired on the first-party API; listed for historical logs." },
@@ -80,6 +83,15 @@
       "speed_multipliers": { "fast": 2 }, "verified_at": "2026-10-03" },
     { "id": "gpt-6-luna", "provider": "openai", "input": 0.1, "cache_read": 0.01, "cache_write_5m": 0.125, "output": 0.5,
       "long_context": { "threshold": 272000, "input": 0.2, "cache_read": 0.02, "cache_write_5m": 0.25, "output": 0.75 },
-      "speed_multipliers": { "fast": 2 }, "verified_at": "2026-10-03" }
+      "speed_multipliers": { "fast": 2 }, "verified_at": "2026-10-03" },
+    { "id": "gemini-3.8-flash", "provider": "google", "aliases": ["gemini-3.8-flash-n"], "input": 0.75, "output": 3.75, "cache_read": 0.075, "verified_at": "2026-10-08", "notes": "Introductory price until 2026-12-31." },
+    { "id": "gemini-3.7-flash", "provider": "google", "input": 0.75, "output": 3.75, "cache_read": 0.075, "verified_at": "2026-10-08", "notes": "Introductory price until 2026-12-31." },
+    { "id": "gemini-3.6-flash", "provider": "google", "input": 0.75, "output": 3.75, "cache_read": 0.075, "verified_at": "2026-10-08", "notes": "Introductory price until 2026-12-31." },
+    { "id": "gemini-3.5-flash", "provider": "google", "aliases": ["gemini-3-flash-a"], "input": 1.5, "output": 9, "cache_read": 0.15, "verified_at": "2026-10-08" },
+    { "id": "gemini-3.5-flash-lite", "provider": "google", "input": 0.3, "output": 2.5, "cache_read": 0.03, "verified_at": "2026-10-08" },
+    { "id": "gemini-3.1-flash-lite", "provider": "google", "input": 0.25, "output": 1.5, "cache_read": 0.025, "verified_at": "2026-10-08" },
+    { "id": "gemini-3.1-pro-preview", "provider": "google", "aliases": ["gemini-3.1-pro"], "input": 2, "output": 12, "cache_read": 0.2,
+      "long_context": { "threshold": 200000, "input": 4, "cache_read": 0.4, "output": 18 }, "verified_at": "2026-10-08" },
+    { "id": "gemini-3-flash-preview", "provider": "google", "aliases": ["gemini-3-flash"], "input": 0.5, "output": 3, "cache_read": 0.05, "verified_at": "2026-10-08" }
   ]
 }

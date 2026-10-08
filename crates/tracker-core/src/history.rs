@@ -275,7 +275,7 @@ pub fn add_local_usage(h: &mut LimitHistory, store: &Store, book: &PriceBook) ->
     for s in &mut h.series {
         let span = |w: &WindowRecord| (w.start_ms.unwrap_or(w.first_ms), w.end_ms.unwrap_or(w.last_ms + 1));
         let (Some(from), Some(to)) = (s.windows.iter().map(|w| span(w).0).min(), s.windows.iter().map(|w| span(w).1).max()) else { continue };
-        let events: Vec<_> = store.events_between(from, to)?.into_iter().filter(|e| counts_toward(s.provider, &s.window, e)).collect();
+        let events: Vec<_> = store.events_between(from, to)?.into_iter().filter(|e| counts_toward(s.provider, &s.limit_id, &s.window, e)).collect();
         // the peak reading is compared with the use up to that reading, not with later use
         let mut at_peak: Vec<LocalUsage> = Vec::new();
         for w in &mut s.windows {

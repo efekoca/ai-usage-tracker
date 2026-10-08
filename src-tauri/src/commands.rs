@@ -78,6 +78,7 @@ fn save_settings_inner(app: &AppHandle, state: &AppState, settings: Settings) ->
     // capture changes only via set_capture (it edits files outside the app), the shortcut only
     // via set_hotkey (it must register first); a page's widget position can predate the last drag
     settings.capture = old.capture.clone();
+    settings.known_sources = old.known_sources.clone();
     settings.widget.hotkey = old.widget.hotkey.clone();
     settings.widget.x = old.widget.x;
     settings.widget.y = old.widget.y;
@@ -185,6 +186,9 @@ pub(crate) fn enabled_providers(s: &Settings) -> HashSet<Provider> {
             }
             SourceId::Codex => {
                 p.insert(Provider::OpenAI);
+            }
+            SourceId::Antigravity => {
+                p.insert(Provider::Google);
             }
             SourceId::ChatgptDesktop => {}
         }
@@ -682,6 +686,7 @@ fn detected_plan(store: &tracker_core::store::Store, provider: Provider, plans: 
     match provider {
         Provider::OpenAI => plans.find(provider, &plan).map(|p| p.id.clone()),
         Provider::Anthropic => (plan == "pro").then_some(plan),
+        Provider::Google => None,
     }
 }
 
@@ -699,7 +704,9 @@ pub async fn get_limit_history(app: AppHandle, days: Option<i64>) -> Res<LimitHi
     let advice_history = tracker_core::history::limit_history(&store, now, tracker_core::history::ADVICE_DAYS).map_err(err)?;
     let plans = tracker_core::plans::PlansFile::bundled();
     let mut detected_plans = std::collections::BTreeMap::new();
-    let mut ordered: Vec<Provider> = providers.into_iter().collect();
+    // a provider whose plans have no limit windows never reports readings to advise on
+    let mut ordered: Vec<Provider> =
+        providers.into_iter().filter(|p| plans.plans(*p).iter().any(|d| !d.windows.is_empty())).collect();
     ordered.sort();
     let advice = ordered
         .into_iter()

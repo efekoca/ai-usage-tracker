@@ -33,7 +33,7 @@
     setPeriod({ kind: 'custom', from, to })
   }
   const activeFilters = $derived((app.filter.tools?.length ?? 0) + (app.filter.models?.length ?? 0) + (app.filter.projects?.length ?? 0))
-  const tools: Tool[] = ['claude_code', 'codex']
+  const tools: Tool[] = ['claude_code', 'codex', 'antigravity']
 </script>
 
 <header class="bar">

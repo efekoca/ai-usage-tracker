@@ -202,6 +202,9 @@ fn watch_roots(env: &Env, s: &Settings) -> Vec<(PathBuf, bool)> {
             v.push((h.join("archived_sessions"), true));
         }
     }
+    if on(SourceId::Antigravity) {
+        v.extend(discovery::antigravity_dirs(env).into_iter().map(|d| (d.join("conversations"), false)));
+    }
     v.retain(|(p, _)| p.is_dir());
     v.sort();
     v.dedup();
@@ -213,7 +216,8 @@ fn crate_data_dir() -> PathBuf {
 }
 
 fn is_relevant(p: &Path) -> bool {
-    p.extension().is_some_and(|e| e == "jsonl") || p.file_name().is_some_and(|n| n == "plan-usage-history.json")
+    p.extension().is_some_and(|e| e == "jsonl" || e == "db" || e == "db-wal")
+        || p.file_name().is_some_and(|n| n == "plan-usage-history.json")
 }
 
 fn make_watcher(roots: &[(PathBuf, bool)], tx: Sender<Msg>) -> Option<notify::RecommendedWatcher> {

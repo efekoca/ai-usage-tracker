@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, latest } from '../lib/store.svelte'
+  import { app, latest, providerColor } from '../lib/store.svelte'
   import { api, type ModelCompare, type Provider } from '../lib/api'
   import { fmtCompact, fmtInt, fmtMoney, fmtPct, t } from '../lib/i18n.svelte'
   import Segmented from './Segmented.svelte'
@@ -37,7 +37,7 @@
     <Segmented
       label={t('compare.title')}
       bind:value={provider}
-      options={[{ value: 'all', label: t('compare.all') }, { value: 'anthropic', label: t('provider.anthropic') }, { value: 'openai', label: t('provider.openai') }]}
+      options={[{ value: 'all', label: t('compare.all') }, { value: 'anthropic', label: t('provider.anthropic') }, { value: 'openai', label: t('provider.openai') }, { value: 'google', label: t('provider.google') }]}
     />
   </div>
   <p class="subtle small lead">{t('compare.lead')}</p>
@@ -60,12 +60,12 @@
         {@const same = Math.abs(pct) < 0.5}
         <li class:mine={used.has(r.model)}>
           <span class="name">
-            <i class="sw" style="background:var(--{r.provider === 'openai' ? 's1' : 's2'})"></i>
+            <i class="sw" style="background:{providerColor[r.provider]}"></i>
             <span class="mn" title={r.model}>{r.model}</span>
             {#if used.has(r.model)}<span class="tag">{t('compare.used')}</span>{/if}
           </span>
           <span class="bar" aria-hidden="true">
-            <span class="fill" style="width:{(r.cost_usd / top) * 100}%;background:var(--{r.provider === 'openai' ? 's1' : 's2'})"></span>
+            <span class="fill" style="width:{(r.cost_usd / top) * 100}%;background:{providerColor[r.provider]}"></span>
             <span class="mark" style="left:{(c.actual_cost_usd / top) * 100}%"></span>
           </span>
           <span class="num cost">{fmtMoney(r.cost_usd)}</span>

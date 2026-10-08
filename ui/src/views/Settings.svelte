@@ -127,6 +127,8 @@
     ['anthropic', 'seven_day'],
     ['openai', 'five_hour'],
     ['openai', 'seven_day'],
+    ['google', 'five_hour'],
+    ['google', 'seven_day'],
   ] as const
   const unpriced = $derived(models.filter((m) => pricing && !pricing.models.some((x) => x.id === m || x.aliases?.includes(m)) && !(m in (pricing.user_aliases ?? {}))))
 
@@ -436,7 +438,7 @@
 
     <div class="row wrap actions">
       {#each Object.entries(pricing.sources ?? {}) as [prov, url] (prov)}
-        <button class="btn ghost small" onclick={() => api.openUrl(url)}><Icon name="external" size={13} />{prov === 'openai' ? 'OpenAI' : 'Anthropic'}</button>
+        <button class="btn ghost small" onclick={() => api.openUrl(url)}><Icon name="external" size={13} />{prov === 'openai' ? 'OpenAI' : prov === 'google' ? 'Google' : 'Anthropic'}</button>
       {/each}
       <span class="spacer"></span>
       <button class="btn" onclick={resetPricing} disabled={pricingOrigin === 'bundled' && !pricingDirty}>{t('settings.pricing.reset')}</button>

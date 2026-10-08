@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount, untrack } from 'svelte'
   import { app, saveSettings } from '../lib/store.svelte'
-  import { api, type Provider, type WidgetData, type WidgetItemKind, type WidgetSettings } from '../lib/api'
+  import { api, PROVIDERS, type Provider, type WidgetData, type WidgetItemKind, type WidgetSettings } from '../lib/api'
   import { fmtPct, searchKey, t } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
   import Toggle from '../components/Toggle.svelte'
@@ -87,7 +87,7 @@
     commit('items')
   }
   function toggleProvider(p: Provider, v: boolean) {
-    const all = (data?.providers ?? ['anthropic', 'openai']) as Provider[]
+    const all = (data?.providers ?? PROVIDERS) as Provider[]
     const cur = ws.providers.length ? [...ws.providers] : [...all]
     const next = v ? [...new Set([...cur, p])] : cur.filter((x) => x !== p)
     // an empty list means "all", so the last provider cannot be switched off
@@ -116,7 +116,7 @@
     commit(...(Object.keys(d) as Key[]).filter((k) => k !== 'visible' && k !== 'x' && k !== 'y' && k !== 'anchor' && k !== 'hotkey'))
     api.placeWidget('bottom-right')
   }
-  const providers: Provider[] = ['anthropic', 'openai']
+  const providers: Provider[] = PROVIDERS
 </script>
 
 <header class="bar">

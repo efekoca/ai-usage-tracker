@@ -2,10 +2,29 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
-export type Tool = 'claude_code' | 'codex' | 'claude_desktop'
-export type Provider = 'anthropic' | 'openai'
+export type Tool = 'claude_code' | 'codex' | 'claude_desktop' | 'antigravity'
+export type Provider = 'anthropic' | 'openai' | 'google'
 export type Accuracy = 'exact' | 'estimated' | 'captured'
-export type SourceId = 'claude_code' | 'cowork' | 'claude_desktop' | 'codex' | 'chatgpt_desktop'
+export type SourceId = 'claude_code' | 'cowork' | 'claude_desktop' | 'codex' | 'chatgpt_desktop' | 'antigravity'
+
+export const PROVIDERS: Provider[] = ['anthropic', 'openai', 'google']
+
+/** Whose plan a source's usage counts toward; `null` for detection-only sources. */
+export function providerOfSource(s: string): Provider | null {
+  if (s === 'codex') return 'openai'
+  if (s === 'antigravity') return 'google'
+  if (s === 'chatgpt_desktop') return null
+  return 'anthropic'
+}
+
+export function providersOf(sources: Iterable<string>): Provider[] {
+  const s = new Set<Provider>()
+  for (const src of sources) {
+    const p = providerOfSource(src)
+    if (p) s.add(p)
+  }
+  return PROVIDERS.filter((p) => s.has(p))
+}
 
 export type Period =
   | { kind: 'today' }
@@ -196,7 +215,12 @@ export interface CaptureSettings {
   claude_poll: boolean
   claude_poll_minutes: number
   claude_path: string
+  antigravity_poll: boolean
+  antigravity_poll_minutes: number
+  antigravity_path: string
 }
+
+export type CaptureKind = 'claude' | 'codex' | 'antigravity' | 'statusline' | 'otel'
 
 export interface CaptureStatus {
   claude_poll: boolean
@@ -205,6 +229,9 @@ export interface CaptureStatus {
   codex_poll: boolean
   codex: { binary: string | null; last_ok_ms: number | null; last_error: string | null }
   codex_candidates_found: boolean
+  antigravity_poll: boolean
+  antigravity: { binary: string | null; last_ok_ms: number | null; last_error: string | null }
+  antigravity_candidates_found: boolean
   statusline: boolean
   statusline_file: string
   statusline_chained: boolean
@@ -223,6 +250,7 @@ export interface Settings {
   language: 'system' | 'tr' | 'en'
   theme: 'system' | 'light' | 'dark'
   enabled_sources: SourceId[]
+  known_sources: SourceId[]
   extra_paths: { claude_config_dirs: string[]; codex_homes: string[] }
   plans: Record<string, string>
   thresholds: Threshold[]
@@ -625,7 +653,7 @@ export const api = {
   widgetMenu: () => invoke<void>('widget_menu'),
   quit: () => invoke<void>('quit_app'),
   captureStatus: () => invoke<CaptureStatus>('capture_status'),
-  setCapture: (kind: 'claude' | 'codex' | 'statusline' | 'otel', enabled: boolean) => invoke<string>('set_capture', { kind, enabled }),
+  setCapture: (kind: CaptureKind, enabled: boolean) => invoke<string>('set_capture', { kind, enabled }),
   placeWidget: (corner: string, remember = true) => invoke<void>('place_widget', { corner, remember }),
   listFonts: () => invoke<string[]>('list_fonts'),
   branches: (period: Period, filter?: Filter) => invoke<Branches>('get_branches', { period, filter }),

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { app } from '../lib/store.svelte'
-  import { api, type CaptureStatus } from '../lib/api'
+  import { api, type CaptureKind, type CaptureStatus } from '../lib/api'
   import { fmtDuration, fmtInt, t } from '../lib/i18n.svelte'
   import Toggle from './Toggle.svelte'
   import Icon from './Icon.svelte'
@@ -33,7 +33,7 @@
     return s === key ? (ok ? t('settings.data.done') : raw) : s
   }
 
-  async function toggle(kind: 'claude' | 'codex' | 'statusline' | 'otel', on: boolean) {
+  async function toggle(kind: CaptureKind, on: boolean) {
     busy = kind
     try {
       const r = await api.setCapture(kind, on)
@@ -56,7 +56,7 @@
   <p class="subtle small lead">{t('cap.lead')}</p>
 
   {#if st}
-    {#each [['claude', st.claude_poll], ['codex', st.codex_poll], ['statusline', st.statusline], ['otel', st.otel]] as const as [kind, on] (kind)}
+    {#each [['claude', st.claude_poll], ['codex', st.codex_poll], ['antigravity', st.antigravity_poll], ['statusline', st.statusline], ['otel', st.otel]] as const as [kind, on] (kind)}
       <div class="method" class:on>
         <div class="top">
           <div class="txt">
@@ -68,7 +68,7 @@
         <dl>
           <dt>{t('cap.changes')}</dt>
           <dd>
-            {#if kind === 'codex' || kind === 'claude'}{t(`cap.${kind}.changes`)}
+            {#if kind === 'codex' || kind === 'claude' || kind === 'antigravity'}{t(`cap.${kind}.changes`)}
             {:else}{t(`cap.${kind}.changes`)} <code>{st.settings_file}</code>{/if}
           </dd>
           <dt>{t('cap.status')}</dt>
@@ -84,6 +84,11 @@
               {#if !st.codex_candidates_found}<span class="muted">{t('cap.codex.notInstalled')}</span>
               {:else if on && st.codex.last_error}<Icon name="warning" size={13} /> <span class="msg">{explain('codex', st.codex.last_error, false)}</span>
               {:else if on}<Icon name="check" size={13} /> {t('cap.codex.ok', { t: ago(st.codex.last_ok_ms) })}
+              {:else}{t('common.off')}{/if}
+            {:else if kind === 'antigravity'}
+              {#if !st.antigravity_candidates_found}<span class="muted">{t('cap.antigravity.notInstalled')}</span>
+              {:else if on && st.antigravity.last_error}<Icon name="warning" size={13} /> <span class="msg">{explain('antigravity', st.antigravity.last_error, false)}</span>
+              {:else if on}<Icon name="check" size={13} /> {t('cap.codex.ok', { t: ago(st.antigravity.last_ok_ms) })}
               {:else}{t('common.off')}{/if}
             {:else if kind === 'statusline'}
               {#if on}<Icon name="check" size={13} /> {t('cap.statusline.ok', { t: ago(st.statusline_last_ms) })}{#if st.statusline_chained} · {t('cap.statusline.chained')}{/if}

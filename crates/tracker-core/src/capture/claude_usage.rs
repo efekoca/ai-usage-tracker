@@ -252,7 +252,7 @@ mod tests {
         for d in [".nvm/versions/node/v9.11.2/bin", ".nvm/versions/node/v22.3.0/bin", ".local/share/fnm/node-versions/v20.1.0/installation/bin"] {
             std::fs::create_dir_all(home.join(d)).unwrap();
         }
-        let env = Env { home: Some(home.clone()), roaming: None, local: None, claude_config_dir: None, codex_home: None };
+        let env = Env { home: Some(home.clone()), roaming: None, local: None, claude_config_dir: None, codex_home: None, antigravity_data_dir: None };
         let c = candidates(&env, None);
         let at = |p: &str| c.iter().position(|x| x == &home.join(p)).unwrap_or_else(|| panic!("{p} missing"));
         assert!(at(".nvm/versions/node/v22.3.0/bin/claude") < at(".nvm/versions/node/v9.11.2/bin/claude"));
@@ -265,7 +265,7 @@ mod tests {
     #[test]
     fn native_homebrew_and_npm_claude_installs_are_candidates() {
         let home = std::env::temp_dir().join("aiut-home-unix");
-        let env = Env { home: Some(home.clone()), roaming: None, local: None, claude_config_dir: None, codex_home: None };
+        let env = Env { home: Some(home.clone()), roaming: None, local: None, claude_config_dir: None, codex_home: None, antigravity_data_dir: None };
         let c = candidates(&env, None);
         for p in [
             home.join(".local/bin/claude"),
@@ -283,7 +283,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app = dir.path().join("Claude/claude-code/2.1.288/48d54124d3c3/claude.app/Contents/MacOS");
         std::fs::create_dir_all(&app).unwrap();
-        let env = Env { home: None, roaming: Some(dir.path().to_owned()), local: None, claude_config_dir: None, codex_home: None };
+        let env = Env { home: None, roaming: Some(dir.path().to_owned()), local: None, claude_config_dir: None, codex_home: None, antigravity_data_dir: None };
         assert!(candidates(&env, None).contains(&app.join("claude")));
     }
 

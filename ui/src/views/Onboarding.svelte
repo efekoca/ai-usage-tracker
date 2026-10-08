@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { app, saveSettings } from '../lib/store.svelte'
-  import { api, type PlansFile, type Provider, type SourceId, type SourceInfo } from '../lib/api'
+  import { api, providersOf, type PlansFile, type Provider, type SourceId, type SourceInfo } from '../lib/api'
   import { i18n, t } from '../lib/i18n.svelte'
   import Toggle from '../components/Toggle.svelte'
   import Select from '../components/Select.svelte'
@@ -11,7 +11,7 @@
   let enabled: Record<string, boolean> = $state({})
   let plans: PlansFile | null = $state(null)
   // every provider starts as '' (no plan): binding undefined to the plan picker throws and stops the page
-  let chosen: Record<string, string> = $state({ anthropic: '', openai: '', ...(app.settings?.plans ?? {}) })
+  let chosen: Record<string, string> = $state({ anthropic: '', openai: '', google: '', ...(app.settings?.plans ?? {}) })
   let showPrivacy = $state(false)
   let busy = $state(false)
   let loaded = $state(false)
@@ -34,15 +34,7 @@
   onMount(detect)
 
   const anyFound = $derived(sources.some((s) => s.found && s.supported))
-  const providers = $derived.by(() => {
-    const p = new Set<Provider>()
-    for (const s of sources) {
-      if (!enabled[s.id]) continue
-      if (s.id === 'codex') p.add('openai')
-      else if (s.id !== 'chatgpt_desktop') p.add('anthropic')
-    }
-    return [...p]
-  })
+  const providers = $derived(providersOf(sources.filter((s) => enabled[s.id]).map((s) => s.id)))
 
   async function start() {
     busy = true

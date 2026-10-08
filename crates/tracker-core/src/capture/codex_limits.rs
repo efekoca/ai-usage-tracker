@@ -181,7 +181,7 @@ mod tests {
     #[test]
     fn only_the_default_codex_home_is_an_executable_location() {
         let home = std::env::temp_dir().join("aiut-home");
-        let env = Env { home: Some(home.clone()), roaming: None, local: None, claude_config_dir: None, codex_home: None };
+        let env = Env { home: Some(home.clone()), roaming: None, local: None, claude_config_dir: None, codex_home: None, antigravity_data_dir: None };
         let c = candidates(&env, None);
         let sandbox: Vec<&PathBuf> = c.iter().filter(|p| p.starts_with(home.join(".codex"))).collect();
         assert_eq!(sandbox, [&home.join(".codex").join(".sandbox-bin").join(super::super::exe("codex"))]);
@@ -198,7 +198,7 @@ mod tests {
     #[test]
     fn homebrew_and_npm_codex_installs_are_candidates() {
         let home = std::env::temp_dir().join("aiut-home-unix");
-        let env = Env { home: Some(home.clone()), roaming: None, local: None, claude_config_dir: None, codex_home: None };
+        let env = Env { home: Some(home.clone()), roaming: None, local: None, claude_config_dir: None, codex_home: None, antigravity_data_dir: None };
         let c = candidates(&env, None);
         for p in [
             home.join(".local/bin/codex"),
