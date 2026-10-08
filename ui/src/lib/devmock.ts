@@ -9,6 +9,8 @@ let codexMissing = scenario.get('codex') === 'missing'
 let codexOut = scenario.get('codex') === 'nologin'
 let agyOut = scenario.get('agy') === 'nologin'
 let agyMissing = scenario.get('agy') === 'missing'
+// every limit read fresh and in range, as on a typical day (README screenshots)
+const showcase = scenario.get('showcase') === '1'
 
 let seed = 7
 const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
@@ -26,7 +28,7 @@ const settings: Settings = {
   currency: 'USD',
   fx_rate: 1,
   widget: {
-    visible: true, opacity: 0.85, size: 'm', scale: 1, x: null, y: null, anchor: 'bottom-right', auto_hide_fullscreen: true, layout: 'horizontal',
+    visible: true, opacity: showcase ? 1 : 0.85, size: 'm', scale: 1, x: null, y: null, anchor: 'bottom-right', auto_hide_fullscreen: true, layout: 'horizontal',
     items: (['primary', 'cost', 'limit_five_hour', 'limit_seven_day', 'tools', 'week_tokens', 'week_cost', 'month_cost', 'updated'] as const).map((k, i) => ({ kind: k, enabled: i < 4 })),
     providers: [], primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '', corner_radius: 14,
     border: true, shadow: false, show_labels: true, show_reset_time: false, warn_at: 70, high_at: 90, always_on_top: true, lock_position: false, click_action: 'open_dashboard',
@@ -38,7 +40,7 @@ const settings: Settings = {
   primary_metric: 'tokens',
   dismissed_unpriced: [],
   limit_display: 'used',
-  plan_prices: {},
+  plan_prices: showcase ? { google: 19.99 } : {},
   weekly_report_auto: false,
   weekly_report_dir: '',
   tray: { show_percent: true, limit: 'auto' },
@@ -142,7 +144,7 @@ function limits(): LimitView[] {
 function allLimits(): LimitView[] {
   const now = Date.now()
   const share = (p: string, s: number, used: number | null) => ({ project_id: projects.indexOf(p) + 1, name: p, hidden: false, totals: totals(Math.round(s * 5e7), s * 30), share: s, estimated_pct: used === null ? null : used * s })
-  return [
+  const all: LimitView[] = [
     { provider: 'anthropic', limit_id: '', window: 'five_hour', window_minutes: 300, used_pct: 46, resets_at: Math.round(now / 1000 + 2.3 * 3600), observed_ms: now - 192 * 60000, source: 'cowork_audit', status: 'allowed', plan: null, accuracy: 'exact', state: 'behind', window_start_ms: now - 2.7 * 3600e3, window_usage: totals(41e6, 31.2), usage_since: totals(190e6, 65.9), forecast: null, projects: [share('demo-app', 0.62, 46), share('notes', 0.38, 46)] },
     { provider: 'anthropic', limit_id: '', window: 'seven_day', window_minutes: 10080, used_pct: 73, resets_at: Math.round(now / 1000 + 2.6 * 86400), observed_ms: now - 4 * 60000, source: 'cowork_audit', status: 'allowed_warning', plan: null, accuracy: 'exact', state: 'fresh', window_start_ms: now - 4.4 * 86400e3, window_usage: totals(612e6, 402.5), usage_since: totals(0, 0), forecast: { kind: 'fills', rate_per_hour: 0.9, fills_at_ms: now + 30 * 3600e3, at_reset_pct: null, basis_minutes: 5760 }, projects: [share('demo-app', 0.5, 73), share('website', 0.3, 73), share('notes', 0.2, 73)] },
     { provider: 'openai', limit_id: 'codex', window: 'five_hour', window_minutes: 300, used_pct: 12, resets_at: Math.round(now / 1000 + 4 * 3600), observed_ms: now - 20 * 60000, source: 'codex_rollout', status: null, plan: 'plus', accuracy: 'exact', state: 'fresh', window_start_ms: now - 3600e3, window_usage: totals(5e6, 3.1), usage_since: totals(0, 0), forecast: { kind: 'safe', rate_per_hour: 4.2, fills_at_ms: null, at_reset_pct: 29, basis_minutes: 60 }, projects: [share('data-pipeline', 1, 12)] },
@@ -151,6 +153,14 @@ function allLimits(): LimitView[] {
     { provider: 'google', limit_id: 'gemini', window: 'seven_day', window_minutes: 10080, used_pct: 9, resets_at: Math.round(now / 1000 + 4.2 * 86400), observed_ms: now - 90000, source: 'antigravity_cli_usage', status: null, plan: null, accuracy: 'captured', state: 'fresh', window_start_ms: now - 2.8 * 86400e3, window_usage: totals(9e6, 2.1), usage_since: totals(0, 0), forecast: null, projects: [share('website', 1, 9)] },
     { provider: 'google', limit_id: '3p', window: 'five_hour', window_minutes: 300, used_pct: 0, resets_at: Math.round(now / 1000 + 5 * 3600), observed_ms: now - 90000, source: 'antigravity_cli_usage', status: null, plan: null, accuracy: 'captured', state: 'fresh', window_start_ms: now, window_usage: totals(0, 0), usage_since: totals(0, 0), forecast: null, projects: [] },
   ]
+  if (!showcase) return all
+  return all.map((l) => {
+    if (l.provider === 'anthropic' && l.window === 'five_hour')
+      return { ...l, observed_ms: now - 3 * 60000, state: 'fresh', usage_since: totals(0, 0), forecast: { ...all[2].forecast!, rate_per_hour: 17, at_reset_pct: 85 } }
+    if (l.provider === 'openai' && l.window === 'seven_day')
+      return { ...l, resets_at: Math.round(now / 1000 + 3.2 * 86400), observed_ms: now - 20 * 60000, state: 'fresh', window_start_ms: now - 3.8 * 86400e3, window_usage: totals(52e6, 13.3), forecast: { ...all[2].forecast!, rate_per_hour: 0.3, at_reset_pct: 56 }, projects: [share('website', 0.58, 31), share('data-pipeline', 0.42, 31)] }
+    return l
+  })
 }
 
 function mockSessions() {
@@ -210,12 +220,14 @@ function mockPlanValue() {
   const run = (per: number) => { let r = 0; return dates.map((_, i) => (r += per * (0.4 + ((i * 37) % 10) / 8))) }
   const a = run(9.1)
   const o = run(1.2)
+  const g = run(0.78)
   return {
     range: { from_ms: Date.now() - n * 86400e3, to_ms: Date.now() },
     dates,
     providers: [
       { provider: 'anthropic', cost_usd: a[n - 1], events: 9000, unpriced_events: 0, cumulative: a },
       { provider: 'openai', cost_usd: o[n - 1], events: 1200, unpriced_events: 93, cumulative: o },
+      { provider: 'google', cost_usd: g[n - 1], events: 640, unpriced_events: 0, cumulative: g },
     ],
   }
 }
@@ -293,6 +305,8 @@ function mockHistory() {
   })
   const codexWeek = week.map((w, i) => ({ ...w, peak_pct: [12, 20, 9, 31, 26, 18, 44, 7][i], full: false, full_at_ms: null, full_minutes: null, plan: 'plus' }))
   const codexFive = five.slice(0, 12).map((w, i) => ({ ...w, peak_pct: [8, 22, 15, 41, 5, 13, 29, 18, 9, 36, 12, 7][i], full: false, full_at_ms: null, full_minutes: null, plan: 'plus', complete: i % 3 !== 0, in_progress: false }))
+  const geminiFive = five.slice(12).map((w, i) => ({ ...w, peak_pct: [14, 9, 27, 18, 33, 6, 21, 12, 38, 16, 24, 18][i], full: false, full_at_ms: null, full_minutes: null, plan: null }))
+  const geminiWeek = week.slice(4).map((w, i) => ({ ...w, peak_pct: [11, 17, 13, 9][i], full: false, full_at_ms: null, full_minutes: null, plan: null }))
   const withLocal = <T extends { peak_pct: number }>(list: T[], perPct: number) =>
     list.map((w, i) => ({ ...w, local: { requests: Math.round(w.peak_pct * 9 + i), tokens: Math.round(w.peak_pct * 2.1e6), cost_usd: w.peak_pct * perPct * (0.85 + ((i * 7) % 5) / 15), unpriced_requests: 0 } }))
   const stats = (w: number, c: number, f: number, fm: number, pc: number | null, ps: number | null) => ({ windows: w, complete: c, full: f, full_minutes: fm, peak_complete: pc, peak_seen: ps })
@@ -305,8 +319,10 @@ function mockHistory() {
         { provider: 'anthropic', limit_id: '', window: 'seven_day', window_minutes: 10080, windows: withLocal(week, 1.6), capacity: { median_usd: 163, min_usd: 139, max_usd: 181, windows: 5 } },
         { provider: 'openai', limit_id: 'codex', window: 'five_hour', window_minutes: 300, windows: withLocal(codexFive, 0.05), capacity: { median_usd: 4.9, min_usd: 3.8, max_usd: 6.1, windows: 6 } },
         { provider: 'openai', limit_id: 'codex', window: 'seven_day', window_minutes: 10080, windows: withLocal(codexWeek, 0.3), capacity: null },
+        { provider: 'google', limit_id: 'gemini', window: 'five_hour', window_minutes: 300, windows: withLocal(geminiFive, 0.04), capacity: null },
+        { provider: 'google', limit_id: 'gemini', window: 'seven_day', window_minutes: 10080, windows: withLocal(geminiWeek, 0.2), capacity: null },
       ],
-      observed_days: { anthropic: 26, openai: 14 },
+      observed_days: { anthropic: 26, openai: 14, google: 12 },
     },
     advice: [
       { provider: 'anthropic', kind: 'upgrade', plan: 'max5x', suggested: 'max20x', strong: false, days: 28, observed_days: 26, five_hour: stats(24, 18, 3, 180, 100, 100), weekly: stats(4, 3, 1, 540, 100, 100), session_ratio: 4, projected_five_hour: null, projected_weekly_if_same_ratio: null, suggested_has_no_five_hour: false, monthly_delta_usd: 100 },
@@ -324,6 +340,17 @@ function mockDay(date: string) {
     const cx = on && h % 3 === 0 ? Math.round(6e5 + (h % 4) * 2e5) : 0
     return { hour: h, tokens: cc + cx, cost_usd: cc * 0.75e-6 + cx * 0.6e-6, events: Math.round((cc + cx) / 120000), by_tool: { ...(cc ? { claude_code: cc } : {}), ...(cx ? { codex: cx } : {}) } }
   })
+  // match the day's total in the 30-day chart
+  const target = report({ kind: 'month1' } as Period).daily.find((d) => d.date === date)?.tokens ?? 0
+  const raw = hourly.reduce((a, h) => a + h.tokens, 0)
+  if (target > 0 && raw > 0)
+    for (const h of hourly) {
+      const f = target / raw
+      h.tokens = Math.round(h.tokens * f)
+      h.cost_usd *= f
+      h.events = Math.round(h.tokens / 120000)
+      for (const k of Object.keys(h.by_tool) as (keyof typeof h.by_tool)[]) h.by_tool[k] = Math.round(h.by_tool[k]! * f)
+    }
   const tok = hourly.reduce((a, h) => a + h.tokens, 0)
   const cost = hourly.reduce((a, h) => a + h.cost_usd, 0)
   const g = (key: string, label: string, share: number, hidden = false) => ({ key, label, hidden, totals: totals(Math.round(tok * share), cost * share) })
@@ -345,7 +372,7 @@ function mockDay(date: string) {
   }
 }
 
-const update = { current: '0.3.0', configured: true, checking: false, last_check_ms: Date.now() - 3600e3, last_error: null, available: null as null | { version: string; notes: string | null; date: string | null }, installing: false, downloaded: 0, total: null }
+const update = { current: '0.4.0', configured: true, checking: false, last_check_ms: Date.now() - 3600e3, last_error: null, available: null as null | { version: string; notes: string | null; date: string | null }, installing: false, downloaded: 0, total: null }
 
 const pricing = {
   schema_version: 1,
@@ -363,7 +390,7 @@ export function installMock() {
       const a = args as Record<string, unknown>
       switch (cmd) {
         case 'app_info':
-          return { version: '0.3.0', data_dir: 'C:\\Users\\you\\AppData\\Local\\AIUsageTracker', pricing_origin: 'bundled', pricing_updated_at: '2026-10-02', platform: 'windows', supports_mica: false, accent_color: null, started_hidden: false, reports_dir: 'C:\\Users\\you\\Documents\\AI Usage Tracker' }
+          return { version: '0.4.0', data_dir: 'C:\\Users\\you\\AppData\\Local\\AIUsageTracker', pricing_origin: 'bundled', pricing_updated_at: '2026-10-02', platform: 'windows', supports_mica: false, accent_color: null, started_hidden: false, reports_dir: 'C:\\Users\\you\\Documents\\AI Usage Tracker' }
         case 'get_settings':
           return settings
         case 'save_settings':

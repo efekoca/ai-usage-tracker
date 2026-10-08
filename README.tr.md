@@ -2,7 +2,7 @@
 
 # AI Usage Tracker
 
-**Claude Code ve Codex kullanımınızı, API eşdeğeri maliyetinizi ve plan limitlerinizi tek yerden izleyin.**
+**Claude Code, Codex ve Antigravity kullanımınızı, API eşdeğeri maliyetinizi ve plan limitlerinizi tek yerden izleyin.**
 
 AI Usage Tracker, Windows, macOS ve Linux'ta çalışan bir uygulamadır. Yapay zekâ araçlarınızın bilgisayarınıza zaten yazdığı kullanım kayıtlarını okur ve size anlaşılır bir panelde sunar. Ne kadar token harcadığınızı, bu kullanımın API fiyatlarıyla ne tutacağını ve limitlerinizin ne zaman dolacağını görürsünüz. Hesap açmanız gerekmez; verileriniz bulutta değil, kendi bilgisayarınızda kalır.
 
@@ -16,11 +16,12 @@ AI Usage Tracker, Windows, macOS ve Linux'ta çalışan bir uygulamadır. Yapay 
 
 - **Verileriniz sizde kalır.** Prompt ve yanıtlarınız hiçbir zaman kaydedilmez. Uygulama yalnızca sayıları ve meta verileri bilgisayarınızdaki bir dosyada tutar ve hiçbir yere göndermez.
 - **Her sayının nereden geldiğini bilirsiniz.** Araçtan doğrudan okunan değerler **Kesin**, uygulamanın hesapladıkları **Tahmini**, canlı okunanlar **Yakalanan** etiketiyle gösterilir. Hiçbir değer sessizce tahmin edilmez.
-- **Limitinize takılmadan çalışın.** Claude ve Codex'in 5 saatlik ve haftalık limitlerini birkaç dakikada bir güncel olarak görür, ne zaman dolacaklarını önceden öğrenirsiniz.
+- **Limitinize takılmadan çalışın.** Claude, Codex ve Antigravity'nin 5 saatlik ve haftalık limitlerini birkaç dakikada bir güncel olarak görür, ne zaman dolacaklarını önceden öğrenirsiniz.
 
 ## Öne çıkan özellikler
 
-- **Limitlerinizi kotanızdan harcamadan izleyin.** Limit yüzdeleri Claude Code'un ve Codex'in kendi resmi arayüzlerinden okunur. Bunun için modele tek bir istek bile gönderilmez.
+- **Limitlerinizi kotanızdan harcamadan izleyin.** Limit yüzdeleri Claude Code'un, Codex'in ve Antigravity CLI'ın kendi resmi arayüzlerinden okunur. Bunun için modele tek bir istek bile gönderilmez.
+- **Gereken aracı tek tıkla kurun.** Limit okumak için Claude Code, Codex CLI ya da Antigravity CLI gerekiyorsa uygulama onu üreticinin resmi kurulumuyla kurar. Giriş yapmanız gerekiyorsa ne yapacağınızı adım adım gösterir.
 - **Limitinizin ne zaman dolabileceğini görün.** Tahmin, pencerenin başından bu yana ortalama hızınıza dayanır. Kısa süreli bir yoğunluk, bütün hafta öyle geçecekmiş gibi hesaplanmaz.
 - **Limit pencerenizin tahmini API eşdeğerini görün.** Uygulama, sonuna kadar izlediği pencerelerden yola çıkarak 5 saatlik ya da haftalık bir pencerenin API fiyatlarıyla ne kadar kullanıma denk geldiğini hesaplar.
 - **Size uygun planı öğrenin.** Limitleriniz sık doluyorsa bir üst plan önerilir. Daha küçük bir plan ise yalnızca sağlayıcının yayımladığı oranlar bunu destekliyorsa önerilir.
@@ -29,15 +30,15 @@ AI Usage Tracker, Windows, macOS ve Linux'ta çalışan bir uygulamadır. Yapay 
 - **Önbelleğin size ne kazandırdığını ölçün.** İsabet oranını, net tasarrufu ve uzun bir aradan sonra önbelleğin yeniden yazılmasının maliyetini görürsünüz.
 - **Geçmişinizi kaybetmeyin.** Devam ettirdiğiniz ya da kopyasından yeni oturum açtığınız sohbetler iki kez sayılmaz. Claude Code kayıtlarını 30 gün sonra silse bile geçmişiniz uygulamanın veri tabanında kalır.
 
-![Kısa bir tur: grafik ipucuyla genel bakış, güncel limitler, limit geçmişi, öneriler, model karşılaştırması ve widget'ın yerleşimini değiştiren Widget stüdyosu](assets/readme/demo-tr.gif)
+![Kısa bir tur: grafik ipucu ve abonelik değeriyle genel bakış, Antigravity dahil güncel limitler, limit geçmişi, öneriler, günlük görünüm, model karşılaştırması, canlı yakalama ve widget'ın yerleşimini değiştiren Widget stüdyosu](assets/readme/demo-tr.gif)
 
 ## Özellikler
 
 ### Limitlerinizi anlık izleyin
 
-5 saatlik ve haftalık limit yüzdeleriniz Claude Code'un ve Codex'in kendi arayüzlerinden okunur; gördüğünüz sayılar araçların gösterdiğiyle aynıdır. Her pencerenin ne zaman dolacağını ve her projenin limitin ne kadarını kullandığını görürsünüz.
+5 saatlik ve haftalık limit yüzdeleriniz Claude Code'un, Codex'in ve Antigravity CLI'ın kendi arayüzlerinden okunur; gördüğünüz sayılar araçların gösterdiğiyle aynıdır. Her pencerenin ne zaman dolacağını ve her projenin limitin ne kadarını kullandığını görürsünüz.
 
-![Limitler sayfası: Claude ve Codex'in 5 saatlik ve haftalık pencereleri, dolma tahminleri ve proje paylarıyla](assets/readme/limits-tr.webp)
+![Limitler sayfası: Claude, Codex ve Antigravity'nin 5 saatlik ve haftalık pencereleri, dolma tahminleri ve proje paylarıyla](assets/readme/limits-tr.webp)
 
 Sağlayıcılar limitlerin sayısal karşılığını yayımlamıyor, yalnızca nasıl işlediklerini açıklıyor. Bu yüzden uygulama şu kurallara uyar:
 
@@ -95,7 +96,7 @@ Tutarlar API eşdeğeridir. Abonelikle kullanıyorsanız bu tutarları ödemezsi
 
 **Günlük** sayfası seçtiğiniz dönemi gün gün gösterir. Kısa dönemlerde sütunlar, uzun dönemlerde takvim görürsünüz; değerleri token, API eşdeğeri ya da istek sayısı olarak seçebilirsiniz.
 
-![Günlük sayfası: Claude Code ve Codex için günlük sütunlar, en yoğun gün ve aktif gün serileri](assets/readme/daily-tr.webp)
+![Günlük sayfası: Claude Code, Codex ve Antigravity için günlük sütunlar, en yoğun gün ve aktif gün serileri](assets/readme/daily-tr.webp)
 
 Sayfanın üstünde en yoğun gününüz, aktif gün başına ortalamanız, en uzun ve şu anki aktif gün seriniz ve hafta sonu payınız yer alır. Bir gün seçtiğinizde ya da aktif günler arasında gezindiğinizde o günün ayrıntıları açılır: token, maliyet, istek, oturum, ilk ve son etkinlik, önbellek isabeti, saat saat grafik, kullandığınız araçlar, modeller ve projeler, o gün ulaşılan en yüksek limit okumaları. Yanında haftanın her gününün ortalamasını ve en yoğun günlerinizi görürsünüz.
 
@@ -103,7 +104,7 @@ Sayfanın üstünde en yoğun gününüz, aktif gün başına ortalamanız, en u
 
 **Dağılım** sayfası, ilgili dönemdeki isteklerinizi aynı token sayıları ve bağlam boyutlarıyla fiyat listesindeki her modele göre yeniden hesaplar. Sonuçları gerçek maliyetinizle birlikte, en ucuzdan en pahalıya doğru görürsünüz.
 
-![Gerçek maliyeti, aynı isteklerin diğer Claude ve GPT modelleriyle tutacağı maliyetle karşılaştıran grafik](assets/readme/compare-tr.webp)
+![Gerçek maliyeti, aynı isteklerin diğer Claude, GPT ve Gemini modelleriyle tutacağı maliyetle karşılaştıran grafik](assets/readme/compare-tr.webp)
 
 Model aileleri aynı metni farklı sayıda token'a böler (Claude 4.7 ve sonrası yaklaşık %30 daha fazla token üretir). Bu yüzden farklı aileler arasındaki karşılaştırma yaklaşıktır; kalite ve hız hesaba katılmaz.
 
@@ -152,7 +153,7 @@ Net tasarruf eksi çıkıyorsa, yazılan önbellek maliyetini karşılayacak kad
 
 Widget her zaman üstte duran küçük bir penceredir. Varsayılan olarak ekranın sağ alt köşesinde durur. Neleri gösterdiğini ve nasıl göründüğünü **Widget stüdyosu**'nda canlı önizlemeyle değiştirirsiniz.
 
-![Bugünkü token ve maliyeti, Claude ve Codex'in 5 saatlik limit halkalarıyla gösteren masaüstü widget'ı](assets/readme/widget-tr.webp)
+![Bugünkü token ve maliyeti, Claude, Codex ve Antigravity'nin 5 saatlik limit halkalarıyla gösteren masaüstü widget'ı](assets/readme/widget-tr.webp)
 
 ![Widget stüdyosu: canlı önizleme ve widget'ın gösterebileceği öğelerin listesi](assets/readme/studio-tr.webp)
 
@@ -201,6 +202,7 @@ Haftalık kullanımınızı PDF olarak kaydedebilir, verilerinizi dışa aktarı
 | **Cowork oturumları** (Claude masaüstü)                | *Claude klasörü*`/local-agent-mode-sessions/**` | **Kesin** | **Kesin %** (5 sa / 7 gün) | Yalnızca bilgisayarınızda çalışan işler. Yeni Cowork işleri bulutta çalışır: token sayıları bilgisayarınızda tutulmaz ancak plan limitlerinize dahil edilir |
 | **Claude masaüstü: plan kullanımı**                    | *Claude klasörü*`/plan-usage-history.json` | —         | **Kesin %**                | Sohbet token'ları yerelde tutulmadığı için token verisi **yok**                     |
 | **Codex** (CLI ve masaüstü)                            | `$CODEX_HOME` ya da `~/.codex/{sessions,archived_sessions}` | **Kesin** | **Kesin %** (her istekte)  |                                                                                     |
+| **Antigravity** (uygulama, IDE ve `agy` CLI)           | `~/.gemini/{antigravity,antigravity-ide,antigravity-cli}/conversations/*.db` ya da `$ANTIGRAVITY_APP_DATA_DIR` | **Kesin** | **Yakalanan %** (`agy` ile) | Veritabanının bir kopyası okunur; Antigravity'nin dosyalarına dokunulmaz. Gemini ile Claude/GPT modellerinin limitleri ayrı gösterilir |
 | ChatGPT masaüstü                                       | —                                                                        | **Yok**   | —                          | Yalnızca algılanır                                                                  |
 
 `~` kullanıcı klasörünüzü gösterir (Windows'ta `%USERPROFILE%`, örneğin `C:\Users\adınız`). *Claude klasörü* Windows'ta `%APPDATA%\Claude`, macOS'te `~/Library/Application Support/Claude` klasörüdür; Claude masaüstü uygulamasının Linux sürümü yoktur.
@@ -269,20 +271,23 @@ Her sürümde, her dosyanın sağlama değerini içeren bir `SHA256SUMS` dosyas�
 - **Okunanlar:** Araçların kendi kayıtlarındaki zaman damgası, model adı, proje klasörü, oturum kimliği, token sayıları ve limit yüzdeleri.
 - **Saklananlar:** Yalnızca bu sayılar ve meta veriler. Hepsi uygulamanın veri klasöründeki `tracker.db` (SQLite) dosyasında durur: Windows'ta `%LOCALAPPDATA%\AIUsageTracker`, macOS'te `~/Library/Application Support/AIUsageTracker`, Linux'ta `~/.local/share/AIUsageTracker`. Proje adları bu bilgisayardan çıkmaz. İsterseniz adları tek tek ya da toplu olarak gizleyebilirsiniz; gizlenen adlar dışa aktarımlarda da maskelenir.
 - **Hiçbir zaman saklanmayanlar:** Prompt ve yanıtlar, dosya içerikleri, kimlik bilgileri ve erişim token'ları. Uygulama, araçların oturum anahtarlarını tutan dosyaları (`.credentials.json`, `auth.json`) **okumaz**.
-- **İnternet bağlantısı:** Uygulamanın kendisi internete yalnızca güncelleme denetimi için bağlanır. Bu denetimde yalnızca sürüm dosyası indirilir, hiçbir veri gönderilmez (**Ayarlar → Güncellemeler**). Varsayılan olarak açık gelen limit okumaları bilgisayarınızdaki Claude Code ve Codex'i çalıştırır; bu araçlar limit yüzdenizi kendi servislerinden sorar. Uygulama onları telemetri ve hata raporlaması kapalı olarak başlatır. Limit okumalarını **Kaynaklar → Canlı yakalama** bölümünden kapatabilirsiniz. Fiyat ve plan dosyaları uygulamayla birlikte gelir. Döviz kuru için de internetten veri çekilmez; kuru kendiniz girersiniz.
+- **İnternet bağlantısı:** Uygulamanın kendisi internete yalnızca güncelleme denetimi için bağlanır. Bu denetimde yalnızca sürüm dosyası indirilir, hiçbir veri gönderilmez (**Ayarlar → Güncellemeler**). Varsayılan olarak açık gelen limit okumaları bilgisayarınızdaki Claude Code, Codex ve Antigravity CLI'ı çalıştırır; bu araçlar limit yüzdenizi kendi servislerinden sorar. Uygulama onları telemetri ve hata raporlaması kapalı olarak başlatır. Limit okumalarını **Kaynaklar → Canlı yakalama** bölümünden kapatabilirsiniz. Bir aracı uygulamadan kurarsanız kurulum dosyası üreticinin sitesinden indirilir. Fiyat ve plan dosyaları uygulamayla birlikte gelir. Döviz kuru için de internetten veri çekilmez; kuru kendiniz girersiniz.
 
 ### Canlı yakalama
 
-**Kaynaklar → Canlı yakalama** bölümünde dört yöntem bulunur. **Claude ve Codex limit okuma varsayılan olarak açıktır.** Bu ikisi için uygulama hiçbir dosyayı değiştirmez, modele istek göndermez ve yalnızca kendi Claude Code / Codex oturumunuzu kullanır. Claude Code'un ayar dosyasını değiştiren diğer iki yöntem **varsayılan olarak kapalıdır**. Her yöntemin neyi değiştirdiği ekranda yazar; yöntemi kapattığınızda değişiklik geri alınır. Windows'ta uygulama, Linux'ta paket kaldırılırken bu değişiklikler kendiliğinden geri alınır; güncellemelerde ise dokunulmaz. macOS'te ve AppImage'da uygulamayı silmeden önce bu anahtarları kapatın.
+**Kaynaklar → Canlı yakalama** bölümünde beş yöntem bulunur. **Claude, Codex ve Antigravity limit okuma varsayılan olarak açıktır.** Bu üçü için uygulama hiçbir dosyayı değiştirmez, modele istek göndermez ve yalnızca kendi Claude Code, Codex ya da Antigravity CLI oturumunuzu kullanır. Claude Code'un ayar dosyasını değiştiren diğer iki yöntem **varsayılan olarak kapalıdır**. Her yöntemin neyi değiştirdiği ekranda yazar; yöntemi kapattığınızda değişiklik geri alınır. Windows'ta uygulama, Linux'ta paket kaldırılırken bu değişiklikler kendiliğinden geri alınır; güncellemelerde ise dokunulmaz. macOS'te ve AppImage'da uygulamayı silmeden önce bu anahtarları kapatın.
 
-![Canlı yakalama paneli: dört anahtar ve her birinin neyi değiştirdiği](assets/readme/capture-tr.webp)
+![Canlı yakalama paneli: beş anahtar ve her birinin neyi değiştirdiği](assets/readme/capture-tr.webp)
 
 | Yöntem                               | Ne yapar                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Neyi değiştirir                                                                                                                                                                                                        |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Claude limit okuma**               | Claude Code'un kendi kullanım sorgusuyla 5 saatlik ve haftalık limit yüzdenizi okur. Modele istek gönderilmediği için kotanızdan bir şey harcanmaz. Claude'u kullanırken 5 dakikada bir, kullanmadığınızda 15 dakikada bir güncellenir (Claude'un kullanım servisi daha sık sorulmasına izin vermez). Böylece Claude masaüstü sohbetleri, Code sekmesi, Cowork ve web kullanımı da yansır. Claude Code'da Pro/Max hesabıyla oturum açmış olmanız gerekir (`claude` → `/login`). | Hiçbir şeyi değiştirmez. Kendi Claude Code kurulumunuzu ve oturumunuzu kullanır. Okuma sırasında MCP sunucuları, hook'lar, telemetri, hata raporlaması ve otomatik güncelleme kapalıdır. Giriş bilgilerinize dokunmaz. |
 | **Codex limit okuma**                | Codex'in resmi arayüzüyle 5 saatlik ve haftalık limit yüzdenizi 5 dakikada bir okur. Böylece Codex'i kullanmadığınız zamanlarda da değer güncel kalır.                                                                                                                                                                                                                                                                                                                          | Hiçbir dosyayı değiştirmez. Kendi Codex kurulumunuzu ve oturumunuzu analitik kapalı olarak kullanır. Giriş bilgilerinize dokunmaz.                                                                                     |
+| **Antigravity limit okuma**          | Antigravity CLI'ın (`agy`) kendi `/usage` komutuyla Gemini ve Claude/GPT havuzlarının 5 saatlik ve haftalık limit yüzdenizi 5 dakikada bir okur. Antigravity uygulaması ve IDE bu okumayı yapamaz; `agy` gerekir. | Hiçbir dosyayı değiştirmez. Kendi `agy` kurulumunuzu ve Google oturumunuzu kullanır; okuma sırasında `agy` kendini güncellemez. Giriş bilgilerinize dokunmaz. |
 | **Claude Code durum satırı köprüsü** | Claude Code'un resmi `statusLine` verisinden (Pro/Max) 5 saatlik ve haftalık limit yüzdenizi kaydeder. Zaten bir durum satırınız varsa aynı girdiyle çalışmaya devam eder. Yalnızca Claude Code'un durum satırı gösterdiği yerde (terminalde) çalışır; Claude masaüstündeki Code sekmesi durum satırı çalıştırmaz.                                                                                                                                                              | `~/.claude/settings.json` dosyasındaki `statusLine` alanı (önce yedeği alınır).                                                                                                                                        |
 | **Yerel telemetri alıcısı**          | Claude Code'un resmi telemetri verisinden istek bazında token sayılarını alır. Kayıt dosyalarında görünmeyen yardımcı model çağrılarını da yakalar.                                                                                                                                                                                                                                                                                                                             | `~/.claude/settings.json` dosyasındaki `env` bloğuna yalnızca log dışa aktarma değişkenleri eklenir. Alıcı yalnızca `127.0.0.1` adresini dinler ve yalnızca bu kuruluma özel anahtarı taşıyan istekleri kabul eder.    |
+
+Limit okuma için gereken araç kurulu değilse kartında **Kur** ve **Kurulum sayfası** düğmeleri çıkar. **Kur**, aracı üreticinin resmi kurulum betiğiyle kurar: Claude Code için `claude.ai/install`, Codex için `chatgpt.com/codex/install`, Antigravity CLI için `antigravity.google/cli/install`. Araç kurulu ama giriş yapılmamışsa genel bakışta ve ilgili kartta nasıl giriş yapacağınız adım adım yazar; **Tekrar dene** ile limitleri hemen okutabilirsiniz.
 
 Güvenlik önlemleri:
 
@@ -295,9 +300,9 @@ Güvenlik önlemleri:
 
 Her şey sizin bilgisayarınızda olur:
 
-1. Claude Code, Cowork, Claude masaüstü ve Codex (CLI ve masaüstü) kullanım kayıtlarını diske yazar.
+1. Claude Code, Cowork, Claude masaüstü, Codex (CLI ve masaüstü) ve Antigravity (uygulama, IDE ve CLI) kullanım kayıtlarını diske yazar.
 2. Uygulama bu kayıtları okur ve içlerinden yalnızca token sayısı, model ve zaman gibi bilgileri alır. Prompt ve yanıt metinleri hiçbir yere kaydedilmez.
-3. Limit okumaları açıksa limit yüzdeleri bilgisayarınızdaki `claude` ve `codex` üzerinden alınır.
+3. Limit okumaları açıksa limit yüzdeleri bilgisayarınızdaki `claude`, `codex` ve `agy` üzerinden alınır.
 4. Yerel veri tabanına (SQLite) yalnızca sayılar ve meta veriler yazılır.
 5. Panel, widget, tepsi simgesi ve PDF özet bu veri tabanını kullanır.
 
@@ -314,6 +319,8 @@ Uygulama açılışta ve 6 saatte bir yeni sürüm olup olmadığına bakar. Bun
 - **Codex hızlı katmanı:** Codex fast/priority katmanını istek bazında kaydetmediği için standart fiyat uygulanır.
 - **Yalnızca telemetriden bilinen istekler:** Bu isteklerde önbellek yazmaları 5 dakikalık fiyattan hesaplanır, bu yüzden maliyetleri biraz düşük çıkabilir.
 - **`codex-auto-review`:** Bu modelin resmi fiyatı yayımlanmamıştır.
+- **Eski Antigravity konuşmaları:** Antigravity'nin eski sürümlerinin şifreli olarak sakladığı `.pb` konuşmaları ve veritabanı silinmiş konuşmalar okunmaz; bunlarda gerçek token sayısı bulunmaz.
+- **Google AI plan fiyatları:** Ülkeye ve kampanyaya göre değiştiği için Antigravity planınızın aylık ücretini kendiniz girersiniz.
 - **Kayıt biçimleri:** Araçların kayıt biçimleri resmi olarak belgelenmiş değildir ve sürümden sürüme değişebilir. Uygulama bilmediği alanları atlar ve tanıyamadığı kayıtları **Kaynaklar** ekranında listeler.
 
 ## Kaynaktan derleme
