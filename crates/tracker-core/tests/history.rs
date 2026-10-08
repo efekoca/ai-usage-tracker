@@ -345,3 +345,37 @@ fn capacity_pairs_the_peak_with_the_use_up_to_that_reading() {
     // $1 at 50 %, not $2
     assert!((s.capacity.as_ref().unwrap().median_usd - 2.0).abs() < 1e-9);
 }
+
+fn antigravity(ts: i64, pool: &str, window: &str, used: f64, resets_ms: i64) -> LimitSnapshot {
+    LimitSnapshot { tool: Tool::Antigravity, limit_id: pool.into(), ..snap(ts, Provider::Google, window, used, resets_ms, None) }
+}
+
+#[test]
+fn antigravity_limits_get_plan_advice_from_either_pool() {
+    let mut v = Vec::new();
+    for d in 1..=10 {
+        let reset = NOW - d * DAY;
+        v.push(antigravity(reset - HOUR, "gemini", "five_hour", 30.0, reset));
+        v.push(antigravity(reset - HOUR, "3p", "five_hour", 20.0, reset));
+    }
+    for d in [2, 4, 7] {
+        let reset = NOW - d * DAY - 8 * HOUR;
+        v.push(antigravity(reset - HOUR, "3p", "five_hour", 100.0, reset));
+    }
+    let h = limit_history(&store_with(v), NOW, 28).unwrap();
+    let plans = PlansFile::bundled();
+    let a = plan_advice(&h, Provider::Google, Some("pro"), &plans, NOW);
+    assert_eq!(a.kind, AdviceKind::Upgrade);
+    assert_eq!((a.suggested.as_deref(), a.five_hour.full), (Some("ultra5x"), 3));
+    assert!(!a.suggested_has_no_five_hour);
+
+    let mut v = Vec::new();
+    for d in 1..=10 {
+        let reset = NOW - d * DAY;
+        v.push(antigravity(reset - HOUR, "gemini", "seven_day", if d == 3 { 100.0 } else { 40.0 }, reset));
+    }
+    let h = limit_history(&store_with(v), NOW, 28).unwrap();
+    let a = plan_advice(&h, Provider::Google, Some("free"), &plans, NOW);
+    assert_eq!((a.kind, a.suggested.as_deref()), (AdviceKind::Upgrade, Some("plus")));
+    assert!(!a.suggested_has_no_five_hour, "neither plan has a five-hour window");
+}

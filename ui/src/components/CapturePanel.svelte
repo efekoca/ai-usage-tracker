@@ -6,6 +6,7 @@
   import Toggle from './Toggle.svelte'
   import Icon from './Icon.svelte'
   import AccuracyBadge from './AccuracyBadge.svelte'
+  import SignInSteps from './SignInSteps.svelte'
 
   let st = $state<CaptureStatus | null>(null)
   let busy = $state<string | null>(null)
@@ -45,8 +46,36 @@
       await load()
     }
   }
+  async function install(kind: 'claude' | 'codex' | 'antigravity') {
+    busy = kind
+    try {
+      note[kind] = { ok: true, text: explain(kind, await api.installCli(kind), true) }
+    } catch (e) {
+      note[kind] = { ok: false, text: explain(kind, String(e), false) }
+    } finally {
+      busy = null
+      await load()
+    }
+  }
+  const GUIDES = {
+    claude: 'https://code.claude.com/docs/en/setup',
+    codex: 'https://learn.chatgpt.com/docs/codex/cli',
+    antigravity: 'https://antigravity.google/docs/getting-started?tab=cli',
+  }
+  const SIGNED_OUT = { claude: 'claude_no_plan_limits', codex: 'codex_not_signed_in', antigravity: 'agy_not_signed_in' } as const
+  const signIn = (kind: string) =>
+    !!st && (kind === 'claude' || kind === 'codex' || kind === 'antigravity') && !missing(kind) && st[kind].last_error === SIGNED_OUT[kind]
+  const missing = (kind: string) =>
+    !!st && ((kind === 'claude' && !st.claude_candidates_found) || (kind === 'codex' && !st.codex_candidates_found) || (kind === 'antigravity' && !st.antigravity_candidates_found))
   const ago = (ms: number | null | undefined) => (ms ? t('cap.ago', { t: fmtDuration(now - ms) }) : t('cap.never'))
 </script>
+
+{#snippet installRow(kind: 'claude' | 'codex' | 'antigravity')}
+  <span class="install">
+    <button class="btn small primary" disabled={busy !== null} onclick={() => install(kind)}><Icon name="download" size={13} />{t(`cap.${kind}.install`)}</button>
+    <button class="btn small ghost" onclick={() => api.openUrl(GUIDES[kind])}><Icon name="external" size={13} />{t('cap.install.guide')}</button>
+  </span>
+{/snippet}
 
 <section class="card">
   <div class="head">
@@ -74,19 +103,19 @@
           <dt>{t('cap.status')}</dt>
           <dd>
             {#if busy === kind}
-              <span class="spin" aria-hidden="true"></span> {t('cap.working')}
+              <span class="spin" aria-hidden="true"></span> {t(missing(kind) ? `cap.${kind}.installing` : 'cap.working')}
             {:else if kind === 'claude'}
-              {#if !st.claude_candidates_found}<span class="muted">{t('cap.claude.notInstalled')}</span>
+              {#if !st.claude_candidates_found}<span class="muted">{t('cap.claude.notInstalled')}</span>{@render installRow('claude')}
               {:else if on && st.claude.last_error}<Icon name="warning" size={13} /> <span class="msg">{explain('claude', st.claude.last_error, false)}</span>
               {:else if on}<Icon name="check" size={13} /> {t('cap.codex.ok', { t: ago(st.claude.last_ok_ms) })}
               {:else}{t('common.off')}{/if}
             {:else if kind === 'codex'}
-              {#if !st.codex_candidates_found}<span class="muted">{t('cap.codex.notInstalled')}</span>
+              {#if !st.codex_candidates_found}<span class="muted">{t('cap.codex.notInstalled')}</span>{@render installRow('codex')}
               {:else if on && st.codex.last_error}<Icon name="warning" size={13} /> <span class="msg">{explain('codex', st.codex.last_error, false)}</span>
               {:else if on}<Icon name="check" size={13} /> {t('cap.codex.ok', { t: ago(st.codex.last_ok_ms) })}
               {:else}{t('common.off')}{/if}
             {:else if kind === 'antigravity'}
-              {#if !st.antigravity_candidates_found}<span class="muted">{t('cap.antigravity.notInstalled')}</span>
+              {#if !st.antigravity_candidates_found}<span class="muted">{t('cap.antigravity.notInstalled')}</span>{@render installRow('antigravity')}
               {:else if on && st.antigravity.last_error}<Icon name="warning" size={13} /> <span class="msg">{explain('antigravity', st.antigravity.last_error, false)}</span>
               {:else if on}<Icon name="check" size={13} /> {t('cap.codex.ok', { t: ago(st.antigravity.last_ok_ms) })}
               {:else}{t('common.off')}{/if}
@@ -100,6 +129,9 @@
             {/if}
           </dd>
         </dl>
+        {#if on && busy !== kind && signIn(kind) && (kind === 'claude' || kind === 'codex' || kind === 'antigravity')}
+          <SignInSteps {kind} binary={st[kind].binary} />
+        {/if}
         {#if note[kind]}
           <p class="note small" class:bad={!note[kind].ok}>{note[kind].text}</p>
         {/if}
@@ -158,6 +190,13 @@
     align-items: center;
     gap: 5px;
     flex-wrap: wrap;
+  }
+  .install {
+    flex-basis: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 6px;
   }
   .msg {
     flex: 1 1 0;

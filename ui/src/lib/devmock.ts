@@ -4,9 +4,11 @@ import plansJson from '../../../config/plans.json'
 import type { DayPoint, Group, LimitView, Period, Report, Settings, Totals } from './api'
 
 const scenario = new URLSearchParams(location.search)
-const claudeMode = scenario.get('claude')
-const codexMissing = scenario.get('codex') === 'missing'
-const agyMissing = scenario.get('agy') === 'missing'
+let claudeMode = scenario.get('claude')
+let codexMissing = scenario.get('codex') === 'missing'
+let codexOut = scenario.get('codex') === 'nologin'
+let agyOut = scenario.get('agy') === 'nologin'
+let agyMissing = scenario.get('agy') === 'missing'
 
 let seed = 7
 const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
@@ -134,7 +136,7 @@ function report(p: Period): Report {
 
 function limits(): LimitView[] {
   const all = allLimits()
-  return all.filter((l) => !(claudeMode && l.provider === 'anthropic') && !(agyMissing && l.provider === 'google'))
+  return all.filter((l) => !(claudeMode && l.provider === 'anthropic') && !((agyMissing || agyOut) && l.provider === 'google') && !(codexOut && l.provider === 'openai'))
 }
 
 function allLimits(): LimitView[] {
@@ -349,7 +351,7 @@ const pricing = {
   schema_version: 1,
   updated_at: '2026-10-02',
   currency: 'USD',
-  sources: { anthropic: 'https://platform.claude.com/docs/en/about-claude/pricing', openai: 'https://developers.openai.com/api/docs/pricing', google: 'https://ai.google.dev/gemini-api/docs/pricing' },
+  sources: { anthropic: 'https://platform.claude.com/docs/en/about-claude/pricing', openai: 'https://developers.openai.com/api/docs/pricing', google: 'https://ai.google.dev/gemini-api/docs/pricing', vertex_ai: 'https://cloud.google.com/vertex-ai/generative-ai/pricing' },
   notes: [],
   models: models.filter((m) => m[3] > 0).map(([id, tool, , i, o, cr]) => ({ id, provider: tool === 'codex' ? 'openai' : tool === 'antigravity' ? 'google' : 'anthropic', input: i, output: o, cache_read: cr, cache_write_5m: i * 1.25, cache_write_1h: tool === 'codex' ? null : i * 2, verified_at: '2026-10-02' })),
   user_aliases: {},
@@ -386,9 +388,22 @@ export function installMock() {
           return { today: per(18_400_000, 12.84), days7: per(96_000_000, 71.3), month1: per(402_000_000, 288.1), limits: limits().map((l) => ({ provider: l.provider, window: l.window, used_pct: l.used_pct, state: l.state, accuracy: l.accuracy, resets_at: l.resets_at, observed_ms: l.observed_ms })), providers: ['anthropic', 'openai', 'google'], updated_ms: Date.now() - 60000 }
         }
         case 'capture_status':
-          return { claude_poll: settings.capture.claude_poll, claude: { binary: claudeMode === 'missing' ? null : 'C:/claude.exe', last_ok_ms: claudeMode ? null : Date.now() - 40000, last_error: claudeMode === 'nologin' ? 'claude_no_plan_limits' : claudeMode === 'missing' ? 'claude_not_found' : null }, claude_candidates_found: claudeMode !== 'missing', codex_poll: settings.capture.codex_poll, codex: { binary: codexMissing ? null : 'C:/codex.exe', last_ok_ms: codexMissing ? null : Date.now() - 120000, last_error: codexMissing ? 'codex_not_found' : null }, codex_candidates_found: !codexMissing, antigravity_poll: settings.capture.antigravity_poll, antigravity: { binary: agyMissing ? null : 'C:/Users/you/AppData/Local/agy/bin/agy.exe', last_ok_ms: agyMissing ? null : Date.now() - 90000, last_error: agyMissing ? 'agy_not_found' : null }, antigravity_candidates_found: !agyMissing, statusline: settings.capture.statusline, statusline_file: 'C:\\Users\\you\\.claude\\settings.json', statusline_chained: false, statusline_last_ms: Date.now() - 30000, otel: settings.capture.otel, otel_port: 43180, otel_listening: settings.capture.otel, otel_events: 42, otel_last_ms: Date.now() - 5000, otel_error: null, settings_file: 'C:\\Users\\you\\.claude\\settings.json' }
+          return { claude_poll: settings.capture.claude_poll, claude: { binary: claudeMode === 'missing' ? null : 'C:/claude.exe', last_ok_ms: claudeMode ? null : Date.now() - 40000, last_error: claudeMode === 'nologin' ? 'claude_no_plan_limits' : claudeMode === 'missing' ? 'claude_not_found' : null }, claude_candidates_found: claudeMode !== 'missing', codex_poll: settings.capture.codex_poll, codex: { binary: codexMissing ? null : 'C:/codex.exe', last_ok_ms: codexMissing ? null : Date.now() - 120000, last_error: codexMissing ? 'codex_not_found' : codexOut ? 'codex_not_signed_in' : null }, codex_candidates_found: !codexMissing, antigravity_poll: settings.capture.antigravity_poll, antigravity: { binary: agyMissing ? null : 'C:/Users/you/AppData/Local/agy/bin/agy.exe', last_ok_ms: agyMissing ? null : Date.now() - 90000, last_error: agyMissing ? 'agy_not_found' : agyOut ? 'agy_not_signed_in' : null }, antigravity_candidates_found: !agyMissing, statusline: settings.capture.statusline, statusline_file: 'C:\\Users\\you\\.claude\\settings.json', statusline_chained: false, statusline_last_ms: Date.now() - 30000, otel: settings.capture.otel, otel_port: 43180, otel_listening: settings.capture.otel, otel_events: 42, otel_last_ms: Date.now() - 5000, otel_error: null, settings_file: 'C:\\Users\\you\\.claude\\settings.json' }
+        case 'install_cli':
+          return new Promise((done) =>
+            setTimeout(() => {
+              if (a.kind === 'claude') claudeMode = null
+              if (a.kind === 'codex') codexMissing = false
+              if (a.kind === 'antigravity') agyMissing = false
+              settings.capture[a.kind === 'claude' ? 'claude_poll' : a.kind === 'codex' ? 'codex_poll' : 'antigravity_poll'] = true
+              done(`${a.kind === 'antigravity' ? 'agy' : a.kind}_installed`)
+            }, 1500),
+          )
         case 'set_capture': {
           const k = a.kind as 'claude' | 'codex' | 'antigravity' | 'statusline' | 'otel'
+          if (a.enabled && k === 'codex') codexOut = false
+          if (a.enabled && k === 'antigravity') agyOut = false
+          if (a.enabled && k === 'claude' && claudeMode === 'nologin') claudeMode = null
           if (k === 'codex') settings.capture.codex_poll = !!a.enabled
           else if (k === 'antigravity') settings.capture.antigravity_poll = !!a.enabled
           else if (k === 'claude') settings.capture.claude_poll = !!a.enabled

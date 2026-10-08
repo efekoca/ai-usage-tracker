@@ -6,7 +6,8 @@
   "sources": {
     "anthropic": "https://platform.claude.com/docs/en/about-claude/pricing",
     "openai": "https://developers.openai.com/api/docs/pricing",
-    "google": "https://ai.google.dev/gemini-api/docs/pricing"
+    "google": "https://ai.google.dev/gemini-api/docs/pricing",
+    "vertex_ai": "https://cloud.google.com/vertex-ai/generative-ai/pricing"
   },
   "notes": [
     "Prices are the public API list prices. Usage on a subscription plan is shown as an 'API equivalent', not as money actually spent.",
@@ -16,7 +17,7 @@
     "speed_multipliers / geo_multipliers multiply every token category (not per-request fees).",
     "For Claude 4.x models the price page lists input/output; their cache prices here are derived from the documented standard multipliers (5m write 1.25x, 1h write 2x, read 0.1x).",
     "Gemini prices are the Gemini Developer API Standard tier. Gemini 3.6/3.7/3.8 Flash list an introductory price until 2026-12-31 (input 1.50, output 7.50, cache read 0.15 from 2027-01-01). Gemini caching has no write fee; thinking tokens are billed as output.",
-    "Antigravity names some models by internal ids (gemini-3.8-flash-n, gemini-3-flash-a, claude-*-thinking); they are aliases of the model Antigravity shows for them. Antigravity does not report cache writes for Claude models, so those are counted as input."
+    "Antigravity names some models by internal ids (gemini-3.8-flash-n, gemini-3-flash-a/-b/-c, -low/-medium/-high/-tiered thinking levels, claude-*-thinking, gpt-oss-*-maas); they are aliases of the model Antigravity shows for them. gemini-3-flash-a/-b/-c are served for Gemini 3.5 Flash at every thinking level. Antigravity does not report cache writes for Claude models, so those are counted as input."
   ],
   "models": [
     { "id": "claude-opus-5-5", "provider": "anthropic", "aliases": ["claude-opus-5-5-thinking"], "input": 4, "output": 20, "cache_read": 0.2, "cache_write_5m": 5, "cache_write_1h": 8,
@@ -84,14 +85,16 @@
     { "id": "gpt-6-luna", "provider": "openai", "input": 0.1, "cache_read": 0.01, "cache_write_5m": 0.125, "output": 0.5,
       "long_context": { "threshold": 272000, "input": 0.2, "cache_read": 0.02, "cache_write_5m": 0.25, "output": 0.75 },
       "speed_multipliers": { "fast": 2 }, "verified_at": "2026-10-03" },
-    { "id": "gemini-3.8-flash", "provider": "google", "aliases": ["gemini-3.8-flash-n"], "input": 0.75, "output": 3.75, "cache_read": 0.075, "verified_at": "2026-10-08", "notes": "Introductory price until 2026-12-31." },
-    { "id": "gemini-3.7-flash", "provider": "google", "input": 0.75, "output": 3.75, "cache_read": 0.075, "verified_at": "2026-10-08", "notes": "Introductory price until 2026-12-31." },
-    { "id": "gemini-3.6-flash", "provider": "google", "input": 0.75, "output": 3.75, "cache_read": 0.075, "verified_at": "2026-10-08", "notes": "Introductory price until 2026-12-31." },
-    { "id": "gemini-3.5-flash", "provider": "google", "aliases": ["gemini-3-flash-a"], "input": 1.5, "output": 9, "cache_read": 0.15, "verified_at": "2026-10-08" },
+    { "id": "gemini-3.8-flash", "provider": "google", "aliases": ["gemini-3.8-flash-n", "gemini-3.8-flash-low", "gemini-3.8-flash-medium", "gemini-3.8-flash-high", "gemini-3.8-flash-tiered"], "input": 0.75, "output": 3.75, "cache_read": 0.075, "verified_at": "2026-10-08", "notes": "Introductory price until 2026-12-31." },
+    { "id": "gemini-3.7-flash", "provider": "google", "aliases": ["gemini-3.7-flash-low", "gemini-3.7-flash-medium", "gemini-3.7-flash-high", "gemini-3.7-flash-tiered"], "input": 0.75, "output": 3.75, "cache_read": 0.075, "verified_at": "2026-10-08", "notes": "Introductory price until 2026-12-31." },
+    { "id": "gemini-3.6-flash", "provider": "google", "aliases": ["gemini-3.6-flash-low", "gemini-3.6-flash-medium", "gemini-3.6-flash-high", "gemini-3.6-flash-tiered"], "input": 0.75, "output": 3.75, "cache_read": 0.075, "verified_at": "2026-10-08", "notes": "Introductory price until 2026-12-31." },
+    { "id": "gemini-3.5-flash", "provider": "google", "aliases": ["gemini-3-flash-a", "gemini-3-flash-b", "gemini-3-flash-c", "gemini-3.5-flash-low", "gemini-3.5-flash-medium", "gemini-3.5-flash-high", "gemini-3.5-flash-tiered"], "input": 1.5, "output": 9, "cache_read": 0.15, "verified_at": "2026-10-08" },
     { "id": "gemini-3.5-flash-lite", "provider": "google", "input": 0.3, "output": 2.5, "cache_read": 0.03, "verified_at": "2026-10-08" },
     { "id": "gemini-3.1-flash-lite", "provider": "google", "input": 0.25, "output": 1.5, "cache_read": 0.025, "verified_at": "2026-10-08" },
-    { "id": "gemini-3.1-pro-preview", "provider": "google", "aliases": ["gemini-3.1-pro"], "input": 2, "output": 12, "cache_read": 0.2,
+    { "id": "gemini-3.1-pro-preview", "provider": "google", "aliases": ["gemini-3.1-pro", "gemini-3.1-pro-low", "gemini-3.1-pro-high"], "input": 2, "output": 12, "cache_read": 0.2,
       "long_context": { "threshold": 200000, "input": 4, "cache_read": 0.4, "output": 18 }, "verified_at": "2026-10-08" },
-    { "id": "gemini-3-flash-preview", "provider": "google", "aliases": ["gemini-3-flash"], "input": 0.5, "output": 3, "cache_read": 0.05, "verified_at": "2026-10-08" }
+    { "id": "gemini-3-flash-preview", "provider": "google", "aliases": ["gemini-3-flash"], "input": 0.5, "output": 3, "cache_read": 0.05, "verified_at": "2026-10-08" },
+    { "id": "gpt-oss-120b", "provider": "google", "aliases": ["gpt-oss-120b-maas", "gpt-oss-120b-medium"], "input": 0.09, "output": 0.36, "verified_at": "2026-10-08", "notes": "Vertex AI open model price; Antigravity serves it through Vertex AI." },
+    { "id": "gpt-oss-20b", "provider": "google", "aliases": ["gpt-oss-20b-maas"], "input": 0.07, "output": 0.25, "cache_read": 0.007, "verified_at": "2026-10-08", "notes": "Vertex AI open model price." }
   ]
 }

@@ -354,6 +354,27 @@ mod tests {
     }
 
     #[test]
+    fn antigravity_served_ids_resolve_to_the_model_shown_in_antigravity() {
+        let b = PriceBook::default_book();
+        for (served, id) in [
+            ("gemini-3-flash-a", "gemini-3.5-flash"),
+            ("gemini-3-flash-b", "gemini-3.5-flash"),
+            ("gemini-3-flash-c", "gemini-3.5-flash"),
+            ("gemini-3.8-flash-n", "gemini-3.8-flash"),
+            ("gemini-3.8-flash-tiered", "gemini-3.8-flash"),
+            ("gemini-3.7-flash-high", "gemini-3.7-flash"),
+            ("gemini-3.6-flash-medium", "gemini-3.6-flash"),
+            ("gemini-3.1-pro-low", "gemini-3.1-pro-preview"),
+            ("claude-opus-4-6-thinking", "claude-opus-4-6"),
+            ("claude-sonnet-5-5-thinking", "claude-sonnet-5-5"),
+            ("gpt-oss-120b-maas", "gpt-oss-120b"),
+            ("gpt-oss-120b-medium", "gpt-oss-120b"),
+        ] {
+            assert_eq!(b.lookup(served).map(|m| m.id.as_str()), Some(id), "{served}");
+        }
+    }
+
+    #[test]
     fn user_alias_prices_an_unknown_model_like_a_known_one() {
         let mut f: PricingFile = serde_json::from_str(DEFAULT_PRICING_JSON).unwrap();
         f.user_aliases.insert("codex-auto-review".into(), "gpt-5.6-terra".into());

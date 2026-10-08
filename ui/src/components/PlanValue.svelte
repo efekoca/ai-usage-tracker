@@ -6,6 +6,7 @@
   import { fmtDate, fmtDec, fmtInt, fmtMoney, i18n, t } from '../lib/i18n.svelte'
   import Icon from './Icon.svelte'
   import AccuracyBadge from './AccuracyBadge.svelte'
+  import Select from './Select.svelte'
 
   let plans = $state<PlansFile | null>(null)
   let value = $state<PlanValue | null>(null)
@@ -37,6 +38,9 @@
     if (typeof own === 'number' && own > 0) return { usd: own, custom: true }
     const list = planOf(p)?.monthly_usd
     return { usd: typeof list === 'number' ? list : null, custom: false }
+  }
+  function setPlan(p: Provider, id: string) {
+    saveSettings((c) => ({ plans: { ...c.plans, [p]: id } }))
   }
   function setPrice(p: Provider, raw: string) {
     const v = Number(raw.replace(',', '.'))
@@ -70,6 +74,22 @@
   }
 </script>
 
+{#snippet usage(p: Provider, r: ReturnType<typeof row>)}
+  {#if r.pv && r.pv.events > 0}
+    {@const g = path(r.pv.cumulative, r.cost * 1.08 || 1)}
+    <div class="figure">
+      <div class="big num">{fmtMoney(r.cost)}</div>
+      <span class="subtle small">{t('value.apiEq')}</span>
+    </div>
+    <svg class="spark" viewBox="0 0 {W} {H}" preserveAspectRatio="none" role="img" aria-label="{t('value.chart.api')}: {fmtMoney(r.cost)}">
+      <path d={g.area} class="area" style="--c:{providerColor[p]}" />
+      <path d={g.line} class="line" style="--c:{providerColor[p]}" />
+    </svg>
+  {:else}
+    <p class="muted small">{t('value.noUse')}</p>
+  {/if}
+{/snippet}
+
 <section class="card value">
   <div class="card-head">
     <h2>{t('value.title')}</h2>
@@ -93,20 +113,29 @@
           </div>
 
           {#if !r.plan}
-            <p class="muted small">{t('value.choosePlan')} <button class="link" onclick={() => (app.view = 'limits')}>{t('value.choose')}</button></p>
+            {@render usage(p, r)}
+            <div class="pick">
+              <span class="small">{t('value.pickLead')}</span>
+              <Select
+                label="{t(`provider.${p}`)} · {t('limits.plan')}"
+                placeholder={t('value.pickPlan')}
+                minWidth={170}
+                options={plans.providers[p]?.plans.map((pl) => ({ value: pl.id, label: pl.name, sub: pl.relative })) ?? []}
+                onchange={(v) => setPlan(p, v)}
+              />
+            </div>
           {:else if r.plan.id === 'api'}
             <p class="muted small">{t('value.api')}</p>
           {:else if r.price.usd === 0}
             <p class="muted small">{t('value.free')}</p>
           {:else if r.price.usd === null}
-            <div class="enter">
-              <p class="muted small">{r.plan.price_note?.[i18n.lang] ?? t('value.enterPrice')}</p>
-              <div class="row wrap">
-                {#each r.plan.price_options ?? [] as o (o)}
-                  <button class="btn small" onclick={() => setPrice(p, String(o))}>{fmtMoney(o)}</button>
-                {/each}
-                <input class="field price" inputmode="decimal" placeholder={t('value.price')} aria-label={t('value.price')} onchange={(e) => setPrice(p, e.currentTarget.value)} />
-              </div>
+            {@render usage(p, r)}
+            <div class="pick">
+              <span class="small">{r.plan.price_note?.[i18n.lang] ?? t('value.enterPrice')}</span>
+              {#each r.plan.price_options ?? [] as o (o)}
+                <button class="btn small" onclick={() => setPrice(p, String(o))}>{fmtMoney(o)}</button>
+              {/each}
+              <input class="field price" inputmode="decimal" placeholder={t('value.price')} aria-label={t('value.price')} onchange={(e) => setPrice(p, e.currentTarget.value)} />
             </div>
           {:else if !r.pv || r.pv.events === 0}
             <p class="muted small">{t('value.noUse')}</p>
@@ -269,21 +298,22 @@
   .verdict :global(svg) {
     color: var(--good-ink);
   }
-  .enter .row {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-  }
   .price {
     width: 150px;
   }
-  .link {
-    background: none;
-    border: 0;
-    padding: 0;
-    color: var(--accent);
-    font: inherit;
-    cursor: pointer;
+  .pick {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 10px 12px;
+    border: 0.5px dashed var(--hairline);
+    border-radius: 10px;
+    background: var(--surface-2);
+  }
+  .pick span {
+    flex: 1 1 180px;
+    color: var(--ink-2);
   }
   .foot {
     margin: 14px 0 0;

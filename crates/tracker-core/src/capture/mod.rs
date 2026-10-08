@@ -11,7 +11,9 @@ pub mod statusline;
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::sync::mpsc;
+use std::time::Duration;
 
 const MAX_LINE: usize = 1024 * 1024;
 
@@ -51,6 +53,85 @@ pub(crate) fn json_lines(out: impl Read + Send + 'static) -> mpsc::Receiver<Valu
 }
 
 /// A relative PATH entry would resolve against the current folder, which is not trusted.
+/// A CLI this app reads limits through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cli {
+    Claude,
+    Codex,
+    Antigravity,
+}
+
+impl Cli {
+    /// The maker's documented installer: (Unix script, the shell it runs in, Windows script).
+    /// None of them asks anything; each puts the CLI where this app looks for it and leaves an
+    /// existing install alone.
+    fn installer(self) -> (&'static str, &'static str, &'static str) {
+        match self {
+            Cli::Claude => ("https://claude.ai/install.sh", "bash", "https://claude.ai/install.ps1"),
+            Cli::Codex => ("https://chatgpt.com/codex/install.sh", "sh", "https://chatgpt.com/codex/install.ps1"),
+            Cli::Antigravity => ("https://antigravity.google/cli/install.sh", "bash", "https://antigravity.google/cli/install.ps1"),
+        }
+    }
+}
+
+fn installer_command(cli: Cli) -> Command {
+    let (unix, shell, windows) = cli.installer();
+    #[cfg(windows)]
+    let mut c = {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = (unix, shell);
+        let mut c = Command::new("powershell.exe");
+        // older Windows PowerShell may not offer TLS 1.2 on its own
+        c.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"]).arg(format!(
+            "[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072; irm {windows} | iex"
+        ));
+        c.creation_flags(CREATE_NO_WINDOW);
+        c
+    };
+    #[cfg(not(windows))]
+    let mut c = {
+        let _ = windows;
+        let mut c = Command::new("bash");
+        c.args(["-c", &format!("set -o pipefail; {{ curl -fsSL {unix} || wget -qO- {unix}; }} | {shell}")]);
+        c
+    };
+    c.env("CODEX_NON_INTERACTIVE", "1");
+    c
+}
+
+pub fn install(cli: Cli, timeout: Duration) -> Result<(), String> {
+    run_installer(installer_command(cli), timeout)
+}
+
+fn run_installer(mut cmd: Command, timeout: Duration) -> Result<(), String> {
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("install_failed:{e}"))?;
+    let mut stderr = child.stderr.take().ok_or("install_failed:no stderr")?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = (&mut stderr).take(64 << 10).read_to_end(&mut buf);
+        let _ = tx.send(buf);
+    });
+    let Ok(err) = rx.recv_timeout(timeout) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err("install_failed:timed out".into());
+    };
+    let status = child.wait().map_err(|e| format!("install_failed:{e}"))?;
+    if status.success() {
+        return Ok(());
+    }
+    let err = String::from_utf8_lossy(&err);
+    let last = err.lines().map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("").chars().take(200).collect::<String>();
+    Err(format!("install_failed:{}", if last.is_empty() { status.to_string() } else { last }))
+}
+
 pub(crate) fn path_dirs() -> Vec<PathBuf> {
     std::env::var_os("PATH").map(|p| std::env::split_paths(&p).filter(|d| d.is_absolute()).collect()).unwrap_or_default()
 }
@@ -113,7 +194,30 @@ pub(crate) fn set_child_path(cmd: &mut std::process::Command, bin: &std::path::P
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
+
+    #[cfg(not(windows))]
+    #[test]
+    fn a_failing_installer_reports_its_last_error_line() {
+        let run = |script: &str, secs| {
+            let mut c = Command::new("sh");
+            c.args(["-c", script]);
+            run_installer(c, Duration::from_secs(secs))
+        };
+        assert_eq!(run("echo fetching >&2; echo 'Error: unsupported architecture' >&2; exit 1", 5), Err("install_failed:Error: unsupported architecture".into()));
+        assert_eq!(run("exit 0", 5), Ok(()));
+        assert_eq!(run("sleep 30", 1), Err("install_failed:timed out".into()));
+    }
+
+    #[test]
+    fn each_cli_installs_with_its_makers_documented_script() {
+        let script = |cli| format!("{:?}", installer_command(cli));
+        for (cli, host) in [(Cli::Claude, "claude.ai/install"), (Cli::Codex, "chatgpt.com/codex/install"), (Cli::Antigravity, "antigravity.google/cli/install")] {
+            let s = script(cli);
+            assert!(s.contains(&format!("https://{host}.{}", if cfg!(windows) { "ps1" } else { "sh" })), "{s}");
+        }
+        #[cfg(not(windows))]
+        assert!(script(Cli::Codex).contains("| sh") && script(Cli::Claude).contains("| bash"));
+    }
 
     #[test]
     fn oversized_lines_are_skipped_and_the_rest_is_read() {

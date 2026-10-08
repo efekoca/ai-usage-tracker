@@ -460,7 +460,8 @@ pub fn plan_advice(history: &LimitHistory, provider: Provider, plan_id: Option<&
                 a.kind = AdviceKind::Upgrade;
                 a.suggested = Some(up.id.clone());
                 a.monthly_delta_usd = price_delta(up);
-                a.suggested_has_no_five_hour = !up.windows.iter().any(|w| w == "five_hour");
+                let five = |p: &crate::plans::PlanDef| p.windows.iter().any(|w| w == "five_hour");
+                a.suggested_has_no_five_hour = five(current) && !five(up);
                 a.session_ratio = match (current.session_multiple, up.session_multiple) {
                     (Some(c), Some(u)) if c > 0.0 => Some(u / c),
                     _ => None,

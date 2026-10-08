@@ -169,26 +169,14 @@ fn chatgpt_desktop_dirs(env: &Env) -> Vec<PathBuf> {
     v
 }
 
-/// Data folders of the Antigravity 2.0 app, IDE and CLI under `~/.gemini`, plus any other
-/// `antigravity*` folder holding conversations and an absolute `ANTIGRAVITY_APP_DATA_DIR`.
+/// Data folders of the Antigravity 2.0 app, IDE and CLI under `~/.gemini`, plus
+/// `ANTIGRAVITY_APP_DATA_DIR`. Other `antigravity*` folders are left alone: Antigravity keeps
+/// backups there (`antigravity-backup`).
 pub fn antigravity_dirs(env: &Env) -> Vec<PathBuf> {
     let mut v = Vec::new();
     if let Some(gemini) = env.home.as_ref().map(|h| h.join(".gemini")) {
         for name in ["antigravity", "antigravity-ide", "antigravity-cli"] {
             v.push(gemini.join(name));
-        }
-        if let Ok(rd) = std::fs::read_dir(&gemini) {
-            let mut more: Vec<PathBuf> = rd
-                .flatten()
-                .map(|e| e.path())
-                .filter(|p| {
-                    p.file_name().is_some_and(|n| n.to_string_lossy().to_ascii_lowercase().starts_with("antigravity"))
-                        && p.join("conversations").is_dir()
-                        && !v.contains(p)
-                })
-                .collect();
-            more.sort();
-            v.extend(more);
         }
         if let Some(d) = &env.antigravity_data_dir {
             let p = if Path::new(d).is_absolute() { PathBuf::from(d) } else { gemini.join(d) };
@@ -263,9 +251,13 @@ pub fn enumerate_files(env: &Env, extra: &ExtraPaths, enabled: &HashSet<SourceId
     }
 
     if enabled.contains(&SourceId::Antigravity) {
+        // a conversation copied into another surface keeps its id: the first copy is read
+        let mut ids = HashSet::new();
         for dir in antigravity_dirs(env) {
             for p in files_with_ext(&dir.join("conversations"), "db") {
-                candidates.push((p, ParserKind::AntigravityDb, SourceId::Antigravity));
+                if p.file_stem().is_some_and(|id| ids.insert(id.to_ascii_lowercase())) {
+                    candidates.push((p, ParserKind::AntigravityDb, SourceId::Antigravity));
+                }
             }
         }
     }
