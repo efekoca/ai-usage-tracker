@@ -2,7 +2,7 @@
 
 # AI Usage Tracker
 
-**Your Claude Code and Codex usage, cost, and plan limits, on your own computer.**
+**Your Claude Code, Codex and Antigravity usage, cost, and plan limits, on your own computer.**
 
 A private app for Windows, macOS, and Linux that reads the usage logs your AI tools already write, keeps its own archive, and shows tokens, API-equivalent cost, and live limit percentages. No account, no cloud, no telemetry.
 
@@ -16,11 +16,12 @@ A private app for Windows, macOS, and Linux that reads the usage logs your AI to
 
 - **Private by design.** Prompts and responses are never stored. Only counts and metadata are kept, in a local SQLite file, and your usage data never leaves the computer.
 - **Know where every number comes from.** Every figure is labeled: **Exact** from the tool's own log, **Estimated** by the app, or **Captured** live. Nothing is guessed silently.
-- **Stay ahead of your limits.** Five-hour and weekly percentages for Claude and Codex are read every few minutes, with a forecast of when each window fills.
+- **Stay ahead of your limits.** Five-hour and weekly percentages for Claude, Codex and Antigravity are read every few minutes, with a forecast of when each window fills.
 
 ## What sets it apart
 
-- **Track your limits without spending quota.** Your five-hour and weekly percentages come from Claude Code's and Codex's own official interfaces, without a single model request.
+- **Track your limits without spending quota.** Your five-hour and weekly percentages come from the official interfaces of Claude Code, Codex and the Antigravity CLI, without a single model request.
+- **Install what you need in one click.** If a limit read needs Claude Code, the Codex CLI or the Antigravity CLI, the app installs it with its maker's own installer, and shows step by step how to sign in when that is missing.
 - **See when your limit may run out.** The forecast uses your average pace since the window started, so a short burst of work is not projected across the whole window.
 - **See what a limit window is worth in API terms.** From the windows it has watched to their end, the app estimates how much API-equivalent use a whole five-hour or weekly window holds.
 - **Find the plan that fits your use.** A bigger plan is suggested when your limits keep filling, and a smaller one only when the provider publishes the ratio between plans.
@@ -29,15 +30,15 @@ A private app for Windows, macOS, and Linux that reads the usage logs your AI to
 - **Measure what the cache saves you.** You see the hit rate, the net savings, and what it cost when the cache had to be written again after a long pause.
 - **Keep your history.** Resumed and forked sessions are never counted twice, and your history stays in the archive even after the tools delete their own logs (Claude Code does so after 30 days).
 
-![A short tour: the overview with a chart tooltip, current limits, limit history, tips, the model comparison and the Widget studio changing the widget's layout](assets/readme/demo-en.gif)
+![A short tour: the overview with a chart tooltip and plan value, current limits including Antigravity, limit history, tips, the daily view, the model comparison, live capture and the Widget studio changing the widget's layout](assets/readme/demo-en.gif)
 
 ## Features
 
 ### Limits that stay current
 
-The app reads the five-hour and weekly limit percentages through Claude Code's and Codex's own interfaces, so the numbers match what the tools show. Each window gets a forecast at its average pace, and each project gets an estimated share of it.
+The app reads the five-hour and weekly limit percentages through the tools' own interfaces (Claude Code, Codex and the Antigravity CLI), so the numbers match what the tools show. Each window gets a forecast at its average pace, and each project gets an estimated share of it.
 
-![Limits page with Claude and Codex five-hour and weekly windows, forecasts, and project shares](assets/readme/limits-en.webp)
+![Limits page with the five-hour and weekly windows of Claude, Codex and Antigravity, forecasts, and project shares](assets/readme/limits-en.webp)
 
 Providers publish how their limits work, not the numbers themselves. The app therefore follows these rules:
 
@@ -95,7 +96,7 @@ Amounts are API equivalents. On a subscription you do not pay them; they show th
 
 The **Daily** page shows the period day by day, as columns or, for long periods, as a calendar, in tokens, API-equivalent cost, or requests. It highlights the busiest day, the average per active day, the longest and current streaks of active days, and the weekend share.
 
-![Daily page with daily columns for Claude Code and Codex and the busiest-day and streak figures](assets/readme/daily-en.webp)
+![Daily page with daily columns for Claude Code, Codex and Antigravity and the busiest-day and streak figures](assets/readme/daily-en.webp)
 
 Pick a day, or step through the active days, to see it in detail:
 
@@ -111,7 +112,7 @@ Next to it are the average for each weekday and the busiest days.
 
 On the **Breakdown** page, the period's priced requests are repriced on every model in the price list, with the same token counts and prompt sizes, and listed cheapest first against the actual cost.
 
-![A chart comparing the actual cost with the same requests priced on other Claude and GPT models](assets/readme/compare-en.webp)
+![A chart comparing the actual cost with the same requests priced on other Claude, GPT and Gemini models](assets/readme/compare-en.webp)
 
 Model families tokenize the same text differently (Claude 4.7 and later use about 30 % more tokens), so comparisons across families are approximate. Quality and speed are not taken into account.
 
@@ -163,7 +164,7 @@ Negative savings mean that written cache was not read enough to pay off.
 
 An always-on-top mini window sits by default in the bottom-right corner of the screen. It sizes itself to its content and, when snapped to a corner, stays flush with that corner while it resizes. Dragging it leaves it where you drop it.
 
-![The desktop widget showing today's tokens and cost with rings for the Claude and Codex five-hour limits](assets/readme/widget-en.webp)
+![The desktop widget showing today's tokens and cost with rings for the Claude, Codex and Antigravity five-hour limits](assets/readme/widget-en.webp)
 
 The **Widget studio** page changes what the widget shows and how it looks, with a live preview.
 
@@ -209,6 +210,7 @@ The widget also comes with a tray icon and a shortcut:
 | **Cowork sessions** (Claude desktop) | *Claude folder*`/local-agent-mode-sessions/**` | **Exact** | **Exact %** (5 h / 7 d) | Only tasks that ran on your computer. New Cowork tasks run in the cloud: their token counts are not stored on your computer, but they count toward your plan limits |
 | **Claude desktop: plan usage** | *Claude folder*`/plan-usage-history.json` | — | **Exact %** | Chat tokens are not stored locally, so **none** |
 | **Codex** (CLI and desktop) | `$CODEX_HOME` or `~/.codex/{sessions,archived_sessions}` | **Exact** | **Exact %** (every request) | |
+| **Antigravity** (app, IDE and `agy` CLI) | `~/.gemini/{antigravity,antigravity-ide,antigravity-cli}/conversations/*.db` or `$ANTIGRAVITY_APP_DATA_DIR` | **Exact** | **Captured %** (through `agy`) | A copy of each database is read, so Antigravity's files are never touched. Gemini and Claude/GPT limits are shown separately |
 | ChatGPT desktop | — | **None** | — | Detection only |
 
 `~` is your home folder (`%USERPROFILE%` on Windows). The *Claude folder* is `%APPDATA%\Claude` on Windows and `~/Library/Application Support/Claude` on macOS; the Claude desktop app is not available for Linux.
@@ -277,20 +279,23 @@ Every release includes `SHA256SUMS`, the checksum of each file. Put it next to y
 - **Read:** timestamps, model, project folder, session ID, token counts, and limit percentages from the tools' own logs.
 - **Stored:** only those values, in `tracker.db` (SQLite) in the app's data folder: `%LOCALAPPDATA%\AIUsageTracker` on Windows, `~/Library/Application Support/AIUsageTracker` on macOS, and `~/.local/share/AIUsageTracker` on Linux. Project names stay local. You can hide them one by one or all at once, and hidden names are masked in exports too.
 - **Never stored:** prompts, responses, file contents, credentials, or tokens. The app does **not** read the tools' credential files.
-- **Network:** the app itself connects only to check for updates. The check downloads the release's version file and sends nothing (**Settings → Updates**). The limit reads, on by default, run your own Claude Code and Codex, which ask their own services for your plan's limit percentages; the app starts them with their telemetry and error reporting turned off. You can turn the reads off under **Sources → Live capture**. Prices and plans ship with the app, and currency conversion uses a rate you enter yourself.
+- **Network:** the app itself connects only to check for updates. The check downloads the release's version file and sends nothing (**Settings → Updates**). The limit reads, on by default, run your own Claude Code, Codex and Antigravity CLI, which ask their own services for your plan's limit percentages; the app starts them with their telemetry and error reporting turned off. You can turn the reads off under **Sources → Live capture**. If you install a tool from the app, its installer is downloaded from the maker's site. Prices and plans ship with the app, and currency conversion uses a rate you enter yourself.
 
 ### Live capture
 
-**Sources → Live capture** has four switches. The two **limit reads are on by default**: they change no files, make no model request, and use only your own Claude Code or Codex sign-in. The two methods that edit Claude Code's settings file are **off by default**. Each switch shows exactly what it changes, and turning it off undoes the change. The Windows uninstaller and removing the Linux package revert them too, but updates leave them alone. On macOS and with the AppImage, turn them off before you delete the app.
+**Sources → Live capture** has five switches. The three **limit reads are on by default**: they change no files, make no model request, and use only your own Claude Code, Codex or Antigravity CLI sign-in. The two methods that edit Claude Code's settings file are **off by default**. Each switch shows exactly what it changes, and turning it off undoes the change. The Windows uninstaller and removing the Linux package revert them too, but updates leave them alone. On macOS and with the AppImage, turn them off before you delete the app.
 
-![Live capture panel with the four switches and what each one changes](assets/readme/capture-en.webp)
+![Live capture panel with the five switches and what each one changes](assets/readme/capture-en.webp)
 
 | Method | What it does | What it changes |
 |---|---|---|
 | **Claude limit reads** | Reads the five-hour and weekly limit percentages through Claude Code's own usage query. No model request is made, so no quota is used. It updates every 5 minutes while Claude is in use and every 15 minutes otherwise, because Claude's usage service does not allow more frequent requests. Claude desktop chat, its Code tab, Cowork, and web use are all reflected. Requires Claude Code signed in with a Pro or Max account (`claude` → `/login`). | Nothing. It uses your own Claude Code install and sign-in, turns off MCP servers and hooks as well as telemetry, error reporting, and auto-update for the read, and never touches credentials. |
 | **Codex limit reads** | Reads the five-hour and weekly limit percentages every 5 minutes through Codex's official interface, so they stay current even when you are not using Codex. | Nothing. It uses your own Codex install and sign-in with analytics turned off, and never touches credentials. |
+| **Antigravity limit reads** | Reads the five-hour and weekly limit percentages of the Gemini and Claude/GPT pools every 5 minutes through the Antigravity CLI's (`agy`) own `/usage` command. The Antigravity app and IDE cannot do this read; it needs `agy`. | Nothing. It uses your own `agy` install and Google sign-in, `agy` does not update itself during the read, and credentials are never touched. |
 | **Claude Code status-line bridge** | Records the five-hour and weekly limit percentages from Claude Code's official `statusLine` data (Pro/Max). An existing status line keeps running with the same input. It works where Claude Code shows a status line (the terminal); the Code tab of the Claude desktop app does not run status lines. | `statusLine` in `~/.claude/settings.json` (backed up first). |
 | **Local telemetry receiver** | Takes per-request token counts from Claude Code's official telemetry, including helper-model calls that the transcripts lack. | Log-export variables only, in the `env` block of `~/.claude/settings.json`. It listens on `127.0.0.1` only and accepts only requests that carry a key generated for this install. |
+
+When the tool a limit read needs is missing, its card offers **Install** and **Install guide**. **Install** uses the maker's own installer: `claude.ai/install` for Claude Code, `chatgpt.com/codex/install` for Codex, and `antigravity.google/cli/install` for the Antigravity CLI. When the tool is installed but signed out, the overview and its card explain step by step how to sign in, and **Try again** reads the limits right away.
 
 Safeguards:
 
@@ -303,9 +308,9 @@ Safeguards:
 
 Everything runs on your computer:
 
-1. Claude Code, Cowork, Claude desktop, and the Codex CLI and desktop app write usage logs to disk, as they already do.
+1. Claude Code, Cowork, Claude desktop, the Codex CLI and desktop app, and the Antigravity app, IDE and CLI write usage logs to disk, as they already do.
 2. The app reads each log from where it left off, so a rescan only touches what is new. It takes only details such as token counts, model, and time; prompt and response text is never saved anywhere.
-3. When the limit reads are on, your own `claude` and `codex` CLIs supply the limit percentages.
+3. When the limit reads are on, your own `claude`, `codex` and `agy` CLIs supply the limit percentages.
 4. Only counts and metadata reach the local archive (SQLite). Duplicates from streaming, resumed or forked sessions, and Codex logs moved to the archive are counted once.
 5. The dashboard, widget, tray icon, and weekly PDF read from that archive.
 
@@ -320,6 +325,8 @@ The app checks for a new version at startup and every 6 hours. The check downloa
 - **Codex fast tier:** not recorded per request, so the standard price is used.
 - **Telemetry-only requests:** for requests known only from the local telemetry receiver, cache writes are priced at the 5-minute rate, so their cost can be slightly low.
 - **`codex-auto-review`:** has no published price.
+- **Older Antigravity conversations:** conversations that older Antigravity versions kept encrypted as `.pb` files, and conversations whose database is gone, are not read; they hold no real token counts.
+- **Google AI plan prices:** they differ by country and offer, so you enter what you pay for your Antigravity plan.
 - **Log formats:** these are not documented interfaces and may change. The app skips unknown fields and lists unrecognized files under **Sources**.
 
 ## Build from source
