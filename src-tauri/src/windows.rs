@@ -108,6 +108,7 @@ fn build_main(app: &AppHandle) {
         .center()
         // macOS otherwise spends the first click on an inactive window just activating it
         .accept_first_mouse(true)
+        .theme(window_theme(&app.state::<AppState>().settings.read().unwrap()))
         .visible(true);
     if supports_mica() {
         b = b.transparent(true).effects(EffectsBuilder::new().effect(Effect::Mica).build());
@@ -117,6 +118,21 @@ fn build_main(app: &AppHandle) {
             let _ = w.set_focus();
         }
         Err(e) => log::error!("cannot create main window: {e}"),
+    }
+}
+
+/// Mica and the title bar follow the window theme, not the page's.
+fn window_theme(s: &Settings) -> Option<tauri::Theme> {
+    match s.theme.as_str() {
+        "light" => Some(tauri::Theme::Light),
+        "dark" => Some(tauri::Theme::Dark),
+        _ => None,
+    }
+}
+
+pub fn apply_theme(app: &AppHandle, s: &Settings) {
+    if let Some(w) = app.get_webview_window(MAIN) {
+        let _ = w.set_theme(window_theme(s));
     }
 }
 

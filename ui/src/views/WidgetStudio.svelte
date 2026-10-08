@@ -348,7 +348,6 @@
     border-radius: 12px;
     padding: 28px;
     overflow: hidden;
-    border: 0.5px solid var(--hairline);
   }
   .natural {
     width: max-content;

@@ -97,6 +97,9 @@ fn save_settings_inner(app: &AppHandle, state: &AppState, settings: Settings) ->
         windows::apply_autostart(settings.autostart, true);
     }
     windows::apply_widget_settings(app, &settings);
+    if old.theme != settings.theme {
+        windows::apply_theme(app, &settings);
+    }
     if settings.onboarded && !old.onboarded {
         crate::capture::resume(app);
     } else if settings.onboarded && old.enabled_sources != settings.enabled_sources {

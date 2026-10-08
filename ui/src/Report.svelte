@@ -77,7 +77,7 @@
         <h1>{t('rep.title')}</h1>
         <p class="range">
           {from ? fmtDate(from, 'long') : ''} – {to ? fmtDate(to, 'long') : ''}
-          {#if r}<span class="muted"> · {t('rep.days', { n: r.days_in_range })}</span>{/if}
+          {#if r}<span class="muted">{' · '}{t('rep.days', { n: r.days_in_range })}</span>{/if}
         </p>
       </div>
     </div>
@@ -169,7 +169,7 @@
                     <tr class="sub">
                       <td colspan="2" class="muted small">
                         {#if l.forecast.kind === 'fills' && l.forecast.fills_at_ms}{t('forecast.fillsShort', { t: fmtDateTime(l.forecast.fills_at_ms) })}
-                        {:else if l.forecast.at_reset_pct !== null}{t('forecast.safe', { pct: fmtLimit(l.forecast.at_reset_pct, mode) })}{/if}
+                        {:else if l.forecast.at_reset_pct !== null}{t('forecast.safe', { pct: fmtLimit(l.forecast.at_reset_pct, mode, true) })}{/if}
                       </td>
                     </tr>
                   {/if}
@@ -236,7 +236,7 @@
                 <tr>
                   <th scope="row" class="ell">
                     <i class="sw" style="background:{toolColor[x.tool]}"></i>{fmtDateTime(x.started_ms)}
-                    <span class="muted"> · {projectLabel(x.project, x.hidden, x.project_id)}</span>
+                    <span class="muted">{' · '}{projectLabel(x.project, x.hidden, x.project_id)}</span>
                   </th>
                   <td class="num">{fmtSpan(x.ended_ms - x.started_ms)}</td>
                   <td class="num">{x.totals.unpriced_events === x.totals.events ? '—' : fmtMoney(x.totals.cost_usd)}</td>

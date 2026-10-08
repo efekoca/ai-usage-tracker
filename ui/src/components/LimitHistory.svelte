@@ -221,7 +221,7 @@
               <td>{fmtDateTime(startOf(w))}</td>
               <td>
                 {fmtDateTime(w.end_ms ?? w.resets_at_ms ?? w.last_ms)}
-                {#if early(w)}<span class="subtle small"> · {t('history.state.early')}</span>{/if}
+                {#if early(w)}<span class="subtle small">{' · '}{t('history.state.early')}</span>{/if}
               </td>
               <td class="num">
                 <BarValue pct={w.peak_pct} tone={w.full ? 'critical' : 'series'} text="{w.complete || w.full || w.in_progress ? '' : '≥ '}{fmtPct(w.peak_pct)}" />

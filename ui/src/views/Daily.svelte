@@ -209,7 +209,7 @@
               <div class="peaks">
                 {#each detail.limit_peaks as p (p.provider + p.window)}
                   <span class="peak" class:full={p.peak_pct >= 99.5}>
-                    {t(`provider.${p.provider}`)} · {windowLabel(p.window)} <b>{fmtPct(p.peak_pct)}</b><span class="subtle"> · {fmtClock(p.at_ms)}</span>
+                    {t(`provider.${p.provider}`)} · {windowLabel(p.window)} <b>{fmtPct(p.peak_pct)}</b><span class="subtle">{' · '}{fmtClock(p.at_ms)}</span>
                   </span>
                 {/each}
               </div>

@@ -93,14 +93,14 @@
         {#if f.kind === 'fills' && f.fills_at_ms}
           {compact ? t('forecast.fillsShort', { t: fmtWhen(f.fills_at_ms) }) : t('forecast.fills', { t: fmtWhen(f.fills_at_ms), d: fmtDuration((resetsAt ?? 0) * 1000 - f.fills_at_ms) })}
         {:else if f.kind === 'safe' && f.at_reset_pct !== null}
-          {t('forecast.safe', { pct: fmtLimit(f.at_reset_pct, mode) })}
+          {t('forecast.safe', { pct: fmtLimit(f.at_reset_pct, mode, true) })}
         {:else if f.kind === 'idle'}
           {t('forecast.idle')}
         {:else}
           {t('forecast.insufficient')}
         {/if}
         {#if !compact && f.rate_per_hour !== null && (f.kind === 'fills' || f.kind === 'safe')}
-          <span class="subtle"> · {t('forecast.rate', { n: fmtDec(f.rate_per_hour, 1) })}</span>
+          <span class="subtle">{' · '}{t('forecast.rate', { n: fmtDec(f.rate_per_hour, 1) })}</span>
         {/if}
       </span>
       {#if !compact}<AccuracyBadge kind="estimated" compact />{/if}

@@ -9,7 +9,7 @@
   import Segmented from '../components/Segmented.svelte'
   import Select from '../components/Select.svelte'
   import LimitHistory from '../components/LimitHistory.svelte'
-  import ClaudeLimitNotice from '../components/ClaudeLimitNotice.svelte'
+  import LimitNotices from '../components/LimitNotices.svelte'
 
   let plans: PlansFile | null = $state(null)
   onMount(async () => {
@@ -99,7 +99,7 @@
   </section>
 {/if}
 
-<ClaudeLimitNotice />
+<LimitNotices />
 
 {#if app.limits.length === 0}
   <div class="banner"><Icon name="info" size={16} />{t('limits.none')}</div>
@@ -109,7 +109,8 @@
   {#each app.limits as l (l.provider + l.limit_id + l.window + l.source)}
     <section class="card limit">
       <div class="who">
-        <span class="prov">{limitName(l.provider, l.limit_id)}</span>
+        <!-- brand names: uppercase with English rules so Antigravity does not become ANTİGRAVİTY in Turkish -->
+        <span class="prov" lang="en">{limitName(l.provider, l.limit_id)}</span>
         {#if l.plan}<span class="pill">{l.plan}</span>{/if}
       </div>
       <LimitMeter window={l.window} used={l.used_pct} state={l.state} accuracy={l.accuracy} resetsAt={l.resets_at} observedMs={l.observed_ms} source={l.source} sinceTokens={l.usage_since.total_tokens} provider={l.provider} forecast={l.forecast} />
