@@ -47,6 +47,7 @@ Providers publish how their limits work, not the numbers themselves. The app the
 - Percentages can read as **used** (as Claude shows them, "15 % used") or **left** (as Codex shows them, "85 % left"). Switch between them in **Settings**, on the **Limits** page, or in the **Widget studio**. Warning colors follow usage either way.
 - Without a real reading, you can set your own budget per window. The resulting percentage is labeled **Estimated**.
 - Limits are account-wide. A project's share is its fraction of the window's API-equivalent cost and is always **Estimated**.
+- Each tool is marked with its own monochrome icon. Under **Settings → General → Tool colors** you can give Claude, Codex, and Antigravity their own color for limit bars and widget rings, and color the icons too if you like. Warning colors still show when a limit gets close.
 
 **Forecast.** Every current limit reading carries a forecast based on the window's **average pace since it started** (current % ÷ time since the window began). Every window starts at 0 % when it resets, so this pace is known and already includes idle hours: a burst of work is not extrapolated as if it never stopped. The app then says when the window would fill ("fills around Sun 21:12, 9 h before the reset") or where it would stand at the reset. No forecast is made in the first tenth of a window, and every forecast is labeled **Estimated**.
 
@@ -173,7 +174,7 @@ The **Widget studio** page changes what the widget shows and how it looks, with 
 - **Content:** the items shown and their order (main number, secondary value, five-hour and weekly limits, per-tool split, 7- and 30-day totals, and last update time)
 - **Layout:** horizontal, vertical, or a single line
 - **Limit style:** ring, bar, or text
-- **Look:** theme, accent color, scale, background opacity, corner radius, border, shadow, labels, and time until reset
+- **Look:** theme, accent color, scale, background opacity, corner radius, border, shadow, labels, tool icons, and time until reset
 - **Text:** any font installed on the computer (searchable and shown in its own face), text size, main-number size, number weight, and fixed-width digits
 - **Thresholds:** caution and critical levels
 - **Behavior:** always on top, position lock, click action, hiding during full-screen apps, snap to a corner, and which providers to show
@@ -196,11 +197,11 @@ The widget also comes with a tray icon and a shortcut:
 - merge-import from a backup
 - **Delete all my data**, which empties the archive and stops recording until you confirm your sources again. Backups and exports you saved elsewhere are not touched.
 
-**Prices.** Official API list prices ship with the app in [`config/pricing.json`](config/pricing.json), verified on 2026-10-02 against the official [Anthropic](https://platform.claude.com/docs/en/about-claude/pricing) and [OpenAI](https://developers.openai.com/api/docs/pricing) pages.
+**Prices.** Official API list prices ship with the app in [`config/pricing.json`](config/pricing.json), verified between 2026-10-02 and 2026-10-09 against the official [Anthropic](https://platform.claude.com/docs/en/about-claude/pricing), [OpenAI](https://developers.openai.com/api/docs/pricing), [Google Gemini](https://ai.google.dev/gemini-api/docs/pricing), and [Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/pricing) pages.
 
 - **Pricing rules covered:** 5-minute and 1-hour cache writes, the OpenAI long-context tier (>272K input tokens), fast-mode and US data-residency multipliers, and web-search fees.
 - **Unknown models:** never priced by guesswork. They are listed as "no price" and left out of costs. You can dismiss the overview warning about them; it returns only if another model becomes unpriced, or through **Settings → Prices → Show the warning again**.
-- **Edits:** change prices in **Settings → Prices**. Your copy is stored as `pricing.json` in the app's data folder (see [Privacy](#privacy)). You can also map an unpriced model to another model's price or restore the defaults.
+- **Edits:** change prices in **Settings → Prices**. Your copy is stored as `pricing.json` in the app's data folder (see [Privacy](#privacy)). Models added in later versions are added to your copy automatically, and your edits stay. You can also map an unpriced model to another model's price or restore the defaults.
 
 ## Supported sources
 
@@ -284,7 +285,7 @@ Every release includes `SHA256SUMS`, the checksum of each file. Put it next to y
 
 ### Live capture
 
-**Sources → Live capture** has five switches. The three **limit reads are on by default**: they change no files, make no model request, and use only your own Claude Code, Codex or Antigravity CLI sign-in. The two methods that edit Claude Code's settings file are **off by default**. Each switch shows exactly what it changes, and turning it off undoes the change. The Windows uninstaller and removing the Linux package revert them too, but updates leave them alone. On macOS and with the AppImage, turn them off before you delete the app.
+**Sources → Live capture** has five switches. The three **limit reads are on by default**: they change no files, make no model request, and use only your own Claude Code, Codex or Antigravity CLI sign-in. They run within seconds of the app starting, so the widget shows current limits right away. The two methods that edit Claude Code's settings file are **off by default**. Each switch shows exactly what it changes, and turning it off undoes the change. The Windows uninstaller and removing the Linux package revert them too, but updates leave them alone. On macOS and with the AppImage, turn them off before you delete the app.
 
 ![Live capture panel with the five switches and what each one changes](assets/readme/capture-en.webp)
 
