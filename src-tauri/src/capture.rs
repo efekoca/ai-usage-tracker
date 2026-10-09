@@ -570,13 +570,13 @@ pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
                 let _ = cs::add_otel_token(&mut cstate, &data_dir, &cs::new_token());
             }
             let token = match &cstate.otel {
-                Some(ch) => ch.token().map(str::to_owned),
-                None => Some(cs::new_token()),
+                Some(ch) => ch.token().map(str::to_owned).ok_or(TOKEN_MISSING)?,
+                None => cs::new_token(),
             };
             start_receiver(app, port, token.clone()).map_err(|e| format!("port_busy:{port}:{e}"))?;
             if cstate.otel.is_none() {
                 let file = claude_settings_file(&settings);
-                if let Err(e) = cs::install_otel(&mut cstate, &data_dir, &file, port, token.as_deref().unwrap_or_default(), now_ms()) {
+                if let Err(e) = cs::install_otel(&mut cstate, &data_dir, &file, port, &token, now_ms()) {
                     stop_receiver(app);
                     return Err(code(e));
                 }
@@ -609,7 +609,11 @@ fn store_limits(state: &AppState, epoch: u64, snaps: &[tracker_core::model::Limi
     tx.commit().map_err(|e| e.to_string())
 }
 
-fn start_receiver(app: &AppHandle, port: u16, token: Option<String>) -> std::io::Result<()> {
+/// A telemetry install whose settings could not take a token: the receiver stays off, since
+/// without one it would accept any local sender. Turning the method off and on reinstalls it.
+const TOKEN_MISSING: &str = "telemetry_token_missing";
+
+fn start_receiver(app: &AppHandle, port: u16, token: String) -> std::io::Result<()> {
     let state = app.state::<AppState>();
     let mut slot = state.capture.receiver.lock().unwrap();
     if slot.as_ref().is_some_and(|r| r.port == port && r.token == token) {
@@ -642,7 +646,11 @@ fn start_otel(app: &AppHandle) {
     {
         log::warn!("could not add a token to the telemetry settings: {e}");
     }
-    let token = cstate.otel.as_ref().and_then(|c| c.token()).map(str::to_owned);
+    let Some(token) = cstate.otel.as_ref().and_then(|c| c.token()).map(str::to_owned) else {
+        log::warn!("otlp receiver not started: the telemetry settings have no token");
+        *state.capture.receiver_error.lock().unwrap() = Some(TOKEN_MISSING.into());
+        return;
+    };
     if let Err(e) = start_receiver(app, port, token) {
         log::warn!("otlp receiver could not start: {e}");
     }

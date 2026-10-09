@@ -475,8 +475,9 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
     for s in &snaps {
         let minutes = window_minutes(&s.window);
         let dur_ms = minutes.map(|m| m * 60_000);
-        let mut state = match (s.resets_at, dur_ms) {
-            (Some(r), _) if r * 1000 <= now_ms => LimitState::Reset,
+        let reset_ms = s.resets_at_ms();
+        let mut state = match (reset_ms, dur_ms) {
+            (Some(r), _) if r <= now_ms => LimitState::Reset,
             (None, Some(d)) if now_ms - s.ts_ms > d => LimitState::Stale,
             _ => LimitState::Fresh,
         };
@@ -492,14 +493,14 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
                 state = LimitState::Behind;
             }
         }
-        let start = dur_ms.map(|d| match s.resets_at {
-            Some(r) if r * 1000 > now_ms => r * 1000 - d,
+        let start = dur_ms.map(|d| match reset_ms {
+            Some(r) if r > now_ms => r - d,
             _ => now_ms - d,
         });
         // project shares of a limit only make sense against a current reading
         let used = if state == LimitState::Fresh { s.used_pct } else { None };
-        let forecast = match (state, s.resets_at, dur_ms, s.used_pct) {
-            (LimitState::Fresh, Some(r), Some(d), Some(cur)) => Some(crate::insights::forecast(now_ms, cur, r * 1000, d)),
+        let forecast = match (state, reset_ms, dur_ms, s.used_pct) {
+            (LimitState::Fresh, Some(r), Some(d), Some(cur)) => Some(crate::insights::forecast(now_ms, cur, r, d)),
             _ => None,
         };
         let (usage, shares) = match start {
@@ -512,7 +513,7 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
             window: s.window.clone(),
             window_minutes: minutes,
             used_pct: s.used_pct,
-            resets_at: s.resets_at,
+            resets_at: reset_ms.map(|ms| ms / 1000),
             observed_ms: Some(s.ts_ms),
             source: s.source.clone(),
             status: s.status.clone(),

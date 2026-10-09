@@ -264,6 +264,68 @@ fn backup_merges_back_without_duplicates() {
 }
 
 #[test]
+fn a_live_reading_with_an_impossible_reset_time_is_kept_without_it() {
+    let mut store = Store::open_in_memory().unwrap();
+    let now = 1_791_000_000_000;
+    let mut tx = store.transaction().unwrap();
+    tx.insert_limits(&[snap(now - 60_000, Provider::OpenAI, Tool::Codex, "five_hour", 30.0, Some(i64::MAX), None, "codex_rollout")]).unwrap();
+    tx.commit().unwrap();
+    let stored: Option<i64> = store.conn().query_row("SELECT resets_at FROM limit_snapshot", [], |r| r.get(0)).unwrap();
+    assert_eq!(stored, None);
+    // a row an older version stored is read safely too
+    store.conn().execute("UPDATE limit_snapshot SET resets_at = ?1", [i64::MAX]).unwrap();
+    let v = limits_view(&store, &PriceBook::default_book(), now, &[]).unwrap();
+    let cx = v.iter().find(|l| l.provider == Provider::OpenAI).unwrap();
+    assert_eq!((cx.used_pct, cx.resets_at), (Some(30.0), None));
+}
+
+#[test]
+fn a_backup_with_impossible_times_brings_only_its_sound_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let backup = dir.path().join("odd.db");
+    {
+        let mut odd = Store::open(&backup).unwrap();
+        let mut tx = odd.transaction().unwrap();
+        tx.insert_limits(&[
+            snap(1_790_000_000_000, Provider::Anthropic, Tool::ClaudeCode, "five_hour", 20.0, Some(1_790_010_000), None, "test"),
+            snap(1_790_000_100_000, Provider::Anthropic, Tool::ClaudeCode, "five_hour", 30.0, Some(i64::MAX), None, "test"),
+            snap(-5, Provider::Anthropic, Tool::ClaudeCode, "five_hour", 30.0, None, None, "test"),
+        ])
+        .unwrap();
+        tx.commit().unwrap();
+        // insert_limits already drops such a time, so the damaged value is written directly
+        odd.conn().execute("UPDATE limit_snapshot SET resets_at = ?1 WHERE used_pct = 30 AND ts_ms > 0", [i64::MAX]).unwrap();
+    }
+    let mut fresh = Store::open(&dir.path().join("fresh.db")).unwrap();
+    assert_eq!(fresh.merge_from(&backup).unwrap(), (0, 1));
+}
+
+#[test]
+fn a_failed_export_keeps_the_existing_file_and_the_archive_is_never_a_target() {
+    use std::io::Write;
+    use tracker_core::export::write_atomically;
+    let dir = tempfile::tempdir().unwrap();
+    let dest = dir.path().join("usage.csv");
+    std::fs::write(&dest, "earlier export").unwrap();
+    let failed: Result<(), String> = write_atomically(&dest, |f| {
+        f.write_all(b"half a file").map_err(|e| e.to_string())?;
+        Err("disk full".into())
+    });
+    assert_eq!(failed, Err("disk full".into()));
+    assert_eq!(std::fs::read_to_string(&dest).unwrap(), "earlier export");
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1, "no temporary file is left behind");
+    write_atomically(&dest, |f| f.write_all(b"new export").map_err(|e| e.to_string())).unwrap();
+    assert_eq!(std::fs::read_to_string(&dest).unwrap(), "new export");
+
+    let db = dir.path().join("tracker.db");
+    let store = Store::open(&db).unwrap();
+    for p in [db.clone(), dir.path().join("tracker.db-wal"), dir.path().join(".").join("tracker.db")] {
+        assert!(store.is_live_file(&p), "{}", p.display());
+    }
+    assert!(!store.is_live_file(&dest));
+}
+
+#[test]
 fn csv_export_masks_hidden_projects_and_leaves_unpriced_cost_empty() {
     use tracker_core::export::{export, Format, Granularity};
     let (_m, store) = loaded();

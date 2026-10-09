@@ -124,14 +124,14 @@ pub fn sessions(store: &Store, book: &PriceBook, range: Range, filter: &Filter) 
             unpriced: false,
         });
         m.events += 1;
-        m.total_tokens += e.tokens.total();
+        m.total_tokens = m.total_tokens.saturating_add(e.tokens.total());
         match c {
             Some(c) => m.cost_usd += c.total(),
             None => m.unpriced = true,
         }
         if e.request_input > 0 {
             a.max_ctx = a.max_ctx.max(e.request_input);
-            a.ctx_sum += e.request_input;
+            a.ctx_sum = a.ctx_sum.saturating_add(e.request_input);
             a.ctx_n += 1;
         }
     }

@@ -52,7 +52,15 @@ pub fn all_sources() -> HashSet<SourceId> {
     SourceId::ALL.into_iter().collect()
 }
 
+/// `TRACKER_TEST_ROUND=1` reads every file one record per round (CI runs the suites both ways).
+pub fn use_test_round() {
+    if let Some(n) = std::env::var("TRACKER_TEST_ROUND").ok().and_then(|v| v.parse().ok()) {
+        tracker_core::sources::set_round_records(n);
+    }
+}
+
 pub fn run(store: &mut Store, env: &Env) -> tracker_core::ingest::IngestReport {
+    use_test_round();
     let files = enumerate_files(env, &ExtraPaths::default(), &all_sources());
     ingest(store, &files, |_| {})
 }

@@ -115,16 +115,17 @@ pub struct Tokens {
 }
 
 impl Tokens {
+    // saturating, so an absurd count from a damaged log cannot overflow
     pub fn total(&self) -> u64 {
-        self.input + self.cache_read + self.cache_write + self.output
+        self.input.saturating_add(self.cache_read).saturating_add(self.cache_write).saturating_add(self.output)
     }
     pub fn add(&mut self, o: &Tokens) {
-        self.input += o.input;
-        self.cache_read += o.cache_read;
-        self.cache_write += o.cache_write;
-        self.cache_write_1h += o.cache_write_1h;
-        self.output += o.output;
-        self.reasoning += o.reasoning;
+        self.input = self.input.saturating_add(o.input);
+        self.cache_read = self.cache_read.saturating_add(o.cache_read);
+        self.cache_write = self.cache_write.saturating_add(o.cache_write);
+        self.cache_write_1h = self.cache_write_1h.saturating_add(o.cache_write_1h);
+        self.output = self.output.saturating_add(o.output);
+        self.reasoning = self.reasoning.saturating_add(o.reasoning);
     }
     /// Field-wise maximum — used to merge repeated streaming snapshots of one response.
     pub fn max(&self, o: &Tokens) -> Tokens {
@@ -212,6 +213,16 @@ pub struct LimitSnapshot {
     pub plan: Option<String>,
     pub source: String,
     pub accuracy: Accuracy,
+}
+
+/// The latest time accepted from any source: the year 3000, in epoch seconds.
+pub const MAX_EPOCH_SECS: i64 = 32_503_680_000;
+
+impl LimitSnapshot {
+    /// The reset time in milliseconds; `None` for a time outside 1970–3000 (a damaged record).
+    pub fn resets_at_ms(&self) -> Option<i64> {
+        self.resets_at.filter(|r| (0..=MAX_EPOCH_SECS).contains(r)).map(|r| r * 1000)
+    }
 }
 
 pub fn window_name(minutes: i64) -> String {

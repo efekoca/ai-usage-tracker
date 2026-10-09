@@ -344,3 +344,19 @@ mod tests {
         assert_eq!(p.extension().unwrap(), "pdf");
     }
 }
+
+/// Guards the vendored glib fix (RUSTSEC-2024-0429): reading a string array must see what
+/// GLib wrote, also in optimized builds.
+#[cfg(all(test, target_os = "linux"))]
+mod glib_patch {
+    use gtk::glib::{ToVariant, Variant};
+
+    #[test]
+    fn a_string_array_reads_back_from_both_ends() {
+        let v = Variant::array_from_iter::<String>(["a", "bc", "déf"].map(|s| s.to_variant()));
+        let iter = v.array_iter_str().unwrap();
+        assert_eq!(iter.collect::<Vec<_>>(), ["a", "bc", "déf"]);
+        let mut iter = v.array_iter_str().unwrap();
+        assert_eq!((iter.next_back(), iter.nth(1), iter.next()), (Some("déf"), Some("bc"), None));
+    }
+}

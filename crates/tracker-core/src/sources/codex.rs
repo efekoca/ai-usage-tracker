@@ -18,7 +18,7 @@
 //! * `rate_limits`: `primary`/`secondary` `{used_percent, window_minutes, resets_at}`,
 //!   `plan_type`, `limit_id`. Windows are classified by `window_minutes`, not by slot.
 
-use super::{f64_at, i64_at, read_jsonl_from, str_at, u64_at, ParseOutput};
+use super::{f64_at, i64_at, str_at, u64_at, JsonlReader, ParseOutput};
 use crate::model::{parse_ts_ms, window_name, Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -47,6 +47,8 @@ struct State {
     /// The last thread whose `session_meta` had no `forked_from_id`: older Codex starts a copy
     /// with the source's own `session_meta`, which names the source.
     unsourced: Option<String>,
+    /// A read from the start stopped after a round; the next round still replays.
+    replaying: bool,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -135,15 +137,16 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
     if st.legacy.is_none() {
         st.legacy = session_id_from_filename(path).or_else(|| path.file_stem().map(|s| s.to_string_lossy().into_owned()));
     }
-    let replay = offset == 0;
-    let (lines, next) = read_jsonl_from(path, offset)?;
-    let mut out = ParseOutput { next_offset: next, ..Default::default() };
+    let replay = offset == 0 || st.replaying;
+    let mut lines = JsonlReader::open(path, offset)?;
+    let mut out = ParseOutput::default();
     let mut typed = 0u64;
+    let mut stopped = false;
 
-    for line in &lines {
+    for line in lines.by_ref() {
         out.lines_total += 1;
         let Some(v) = &line.value else {
-            out.warnings.push(format!("invalid JSON at byte {}", line.offset));
+            out.warn(format!("invalid JSON at byte {}", line.offset));
             continue;
         };
         let Some(kind) = str_at(v, "type") else { continue };
@@ -256,11 +259,17 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
         if ts_ms.is_some() {
             st.last_line_ms = ts_ms;
         }
+        if out.round_full() {
+            stopped = true;
+            break;
+        }
     }
+    st.replaying = replay && stopped;
     if out.lines_total >= 20 && typed == 0 {
-        out.warnings.push("unrecognised format: no line has a `type` field".into());
+        out.warn("unrecognised format: no line has a `type` field");
     }
     out.state = serde_json::to_value(&st).unwrap_or(Value::Null);
+    out.next_offset = lines.finish()?;
     Ok(out)
 }
 

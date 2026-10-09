@@ -4,7 +4,7 @@
 //! Observed shape: `{type:"rate_limit_event", timestamp, rate_limit_info:{status, resetsAt,
 //! rateLimitType, unifiedWindows:{five_hour:{utilization 0..1, resetsAt}, seven_day:{…}}}}`.
 
-use super::{f64_at, i64_at, read_jsonl_from, str_at, ParseOutput};
+use super::{f64_at, i64_at, str_at, JsonlReader, ParseOutput};
 use crate::model::{parse_ts_ms, Accuracy, LimitSnapshot, Provider, Tool};
 use serde_json::Value;
 use std::path::Path;
@@ -12,12 +12,12 @@ use std::path::Path;
 pub const SOURCE: &str = "cowork_audit";
 
 pub fn parse_file(path: &Path, offset: u64) -> std::io::Result<ParseOutput> {
-    let (lines, next) = read_jsonl_from(path, offset)?;
-    let mut out = ParseOutput { next_offset: next, ..Default::default() };
-    for line in &lines {
+    let mut lines = JsonlReader::open(path, offset)?;
+    let mut out = ParseOutput::default();
+    for line in lines.by_ref() {
         out.lines_total += 1;
         let Some(v) = &line.value else {
-            out.warnings.push(format!("invalid JSON at byte {}", line.offset));
+            out.warn(format!("invalid JSON at byte {}", line.offset));
             continue;
         };
         if str_at(v, "type") != Some("rate_limit_event") {
@@ -55,7 +55,11 @@ pub fn parse_file(path: &Path, offset: u64) -> std::io::Result<ParseOutput> {
         if any {
             out.lines_recognised += 1;
         }
+        if out.round_full() {
+            break;
+        }
     }
+    out.next_offset = lines.finish()?;
     Ok(out)
 }
 

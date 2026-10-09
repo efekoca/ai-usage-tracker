@@ -137,6 +137,8 @@ const MIGRATIONS: &[&str] = &[
 ];
 
 const MAX_IMPORTED_COUNT: i64 = 1_000_000_000_000;
+/// Imported times must fall between 1970 and 3000 (milliseconds; reset times are seconds).
+const MAX_IMPORTED_MS: i64 = 32_503_680_000_000;
 
 /// A captured row is hidden when the same request also exists as an exact (log) row.
 const NOT_SUPERSEDED: &str = "NOT (u.accuracy = 'captured' AND u.request_id IS NOT NULL AND EXISTS (
@@ -489,7 +491,7 @@ impl Store {
                      FROM other.usage_event e
                      LEFT JOIN other.project op ON op.id = e.project_id
                      LEFT JOIN main.project p ON p.path = op.path
-                     WHERE typeof(e.ts_ms) = 'integer' {valid_counts} {old_events}
+                     WHERE typeof(e.ts_ms) = 'integer' AND e.ts_ms BETWEEN 0 AND {MAX_IMPORTED_MS} {valid_counts} {old_events}
                      {UPSERT_EVENT_TAIL}"
                 ),
                 [],
@@ -499,10 +501,11 @@ impl Store {
                      plan, source, accuracy)
                  SELECT ts_ms, provider, tool, account, limit_id, window, used_pct, resets_at, status, plan, source, accuracy
                  FROM other.limit_snapshot
-                 WHERE typeof(ts_ms) = 'integer' AND typeof(resets_at) IN ('integer', 'null')
+                 WHERE typeof(ts_ms) = 'integer' AND ts_ms BETWEEN 0 AND ?1
+                   AND (resets_at IS NULL OR (typeof(resets_at) = 'integer' AND resets_at BETWEEN 0 AND ?1 / 1000))
                    AND (used_pct IS NULL OR used_pct BETWEEN 0 AND 1000)
                  ON CONFLICT(source, account, limit_id, window, ts_ms) DO NOTHING",
-                [],
+                [MAX_IMPORTED_MS],
             )?;
             if theirs >= 7 {
                 tx.execute(
@@ -545,7 +548,8 @@ impl Store {
         written
     }
 
-    fn is_live_file(&self, path: &Path) -> bool {
+    /// Whether `path` is this archive or one of its SQLite side files, under any spelling.
+    pub fn is_live_file(&self, path: &Path) -> bool {
         let Some(live) = self.conn.path().filter(|p| !p.is_empty()).and_then(|p| canonical(Path::new(p))) else {
             return false;
         };
@@ -613,6 +617,13 @@ impl StoreTx<'_> {
     /// A repeated key merges with the stored row per `UPSERT_EVENT_TAIL`.
     pub fn upsert_events(&mut self, events: &[UsageEvent]) -> Result<()> {
         for e in events {
+            // a count no real request reaches means a damaged log; it never enters the archive
+            let t = &e.tokens;
+            let counts = [t.input, t.cache_read, t.cache_write, t.cache_write_1h, t.output, t.reasoning, e.request_input, e.web_search_requests.into()];
+            if counts.iter().any(|&c| c > MAX_IMPORTED_COUNT as u64) {
+                log::warn!("event {} skipped: implausible token count", e.key);
+                continue;
+            }
             let pid = match &e.project_path {
                 Some(p) if !p.is_empty() => Some(self.project_id(p)?),
                 // captured events carry no working directory: borrow the project of a logged
@@ -754,7 +765,8 @@ impl StoreTx<'_> {
                 l.limit_id,
                 l.window,
                 l.used_pct,
-                l.resets_at,
+                // a reset time outside 1970–3000 is a damaged reading: keep the reading, drop the time
+                l.resets_at_ms().map(|ms| ms / 1000),
                 l.status,
                 l.plan,
                 l.source,

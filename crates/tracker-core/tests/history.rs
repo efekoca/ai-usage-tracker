@@ -379,3 +379,24 @@ fn antigravity_limits_get_plan_advice_from_either_pool() {
     assert_eq!((a.kind, a.suggested.as_deref()), (AdviceKind::Upgrade, Some("plus")));
     assert!(!a.suggested_has_no_five_hour, "neither plan has a five-hour window");
 }
+
+#[test]
+fn readings_that_contradict_their_reset_times_neither_panic_nor_invert_a_window() {
+    // a later window was first read before an earlier window began
+    let n = NOW - 12 * HOUR;
+    let mut odd = snap(n, Provider::Anthropic, "five_hour", 40.0, n + 5 * HOUR, None);
+    odd.resets_at = Some(i64::MAX);
+    let mut store = store_with(vec![
+        snap(n - 2 * HOUR, Provider::Anthropic, "five_hour", 20.0, n - HOUR, None),
+        snap(n, Provider::Anthropic, "five_hour", 30.0, n + 5 * HOUR, None),
+        snap(n - HOUR, Provider::Anthropic, "five_hour", 10.0, n + 6 * HOUR, None),
+        LimitSnapshot { ts_ms: n + 1, ..odd },
+    ]);
+    let mut tx = store.transaction().unwrap();
+    tx.upsert_events(&[usage("u", n - 30 * MIN, 100_000)]).unwrap();
+    tx.commit().unwrap();
+    let mut h = limit_history(&store, NOW, 28).unwrap();
+    add_local_usage(&mut h, &store, &PriceBook::default_book()).unwrap();
+    let five = h.series.iter().find(|s| s.window == "five_hour").unwrap();
+    assert!(five.windows.iter().all(|w| w.end_ms.zip(w.start_ms).is_none_or(|(e, s)| e >= s)), "{:#?}", five.windows);
+}

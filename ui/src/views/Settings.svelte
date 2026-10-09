@@ -140,7 +140,8 @@
     try {
       await fn()
     } catch (e) {
-      flash(t('common.error', { e: String(e) }))
+      const key = `settings.data.err.${String(e)}`
+      flash(t(key) === key ? t('common.error', { e: String(e) }) : t(key))
     }
   }
 
