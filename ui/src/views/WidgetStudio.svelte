@@ -5,6 +5,7 @@
   import { fmtPct, searchKey, t } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
   import Toggle from '../components/Toggle.svelte'
+  import ColorPick from '../components/ColorPick.svelte'
   import Icon from '../components/Icon.svelte'
   import WidgetView from '../components/WidgetView.svelte'
 
@@ -106,7 +107,7 @@
       layout: 'horizontal',
       items: (['primary', 'cost', 'limit_five_hour', 'limit_seven_day', 'tools', 'week_tokens', 'week_cost', 'month_cost', 'updated'] as WidgetItemKind[]).map((k, i) => ({ kind: k, enabled: i < 4 })),
       providers: [], primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '',
-      corner_radius: 14, border: true, shadow: false, show_labels: true, show_reset_time: false, warn_at: 70, high_at: 90,
+      corner_radius: 14, border: true, shadow: false, show_labels: true, show_icons: false, show_reset_time: false, warn_at: 70, high_at: 90,
       always_on_top: true, lock_position: false, click_action: 'open_dashboard',
       font_family: '', text_scale: 1, number_scale: 1, number_weight: 700, tabular_nums: true,
       // the shortcut changes only in Settings (it must register first)
@@ -135,7 +136,7 @@
     <div class="stage {backdrop}" data-theme={ws.theme === 'system' ? undefined : ws.theme} bind:clientWidth={stageW}>
       <div class="fit" style:width={natW ? `${natW * fit}px` : undefined} style:height={natH ? `${natH * fit}px` : undefined}>
         <div class="natural" bind:offsetWidth={natW} bind:offsetHeight={natH} style:transform="scale({fit})">
-          <WidgetView {data} {ws} mode={app.settings?.limit_display ?? 'used'} />
+          <WidgetView {data} {ws} mode={app.settings?.limit_display ?? 'used'} colors={app.settings?.provider_colors} tintIcons={app.settings?.tint_icons} />
         </div>
       </div>
     </div>
@@ -194,14 +195,7 @@
       </div>
       <div class="item">
         <span>{t('ws.accent')}</span>
-        <div class="row">
-          {#each ['', '#2a78d6', '#1baf7a', '#eb6834', '#e87ba4', '#4a3aa7', '#52514e'] as c (c)}
-            <button class="swatchbtn" class:sel={ws.accent === c} style="--c:{c || 'var(--accent)'}" aria-label={c || t('ws.accent.system')} title={c || t('ws.accent.system')} onclick={() => set('accent', c)}>
-              {#if !c}<span>A</span>{/if}
-            </button>
-          {/each}
-          <input type="color" class="picker" value={ws.accent || '#2a78d6'} aria-label={t('ws.accent.custom')} onchange={(e) => set('accent', e.currentTarget.value)} />
-        </div>
+        <ColorPick value={ws.accent} label={t('ws.accent')} defaultLabel={t('ws.accent.system')} customLabel={t('ws.accent.custom')} swatches={['#2a78d6', '#1baf7a', '#eb6834', '#e87ba4', '#4a3aa7', '#52514e']} onchange={(v) => set('accent', v)} />
       </div>
       {#each [['scale', 0.6, 2, 0.05, (v: number) => fmtPct(v * 100)], ['opacity', 0.3, 1, 0.05, (v: number) => fmtPct(v * 100)], ['corner_radius', 0, 28, 1, (v: number) => `${v}px`]] as const as [key, min, max, step, fmt] (key)}
         <div class="item">
@@ -212,7 +206,7 @@
           </div>
         </div>
       {/each}
-      {#each ['border', 'shadow', 'show_labels', 'show_reset_time'] as const as key (key)}
+      {#each ['border', 'shadow', 'show_labels', 'show_icons', 'show_reset_time'] as const as key (key)}
         <div class="item">
           <span>{t(`ws.${key}`)}</span>
           <Toggle checked={ws[key]} label={t(`ws.${key}`)} onchange={(v) => set(key, v)} />
@@ -500,30 +494,6 @@
   .block {
     display: block;
     margin-top: 2px;
-  }
-  .swatchbtn {
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    border: 2px solid var(--surface);
-    outline: 1px solid var(--hairline-strong);
-    background: var(--c);
-    display: grid;
-    place-items: center;
-    color: #fff;
-    font-size: 10px;
-    font-weight: 700;
-    padding: 0;
-  }
-  .swatchbtn.sel {
-    outline: 2px solid var(--ink);
-  }
-  .picker {
-    width: 30px;
-    height: 26px;
-    border: 0;
-    background: transparent;
-    padding: 0;
   }
   .dot {
     display: inline-block;

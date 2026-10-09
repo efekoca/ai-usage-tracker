@@ -2,9 +2,10 @@
   // Stale or reset readings show as unknown rather than a misleading bar.
   import Icon from './Icon.svelte'
   import AccuracyBadge from './AccuracyBadge.svelte'
+  import BrandIcon from './BrandIcon.svelte'
   import { fmtCompact, fmtDec, fmtDuration, fmtLimit, fmtTime, fmtWhen, limitShown, t, windowLabel } from '../lib/i18n.svelte'
   import type { Accuracy, Forecast, LimitState, Provider } from '../lib/api'
-  import { app } from '../lib/store.svelte'
+  import { app, markTint, tint } from '../lib/store.svelte'
 
   let {
     window: win,
@@ -19,6 +20,7 @@
     sinceTokens = 0,
     provider = null,
     forecast = null,
+    brand = null,
   }: {
     window: string
     used: number | null
@@ -34,6 +36,8 @@
     provider?: Provider | null
     /** pace of the current window (fresh readings only) */
     forecast?: Forecast | null
+    /** leads the title with the tool's mark (meters outside a tool's own card) */
+    brand?: Provider | null
   } = $props()
 
   let now = $state(Date.now())
@@ -52,11 +56,13 @@
   // severity always follows usage; only the number and the bar follow the chosen reading
   const mode = $derived(app.settings?.limit_display ?? 'used')
   const shown = $derived(known ? limitShown(pct, mode) : 0)
+  const tool = $derived(brand ?? provider)
+  const color = $derived(tool ? tint(tool) : null)
 </script>
 
 <div class="meter" class:compact>
   <div class="head">
-    <span class="name">{title || windowLabel(win)}</span>
+    <span class="name" class:brandname={brand}>{#if brand}<BrandIcon provider={brand} size={13} color={markTint(brand)} />{/if}{title || windowLabel(win)}</span>
     <span class="spacer"></span>
     {#if known}
       <span class="pct num">{fmtLimit(pct, mode)}</span>
@@ -67,7 +73,7 @@
     {/if}
   </div>
   <div class="track" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow={known ? shown : undefined} aria-valuetext={known ? fmtLimit(pct, mode) : undefined} aria-label={title || windowLabel(win)}>
-    <span class="fill {level}" style="width:{shown}%"></span>
+    <span class="fill {level}" style="width:{shown}%" style:--fill={color}></span>
   </div>
   <div class="foot">
     <span class="status {level}"><Icon name={icon} size={13} />{t(`limits.status.${level}`)}</span>
@@ -148,7 +154,8 @@
     display: block;
     height: 100%;
     border-radius: 4px;
-    background: var(--accent);
+    /* the tool's own color, if picked; warning levels keep theirs */
+    background: var(--fill, var(--accent));
     transition: width 600ms var(--ease);
   }
   .fill.warn {

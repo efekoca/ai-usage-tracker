@@ -147,6 +147,7 @@
               <LimitMeter
                 compact
                 title="{limitName(l.provider, l.limit_id)} · {t(`limits.window.${l.window}`)}"
+                brand={l.provider}
                 window={l.window}
                 used={l.used_pct}
                 state={l.state}

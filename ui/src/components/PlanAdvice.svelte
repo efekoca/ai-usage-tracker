@@ -1,9 +1,10 @@
 <script lang="ts">
   import type { PlanAdvice, PlansFile } from '../lib/api'
   import { api } from '../lib/api'
-  import { app } from '../lib/store.svelte'
+  import { app, markTint } from '../lib/store.svelte'
   import { fmtDuration, fmtMoney, fmtPct, i18n, t } from '../lib/i18n.svelte'
   import Icon from './Icon.svelte'
+  import BrandIcon from './BrandIcon.svelte'
 
   let { advice, plans, detected = false, compact = false }: { advice: PlanAdvice; plans: PlansFile | null; detected?: boolean; compact?: boolean } = $props()
 
@@ -76,7 +77,7 @@
     <span class="mark" aria-hidden="true"><Icon name={icon} size={16} /></span>
     <div class="titles">
       <div class="who">
-        {t(`provider.${a.provider}`)}{#if a.plan}{` · ${name(a.plan)}`}{/if}
+        <BrandIcon provider={a.provider} size={13} color={markTint(a.provider)} />{t(`provider.${a.provider}`)}{#if a.plan}{` · ${name(a.plan)}`}{/if}
         {#if detected}<span class="pill">{t('advice.detected')}</span>{/if}
       </div>
       <h3>{title}</h3>

@@ -2,15 +2,28 @@
   import { ask, open, save } from '@tauri-apps/plugin-dialog'
   import { onMount } from 'svelte'
   import { app, refresh, saveSettings } from '../lib/store.svelte'
-  import { api, type HotkeyStatus, type PricingFile } from '../lib/api'
+  import { api, providersOf, type HotkeyStatus, type PricingFile, type Provider } from '../lib/api'
   import { fmtDate, fmtDateTime, fmtInt, fmtPct, localDate, t, windowLabel } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
   import Select from '../components/Select.svelte'
   import Toggle from '../components/Toggle.svelte'
   import Icon from '../components/Icon.svelte'
+  import BrandIcon from '../components/BrandIcon.svelte'
+  import ColorPick from '../components/ColorPick.svelte'
   import ReportCard from '../components/ReportCard.svelte'
 
   const s = $derived(app.settings!)
+
+  // brand-like hues, then neutral ones; warnings keep their own colors whatever is picked
+  const TOOL_SWATCHES = ['#d97757', '#10a37f', '#4285f4', '#8b5cf6', '#e87ba4', '#52514e']
+  function setTint(p: Provider, color: string) {
+    saveSettings((c) => {
+      const next = { ...c.provider_colors }
+      if (color) next[p] = color
+      else delete next[p]
+      return { provider_colors: next }
+    })
+  }
   // "Start with Windows" only on Windows; elsewhere it starts at login
   const autostartKey = $derived(app.info && app.info.platform !== 'windows' ? 'settings.autostart.mac' : 'settings.autostart')
   let pricing: PricingFile | null = $state(null)
@@ -233,6 +246,21 @@
   <div class="item">
     <span>{t('settings.theme')}</span>
     <Segmented label={t('settings.theme')} value={s.theme} options={[{ value: 'system', label: t('settings.theme.system') }, { value: 'light', label: t('settings.theme.light') }, { value: 'dark', label: t('settings.theme.dark') }]} onchange={(v) => saveSettings({ theme: v })} />
+  </div>
+  <div class="item">
+    <div><span>{t('settings.toolColors')}</span><div class="subtle small">{t('settings.toolColors.help')}</div></div>
+    <div class="tints">
+      {#each providersOf(s.enabled_sources) as p (p)}
+        <div class="tint">
+          <span class="brandname tname"><BrandIcon provider={p} color={s.tint_icons ? s.provider_colors?.[p] || null : null} />{t(`provider.${p}`)}</span>
+          <ColorPick value={s.provider_colors?.[p] ?? ''} label={t(`provider.${p}`)} defaultLabel={t('settings.toolColors.accent')} customLabel={t('ws.accent.custom')} swatches={TOOL_SWATCHES} onchange={(v) => setTint(p, v)} />
+        </div>
+      {/each}
+    </div>
+  </div>
+  <div class="item">
+    <div><span>{t('settings.tintIcons')}</span><div class="subtle small">{t('settings.tintIcons.help')}</div></div>
+    <Toggle checked={s.tint_icons} label={t('settings.tintIcons')} onchange={(v) => saveSettings({ tint_icons: v })} />
   </div>
   <div class="item">
     <span>{t('settings.primaryMetric')}</span>
@@ -520,6 +548,20 @@
   }
   .item:last-child {
     border-bottom: 0;
+  }
+  .tints {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .tint {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .tname {
+    min-width: 110px;
   }
   .prose {
     max-width: 720px;

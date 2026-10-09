@@ -31,7 +31,7 @@ const settings: Settings = {
     visible: true, opacity: showcase ? 1 : 0.85, size: 'm', scale: 1, x: null, y: null, anchor: 'bottom-right', auto_hide_fullscreen: true, layout: 'horizontal',
     items: (['primary', 'cost', 'limit_five_hour', 'limit_seven_day', 'tools', 'week_tokens', 'week_cost', 'month_cost', 'updated'] as const).map((k, i) => ({ kind: k, enabled: i < 4 })),
     providers: [], primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '', corner_radius: 14,
-    border: true, shadow: false, show_labels: true, show_reset_time: false, warn_at: 70, high_at: 90, always_on_top: true, lock_position: false, click_action: 'open_dashboard',
+    border: true, shadow: false, show_labels: true, show_icons: false, show_reset_time: false, warn_at: 70, high_at: 90, always_on_top: true, lock_position: false, click_action: 'open_dashboard',
     font_family: '', text_scale: 1, number_scale: 1, number_weight: 700, tabular_nums: true, hotkey: 'Ctrl+Alt+Shift+W',
   },
   capture: { codex_poll: true, codex_poll_minutes: 5, codex_path: '', statusline: false, otel: false, otel_port: 43180, claude_poll: true, claude_poll_minutes: 5, claude_path: '', antigravity_poll: true, antigravity_poll_minutes: 5, antigravity_path: '' },
@@ -45,6 +45,8 @@ const settings: Settings = {
   weekly_report_dir: '',
   tray: { show_percent: true, limit: 'auto' },
   update_check: true,
+  provider_colors: {},
+  tint_icons: false,
 }
 
 const day = 864e5

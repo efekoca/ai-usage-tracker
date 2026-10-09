@@ -1,12 +1,13 @@
 <script lang="ts">
   import { api, providersOf, type LimitHistoryView, type Provider, type WindowRecord } from '../lib/api'
-  import { app, latest } from '../lib/store.svelte'
+  import { app, latest, markTint } from '../lib/store.svelte'
   import { fmtCompact, fmtDateTime, fmtDuration, fmtInt, fmtMoney, fmtPct, i18n, limitName, t, windowLabel } from '../lib/i18n.svelte'
   import Segmented from './Segmented.svelte'
   import Select from './Select.svelte'
   import StatTile from './StatTile.svelte'
   import AccuracyBadge from './AccuracyBadge.svelte'
   import Icon from './Icon.svelte'
+  import BrandIcon from './BrandIcon.svelte'
   import BarValue from './BarValue.svelte'
   import WindowHistory from './charts/WindowHistory.svelte'
 
@@ -169,7 +170,7 @@
       {#each series as s (s.provider + s.limit_id)}
         {@const shownW = s.windows.filter((w) => kept.has(keyOf(s.provider, s.limit_id, w)))}
         <div class="chart">
-          {#if series.length > 1}<h3>{limitName(s.provider, s.limit_id)}</h3>{/if}
+          {#if series.length > 1}<h3 class="brandname"><BrandIcon provider={s.provider} color={markTint(s.provider)} />{limitName(s.provider, s.limit_id)}</h3>{/if}
           <WindowHistory
             windows={shownW}
             fromMs={chartFrom}
@@ -217,7 +218,7 @@
           {#each visible as w (keyOf(w.provider, w.limit_id, w))}
             {@const st = stateOf(w)}
             <tr>
-              {#if providers.length > 1}<td>{limitName(w.provider, w.limit_id)}</td>{/if}
+              {#if providers.length > 1}<td><span class="brandname"><BrandIcon provider={w.provider} size={13} color={markTint(w.provider)} />{limitName(w.provider, w.limit_id)}</span></td>{/if}
               <td>{fmtDateTime(startOf(w))}</td>
               <td>
                 {fmtDateTime(w.end_ms ?? w.resets_at_ms ?? w.last_ms)}

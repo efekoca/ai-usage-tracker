@@ -1,4 +1,4 @@
-import { api, on, type AppInfo, type Filter, type LimitView, type Period, type Report, type ScanStatus, type Settings, type UpdateStatus } from './api'
+import { api, on, type AppInfo, type Filter, type LimitView, type Period, type Provider, type Report, type ScanStatus, type Settings, type UpdateStatus } from './api'
 import { i18n, resolveLang } from './i18n.svelte'
 
 export type View = 'overview' | 'tips' | 'daily' | 'breakdown' | 'sessions' | 'cache' | 'context' | 'limits' | 'projects' | 'sources' | 'widget' | 'settings'
@@ -162,6 +162,11 @@ export const toolColor: Record<string, string> = {
   claude_desktop: 'var(--s3)',
   antigravity: 'var(--s4)',
 }
+
+/** The color the user picked for a tool's limits and mark, if any. */
+export const tint = (p: Provider): string | null => app.settings?.provider_colors?.[p] || null
+/** Marks stay in the text color unless the user also colors them. */
+export const markTint = (p: Provider): string | null => (app.settings?.tint_icons ? tint(p) : null)
 
 export const providerColor: Record<string, string> = {
   openai: 'var(--s1)',
