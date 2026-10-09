@@ -101,7 +101,7 @@ pub struct Reading {
 
 impl Reading {
     fn of(s: &LimitSnapshot) -> Option<Reading> {
-        Some(Reading { ts_ms: s.ts_ms, used: s.used_pct?.clamp(0.0, 100.0), resets_ms: s.resets_at.map(|r| r * 1000), plan: s.plan.clone() })
+        Some(Reading { ts_ms: s.ts_ms, used: s.used_pct?.clamp(0.0, 100.0), resets_ms: s.resets_at_ms(), plan: s.plan.clone() })
     }
 }
 
@@ -176,7 +176,8 @@ pub fn build_windows(readings: &[Reading], dur_ms: i64, now_ms: i64) -> Vec<Wind
     let ends: Vec<i64> = (0..known.len())
         .map(|i| {
             let next = known[i + 1..].iter().filter_map(|k| k.items.iter().map(|r| r.ts_ms).min()).min();
-            next.map_or(known[i].reset, |n| n.min(known[i].reset))
+            // a reading that contradicts the reset times cannot end a window before it starts
+            next.map_or(known[i].reset, |n| n.min(known[i].reset)).max(known[i].reset - dur_ms)
         })
         .collect();
     let mut loose: Vec<&Reading> = Vec::new();
@@ -281,7 +282,7 @@ pub fn add_local_usage(h: &mut LimitHistory, store: &Store, book: &PriceBook) ->
         for w in &mut s.windows {
             let (a, b) = span(w);
             let lo = events.partition_point(|e| e.ts_ms < a);
-            let hi = events.partition_point(|e| e.ts_ms < b);
+            let hi = events.partition_point(|e| e.ts_ms < b).max(lo);
             let (mut u, mut p) = (LocalUsage::default(), LocalUsage::default());
             for e in &events[lo..hi] {
                 let input = CostInput {

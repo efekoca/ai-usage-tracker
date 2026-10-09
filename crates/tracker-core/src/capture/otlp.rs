@@ -151,7 +151,7 @@ pub struct Receiver {
     stop: Arc<AtomicBool>,
     pub port: u16,
     pub stats: Arc<ReceiverStats>,
-    pub token: Option<String>,
+    pub token: String,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -173,13 +173,11 @@ fn same_token(given: &str, expected: &str) -> bool {
 }
 
 /// Checks everything that needs no body, so unauthenticated senders never get a reader.
-fn precheck(req: &tiny_http::Request, token: Option<&str>) -> Result<(), u16> {
+fn precheck(req: &tiny_http::Request, token: &str) -> Result<(), u16> {
     if req.method() != &tiny_http::Method::Post {
         return Err(405);
     }
-    if let Some(t) = token
-        && !header(req, AUTH_HEADER).is_some_and(|g| same_token(g, t))
-    {
+    if !header(req, AUTH_HEADER).is_some_and(|g| same_token(g, token)) {
         return Err(401);
     }
     if req.url().split('?').next() != Some("/v1/logs") {
@@ -198,7 +196,10 @@ fn precheck(req: &tiny_http::Request, token: Option<&str>) -> Result<(), u16> {
 impl Receiver {
     /// Binds 127.0.0.1:`port` and serves until dropped. `on_events` runs after each batch
     /// that stored at least one event (e.g. to refresh the UI).
-    pub fn start(port: u16, db_path: PathBuf, token: Option<String>, on_events: impl Fn(usize) + Send + 'static) -> std::io::Result<Receiver> {
+    pub fn start(port: u16, db_path: PathBuf, token: String, on_events: impl Fn(usize) + Send + 'static) -> std::io::Result<Receiver> {
+        if token.trim().is_empty() {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "the receiver needs an access key"));
+        }
         let server = tiny_http::Server::http(("127.0.0.1", port)).map_err(|e| std::io::Error::other(e.to_string()))?;
         let port = server.server_addr().to_ip().map(|a| a.port()).unwrap_or(port);
         let server = Arc::new(server);
@@ -233,7 +234,7 @@ impl Receiver {
                     Err(_) => break,
                 };
                 st.requests.fetch_add(1, Ordering::Relaxed);
-                if let Err(code) = precheck(&req, tok.as_deref()) {
+                if let Err(code) = precheck(&req, &tok) {
                     if code == 401 && st.rejected.fetch_add(1, Ordering::Relaxed) == 0 {
                         log::warn!("otlp receiver: a request without the expected token was refused");
                     }
@@ -379,7 +380,8 @@ mod tests {
     fn only_requests_with_the_token_are_stored() {
         let dir = tempfile::tempdir().unwrap();
         let db = dir.path().join("t.db");
-        let r = Receiver::start(0, db.clone(), Some("secret-1".into()), |_| {}).unwrap();
+        assert!(Receiver::start(0, db.clone(), " ".into(), |_| {}).is_err(), "an empty key would let any sender in");
+        let r = Receiver::start(0, db.clone(), "secret-1".into(), |_| {}).unwrap();
         let body = sample("req_a", "claude-haiku-4-5", 3).to_string();
         assert!(post(r.port, "", &body).starts_with("HTTP/1.1 401"));
         assert!(post(r.port, "x-aiut-token: secret-2\r\n", &body).starts_with("HTTP/1.1 401"));
@@ -394,7 +396,7 @@ mod tests {
         use std::io::Write;
         let dir = tempfile::tempdir().unwrap();
         let db = dir.path().join("t.db");
-        let r = Receiver::start(0, db.clone(), Some("k".into()), |_| {}).unwrap();
+        let r = Receiver::start(0, db.clone(), "k".into(), |_| {}).unwrap();
         let mut stalled = std::net::TcpStream::connect(("127.0.0.1", r.port)).unwrap();
         write!(stalled, "POST /v1/logs HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nx-aiut-token: k\r\nContent-Length: 1000\r\n\r\n{{\"res").unwrap();
         std::thread::sleep(Duration::from_millis(200));

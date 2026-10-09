@@ -7,7 +7,7 @@
 //! the same stdin and its output is printed unchanged.
 
 use crate::model::{Accuracy, LimitSnapshot, Provider, Tool};
-use crate::sources::{f64_at, i64_at, read_jsonl_from, ParseOutput};
+use crate::sources::{f64_at, i64_at, JsonlReader, ParseOutput};
 use serde_json::{json, Map, Value};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -112,12 +112,12 @@ pub fn render_default(windows: Option<&Map<String, Value>>) -> String {
 }
 
 pub fn parse_file(path: &Path, offset: u64) -> std::io::Result<ParseOutput> {
-    let (lines, next) = read_jsonl_from(path, offset)?;
-    let mut out = ParseOutput { next_offset: next, ..Default::default() };
-    for line in &lines {
+    let mut lines = JsonlReader::open(path, offset)?;
+    let mut out = ParseOutput::default();
+    for line in lines.by_ref() {
         out.lines_total += 1;
         let Some(v) = &line.value else {
-            out.warnings.push(format!("invalid JSON at byte {}", line.offset));
+            out.warn(format!("invalid JSON at byte {}", line.offset));
             continue;
         };
         let (Some(ts), Some(windows)) = (i64_at(v, "ts"), v.get("windows").and_then(Value::as_object)) else { continue };
@@ -138,7 +138,11 @@ pub fn parse_file(path: &Path, offset: u64) -> std::io::Result<ParseOutput> {
             });
         }
         out.lines_recognised += 1;
+        if out.round_full() {
+            break;
+        }
     }
+    out.next_offset = lines.finish()?;
     Ok(out)
 }
 

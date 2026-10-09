@@ -8,6 +8,7 @@ use chrono::TimeZone;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io::Write;
+use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -51,6 +52,26 @@ pub enum ExportError {
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+}
+
+/// Writes through a temporary file next to `dest` and moves it into place only once every byte
+/// is on disk, so a failed export leaves an existing file as it was.
+pub fn write_atomically<T>(dest: &Path, write: impl FnOnce(&mut std::io::BufWriter<std::fs::File>) -> Result<T, String>) -> Result<T, String> {
+    let name = dest.file_name().ok_or("export target has no file name")?;
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let tmp = dest.with_file_name(format!(".{}.{}-{nanos}.tmp", name.to_string_lossy(), std::process::id()));
+    let result = (|| {
+        let mut f = std::io::BufWriter::new(std::fs::File::create(&tmp).map_err(|e| e.to_string())?);
+        let value = write(&mut f)?;
+        // the last buffered write and the disk's answer are errors too; dropping would hide them
+        f.into_inner().map_err(|e| e.error().to_string())?.sync_all().map_err(|e| e.to_string())?;
+        std::fs::rename(&tmp, dest).map_err(|e| e.to_string())?;
+        Ok(value)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
 }
 
 #[allow(clippy::too_many_arguments)]

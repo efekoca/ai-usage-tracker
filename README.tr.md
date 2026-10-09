@@ -14,7 +14,7 @@ AI Usage Tracker, Windows, macOS ve Linux'ta çalışan bir uygulamadır. Yapay 
 
 ![Genel bakış ekranı: 30 günlük trend, token dağılımı ve güncel limitler; yanında bugünkü token sayısını ve limit halkalarını gösteren masaüstü widget'ı](assets/readme/hero-tr.webp)
 
-- **Verileriniz sizde kalır.** Prompt ve yanıtlarınız hiçbir zaman kaydedilmez. Uygulama yalnızca sayıları ve meta verileri bilgisayarınızdaki bir dosyada tutar ve hiçbir yere göndermez.
+- **Verileriniz sizde kalır.** Prompt ve yanıtlarınız uygulamanın arşivine hiçbir zaman kaydedilmez. Uygulama yalnızca sayıları ve meta verileri bilgisayarınızdaki bir dosyada tutar ve hiçbir yere göndermez.
 - **Her sayının nereden geldiğini bilirsiniz.** Araçtan doğrudan okunan değerler **Kesin**, uygulamanın hesapladıkları **Tahmini**, canlı okunanlar **Yakalanan** etiketiyle gösterilir. Hiçbir değer sessizce tahmin edilmez.
 - **Limitinize takılmadan çalışın.** Claude, Codex ve Antigravity'nin 5 saatlik ve haftalık limitlerini birkaç dakikada bir güncel olarak görür, ne zaman dolacaklarını önceden öğrenirsiniz.
 
@@ -266,11 +266,12 @@ Her sürümde, her dosyanın sağlama değerini içeren bir `SHA256SUMS` dosyas�
 
 ## Gizlilik
 
-> **Prompt ve yanıtlarınız hiçbir zaman saklanmaz.** Uygulama kayıtlardan yalnızca token sayısı, model ve zaman gibi bilgileri alır; prompt ve yanıt metinleri hiçbir yere kaydedilmez. Kullanım verileriniz bilgisayarınızdan hiçbir yere gönderilmez ve uygulamada telemetri yoktur.
+> **Prompt ve yanıtlarınız arşive alınmaz.** Uygulama kayıtlardan yalnızca token sayısı, model ve zaman gibi bilgileri alır; prompt ve yanıt metinleri uygulamanın arşivine kaydedilmez. Kullanım verileriniz bilgisayarınızdan hiçbir yere gönderilmez ve uygulamada telemetri yoktur.
 
 - **Okunanlar:** Araçların kendi kayıtlarındaki zaman damgası, model adı, proje klasörü, oturum kimliği, token sayıları ve limit yüzdeleri.
 - **Saklananlar:** Yalnızca bu sayılar ve meta veriler. Hepsi uygulamanın veri klasöründeki `tracker.db` (SQLite) dosyasında durur: Windows'ta `%LOCALAPPDATA%\AIUsageTracker`, macOS'te `~/Library/Application Support/AIUsageTracker`, Linux'ta `~/.local/share/AIUsageTracker`. Proje adları bu bilgisayardan çıkmaz. İsterseniz adları tek tek ya da toplu olarak gizleyebilirsiniz; gizlenen adlar dışa aktarımlarda da maskelenir.
-- **Hiçbir zaman saklanmayanlar:** Prompt ve yanıtlar, dosya içerikleri, kimlik bilgileri ve erişim token'ları. Uygulama, araçların oturum anahtarlarını tutan dosyaları (`.credentials.json`, `auth.json`) **okumaz**.
+- **Uygulamanın arşivinde hiçbir zaman tutulmayanlar:** Prompt ve yanıtlar, dosya içerikleri, kimlik bilgileri ve erişim token'ları. Uygulama, araçların oturum anahtarlarını tutan dosyaları (`.credentials.json`, `auth.json`) **okumaz**.
+- **Antigravity'nin geçici kopyası:** Antigravity, sohbetlerini metinleriyle birlikte bir veri tabanında tutar. Uygulama bu dosyaya dokunmamak için onu, yalnızca sizin erişebildiğiniz geçici bir klasöre kopyalar, sayıları okur ve kopyayı hemen siler. Uygulama zorla kapatılırsa kalan kopyalar, Antigravity bir sonraki okunduğunda 10 dakikadan eskiyse silinir. Sohbet metni uygulamanın arşivine hiçbir zaman alınmaz.
 - **İnternet bağlantısı:** Uygulamanın kendisi internete yalnızca güncelleme denetimi için bağlanır. Bu denetimde yalnızca sürüm dosyası indirilir, hiçbir veri gönderilmez (**Ayarlar → Güncellemeler**). Varsayılan olarak açık gelen limit okumaları bilgisayarınızdaki Claude Code, Codex ve Antigravity CLI'ı çalıştırır; bu araçlar limit yüzdenizi kendi servislerinden sorar. Uygulama onları telemetri ve hata raporlaması kapalı olarak başlatır. Limit okumalarını **Kaynaklar → Canlı yakalama** bölümünden kapatabilirsiniz. Bir aracı uygulamadan kurarsanız kurulum dosyası üreticinin sitesinden indirilir. Fiyat ve plan dosyaları uygulamayla birlikte gelir. Döviz kuru için de internetten veri çekilmez; kuru kendiniz girersiniz.
 
 ### Canlı yakalama
@@ -301,7 +302,7 @@ Güvenlik önlemleri:
 Her şey sizin bilgisayarınızda olur:
 
 1. Claude Code, Cowork, Claude masaüstü, Codex (CLI ve masaüstü) ve Antigravity (uygulama, IDE ve CLI) kullanım kayıtlarını diske yazar.
-2. Uygulama bu kayıtları okur ve içlerinden yalnızca token sayısı, model ve zaman gibi bilgileri alır. Prompt ve yanıt metinleri hiçbir yere kaydedilmez.
+2. Uygulama bu kayıtları okur ve içlerinden yalnızca token sayısı, model ve zaman gibi bilgileri alır. Prompt ve yanıt metinleri uygulamanın arşivine kaydedilmez.
 3. Limit okumaları açıksa limit yüzdeleri bilgisayarınızdaki `claude`, `codex` ve `agy` üzerinden alınır.
 4. Yerel veri tabanına (SQLite) yalnızca sayılar ve meta veriler yazılır.
 5. Panel, widget, tepsi simgesi ve PDF özet bu veri tabanını kullanır.

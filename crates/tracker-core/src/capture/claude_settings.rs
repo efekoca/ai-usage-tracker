@@ -292,14 +292,11 @@ pub fn otel_env(port: u16, token: &str) -> BTreeMap<String, String> {
 }
 
 /// std's `RandomState` is keyed from the OS random generator: enough for a loopback secret.
+/// 128 random bits from SQLite's generator, which the operating system's random source seeds.
 pub fn new_token() -> String {
-    use std::hash::{BuildHasher, Hasher};
-    let part = || {
-        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
-        h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
-        h.finish()
-    };
-    format!("{:016x}{:016x}", part(), part())
+    rusqlite::Connection::open_in_memory()
+        .and_then(|c| c.query_row("SELECT lower(hex(randomblob(16)))", [], |r| r.get(0)))
+        .expect("an in-memory SQLite database always opens")
 }
 
 fn is_telemetry_key(k: &str) -> bool {

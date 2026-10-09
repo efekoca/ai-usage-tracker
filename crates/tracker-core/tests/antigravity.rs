@@ -180,6 +180,7 @@ fn antigravity_only() -> std::collections::HashSet<SourceId> {
 }
 
 fn run_ag(store: &mut Store, env: &Env) -> tracker_core::ingest::IngestReport {
+    use_test_round();
     let files = enumerate_files(env, &ExtraPaths::default(), &antigravity_only());
     tracker_core::ingest::ingest(store, &files, |_| {})
 }
@@ -472,4 +473,54 @@ fn copy_dir(from: &Path, to: &Path) {
             fs::copy(e.path(), dst).unwrap();
         }
     }
+}
+
+#[test]
+fn an_implausible_call_count_keeps_the_generation_out_of_the_archive() {
+    let g = gemini();
+    let dir = g.gemini.join("antigravity");
+    let id = "0a1b2c3d-0000-4000-8000-0000000000b1";
+    let c = conversation(&dir, id, &workspace("file:///home/u/p", ""));
+    add_step(&c, 0, 14, 3, step_meta(T0, None), None);
+    add_step(&c, 1, 15, 3, step_meta(T0 + 1, None), None);
+    for i in 0..2 {
+        add_gen(&c, i, generation("gemini-3.6-flash", (1, 1, 0, 0, 1), &[(u64::MAX, 0, 0, 0, 0)], 0));
+    }
+    let mut store = Store::open_in_memory().unwrap();
+    let rep = run_ag(&mut store, &g.env);
+    assert_eq!(rep.errors, vec![]);
+    assert_eq!(rep.warnings.iter().filter(|(_, w)| w.contains("implausible token count")).count(), 2);
+    assert!(rows(&store).iter().all(|r| !r.key.starts_with(&format!("ag:{id}:"))));
+    let max_input: i64 = store.conn().query_row("SELECT MAX(request_input) FROM usage_event", [], |r| r.get(0)).unwrap();
+    assert!((0..1_000_000_000_000).contains(&max_input));
+}
+
+#[test]
+fn the_archive_refuses_an_implausible_count_from_any_source() {
+    let mut store = Store::open_in_memory().unwrap();
+    let ev = |key: &str, input: u64| tracker_core::model::UsageEvent {
+        key: key.into(),
+        ts_ms: 1_791_000_000_000,
+        tool: tracker_core::model::Tool::Codex,
+        client: None,
+        model: "gpt-5.6-terra".into(),
+        project_path: None,
+        session_id: None,
+        tokens: tracker_core::model::Tokens { input, ..Default::default() },
+        request_input: input,
+        web_search_requests: 0,
+        speed: None,
+        service_tier: None,
+        inference_geo: None,
+        request_id: None,
+        accuracy: tracker_core::model::Accuracy::Exact,
+        source: "test".into(),
+        branch: None,
+        agent: None,
+        thread_id: None,
+    };
+    let mut tx = store.transaction().unwrap();
+    tx.upsert_events(&[ev("ok", 5_000), ev("bad", u64::MAX), ev("too-big", 2_000_000_000_000)]).unwrap();
+    tx.commit().unwrap();
+    assert_eq!(store.event_count().unwrap(), 1);
 }

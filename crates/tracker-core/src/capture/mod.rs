@@ -13,7 +13,7 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const MAX_LINE: usize = 1024 * 1024;
 
@@ -105,6 +105,10 @@ pub fn install(cli: Cli, timeout: Duration) -> Result<(), String> {
 }
 
 fn run_installer(mut cmd: Command, timeout: Duration) -> Result<(), String> {
+    // its own process group, so a timeout also ends the downloads and installers it started
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+    let deadline = Instant::now() + timeout;
     let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -118,18 +122,47 @@ fn run_installer(mut cmd: Command, timeout: Duration) -> Result<(), String> {
         let _ = (&mut stderr).take(64 << 10).read_to_end(&mut buf);
         let _ = tx.send(buf);
     });
-    let Ok(err) = rx.recv_timeout(timeout) else {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err("install_failed:timed out".into());
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(100)),
+            Ok(None) => {
+                kill_tree(&mut child);
+                return Err("install_failed:timed out".into());
+            }
+            Err(e) => {
+                kill_tree(&mut child);
+                return Err(format!("install_failed:{e}"));
+            }
+        }
     };
-    let status = child.wait().map_err(|e| format!("install_failed:{e}"))?;
     if status.success() {
         return Ok(());
     }
+    // something the installer left running may still hold its error output open
+    let err = rx.recv_timeout(Duration::from_secs(2)).unwrap_or_default();
     let err = String::from_utf8_lossy(&err);
     let last = err.lines().map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("").chars().take(200).collect::<String>();
     Err(format!("install_failed:{}", if last.is_empty() { status.to_string() } else { last }))
+}
+
+/// Ends the installer and everything it started.
+fn kill_tree(child: &mut std::process::Child) {
+    // a direct call: procps-ng 4.0.2's `kill -KILL -<group>` (Debian 12) exits 0 and signals nothing
+    #[cfg(unix)]
+    if let Ok(group) = libc::pid_t::try_from(child.id()) {
+        // SAFETY: plain syscall; the group is the installer's own, created by `process_group(0)`
+        unsafe { libc::kill(-group, libc::SIGKILL) };
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let taskkill = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows")).join(r"System32\taskkill.exe");
+        let _ = Command::new(taskkill).args(["/T", "/F", "/PID", &child.id().to_string()]).creation_flags(CREATE_NO_WINDOW).status();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 pub(crate) fn path_dirs() -> Vec<PathBuf> {
@@ -206,6 +239,20 @@ mod tests {
         assert_eq!(run("echo fetching >&2; echo 'Error: unsupported architecture' >&2; exit 1", 5), Err("install_failed:Error: unsupported architecture".into()));
         assert_eq!(run("exit 0", 5), Ok(()));
         assert_eq!(run("sleep 30", 1), Err("install_failed:timed out".into()));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn the_timeout_ends_an_installer_that_closed_its_output_and_what_it_started() {
+        let dir = tempfile::tempdir().unwrap();
+        let mark = dir.path().join("mark");
+        let mut c = Command::new("sh");
+        c.args(["-c", &format!("(sleep 2; touch '{}') & exec 2>&-; sleep 30", mark.display())]);
+        let started = Instant::now();
+        assert_eq!(run_installer(c, Duration::from_millis(500)), Err("install_failed:timed out".into()));
+        assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
+        std::thread::sleep(Duration::from_secs(3));
+        assert!(!mark.exists(), "a process the installer started outlived the timeout");
     }
 
     #[test]

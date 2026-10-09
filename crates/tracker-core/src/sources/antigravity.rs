@@ -23,7 +23,6 @@ use crate::model::{Accuracy, Tokens, Tool, ToolCall, UsageEvent};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 pub const SOURCE: &str = "antigravity_db";
 
@@ -117,23 +116,24 @@ fn text(buf: &[u8], field: u64) -> Option<String> {
 }
 
 /// `google.protobuf.Timestamp` → epoch milliseconds.
+/// More tokens than any real request has; a larger count means a damaged record.
+const MAX_COUNT: u64 = 1_000_000_000_000;
+
+/// `google.protobuf.Timestamp` → epoch milliseconds; `None` outside 1970–3000.
 fn timestamp_ms(buf: &[u8]) -> Option<i64> {
-    let secs = i64::try_from(int(buf, 1)?).ok()?;
+    let secs = int(buf, 1).filter(|&s| s <= crate::model::MAX_EPOCH_SECS as u64)? as i64;
     let nanos = int(buf, 2).unwrap_or(0).min(999_999_999) as i64;
     Some(secs * 1000 + nanos / 1_000_000)
 }
 
-fn usage_tokens(u: &[u8]) -> Tokens {
-    let n = |f| int(u, f).unwrap_or(0);
-    let thinking = n(9);
-    Tokens {
-        input: n(2),
-        cache_read: n(5),
-        cache_write: n(4),
-        cache_write_1h: 0,
-        output: n(3).max(thinking + n(10)),
-        reasoning: thinking,
+/// `None` when a count is too large to be real.
+fn usage_tokens(u: &[u8]) -> Option<Tokens> {
+    let counts = [2, 3, 4, 5, 9, 10].map(|f| int(u, f).unwrap_or(0));
+    if counts.iter().any(|&c| c > MAX_COUNT) {
+        return None;
     }
+    let [input, output, cache_write, cache_read, thinking, response] = counts;
+    Some(Tokens { input, cache_read, cache_write, cache_write_1h: 0, output: output.max(thinking + response), reasoning: thinking })
 }
 
 /// `file:///c%3A/Users/x` → `c:\Users\x`; `file:///home/x` → `/home/x`.
@@ -166,20 +166,42 @@ pub fn file_uri_to_path(uri: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| if trimmed.ends_with(':') { path } else { trimmed })
 }
 
-/// A private copy of a live SQLite database and its WAL, removed when dropped.
+const SNAPSHOT_PREFIX: &str = "ai-usage-tracker-ag-";
+
+/// A private copy of a live SQLite database and its WAL, removed when dropped. The folder gets a
+/// random name, is created exclusively and is readable only by this user, so nothing another
+/// user prepared in a shared temp folder is ever written through.
 struct Snapshot {
-    dir: PathBuf,
+    dir: Option<tempfile::TempDir>,
     conn: Option<Connection>,
+}
+
+/// Copies left behind when the app was killed mid-read; folders only, links are never followed.
+fn remove_stale_snapshots() {
+    let Ok(rd) = std::fs::read_dir(std::env::temp_dir()) else { return };
+    // a read takes seconds; anything this old belongs to no running read
+    let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(600);
+    for e in rd.flatten() {
+        let old = e.file_name().to_string_lossy().starts_with(SNAPSHOT_PREFIX)
+            && std::fs::symlink_metadata(e.path()).is_ok_and(|m| m.is_dir() && m.modified().is_ok_and(|t| t < cutoff));
+        if old {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
 }
 
 impl Snapshot {
     fn open(db: &Path) -> std::io::Result<Snapshot> {
-        static SEQ: AtomicU64 = AtomicU64::new(0);
-        let dir = std::env::temp_dir()
-            .join(format!("ai-usage-tracker-ag-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
-        std::fs::create_dir_all(&dir)?;
-        let mut snap = Snapshot { dir, conn: None };
-        let copy = snap.dir.join("c.db");
+        static CLEANED: std::sync::Once = std::sync::Once::new();
+        CLEANED.call_once(remove_stale_snapshots);
+        let mut builder = tempfile::Builder::new();
+        builder.prefix(SNAPSHOT_PREFIX);
+        #[cfg(unix)]
+        builder.permissions(std::os::unix::fs::PermissionsExt::from_mode(0o700));
+        let dir = builder.tempdir()?;
+        let copy = dir.path().join("c.db");
+        let copy_wal = dir.path().join("c.db-wal");
+        let mut snap = Snapshot { dir: Some(dir), conn: None };
         let mut wal = db.as_os_str().to_owned();
         wal.push("-wal");
         let wal = PathBuf::from(wal);
@@ -191,10 +213,10 @@ impl Snapshot {
             let before = stamp();
             std::fs::copy(db, &copy)?;
             // the WAL holds everything written since Antigravity's last checkpoint
-            match std::fs::copy(&wal, snap.dir.join("c.db-wal")) {
+            match std::fs::copy(&wal, &copy_wal) {
                 Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
                 Err(_) => {
-                    let _ = std::fs::remove_file(snap.dir.join("c.db-wal"));
+                    let _ = std::fs::remove_file(&copy_wal);
                 }
                 Ok(_) => {}
             }
@@ -216,8 +238,9 @@ impl Snapshot {
 
 impl Drop for Snapshot {
     fn drop(&mut self) {
+        // the database closes before its folder goes
         drop(self.conn.take());
-        let _ = std::fs::remove_dir_all(&self.dir);
+        drop(self.dir.take());
     }
 }
 
@@ -274,7 +297,7 @@ fn read(path: &Path) -> Result<ParseOutput, Box<dyn std::error::Error + Send + S
     let snap = Snapshot::open(path)?;
     let conn = snap.conn();
     if !has_table(conn, "gen_metadata") || !has_table(conn, "steps") {
-        out.warnings.push("not an Antigravity conversation database".into());
+        out.warn("not an Antigravity conversation database");
         return Ok(out);
     }
 
@@ -316,12 +339,15 @@ fn read(path: &Path) -> Result<ParseOutput, Box<dyn std::error::Error + Send + S
         out.lines_total += 1;
         let Some(g) = data.as_deref().and_then(|d| msg(d, 1)) else { continue };
         let Some(usage) = msg(g, 4) else { continue };
-        let tokens = usage_tokens(usage);
+        let Some(tokens) = usage_tokens(usage) else {
+            out.warn(format!("generation {idx}: implausible token count"));
+            continue;
+        };
         if tokens.total() == 0 {
             continue;
         }
         let Some(model) = text(g, 19) else {
-            out.warnings.push(format!("generation {idx}: no model id"));
+            out.warn(format!("generation {idx}: no model id"));
             continue;
         };
         let last_step = msgs(g, 20)
@@ -329,15 +355,20 @@ fn read(path: &Path) -> Result<ParseOutput, Box<dyn std::error::Error + Send + S
             .and_then(|kv| text(kv, 2))
             .and_then(|v| v.parse::<i64>().ok());
         let step_ts = |i: i64| steps.get(&i).and_then(|s| s.ts_ms);
-        let ts_ms = last_step.and_then(|l| step_ts(l + 1).or_else(|| step_ts(l))).or(created_ms);
+        let ts_ms = last_step.and_then(|l| l.checked_add(1).and_then(step_ts).or_else(|| step_ts(l))).or(created_ms);
         let Some(ts_ms) = ts_ms else {
-            out.warnings.push(format!("generation {idx}: no timestamp"));
+            out.warn(format!("generation {idx}: no timestamp"));
             continue;
         };
+        let calls: Vec<&[u8]> = msgs(g, 17).filter_map(|c| msg(c, 2)).collect();
+        if calls.iter().any(|c| usage_tokens(c).is_none()) {
+            out.warn(format!("generation {idx}: implausible token count"));
+            continue;
+        }
+        // every count is below MAX_COUNT here, so these sums cannot overflow
         let prompt = |u: &[u8]| int(u, 2).unwrap_or(0) + int(u, 4).unwrap_or(0) + int(u, 5).unwrap_or(0);
         // a retried generation sums its calls; the long-context tier depends on one request's prompt
-        let request_input =
-            msgs(g, 17).filter_map(|c| msg(c, 2)).map(prompt).max().unwrap_or_else(|| prompt(usage));
+        let request_input = calls.iter().map(|c| prompt(c)).max().unwrap_or_else(|| prompt(usage));
         out.lines_recognised += 1;
         out.events.push(UsageEvent {
             key: format!("ag:{id}:{idx}"),
@@ -408,6 +439,52 @@ mod tests {
             assert!(fields(bad).count() <= 1);
         }
         assert_eq!(int(&[0x08, 0x96, 0x01], 1), Some(150));
+    }
+
+    #[test]
+    fn each_copy_gets_its_own_private_folder_that_goes_away() {
+        let src = tempfile::tempdir().unwrap();
+        let db = src.path().join("x.db");
+        Connection::open(&db).unwrap().execute_batch("CREATE TABLE t (x); INSERT INTO t VALUES (1);").unwrap();
+        let (a, b) = (Snapshot::open(&db).unwrap(), Snapshot::open(&db).unwrap());
+        let dir = a.dir.as_ref().unwrap().path().to_owned();
+        assert_ne!(dir, b.dir.as_ref().unwrap().path());
+        assert!(dir.file_name().unwrap().to_string_lossy().starts_with(SNAPSHOT_PREFIX));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
+        }
+        assert_eq!(a.conn().query_row("SELECT x FROM t", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        drop(a);
+        assert!(!dir.exists());
+    }
+
+    fn varint(mut v: u64, out: &mut Vec<u8>) {
+        while v >= 0x80 {
+            out.push((v as u8) | 0x80);
+            v >>= 7;
+        }
+        out.push(v as u8);
+    }
+
+    fn int_field(field: u64, v: u64) -> Vec<u8> {
+        let mut out = Vec::new();
+        varint(field << 3, &mut out);
+        varint(v, &mut out);
+        out
+    }
+
+    #[test]
+    fn huge_but_well_formed_numbers_are_rejected_not_overflowed() {
+        assert_eq!(timestamp_ms(&int_field(1, i64::MAX as u64)), None);
+        assert_eq!(timestamp_ms(&int_field(1, u64::MAX)), None);
+        assert_eq!(timestamp_ms(&[int_field(1, 1_791_192_252), int_field(2, 250_000_000)].concat()), Some(1_791_192_252_250));
+        assert!(usage_tokens(&int_field(9, u64::MAX)).is_none());
+        let t = usage_tokens(&[int_field(2, 10), int_field(9, 3), int_field(10, 4)].concat()).unwrap();
+        assert_eq!((t.input, t.output, t.reasoning), (10, 7, 3));
+        let max = Tokens { input: u64::MAX, output: u64::MAX, ..Default::default() };
+        assert_eq!(max.total(), u64::MAX);
     }
 
     #[test]

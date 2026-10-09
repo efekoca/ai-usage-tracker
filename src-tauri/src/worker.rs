@@ -158,7 +158,7 @@ fn scan(app: &AppHandle, store: &mut Store) {
         st.last_scan_ms = Some(chrono::Utc::now().timestamp_millis());
         st.last_new_events = report.new_events();
         st.files_seen = report.files_seen;
-        st.warnings = report.warnings.len();
+        st.warnings = report.warning_count;
         st.errors = report.errors.len();
     }
     let _ = app.emit("scan-finished", state.status.lock().unwrap().clone());

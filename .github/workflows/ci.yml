@@ -65,3 +65,31 @@ jobs:
 
       - name: Tests
         run: cargo test --workspace --locked
+
+      # every ingest scenario again with one record per read round
+      - name: Tests in read rounds
+        run: cargo test -p tracker-core --locked --test ingest --test antigravity --test rounds
+        env:
+          TRACKER_TEST_ROUND: "1"
+
+  # known advisories fail the run; the few that cannot be fixed here are listed with their reason
+  # in .cargo/audit.toml
+  audit:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+          rustup default ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Rust advisories
+        run: |
+          cargo install cargo-audit --locked --version 0.22.2
+          cargo audit --deny unsound --deny yanked
+
+      - name: npm advisories
+        run: npm --prefix ui audit --audit-level=high

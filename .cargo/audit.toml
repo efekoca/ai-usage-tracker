@@ -1,0 +1,5 @@
+# Advisories that cannot be fixed from this project, each with the reason and when to look again.
+# RUSTSEC-2024-0429 (glib) is fixed by the patched copy in vendor/glib; a path dependency is not
+# checked against the advisory database, so it needs no entry here.
+[advisories]
+ignore = []

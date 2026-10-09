@@ -836,6 +836,7 @@ const tr: Dict = {
   'cap.claude.what': "Claude Code'un kendi kullanım sorgusuyla (get_usage) 5 saatlik ve haftalık limit yüzdesini okur. Claude kullanılırken 5 dakikada bir, boştayken 15 dakikada bir güncellenir (Claude'un kullanım servisi daha sık sorgulanmaya izin vermiyor); Claude masaüstü, Code sekmesi, Cowork ve web kullanımının hepsi aynı limite dahildir.",
   'cap.claude.changes': 'Hiçbir dosyayı değiştirmez. Kendi Claude Code kurulumunuzu ve oturumunuzu kullanır; giriş bilgilerinize dokunmaz. Modele istek gönderilmez, kotanızdan bir şey harcanmaz.',
   'cap.claude.note': "Her okumada arka planda kısa süreli bir Claude Code işlemi başlatılır (pencere açılmaz, eklentiler ve hook'lar kapalı). Claude Code'a terminalden giriş yapılmış olmalı.",
+  "settings.data.err.export_target_is_archive": "Bu dosya uygulamanın kendi veri tabanı; dışa aktarma için başka bir dosya adı seçin.",
   'cap.msg.claude_not_found': 'Claude Code bulunamadı. Claude Code CLI veya Claude masaüstü kurulu olmalı.',
   'cap.msg.app_not_installed': 'Uygulama disk görüntüsünden ya da geçici bir konumdan çalışıyor. Önce Uygulamalar klasörüne taşıyıp oradan açın.',
   'cap.msg.claude_no_plan_limits': "Claude Code'da giriş yapılmadığı için limitler okunamıyor (oturum kapalı, süresi dolmuş ya da API anahtarıyla giriş yapılmış).",
@@ -895,6 +896,7 @@ const tr: Dict = {
   "cap.msg.claude_installed": "Claude Code başarıyla kuruldu.",
   "cap.msg.codex_installed": "Codex CLI başarıyla kuruldu.",
   "cap.msg.install_failed": "Kurulum tamamlanamadı ({detail}). Kurulum sayfasındaki komutla elle kurabilirsiniz.",
+  "cap.msg.telemetry_token_missing": "Alıcı kapalı: telemetri ayarlarında erişim kodu yok, bu yüzden bilgisayardaki her program ona veri gönderebilirdi. Güvenli biçimde yeniden kurmak için bu seçeneği kapatıp açın.",
   "cap.msg.agy_not_signed_in": "Antigravity CLI'da (agy) Google hesabıyla giriş yapılmadığı için limitler okunamıyor.",
   "cap.msg.agy_not_found": "Antigravity CLI (agy) bulunamadı. Limitleri okumak için Antigravity CLI kurulu olmalı.",
 
@@ -1741,6 +1743,7 @@ const en: Dict = {
   'cap.claude.what': "Reads the five-hour and weekly limit percentages through Claude Code's own usage query (get_usage). It updates every 5 minutes while Claude is in use and every 15 minutes otherwise (Claude's usage service does not allow asking more often); Claude desktop, its Code tab, Cowork and web use all count toward the same limit.",
   'cap.claude.changes': 'Changes no files. Uses your own Claude Code install and sign-in; your credentials are never touched. No model request is made, so it uses none of your quota.',
   'cap.claude.note': 'Each read runs a short-lived Claude Code process in the background (no window, plugins and hooks off). Claude Code must be signed in from a terminal.',
+  "settings.data.err.export_target_is_archive": "This file is the app's own database; choose another file name for the export.",
   'cap.msg.claude_not_found': 'Claude Code was not found. The Claude Code CLI or the Claude desktop app must be installed.',
   'cap.msg.app_not_installed': 'The app is running from the disk image or a temporary location. Move it to the Applications folder and open it from there first.',
   'cap.msg.claude_no_plan_limits': 'The limits cannot be read because Claude Code is not signed in (signed out, the sign-in expired, or signed in with an API key).',
@@ -1800,6 +1803,7 @@ const en: Dict = {
   "cap.msg.claude_installed": "Claude Code was installed successfully.",
   "cap.msg.codex_installed": "The Codex CLI was installed successfully.",
   "cap.msg.install_failed": "The install did not finish ({detail}). You can install it yourself with the command on the install guide.",
+  "cap.msg.telemetry_token_missing": "The receiver is off: the telemetry settings have no access key, so any program on this computer could send it data. Turn this switch off and on again to set it up securely.",
   "cap.msg.agy_not_signed_in": "The limits cannot be read because the Antigravity CLI (agy) is not signed in with a Google account.",
   "cap.msg.agy_not_found": "The Antigravity CLI (agy) was not found. It must be installed to read the limits.",
 

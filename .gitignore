@@ -24,3 +24,6 @@ node_modules/
 
 # local Claude Code notes
 CLAUDE.md
+
+# macOS folder metadata
+.DS_Store

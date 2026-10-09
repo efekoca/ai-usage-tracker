@@ -213,6 +213,18 @@ fn rect_fits((x, y, w, h): (i32, i32, i32, i32), monitors: &[(i32, i32, i32, i32
 static LAST_PLACED_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 static LAST_DRAG_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 static DRAG_SAVE_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The last dragged position, applied again when it is saved: a settings update that copied the
+/// settings before the drag would otherwise put the old position back. Taken and cleared only under
+/// the settings lock, so a corner picked after the drag cannot be overwritten by its delayed save.
+static DRAGGED_TO: std::sync::Mutex<Option<(i32, i32)>> = std::sync::Mutex::new(None);
+
+fn apply_pending_drag(s: &mut Settings) {
+    if let Some((x, y)) = DRAGGED_TO.lock().unwrap().take() {
+        s.widget.x = Some(x);
+        s.widget.y = Some(y);
+        s.widget.anchor.clear();
+    }
+}
 
 fn remember_widget_position(app: &AppHandle, x: i32, y: i32) {
     let now = chrono::Utc::now().timestamp_millis();
@@ -229,6 +241,7 @@ fn remember_widget_position(app: &AppHandle, x: i32, y: i32) {
     s.widget.y = Some(y);
     s.widget.anchor.clear();
     drop(s);
+    *DRAGGED_TO.lock().unwrap() = Some((x, y));
     LAST_DRAG_MS.store(now, Ordering::SeqCst);
     // a drag fires many Moved events: save and tell the UI once it has settled, off the event loop
     if DRAG_SAVE_PENDING.swap(true, Ordering::SeqCst) {
@@ -240,7 +253,7 @@ fn remember_widget_position(app: &AppHandle, x: i32, y: i32) {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
         DRAG_SAVE_PENDING.store(false, Ordering::SeqCst);
-        match app.state::<AppState>().update_settings(|_| {}) {
+        match app.state::<AppState>().update_settings(apply_pending_drag) {
             Ok(s) => {
                 let _ = app.emit("settings-changed", &s);
             }
@@ -398,7 +411,6 @@ fn locale_from(var: impl Fn(&str) -> Option<String>) -> String {
 
 pub fn handle_menu(app: &AppHandle, id: &str) {
     let state = app.state::<AppState>();
-    let mut s = state.settings.read().unwrap().clone();
     match id {
         "w:open" | "tray:open" => return show_main(app),
         "app:quit" => {
@@ -413,34 +425,54 @@ pub fn handle_menu(app: &AppHandle, id: &str) {
             let _ = app.emit("navigate", "settings");
             return;
         }
-        "w:hide" => s.widget.visible = false,
-        "tray:widget" => s.widget.visible = !s.widget.visible,
-        "w:autohide" => s.widget.auto_hide_fullscreen = !s.widget.auto_hide_fullscreen,
+        _ => {}
+    }
+    let Some(change) = menu_change(id) else { return };
+    // applied to the current settings under the store lock, so a concurrent change is kept
+    match state.update_settings(change) {
+        Ok(s) => {
+            if let Some(corner) = id.strip_prefix("w:pos:")
+                && let Some(w) = app.get_webview_window(WIDGET)
+            {
+                place_widget(&w, corner);
+            }
+            apply_widget_settings(app, &s);
+            let _ = app.emit("settings-changed", &s);
+            crate::tray::refresh_soon();
+        }
+        Err(e) => log::warn!("menu setting not saved: {e}"),
+    }
+}
+
+type SettingsChange<'a> = Box<dyn FnOnce(&mut Settings) + 'a>;
+
+/// The settings change a widget or tray menu item makes, if it makes one.
+fn menu_change(id: &str) -> Option<SettingsChange<'_>> {
+    Some(match id {
+        "w:hide" => Box::new(|s| s.widget.visible = false),
+        "tray:widget" => Box::new(|s| s.widget.visible = !s.widget.visible),
+        "w:autohide" => Box::new(|s| s.widget.auto_hide_fullscreen = !s.widget.auto_hide_fullscreen),
         other => {
             if let Some(v) = other.strip_prefix("w:opacity:").and_then(|v| v.parse::<f64>().ok()) {
-                s.widget.opacity = v;
+                Box::new(move |s| s.widget.opacity = v)
             } else if let Some(v) = other.strip_prefix("w:size:") {
-                s.widget.size = v.to_owned();
-                s.widget.scale = match v {
-                    "s" => 0.85,
-                    "l" => 1.25,
-                    _ => 1.0,
-                };
-            } else if let Some(corner) = other.strip_prefix("w:pos:") {
-                if let Some(w) = app.get_webview_window(WIDGET) {
-                    place_widget(&w, corner);
-                }
-                s.widget.anchor = corner.to_owned();
+                Box::new(move |s| {
+                    s.widget.size = v.to_owned();
+                    s.widget.scale = match v {
+                        "s" => 0.85,
+                        "l" => 1.25,
+                        _ => 1.0,
+                    };
+                })
             } else {
-                return;
+                let corner = other.strip_prefix("w:pos:")?;
+                Box::new(move |s| {
+                    DRAGGED_TO.lock().unwrap().take();
+                    s.widget.anchor = corner.to_owned();
+                })
             }
         }
-    }
-    let _ = s.save(&state.db());
-    *state.settings.write().unwrap() = s.clone();
-    apply_widget_settings(app, &s);
-    let _ = app.emit("settings-changed", &s);
-    crate::tray::refresh_soon();
+    })
 }
 
 /// The uninstaller removes the same value.
@@ -708,6 +740,36 @@ fn fullscreen_app_active() -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn menu_items_change_only_their_own_setting() {
+        let base = Settings::default();
+        let after = |id: &str| {
+            let mut s = base.clone();
+            menu_change(id).expect(id)(&mut s);
+            s
+        };
+        let s = after("w:size:l");
+        assert_eq!((s.widget.size.as_str(), s.widget.scale), ("l", 1.25));
+        assert_eq!(after("w:opacity:0.6").widget.opacity, 0.6);
+        assert_eq!(after("tray:widget").widget.visible, !base.widget.visible);
+        assert_eq!(serde_json::to_value(&after("w:autohide").capture).unwrap(), serde_json::to_value(&base.capture).unwrap());
+        assert!(menu_change("tray:open").is_none() && menu_change("w:opacity:x").is_none());
+    }
+
+    #[test]
+    fn a_corner_picked_after_a_drag_survives_the_delayed_drag_save() {
+        let mut s = Settings::default();
+        *DRAGGED_TO.lock().unwrap() = Some((40, 50));
+        menu_change("w:pos:top-left").unwrap()(&mut s);
+        apply_pending_drag(&mut s);
+        assert_eq!((s.widget.anchor.as_str(), s.widget.x), ("top-left", None));
+
+        // a drag after the corner still wins
+        *DRAGGED_TO.lock().unwrap() = Some((40, 50));
+        apply_pending_drag(&mut s);
+        assert_eq!((s.widget.anchor.as_str(), s.widget.x, s.widget.y), ("", Some(40), Some(50)));
+    }
     use super::*;
 
     #[test]

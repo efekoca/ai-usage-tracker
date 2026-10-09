@@ -14,7 +14,7 @@ A private app for Windows, macOS, and Linux that reads the usage logs your AI to
 
 ![The AI Usage Tracker overview with a 30-day trend, token mix and current limits, and the desktop widget showing today's tokens and limit rings](assets/readme/hero-en.webp)
 
-- **Private by design.** Prompts and responses are never stored. Only counts and metadata are kept, in a local SQLite file, and your usage data never leaves the computer.
+- **Private by design.** Prompts and responses never enter the app's archive. Only counts and metadata are kept, in a local SQLite file, and your usage data never leaves the computer.
 - **Know where every number comes from.** Every figure is labeled: **Exact** from the tool's own log, **Estimated** by the app, or **Captured** live. Nothing is guessed silently.
 - **Stay ahead of your limits.** Five-hour and weekly percentages for Claude, Codex and Antigravity are read every few minutes, with a forecast of when each window fills.
 
@@ -274,11 +274,12 @@ Every release includes `SHA256SUMS`, the checksum of each file. Put it next to y
 
 ## Privacy
 
-> **Content is never stored.** The app takes only details such as token counts, model, and time from the logs; prompt and response text is never saved anywhere. Your usage data never leaves your computer, and the app has no telemetry.
+> **Content never enters the archive.** The app takes only details such as token counts, model, and time from the logs; prompt and response text is never saved to the app's archive. Your usage data never leaves your computer, and the app has no telemetry.
 
 - **Read:** timestamps, model, project folder, session ID, token counts, and limit percentages from the tools' own logs.
 - **Stored:** only those values, in `tracker.db` (SQLite) in the app's data folder: `%LOCALAPPDATA%\AIUsageTracker` on Windows, `~/Library/Application Support/AIUsageTracker` on macOS, and `~/.local/share/AIUsageTracker` on Linux. Project names stay local. You can hide them one by one or all at once, and hidden names are masked in exports too.
-- **Never stored:** prompts, responses, file contents, credentials, or tokens. The app does **not** read the tools' credential files.
+- **Never kept in the app's archive:** prompts, responses, file contents, credentials, or tokens. The app does **not** read the tools' credential files.
+- **Antigravity's temporary copy:** Antigravity keeps its conversations, text included, in a database. So as never to touch that file, the app copies it into a temporary folder only you can open, reads the counts and deletes the copy right away. If the app is forced to quit, the next Antigravity read deletes leftover copies older than 10 minutes. Conversation text never reaches the app's archive.
 - **Network:** the app itself connects only to check for updates. The check downloads the release's version file and sends nothing (**Settings → Updates**). The limit reads, on by default, run your own Claude Code, Codex and Antigravity CLI, which ask their own services for your plan's limit percentages; the app starts them with their telemetry and error reporting turned off. You can turn the reads off under **Sources → Live capture**. If you install a tool from the app, its installer is downloaded from the maker's site. Prices and plans ship with the app, and currency conversion uses a rate you enter yourself.
 
 ### Live capture
@@ -309,7 +310,7 @@ Safeguards:
 Everything runs on your computer:
 
 1. Claude Code, Cowork, Claude desktop, the Codex CLI and desktop app, and the Antigravity app, IDE and CLI write usage logs to disk, as they already do.
-2. The app reads each log from where it left off, so a rescan only touches what is new. It takes only details such as token counts, model, and time; prompt and response text is never saved anywhere.
+2. The app reads each log from where it left off, so a rescan only touches what is new. It takes only details such as token counts, model, and time; prompt and response text is never saved to the app's archive.
 3. When the limit reads are on, your own `claude`, `codex` and `agy` CLIs supply the limit percentages.
 4. Only counts and metadata reach the local archive (SQLite). Duplicates from streaming, resumed or forked sessions, and Codex logs moved to the archive are counted once.
 5. The dashboard, widget, tray icon, and weekly PDF read from that archive.

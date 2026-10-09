@@ -19,7 +19,7 @@
 //! * Tool calls are `tool_use` content blocks (one block per line); the outcome is the matching
 //!   `tool_result` block (`is_error`) in a later user line. Only names and outcomes are kept.
 
-use super::{read_jsonl_from, str_at, u64_at, i64_at, ParseOutput};
+use super::{str_at, u64_at, i64_at, JsonlReader, ParseOutput};
 use crate::model::{parse_ts_ms, Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
 use serde_json::{json, Value};
 use std::path::Path;
@@ -58,17 +58,17 @@ fn launch_dir(cwd: &str, folder: Option<&str>) -> String {
 
 pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> std::io::Result<ParseOutput> {
     let folder = project_folder(path);
-    let (lines, next) = read_jsonl_from(path, offset)?;
-    let mut out = ParseOutput { next_offset: next, ..Default::default() };
+    let mut lines = JsonlReader::open(path, offset)?;
+    let mut out = ParseOutput::default();
     let mut max_version = str_at(state, "max_version").map(str::to_owned);
     // The session's first working directory is its project; later lines can carry
     // sub-directories the agent cd'd into, which would split one project into many.
     let mut root_cwd = str_at(state, "root_cwd").map(str::to_owned);
     let mut typed = 0u64;
-    for line in &lines {
+    for line in lines.by_ref() {
         out.lines_total += 1;
         let Some(v) = &line.value else {
-            out.warnings.push(format!("invalid JSON at byte {}", line.offset));
+            out.warn(format!("invalid JSON at byte {}", line.offset));
             continue;
         };
         if v.get("type").is_some() {
@@ -106,11 +106,15 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
         if recognised {
             out.lines_recognised += 1;
         }
+        if out.round_full() {
+            break;
+        }
     }
     if out.lines_total >= 20 && typed == 0 {
-        out.warnings.push("unrecognised format: no line has a `type` field".into());
+        out.warn("unrecognised format: no line has a `type` field");
     }
     out.state = json!({ "max_version": max_version, "root_cwd": root_cwd });
+    out.next_offset = lines.finish()?;
     Ok(out)
 }
 

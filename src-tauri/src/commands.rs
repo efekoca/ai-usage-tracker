@@ -68,13 +68,14 @@ fn main_only(w: &WebviewWindow) -> Res<()> {
 #[tauri::command]
 pub fn save_settings(app: AppHandle, window: WebviewWindow, state: State<AppState>, settings: Settings) -> Res<Settings> {
     main_only(&window)?;
-    save_settings_inner(&app, &state, settings)
+    save_settings_inner(&app, &state, |_| settings)
 }
 
-fn save_settings_inner(app: &AppHandle, state: &AppState, settings: Settings) -> Res<Settings> {
+/// `make` builds the new settings from the current ones while the store is locked.
+fn save_settings_inner(app: &AppHandle, state: &AppState, make: impl FnOnce(&Settings) -> Settings) -> Res<Settings> {
     let store = state.db();
     let old = state.settings.read().unwrap().clone();
-    let mut settings = settings;
+    let mut settings = make(&old);
     // capture changes only via set_capture (it edits files outside the app), the shortcut only
     // via set_hotkey (it must register first); a page's widget position can predate the last drag
     settings.capture = old.capture.clone();
@@ -413,21 +414,16 @@ pub fn export_data(
     let store = state.db();
     let book = state.book.read().unwrap();
     let range = analytics::period_range(period, &chrono::Local, now_ms(), store.first_event_ms().map_err(err)?);
-    let mut f = std::io::BufWriter::new(std::fs::File::create(&path).map_err(err)?);
-    let result = (|| {
+    if store.is_live_file(&path) {
+        return Err("export_target_is_archive".into());
+    }
+    export::write_atomically(&path, |f| {
         // UTF-8 BOM so Excel opens Turkish characters correctly
         if format == Format::Csv {
-            std::io::Write::write_all(&mut f, b"\xEF\xBB\xBF").map_err(err)?;
+            std::io::Write::write_all(f, b"\xEF\xBB\xBF").map_err(err)?;
         }
-        let n = export::export(&store, &book, range, &filter.unwrap_or_default(), &chrono::Local, granularity, format, hide, &mut f).map_err(err)?;
-        // the last buffered write and the disk's answer are errors too; dropping would hide them
-        f.into_inner().map_err(|e| e.error().to_string())?.sync_all().map_err(err)?;
-        Ok(n)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&path);
-    }
-    result
+        export::export(&store, &book, range, &filter.unwrap_or_default(), &chrono::Local, granularity, format, hide, f).map_err(err)
+    })
 }
 
 #[tauri::command]
@@ -466,14 +462,15 @@ pub async fn wipe_all_data(window: WebviewWindow, app: AppHandle) -> Res<()> {
     }
     let wiped = (|| {
         let _writers = state.writers.write().unwrap_or_else(|e| e.into_inner());
-        let mut s = state.settings.read().unwrap().clone();
-        s.onboarded = false;
-        {
+        let s = {
             let store = state.db();
+            let mut s = state.settings.read().unwrap().clone();
+            s.onboarded = false;
             store.wipe_data().map_err(err)?;
             s.save(&store)?;
             *state.settings.write().unwrap() = s.clone();
-        }
+            s
+        };
         tracker_core::capture::statusline::delete_records(&state.data_dir).map_err(err)?;
         Ok::<_, String>(s)
     })();
@@ -515,9 +512,12 @@ pub fn open_main(app: AppHandle) {
 #[tauri::command]
 pub fn set_widget_visible(window: WebviewWindow, app: AppHandle, state: State<AppState>, visible: bool) -> Res<()> {
     main_only(&window)?;
-    let mut s = state.settings.read().unwrap().clone();
-    s.widget.visible = visible;
-    save_settings_inner(&app, &state, s).map(|_| ())
+    save_settings_inner(&app, &state, |old| {
+        let mut s = old.clone();
+        s.widget.visible = visible;
+        s
+    })
+    .map(|_| ())
 }
 
 #[tauri::command]

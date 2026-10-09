@@ -12,3 +12,9 @@ lto = true
 codegen-units = 1
 strip = true
 opt-level = "s"
+
+# glib 0.18.5 (Linux GTK 3 stack) with the upstream fix for RUSTSEC-2024-0429
+# (gtk-rs/gtk-rs-core#1343); the fixed 0.20 needs GTK 4, which Tauri 2 does not use yet.
+# The only change from the crates.io source is in src/variant_iter.rs.
+[patch.crates-io]
+glib = { path = "vendor/glib" }

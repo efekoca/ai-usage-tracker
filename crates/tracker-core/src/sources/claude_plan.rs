@@ -19,16 +19,16 @@ pub fn parse_file(path: &Path) -> std::io::Result<ParseOutput> {
     let doc: Value = match serde_json::from_slice(bytes) {
         Ok(v) => v,
         Err(_) => {
-            out.warnings.push("invalid JSON document".into());
+            out.warn("invalid JSON document");
             return Ok(out);
         }
     };
     match i64_at(&doc, "version") {
         Some(v) if KNOWN_VERSIONS.contains(&v) => {}
-        other => out.warnings.push(format!("unknown plan-usage-history version {other:?}; parsing best-effort")),
+        other => out.warn(format!("unknown plan-usage-history version {other:?}; parsing best-effort")),
     }
     let Some(samples) = doc.get("samples").and_then(Value::as_array) else {
-        out.warnings.push("unrecognised format: no `samples` array".into());
+        out.warn("unrecognised format: no `samples` array");
         return Ok(out);
     };
     for s in samples {
