@@ -197,6 +197,31 @@ impl PriceBook {
         Ok(PriceBook { file, index })
     }
 
+    /// A saved price list keeps its edits but still learns models and aliases added to the
+    /// bundled list after it was saved; a name it already uses keeps its meaning.
+    pub fn from_user_json(s: &str) -> Result<PriceBook, PricingError> {
+        let mut file: PricingFile = serde_json::from_str(s)?;
+        let bundled: PricingFile = serde_json::from_str(DEFAULT_PRICING_JSON)?;
+        let known = |f: &PricingFile| -> std::collections::HashSet<String> {
+            f.models.iter().flat_map(|m| std::iter::once(&m.id).chain(&m.aliases)).chain(f.user_aliases.keys()).map(|n| n.to_ascii_lowercase()).collect()
+        };
+        for b in bundled.models {
+            let mut names = known(&file);
+            if let Some(m) = file.models.iter_mut().find(|m| m.id.eq_ignore_ascii_case(&b.id)) {
+                for a in b.aliases {
+                    if names.insert(a.to_ascii_lowercase()) {
+                        m.aliases.push(a);
+                    }
+                }
+            } else if !names.contains(&b.id.to_ascii_lowercase()) {
+                let mut b = b;
+                b.aliases.retain(|a| names.insert(a.to_ascii_lowercase()));
+                file.models.push(b);
+            }
+        }
+        PriceBook::from_json(&serde_json::to_string(&file)?)
+    }
+
     pub fn file(&self) -> &PricingFile {
         &self.file
     }
@@ -367,11 +392,40 @@ mod tests {
             ("gemini-3.1-pro-low", "gemini-3.1-pro-preview"),
             ("claude-opus-4-6-thinking", "claude-opus-4-6"),
             ("claude-sonnet-5-5-thinking", "claude-sonnet-5-5"),
+            ("claude-sonnet-5-5-high", "claude-sonnet-5-5"),
+            ("claude-opus-5-5-low", "claude-opus-5-5"),
             ("gpt-oss-120b-maas", "gpt-oss-120b"),
             ("gpt-oss-120b-medium", "gpt-oss-120b"),
         ] {
             assert_eq!(b.lookup(served).map(|m| m.id.as_str()), Some(id), "{served}");
         }
+    }
+
+    #[test]
+    fn older_openai_models_that_codex_still_uses_are_priced() {
+        let b = PriceBook::default_book();
+        for id in ["gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-5-nano"] {
+            assert_eq!(b.lookup(id).map(|m| m.id.as_str()), Some(id));
+        }
+        assert_eq!(b.lookup("gpt-5.4").unwrap().long_context.as_ref().map(|l| l.threshold), Some(272_000));
+    }
+
+    #[test]
+    fn a_saved_price_list_keeps_its_edits_and_learns_newer_models() {
+        let mut f: PricingFile = serde_json::from_str(DEFAULT_PRICING_JSON).unwrap();
+        // saved by an older version: no Gemini 3.8 Flash, no -high alias, one edited price
+        f.models.retain(|m| m.id != "gemini-3.8-flash");
+        let sonnet = f.models.iter_mut().find(|m| m.id == "claude-sonnet-5-5").unwrap();
+        sonnet.aliases.retain(|a| a.ends_with("-thinking"));
+        sonnet.rates.input = 9.0;
+        f.user_aliases.insert("gemini-3.8-flash-high".into(), "gemini-3.5-flash".into());
+        let b = PriceBook::from_user_json(&serde_json::to_string(&f).unwrap()).unwrap();
+
+        assert_eq!(b.lookup("gemini-3.8-flash").map(|m| m.id.as_str()), Some("gemini-3.8-flash"));
+        let s = b.lookup("claude-sonnet-5-5-high").unwrap();
+        assert_eq!((s.id.as_str(), s.rates.input), ("claude-sonnet-5-5", 9.0), "the edit stays");
+        assert_eq!(b.lookup("gemini-3.8-flash-high").map(|m| m.id.as_str()), Some("gemini-3.5-flash"), "a user alias wins");
+        assert_eq!(b.file().models.iter().filter(|m| m.id == "gemini-3.8-flash").count(), 1);
     }
 
     #[test]

@@ -66,7 +66,7 @@ impl AppState {
 pub fn load_price_book(data_dir: &std::path::Path) -> (PriceBook, String) {
     let p = data_dir.join("pricing.json");
     if let Ok(s) = std::fs::read_to_string(&p) {
-        match PriceBook::from_json(&s) {
+        match PriceBook::from_user_json(&s) {
             Ok(b) => return (b, "user".into()),
             Err(e) => log::warn!("user pricing.json ignored: {e}"),
         }
