@@ -64,6 +64,8 @@ pub struct WidgetSettings {
     pub border: bool,
     pub shadow: bool,
     pub show_labels: bool,
+    /// Each tool's mark next to its limits.
+    pub show_icons: bool,
     pub show_reset_time: bool,
     pub warn_at: f64,
     pub high_at: f64,
@@ -104,6 +106,7 @@ impl Default for WidgetSettings {
             border: true,
             shadow: false,
             show_labels: true,
+            show_icons: false,
             show_reset_time: false,
             warn_at: 70.0,
             high_at: 90.0,
@@ -251,6 +254,10 @@ pub struct Settings {
     /// Only the version file is downloaded; nothing is sent. No effect until the build names a
     /// release location.
     pub update_check: bool,
+    /// Provider → `#rrggbb` for its limit bars and mark; a missing one uses the accent color.
+    pub provider_colors: std::collections::BTreeMap<String, String>,
+    /// Marks take the tool's color too; off keeps them in the text color.
+    pub tint_icons: bool,
 }
 
 impl Default for Settings {
@@ -279,6 +286,8 @@ impl Default for Settings {
             weekly_report_dir: String::new(),
             tray: TraySettings::default(),
             update_check: true,
+            provider_colors: Default::default(),
+            tint_icons: false,
         }
     }
 }
@@ -321,6 +330,10 @@ impl Settings {
         if !(self.fx_rate.is_finite() && self.fx_rate > 0.0) {
             self.fx_rate = 1.0;
         }
+        // the value is placed into CSS, so only a plain hex color is kept
+        self.provider_colors.retain(|p, c| {
+            ["anthropic", "openai", "google"].contains(&p.as_str()) && c.len() == 7 && c.starts_with('#') && c[1..].bytes().all(|b| b.is_ascii_hexdigit())
+        });
     }
 
     /// Normalizes in place first, so what callers keep and publish is exactly what was stored.
@@ -376,6 +389,18 @@ mod tests {
         assert_eq!(s.widget.opacity, 1.0);
         let stored = Settings::load(&store);
         assert_eq!(serde_json::to_value(&stored).unwrap(), serde_json::to_value(&s).unwrap());
+    }
+
+    #[test]
+    fn only_plain_hex_colors_for_known_tools_are_kept() {
+        let mut s: Settings = serde_json::from_str(
+            r##"{"provider_colors":{"anthropic":"#D97757","openai":"red;}body{","google":"#12345","grok":"#000000"}}"##,
+        )
+        .unwrap();
+        s.normalize();
+        assert_eq!(s.provider_colors.into_iter().collect::<Vec<_>>(), [("anthropic".to_owned(), "#D97757".to_owned())]);
+        let d = Settings::default();
+        assert!(d.provider_colors.is_empty() && !d.tint_icons && !d.widget.show_icons);
     }
 
     #[test]

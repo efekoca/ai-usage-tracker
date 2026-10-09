@@ -1,10 +1,11 @@
 <script lang="ts">
   // Chat use is not in local logs, so the figure is a lower bound.
   import { untrack } from 'svelte'
-  import { app, latest, providerColor, saveSettings } from '../lib/store.svelte'
+  import { app, latest, providerColor, saveSettings, tint, markTint } from '../lib/store.svelte'
   import { api, providersOf, type PlanDef, type PlansFile, type PlanValue, type Provider } from '../lib/api'
   import { fmtDate, fmtDec, fmtInt, fmtMoney, i18n, t } from '../lib/i18n.svelte'
   import Icon from './Icon.svelte'
+  import BrandIcon from './BrandIcon.svelte'
   import AccuracyBadge from './AccuracyBadge.svelte'
   import Select from './Select.svelte'
 
@@ -82,8 +83,8 @@
       <span class="subtle small">{t('value.apiEq')}</span>
     </div>
     <svg class="spark" viewBox="0 0 {W} {H}" preserveAspectRatio="none" role="img" aria-label="{t('value.chart.api')}: {fmtMoney(r.cost)}">
-      <path d={g.area} class="area" style="--c:{providerColor[p]}" />
-      <path d={g.line} class="line" style="--c:{providerColor[p]}" />
+      <path d={g.area} class="area" style="--c:{tint(p) ?? providerColor[p]}" />
+      <path d={g.line} class="line" style="--c:{tint(p) ?? providerColor[p]}" />
     </svg>
   {:else}
     <p class="muted small">{t('value.noUse')}</p>
@@ -108,7 +109,7 @@
         {@const r = row(p)}
         <div class="prow">
           <div class="who">
-            <b>{t(`provider.${p}`)}</b>
+            <b class="brandname"><BrandIcon provider={p} color={markTint(p)} />{t(`provider.${p}`)}</b>
             {#if r.plan}<span class="pill">{r.plan.name}</span>{/if}
           </div>
 
@@ -155,12 +156,12 @@
             </div>
             <svg class="spark" viewBox="0 0 {W} {H}" preserveAspectRatio="none" role="img"
               aria-label="{t('value.chart.api')}: {fmtMoney(r.cost)}; {t('value.chart.plan')}: {fmtMoney(r.share ?? 0)}">
-              <path d={g.area} class="area" style="--c:{providerColor[p]}" />
-              <path d={g.line} class="line" style="--c:{providerColor[p]}" />
+              <path d={g.area} class="area" style="--c:{tint(p) ?? providerColor[p]}" />
+              <path d={g.line} class="line" style="--c:{tint(p) ?? providerColor[p]}" />
               <line x1="0" x2={W} y1={planY} y2={planY} class="plan" />
             </svg>
             <div class="legend small subtle">
-              <span><i class="sw" style="background:{providerColor[p]}"></i>{t('value.chart.api')}</span>
+              <span><i class="sw" style="background:{tint(p) ?? providerColor[p]}"></i>{t('value.chart.api')}</span>
               <span><i class="sw dash"></i>{t('value.chart.plan')}</span>
               <span class="spacer"></span>
               <span>{fmtDate(value.dates[0], 'short')} – {fmtDate(value.dates[value.dates.length - 1], 'short')}</span>

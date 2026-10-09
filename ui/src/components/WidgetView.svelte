@@ -2,13 +2,16 @@
   import type { Provider, WidgetData, WidgetItemKind, WidgetPeriod, WidgetSettings } from '../lib/api'
   import { fmtCompact, fmtDec, fmtDuration, fmtMoney, fmtPct, fmtTime, limitShown, lower, t, toolLabel, type LimitMode } from '../lib/i18n.svelte'
   import { toolColor } from '../lib/store.svelte'
+  import BrandIcon from './BrandIcon.svelte'
 
   let {
     data,
     ws,
     mode = 'used',
+    colors = {},
+    tintIcons = false,
     root = $bindable(),
-  }: { data: WidgetData | null; ws: WidgetSettings; mode?: LimitMode; root?: HTMLElement } = $props()
+  }: { data: WidgetData | null; ws: WidgetSettings; mode?: LimitMode; colors?: Partial<Record<Provider, string>>; tintIcons?: boolean; root?: HTMLElement } = $props()
 
   const on = (k: WidgetItemKind) => ws.items.some((i) => i.kind === k && i.enabled)
   const order = $derived(ws.items.filter((i) => i.enabled).map((i) => i.kind))
@@ -34,7 +37,8 @@
     const pct = known ? Math.max(0, Math.min(100, l.used_pct as number)) : null
     return { pct, val: pct === null ? null : limitShown(pct, mode), last, resets: l.resets_at, estimated: l.accuracy === 'estimated', captured: l.accuracy === 'captured' }
   }
-  const level = (pct: number) => (pct >= ws.high_at ? 'var(--critical)' : pct >= ws.warn_at ? 'var(--serious)' : 'var(--w-accent)')
+  // a tool's own color only for the calm range; warnings keep their colors
+  const level = (pct: number, p: Provider) => (pct >= ws.high_at ? 'var(--critical)' : pct >= ws.warn_at ? 'var(--serious)' : colors?.[p] || 'var(--w-accent)')
   const winShort = (k: WidgetItemKind) => (k === 'limit_five_hour' ? t('widget.5h') : t('widget.week'))
 
   let now = $state(Date.now())
@@ -77,6 +81,14 @@
   {/if}
 {/snippet}
 
+{#snippet name(p: Provider)}
+  {#if ws.show_labels}
+    <span class="pn">{#if ws.show_icons}<BrandIcon provider={p} color={tintIcons ? colors?.[p] : null} />{/if}{t(`provider.${p}`)} <span class="mode">{t(`widget.mode.${mode}`)}</span></span>
+  {:else if ws.show_icons}
+    <span class="pn"><BrandIcon provider={p} color={tintIcons ? colors?.[p] : null} label={t(`provider.${p}`)} /></span>
+  {/if}
+{/snippet}
+
 {#snippet providerLimits(p: Provider, kinds: WidgetItemKind[])}
   {@const rows = kinds.map((k) => ({ k, l: limit(p, k) })).filter((x) => x.l !== null) as { k: WidgetItemKind; l: NonNullable<ReturnType<typeof limit>> }[]}
   {#if rows.length}
@@ -86,38 +98,38 @@
         <svg viewBox="0 0 40 40" aria-hidden="true">
           <circle cx="20" cy="20" r={R} class="track" />
           {#if lead.l.pct !== null}
-            <circle cx="20" cy="20" r={R} class="arc" stroke={level(lead.l.pct)} stroke-dasharray="{((lead.l.val ?? 0) / 100) * C} {C}" transform="rotate(-90 20 20)" />
+            <circle cx="20" cy="20" r={R} class="arc" stroke={level(lead.l.pct, p)} stroke-dasharray="{((lead.l.val ?? 0) / 100) * C} {C}" transform="rotate(-90 20 20)" />
           {/if}
           <text x="20" y="20" dy="0.35em" text-anchor="middle">{lead.l.val !== null ? fmtDec(lead.l.val) : lead.l.last ? '?' : '–'}</text>
         </svg>
         <div class="rl">
-          {#if ws.show_labels}<span class="pn">{t(`provider.${p}`)} <span class="mode">{t(`widget.mode.${mode}`)}</span></span>{/if}
+          {@render name(p)}
           <span class="sub">
             {winShort(lead.k)}{lead.l.estimated ? ' ≈' : ''}{lead.l.last ? ` · ${t('widget.lastShort', { pct: fmtPct(lead.l.last.pct) })}` : ws.show_reset_time && lead.l.resets ? ` · ${fmtDuration(lead.l.resets * 1000 - now)}` : ''}
             {#each rows.slice(1) as r (r.k)}
-              · {winShort(r.k)} <b class="num" style="color:{r.l.pct !== null && r.l.pct >= ws.warn_at ? level(r.l.pct) : 'inherit'}">{r.l.val !== null ? fmtPct(r.l.val) : r.l.last ? '?' : '—'}</b>
+              · {winShort(r.k)} <b class="num" style="color:{r.l.pct !== null && r.l.pct >= ws.warn_at ? level(r.l.pct, p) : 'inherit'}">{r.l.val !== null ? fmtPct(r.l.val) : r.l.last ? '?' : '—'}</b>
             {/each}
           </span>
         </div>
       </div>
     {:else if ws.limit_style === 'bar'}
       <div class="barrow">
-        {#if ws.show_labels}<span class="pn">{t(`provider.${p}`)} <span class="mode">{t(`widget.mode.${mode}`)}</span></span>{/if}
+        {@render name(p)}
         {#each rows as r (r.k)}
           <div class="bh">
             <span class="sub">{winShort(r.k)}{ws.show_reset_time && r.l.resets ? ` · ${fmtDuration(r.l.resets * 1000 - now)}` : ''}</span>
             <span class="pv num">{r.l.val !== null ? fmtPct(r.l.val) : r.l.last ? '?' : '—'}{r.l.estimated ? ' ≈' : ''}</span>
           </div>
-          <div class="bt"><span style="width:{r.l.val ?? 0}%;background:{r.l.pct !== null ? level(r.l.pct) : 'transparent'}"></span></div>
+          <div class="bt"><span style="width:{r.l.val ?? 0}%;background:{r.l.pct !== null ? level(r.l.pct, p) : 'transparent'}"></span></div>
         {/each}
       </div>
     {:else}
       <span class="textlimit">
-        {#if ws.show_labels}<span class="pn">{t(`provider.${p}`)} <span class="mode">{t(`widget.mode.${mode}`)}</span></span>{/if}
+        {@render name(p)}
         {#each rows as r, i (r.k)}
           {#if i > 0}<span class="sub">·</span>{/if}
           <span class="sub">{winShort(r.k)}</span>
-          <b class="num" style="color:{r.l.pct !== null && r.l.pct >= ws.warn_at ? level(r.l.pct) : 'inherit'}">{r.l.val !== null ? fmtPct(r.l.val) : r.l.last ? '?' : '—'}</b>
+          <b class="num" style="color:{r.l.pct !== null && r.l.pct >= ws.warn_at ? level(r.l.pct, p) : 'inherit'}">{r.l.val !== null ? fmtPct(r.l.val) : r.l.last ? '?' : '—'}</b>
         {/each}
       </span>
     {/if}
@@ -306,6 +318,11 @@
   .pn {
     font-size: calc(12px * var(--ts));
     font-weight: 600;
+  }
+  .pn :global(.brand) {
+    width: 1.05em;
+    height: 1.05em;
+    margin-right: 0.35em;
   }
   .mode {
     font-weight: 400;

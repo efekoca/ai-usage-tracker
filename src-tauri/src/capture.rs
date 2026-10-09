@@ -701,12 +701,20 @@ fn wake_antigravity(app: &AppHandle) {
     }
 }
 
+/// First reads right after start, a second apart, so the widget shows limits at once without
+/// starting three CLIs together.
+const FIRST_READ: [Duration; 3] = [Duration::from_secs(1), Duration::from_secs(2), Duration::from_secs(3)];
+/// A failed first read (e.g. no network yet after login) is retried a minute later, a few times.
+const FIRST_RETRY: Duration = Duration::from_secs(60);
+const FIRST_RETRIES: u8 = 3;
+
 fn start_antigravity_poller(app: &AppHandle) {
     let (tx, rx) = channel::<()>();
     *app.state::<AppState>().capture.antigravity_wake.lock().unwrap() = Some(tx);
     let app = app.clone();
     let _ = std::thread::Builder::new().name("antigravity-limits".into()).spawn(move || {
-        let mut wait = Duration::from_secs(25);
+        let mut wait = FIRST_READ[1];
+        let mut quick_retries = FIRST_RETRIES;
         loop {
             match rx.recv_timeout(wait) {
                 Ok(()) | Err(RecvTimeoutError::Timeout) => {}
@@ -729,6 +737,7 @@ fn start_antigravity_poller(app: &AppHandle) {
             let epoch = state.capture.wipes.load(Ordering::SeqCst);
             match read_antigravity(&state, &bin).and_then(|snaps| store_limits(&state, epoch, &snaps)) {
                 Ok(()) => {
+                    quick_retries = 0;
                     let mut c = state.capture.antigravity.lock().unwrap();
                     c.binary = Some(bin.to_string_lossy().into_owned());
                     c.last_ok_ms = Some(now_ms());
@@ -738,6 +747,10 @@ fn start_antigravity_poller(app: &AppHandle) {
                 }
                 Err(e) if e == DISCARDED => {}
                 Err(e) => {
+                    if quick_retries > 0 {
+                        quick_retries -= 1;
+                        wait = wait.min(FIRST_RETRY);
+                    }
                     let mut c = state.capture.antigravity.lock().unwrap();
                     if c.last_error.as_deref() != Some(e.as_str()) {
                         log::warn!("antigravity limit read failed: {e}");
@@ -782,7 +795,7 @@ fn start_claude_poller(app: &AppHandle) {
         let mut seen_event_ms: Option<i64> = None;
         let mut forced = false;
         loop {
-            match rx.recv_timeout(if last_try_ms == 0 { Duration::from_secs(25) } else { TICK }) {
+            match rx.recv_timeout(if last_try_ms == 0 { FIRST_READ[2] } else { TICK }) {
                 Ok(()) => forced = true,
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return,
@@ -885,7 +898,8 @@ pub fn start(app: &AppHandle) {
     *app.state::<AppState>().capture.codex_wake.lock().unwrap() = Some(tx);
     let app = app.clone();
     let _ = std::thread::Builder::new().name("codex-limits".into()).spawn(move || {
-        let mut wait = Duration::from_secs(20);
+        let mut wait = FIRST_READ[0];
+        let mut quick_retries = FIRST_RETRIES;
         loop {
             match rx.recv_timeout(wait) {
                 Ok(()) | Err(RecvTimeoutError::Timeout) => {}
@@ -908,6 +922,7 @@ pub fn start(app: &AppHandle) {
             let epoch = state.capture.wipes.load(Ordering::SeqCst);
             match codex_limits::query(&bin, Duration::from_secs(20), now_ms()).and_then(|snaps| store_limits(&state, epoch, &snaps)) {
                 Ok(()) => {
+                    quick_retries = 0;
                     let mut c = state.capture.codex.lock().unwrap();
                     c.binary = Some(bin.to_string_lossy().into_owned());
                     c.last_ok_ms = Some(now_ms());
@@ -917,6 +932,10 @@ pub fn start(app: &AppHandle) {
                 }
                 Err(e) if e == DISCARDED => {}
                 Err(e) => {
+                    if quick_retries > 0 {
+                        quick_retries -= 1;
+                        wait = wait.min(FIRST_RETRY);
+                    }
                     let mut c = state.capture.codex.lock().unwrap();
                     if c.last_error.as_deref() != Some(e.as_str()) {
                         log::warn!("codex limit read failed: {e}");

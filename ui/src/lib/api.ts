@@ -191,6 +191,7 @@ export interface WidgetSettings {
   border: boolean
   shadow: boolean
   show_labels: boolean
+  show_icons: boolean
   show_reset_time: boolean
   warn_at: number
   high_at: number
@@ -269,6 +270,9 @@ export interface Settings {
   weekly_report_dir: string
   tray: { show_percent: boolean; limit: string }
   update_check: boolean
+  /** provider → #rrggbb; missing = the accent color */
+  provider_colors: Partial<Record<Provider, string>>
+  tint_icons: boolean
 }
 
 export interface SourceInfo {

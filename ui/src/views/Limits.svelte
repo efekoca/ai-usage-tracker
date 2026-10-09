@@ -1,11 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { app, saveSettings } from '../lib/store.svelte'
+  import { app, saveSettings, markTint } from '../lib/store.svelte'
   import { api, providersOf, type PlansFile, type Provider, type Threshold } from '../lib/api'
   import { fmtCompact, fmtMoney, fmtPct, i18n, limitName, t, windowLabel } from '../lib/i18n.svelte'
   import LimitMeter from '../components/LimitMeter.svelte'
   import AccuracyBadge from '../components/AccuracyBadge.svelte'
   import Icon from '../components/Icon.svelte'
+  import BrandIcon from '../components/BrandIcon.svelte'
   import Segmented from '../components/Segmented.svelte'
   import Select from '../components/Select.svelte'
   import LimitHistory from '../components/LimitHistory.svelte'
@@ -72,7 +73,7 @@
   <section class="card plans">
     {#each providers as p (p)}
       <div class="plan-row">
-        <label for="plan-{p}"><b>{plans.providers[p].label}</b> · {t('limits.plan')}</label>
+        <label for="plan-{p}"><b class="brandname"><BrandIcon provider={p} color={markTint(p)} />{plans.providers[p].label}</b> · {t('limits.plan')}</label>
         <Select
           id="plan-{p}"
           label="{plans.providers[p].label} · {t('limits.plan')}"
@@ -83,6 +84,7 @@
         />
         {#if planNote(p)}
           {@const pl = planNote(p)!}
+          <div class="extra">
           {#if pl.id !== 'api' && pl.monthly_usd !== 0}
             {@const own = app.settings?.plan_prices?.[p]}
             <label class="price">
@@ -92,6 +94,7 @@
           {/if}
           <span class="subtle small">{pl.note ? pl.note[i18n.lang] : ''}</span>
           <button class="btn ghost small" onclick={() => api.openUrl(pl.source)}><Icon name="external" size={13} />{t('settings.pricing.sources')}</button>
+          </div>
         {/if}
       </div>
     {/each}
@@ -110,7 +113,7 @@
     <section class="card limit">
       <div class="who">
         <!-- brand names: uppercase with English rules so Antigravity does not become ANTİGRAVİTY in Turkish -->
-        <span class="prov" lang="en">{limitName(l.provider, l.limit_id)}</span>
+        <span class="prov" lang="en"><BrandIcon provider={l.provider} size={13} color={markTint(l.provider)} />{limitName(l.provider, l.limit_id)}</span>
         {#if l.plan}<span class="pill">{l.plan}</span>{/if}
       </div>
       <LimitMeter window={l.window} used={l.used_pct} state={l.state} accuracy={l.accuracy} resetsAt={l.resets_at} observedMs={l.observed_ms} source={l.source} sinceTokens={l.usage_since.total_tokens} provider={l.provider} forecast={l.forecast} />
@@ -192,15 +195,37 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
+    container: plans / inline-size;
   }
+  /* name, plan list, then price and links; on a narrow window the extras move under the list */
   .plan-row {
+    display: grid;
+    grid-template-columns: 196px 240px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px 12px;
+  }
+  .extra {
     display: flex;
     align-items: center;
-    gap: 12px;
     flex-wrap: wrap;
+    gap: 8px 12px;
+    min-width: 0;
   }
-  .plan-row label {
-    min-width: 170px;
+  @container plans (max-width: 820px) {
+    .plan-row {
+      grid-template-columns: 196px minmax(0, 240px) minmax(0, 1fr);
+    }
+    .extra {
+      grid-column: 2 / -1;
+    }
+  }
+  @container plans (max-width: 520px) {
+    .plan-row {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .extra {
+      grid-column: 1;
+    }
   }
   .cards {
     display: grid;
@@ -222,6 +247,9 @@
     align-items: center;
   }
   .prov {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
     font-size: 12px;
     font-weight: 600;
     color: var(--ink-2);

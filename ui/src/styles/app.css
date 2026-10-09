@@ -294,6 +294,12 @@ select.field {
   align-items: center;
   gap: 10px;
 }
+/* a tool name led by its mark */
+.brandname {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 .spacer {
   flex: 1;
 }
