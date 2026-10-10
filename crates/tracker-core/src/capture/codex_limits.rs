@@ -112,6 +112,9 @@ pub fn query(bin: &Path, timeout: Duration, now_ms: i64) -> Result<Vec<LimitSnap
     }
     #[cfg(not(windows))]
     super::set_child_path(&mut cmd, bin);
+    // its own process group, so ending it also ends what the CLI started
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
     let mut child = cmd.spawn().map_err(|e| format!("cannot start codex: {e}"))?;
     let mut stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
@@ -140,8 +143,7 @@ pub fn query(bin: &Path, timeout: Duration, now_ms: i64) -> Result<Vec<LimitSnap
         send(&mut stdin, json!({"id": 1, "method": "account/rateLimits/read"}))?;
         wait_for(1)
     })();
-    let _ = child.kill();
-    let _ = child.wait();
+    super::kill_tree(&mut child);
     let result = result?;
     let snaps = parse_result(&result, now_ms);
     if snaps.is_empty() {

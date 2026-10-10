@@ -121,7 +121,7 @@ fn current_limits(app: &AppHandle, s: &Settings) -> Option<Vec<Current>> {
     let state = app.state::<AppState>();
     let providers = crate::commands::enabled_providers(s);
     let views = {
-        let store = state.store.lock().ok()?;
+        let store = state.db();
         let book = state.book.read().unwrap();
         analytics::limits_view(&store, &book, chrono::Utc::now().timestamp_millis(), &[]).ok()?
     };

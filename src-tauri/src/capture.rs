@@ -131,7 +131,9 @@ fn quoted_command(full: &str, short: Option<&str>, bash: bool) -> String {
         return format!("{short} --statusline");
     }
     let full = fwd(full);
-    if bash { format!("'{}' --statusline", full.replace('\'', r"'\''")) } else { format!("& '{}' --statusline", full.replace('\'', "''")) }
+    // PowerShell also ends a single-quoted string at the typographic single quotes
+    let ps = |s: &str| s.chars().flat_map(|c| if matches!(c, '\'' | '\u{2018}'..='\u{201B}') { vec![c, c] } else { vec![c] }).collect::<String>();
+    if bash { format!("'{}' --statusline", full.replace('\'', r"'\''")) } else { format!("& '{}' --statusline", ps(&full)) }
 }
 
 /// Run by Claude Code as its status-line command; chains to the user's previous one if any.
@@ -501,17 +503,28 @@ const CLAUDE_MIN_GAP_MS: i64 = 5 * 60_000;
 /// Takes the next read slot unless the previous read is less than `gap_ms` old.
 fn claim_read(last_ms: &Mutex<i64>, now: i64, gap_ms: i64) -> bool {
     let mut last = last_ms.lock().unwrap();
-    if *last != 0 && now - *last < gap_ms {
+    // a time ahead of the clock (the clock was set back) holds nothing up
+    if *last != 0 && *last <= now && now - *last < gap_ms {
         return false;
     }
     *last = now;
     true
 }
 
+/// The last read survives a restart, so a relaunch within five minutes does not read again.
+const CLAUDE_LAST_READ: &str = "capture.claude_last_read_ms";
+
 fn read_claude(state: &AppState, s: &Settings, bin: &Path) -> Result<Vec<tracker_core::model::LimitSnapshot>, String> {
-    if !claim_read(&state.capture.claude_last_read_ms, now_ms(), CLAUDE_MIN_GAP_MS) {
+    let stored = state.db().setting(CLAUDE_LAST_READ).ok().flatten().and_then(|v| v.parse::<i64>().ok());
+    if let Some(stored) = stored {
+        let mut last = state.capture.claude_last_read_ms.lock().unwrap();
+        *last = (*last).max(stored);
+    }
+    let now = now_ms();
+    if !claim_read(&state.capture.claude_last_read_ms, now, CLAUDE_MIN_GAP_MS) {
         return Err("claude_throttled".into());
     }
+    let _ = state.db().set_setting(CLAUDE_LAST_READ, &now.to_string());
     let work = state.data_dir.join("claude-usage");
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
     let env = Env::from_system();
@@ -1139,6 +1152,9 @@ mod tests {
         assert!(!claim_read(&last, 1_000_000 + CLAUDE_MIN_GAP_MS - 1, CLAUDE_MIN_GAP_MS));
         assert!(claim_read(&last, 1_000_000 + CLAUDE_MIN_GAP_MS, CLAUDE_MIN_GAP_MS));
         assert_eq!(*last.lock().unwrap(), 1_000_000 + CLAUDE_MIN_GAP_MS);
+        // a stored read ahead of the clock (the clock was set back) does not block reads
+        let ahead = Mutex::new(5_000_000);
+        assert!(claim_read(&ahead, 1_000_000, CLAUDE_MIN_GAP_MS));
     }
 
     #[cfg(not(windows))]
@@ -1148,6 +1164,8 @@ mod tests {
         assert_eq!(statusline_command(Path::new(app)), format!("'{app}' --statusline"));
         let odd = r"/Users/o'neil/$HOME `x` a\b/ai-usage-tracker";
         assert_eq!(quoted_command(odd, None, true), r"'/Users/o'\''neil/$HOME `x` a\b/ai-usage-tracker' --statusline");
+        // the PowerShell form doubles every kind of single quote it would end a string at
+        assert_eq!(quoted_command("/x/O\u{2019}Neil/O'K/app", None, false), "& '/x/O\u{2019}\u{2019}Neil/O''K/app' --statusline");
     }
 
     #[cfg(windows)]
