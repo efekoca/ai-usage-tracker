@@ -231,16 +231,17 @@ impl PriceBook {
     pub fn lookup(&self, model: &str) -> Option<&ModelPrice> {
         let m = model.trim().to_ascii_lowercase();
         let find = |k: &str| self.index.get(k).map(|&i| &self.file.models[i]);
-        find(&m)
-            .or_else(|| {
+        let named = |k: &str| {
+            find(k).or_else(|| {
                 self.file
                     .user_aliases
                     .iter()
-                    .find(|(k, _)| k.eq_ignore_ascii_case(&m))
+                    .find(|(a, _)| a.eq_ignore_ascii_case(k))
                     .and_then(|(_, target)| find(&target.to_ascii_lowercase()))
             })
-            // a dated id takes the price of its base, user aliases included
-            .or_else(|| strip_date_suffix(&m).and_then(|base| self.lookup(base)))
+        };
+        // a dated id takes the price of its base, user aliases included; one suffix only
+        named(&m).or_else(|| strip_date_suffix(&m).and_then(named))
     }
 
     /// `None` when the model has no known price.
@@ -388,6 +389,9 @@ mod tests {
         assert!(b.lookup("codex-auto-review").is_none());
         assert!(b.lookup("claude-opus-5-5-preview").is_none()); // no fuzzy matching
         assert!(b.lookup("gpt-5.6").is_none());
+        assert!(b.lookup("claude-opus-5-20260101-20260101").is_none(), "one date suffix only");
+        let long = format!("claude-opus-5{}", "-20260101".repeat(8000));
+        assert!(b.lookup(&long).is_none());
     }
 
     #[test]

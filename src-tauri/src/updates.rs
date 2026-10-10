@@ -244,14 +244,15 @@ const ROOT_INSTALL: &str = r#"set -eu
 src=$1; sum=$2; ext=$3; shift 3
 dir=$(mktemp -d)
 trap 'rm -rf "$dir"' EXIT
-chmod 755 "$dir"
 pkg="$dir/ai-usage-tracker.$ext"
 cp -- "$src" "$pkg"
-chmod 644 "$pkg"
 if [ "$(sha256sum "$pkg" | cut -d ' ' -f 1)" != "$sum" ]; then
   echo "the update package changed after its signature check" >&2
   exit 3
 fi
+# opened only once verified: until then the copy may hold whatever the path pointed to
+chmod 755 "$dir"
+chmod 644 "$pkg"
 "$@" "$pkg""#;
 
 #[cfg(any(target_os = "linux", test))]
@@ -323,6 +324,31 @@ mod tests {
         let swapped = run(b"another package");
         assert_eq!(swapped.code(), Some(3));
         assert!(!out.exists(), "a swapped package must not reach the package tool");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Until the hash matches, the root copy may hold a file the path was pointed at, so nobody
+    /// else may read it.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_root_copy_stays_private_until_it_is_verified() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("aiut-root-private-{}", std::process::id()));
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let file = dir.join("ai-usage-tracker.deb");
+        std::fs::write(&file, b"package").unwrap();
+        let seen = dir.join("seen");
+        // runs in place of sha256sum and records the copy's folder mode at that moment
+        let stub = bin.join("sha256sum");
+        std::fs::write(&stub, format!("#!/bin/sh\nstat -c %a \"$(dirname \"$1\")\" > '{}'\n/usr/bin/sha256sum \"$@\"\n", seen.display())).unwrap();
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let tool: Vec<String> = ["true".to_string()].into();
+        let args = root_install("deb", &file, "0", &tool);
+        let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
+        let status = std::process::Command::new(&args[0]).args(&args[1..]).env("PATH", path).status().unwrap();
+        assert_eq!(status.code(), Some(3));
+        assert_eq!(std::fs::read_to_string(&seen).unwrap().trim(), "700");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
