@@ -201,7 +201,7 @@ The widget also comes with a tray icon and a shortcut:
 
 - **Pricing rules covered:** 5-minute and 1-hour cache writes, the OpenAI long-context tier (>272K input tokens), fast-mode and US data-residency multipliers, and web-search fees.
 - **Unknown models:** never priced by guesswork. They are listed as "no price" and left out of costs. You can dismiss the overview warning about them; it returns only if another model becomes unpriced, or through **Settings → Prices → Show the warning again**.
-- **Edits:** change prices in **Settings → Prices**. Your copy is stored as `pricing.json` in the app's data folder (see [Privacy](#privacy)). Models added in later versions are added to your copy automatically, and your edits stay. You can also map an unpriced model to another model's price or restore the defaults.
+- **Edits:** change prices in **Settings → Prices**. The list starts with the models found in your logs; **Show all models** lists every priced model. Your copy is stored as `pricing.json` in the app's data folder (see [Privacy](#privacy)). Models added in later versions are added to your copy automatically, and your edits stay. You can also map an unpriced model to another model's price or restore the defaults.
 
 ## Supported sources
 
