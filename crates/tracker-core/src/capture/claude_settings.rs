@@ -224,6 +224,12 @@ pub fn install_statusline(st: &mut CaptureState, data_dir: &Path, settings_file:
     record_then_write(st, data_dir, |s| &mut s.statusline, change, &backup, || write_doc(settings_file, &doc, &original))
 }
 
+/// Whether Claude Code's settings still run our status line (the user or `/statusline` may have
+/// replaced it since).
+pub fn statusline_in_place(change: &StatuslineChange) -> bool {
+    read_doc(&change.settings_file).is_ok_and(|(doc, _)| doc.get("statusLine") == Some(&change.installed))
+}
+
 pub fn revert_statusline(change: &StatuslineChange) -> Result<RevertOutcome, SettingsError> {
     let (mut doc, original) = read_doc(&change.settings_file)?;
     match doc.get("statusLine") {
@@ -400,16 +406,15 @@ pub fn add_otel_token(st: &mut CaptureState, data_dir: &Path, token: &str) -> Re
 pub fn revert_otel(change: &OtelChange) -> Result<RevertOutcome, SettingsError> {
     let (mut doc, original) = read_doc(&change.settings_file)?;
     let Some(env) = doc.get_mut("env").and_then(Value::as_object_mut) else { return Ok(RevertOutcome::NothingToDo) };
+    // one value the user changed means they use the setup themselves: leave all of it
+    if change.added.iter().any(|(k, v)| env.get(k).is_some_and(|cur| cur.as_str() != Some(v.as_str()))) {
+        return Ok(RevertOutcome::LeftUserValue);
+    }
     let mut removed = 0;
-    let mut kept = 0;
     for (k, v) in &change.added {
-        match env.get(k) {
-            Some(Value::String(cur)) if cur == v => {
-                env.remove(k);
-                removed += 1;
-            }
-            Some(_) => kept += 1,
-            None => {}
+        if env.get(k).and_then(Value::as_str) == Some(v.as_str()) {
+            env.remove(k);
+            removed += 1;
         }
     }
     if env.is_empty() {
@@ -418,11 +423,7 @@ pub fn revert_otel(change: &OtelChange) -> Result<RevertOutcome, SettingsError> 
     if removed > 0 {
         write_doc(&change.settings_file, &doc, &original)?;
     }
-    Ok(match (removed, kept) {
-        (_, k) if k > 0 => RevertOutcome::LeftUserValue,
-        (0, _) => RevertOutcome::NothingToDo,
-        _ => RevertOutcome::Restored,
-    })
+    Ok(if removed == 0 { RevertOutcome::NothingToDo } else { RevertOutcome::Restored })
 }
 
 pub fn uninstall_otel(st: &mut CaptureState, data_dir: &Path) -> Result<RevertOutcome, SettingsError> {
@@ -557,6 +558,33 @@ mod tests {
         assert_eq!(uninstall_otel(&mut st, &data).unwrap(), RevertOutcome::Restored);
         assert_eq!(read(&file), json!({"env": {"MY_VAR": "1"}, "model": "opus"}));
         assert!(st.otel.is_none());
+    }
+
+    #[test]
+    fn telemetry_the_user_took_over_is_left_whole() {
+        let mut st = CaptureState::default();
+        let (_d, file, data) = setup(Some(r#"{"model": "opus"}"#));
+        install_otel(&mut st, &data, &file, 43180, "tok", 1).unwrap();
+        let mut doc = read(&file);
+        doc["env"]["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] = json!("https://my-collector/v1/logs");
+        fs::write(&file, doc.to_string()).unwrap();
+        let before = read(&file);
+        assert_eq!(uninstall_otel(&mut st, &data).unwrap(), RevertOutcome::LeftUserValue);
+        assert_eq!(read(&file), before, "their collector keeps the switches it needs");
+    }
+
+    #[test]
+    fn our_status_line_is_known_to_be_in_place_until_someone_replaces_it() {
+        let (_d, file, data) = setup(None);
+        let mut st = CaptureState::default();
+        let ch = install_statusline(&mut st, &data, &file, "aiut --statusline", 1).unwrap();
+        assert!(statusline_in_place(&ch));
+        fs::write(&file, json!({"statusLine": {"type": "command", "command": "user-changed"}}).to_string()).unwrap();
+        assert!(!statusline_in_place(&ch));
+        // installing again chains the new command
+        let again = install_statusline(&mut st, &data, &file, "aiut --statusline", 2).unwrap();
+        assert_eq!(again.previous.as_ref().unwrap()["command"], "user-changed");
+        assert!(statusline_in_place(&again));
     }
 
     #[test]
