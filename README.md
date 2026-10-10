@@ -186,7 +186,7 @@ The widget also comes with a tray icon and a shortcut:
 
 ### Weekly PDF, export, and your own prices
 
-**Weekly summary (PDF).** **Settings → Weekly summary (PDF)** saves last week, this week, or the last 7 days as an A4 PDF. It contains totals with the change from the previous period, a daily chart, tools, plan value, current limits with their forecast, context, models, projects (hidden names stay hidden), the most expensive sessions, and notes. No print dialog opens. Optionally, the app saves the last full week (Monday to Sunday) to a folder (by default the **AI Usage Tracker** folder inside your Documents folder) whenever its file is not there yet, so a week missed while the computer was off is saved at the next start.
+**Usage summary (PDF).** **Settings → Usage summary (PDF)** saves last week, this week, the last 7 days, last month, this month, last year, or this year as an A4 PDF. It contains totals with the change from the previous period, a daily chart, tools, plan value, current limits with their forecast, context, models, projects (hidden names stay hidden), the most expensive sessions, and notes. No print dialog opens. Optionally, the app saves the last full week (Monday to Sunday) to a folder (by default the **AI Usage Tracker** folder inside your Documents folder) whenever its file is not there yet, so a week missed while the computer was off is saved at the next start.
 
 **Archive and data.** Source tools may delete old logs; the Claude Code CLI, for example, deletes sessions after 30 days by default. Everything this app has imported stays in its archive, and no record is ever counted twice (see [How it works](#how-it-works)).
 
@@ -314,7 +314,7 @@ Everything runs on your computer:
 2. The app reads each log from where it left off, so a rescan only touches what is new. It takes only details such as token counts, model, and time; prompt and response text is never saved to the app's archive.
 3. When the limit reads are on, your own `claude`, `codex` and `agy` CLIs supply the limit percentages.
 4. Only counts and metadata reach the local archive (SQLite). Duplicates from streaming, resumed or forked sessions, and Codex logs moved to the archive are counted once.
-5. The dashboard, widget, tray icon, and weekly PDF read from that archive.
+5. The dashboard, widget, tray icon, and PDF summary read from that archive.
 
 ## Updates
 

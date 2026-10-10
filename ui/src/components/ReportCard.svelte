@@ -3,11 +3,12 @@
   import { app, saveSettings } from '../lib/store.svelte'
   import { api } from '../lib/api'
   import { fmtDate, has, localDate, t } from '../lib/i18n.svelte'
-  import Segmented from './Segmented.svelte'
+  import Select from './Select.svelte'
   import Toggle from './Toggle.svelte'
   import Icon from './Icon.svelte'
 
-  type Which = 'lastWeek' | 'thisWeek' | 'last7'
+  type Which = 'lastWeek' | 'thisWeek' | 'last7' | 'lastMonth' | 'thisMonth' | 'lastYear' | 'thisYear'
+  const PERIODS: Which[] = ['lastWeek', 'thisWeek', 'last7', 'lastMonth', 'thisMonth', 'lastYear', 'thisYear']
   let which = $state<Which>('lastWeek')
   let busy = $state(false)
   let status = $state<{ ok: boolean; text: string } | null>(null)
@@ -17,6 +18,11 @@
     const monday = addDays(today, -((today.getDay() + 6) % 7))
     if (w === 'lastWeek') return { from: localDate(addDays(monday, -7)), to: localDate(addDays(monday, -1)) }
     if (w === 'thisWeek') return { from: localDate(monday), to: localDate(today) }
+    const [y, m] = [today.getFullYear(), today.getMonth()]
+    if (w === 'lastMonth') return { from: localDate(new Date(y, m - 1, 1)), to: localDate(new Date(y, m, 0)) }
+    if (w === 'thisMonth') return { from: localDate(new Date(y, m, 1)), to: localDate(today) }
+    if (w === 'lastYear') return { from: localDate(new Date(y - 1, 0, 1)), to: localDate(new Date(y - 1, 11, 31)) }
+    if (w === 'thisYear') return { from: localDate(new Date(y, 0, 1)), to: localDate(today) }
     return { from: localDate(addDays(today, -6)), to: localDate(today) }
   }
   const range = $derived(rangeOf(which))
@@ -49,11 +55,7 @@
   <p class="subtle small help">{t('report.help')}</p>
   <div class="item">
     <div class="row wrap">
-      <Segmented
-        label={t('report.title')}
-        bind:value={which}
-        options={[{ value: 'lastWeek', label: t('report.lastWeek') }, { value: 'thisWeek', label: t('report.thisWeek') }, { value: 'last7', label: t('report.last7') }]}
-      />
+      <Select label={t('report.period')} value={which} minWidth={150} options={PERIODS.map((p) => ({ value: p, label: t(`report.${p}`) }))} onchange={(v) => (which = v as Which)} />
       <span class="muted small">{fmtDate(range.from, 'medium')} – {fmtDate(range.to, 'medium')}</span>
     </div>
     <button class="btn primary" onclick={run} disabled={busy}>
