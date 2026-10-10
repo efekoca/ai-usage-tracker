@@ -145,7 +145,9 @@ pub fn statusline_main() -> i32 {
         statusline::record(&data_dir, w, now_ms());
     }
     let state = cs::load_state(&data_dir);
-    let previous = state.statusline.and_then(|s| s.previous);
+    // a bridge run as someone's previous command (another copy of the app) does not chain again,
+    // so two bridges can never call each other without end
+    let previous = state.statusline.and_then(|s| s.previous).filter(|_| std::env::var_os(CHAINED).is_none());
     let out = match previous.as_ref().and_then(|p| p.get("command")).and_then(|c| c.as_str()) {
         Some(cmd) => run_chained(cmd, input).unwrap_or_default(),
         None => statusline::render_default(windows.as_ref()),
@@ -155,6 +157,9 @@ pub fn statusline_main() -> i32 {
     let _ = stdout.flush();
     0
 }
+
+/// Set for the user's previous status-line command.
+const CHAINED: &str = "AIUT_STATUSLINE_CHAINED";
 
 fn run_chained(cmd: &str, input: Vec<u8>) -> Option<String> {
     run_within(cmd, input, Duration::from_secs(5))
@@ -181,7 +186,7 @@ fn run_within(cmd: &str, input: Vec<u8>, deadline: Duration) -> Option<String> {
             c
         }
     };
-    c.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+    c.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).env(CHAINED, "1");
     // its own process group, so a timeout also ends what the command started
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut c, 0);
@@ -653,8 +658,13 @@ pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
             let mut cstate = read_state()?;
             if cstate.statusline.is_some() {
                 refresh_statusline(&data_dir);
-                persist(app, |s| s.capture.statusline = true)?;
-                return Ok("already".into());
+                cstate = read_state()?;
+                // replaced since (by the user or Claude Code's `/statusline`): install again below,
+                // chaining the new command
+                if cstate.statusline.as_ref().is_some_and(cs::statusline_in_place) {
+                    persist(app, |s| s.capture.statusline = true)?;
+                    return Ok("already".into());
+                }
             }
             let exe = crate::app_path()?;
             let file = claude_settings_file(&settings);
@@ -1085,6 +1095,12 @@ mod tests {
             assert!(!marker.exists(), "a process started by `{tail}` outlived the deadline");
         }
         assert_eq!(run_within("cat", b"ok".to_vec(), Duration::from_secs(5)).as_deref(), Some("ok"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_chained_command_knows_it_was_chained_so_a_bridge_never_chains_again() {
+        assert_eq!(run_within("printf %s \"$AIUT_STATUSLINE_CHAINED\"", Vec::new(), Duration::from_secs(5)).as_deref(), Some("1"));
     }
 
     #[cfg(windows)]
