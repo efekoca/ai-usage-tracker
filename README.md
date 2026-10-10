@@ -47,7 +47,7 @@ Providers publish how their limits work, not the numbers themselves. The app the
 - Percentages can read as **used** (as Claude shows them, "15 % used") or **left** (as Codex shows them, "85 % left"). Switch between them in **Settings**, on the **Limits** page, or in the **Widget studio**. Warning colors follow usage either way.
 - Without a real reading, you can set your own budget per window. The resulting percentage is labeled **Estimated**.
 - Limits are account-wide. A project's share is its fraction of the window's API-equivalent cost and is always **Estimated**.
-- Each tool is marked with its own monochrome icon. Under **Settings → General → Tool colors** you can give Claude, Codex, and Antigravity their own color for limit bars and widget rings, and color the icons too if you like. Warning colors still show when a limit gets close.
+- Each tool is marked with its own monochrome icon. Under **Settings → General → Tool colors** you can give Claude, Codex, and Antigravity their own color for limit bars and widget rings, and color the icons too if you like. Warning colors still show when a limit gets close. If you prefer plain names, turn the icons off under **Settings → General → Show tool icons**.
 
 **Forecast.** Every current limit reading carries a forecast based on the window's **average pace since it started** (current % ÷ time since the window began). Every window starts at 0 % when it resets, so this pace is known and already includes idle hours: a burst of work is not extrapolated as if it never stopped. The app then says when the window would fill ("fills around Sun 21:12, 9 h before the reset") or where it would stand at the reset. No forecast is made in the first tenth of a window, and every forecast is labeled **Estimated**.
 
@@ -87,7 +87,7 @@ Claude's readings say only "max" for both Max plans, so choose your plan on the 
 
 Amounts are API equivalents. On a subscription you do not pay them; they show the size of your use.
 
-**Plan value.** The **Overview** compares each provider's API-equivalent use over the last 30 days with the plan price for those days ("4.7×"), shows a running total against the plan price, and marks the day the plan paid for itself.
+**Plan value.** The **Overview** compares each provider's API-equivalent use over the last 30 days with the plan price for those days ("4.7×"), shows a running total against the plan price, and marks the day the plan paid for itself. Tools you have not used in those 30 days are left out.
 
 - **List prices** come from [`config/plans.json`](config/plans.json), verified on 2026-10-02 against the official pages ([Claude](https://claude.com/pricing), [ChatGPT](https://learn.chatgpt.com/docs/pricing)).
 - **Your price:** plans without a fixed price (ChatGPT Pro, Enterprise) ask for one, and you can override any plan's price on the **Limits** page (e.g., for annual billing).
@@ -171,13 +171,13 @@ The **Widget studio** page changes what the widget shows and how it looks, with 
 
 ![Widget studio with a live preview and the list of items the widget can show](assets/readme/studio-en.webp)
 
-- **Content:** the items shown and their order (main number, secondary value, five-hour and weekly limits, per-tool split, 7- and 30-day totals, and last update time)
+- **Content:** the items shown and their order (main number, secondary value, five-hour and weekly limits, per-tool split, 7- and 30-day totals, and last update time), which tools' limits to show and in what order, and which Antigravity limit to show: Gemini, Claude and GPT, both, or whichever is fuller
 - **Layout:** horizontal, vertical, or a single line
 - **Limit style:** ring, bar, or text
 - **Look:** theme, accent color, scale, background opacity, corner radius, border, shadow, labels, tool icons, and time until reset
 - **Text:** any font installed on the computer (searchable and shown in its own face), text size, main-number size, number weight, and fixed-width digits
 - **Thresholds:** caution and critical levels
-- **Behavior:** always on top, position lock, click action, hiding during full-screen apps, snap to a corner, and which providers to show
+- **Behavior:** always on top, position lock, click action, hiding during full-screen apps, and snap to a corner
 
 The widget also comes with a tray icon and a shortcut:
 
