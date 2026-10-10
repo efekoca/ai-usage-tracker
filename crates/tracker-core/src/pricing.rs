@@ -361,6 +361,17 @@ mod tests {
     }
 
     #[test]
+    fn claude_haiku_5_5_is_priced_by_prompt_length_and_sonnet_5_5_cache_reads_are_cheaper() {
+        let b = PriceBook::default_book();
+        let input = tokens(1_000_000, 0, 0, 0, 0);
+        assert_eq!(cost(&b, "claude-haiku-5-5", &input, 100_000, None, None), Some(0.1));
+        assert_eq!(cost(&b, "claude-haiku-5-5", &input, 100_001, None, None), Some(0.5));
+        let reads = tokens(0, 1_000_000, 0, 0, 0);
+        assert_eq!(cost(&b, "claude-haiku-5-5", &reads, 150_000, None, None), Some(0.05));
+        assert_eq!(cost(&b, "claude-sonnet-5-5", &reads, 0, None, None), Some(0.1));
+    }
+
+    #[test]
     fn missing_cache_write_rate_falls_back_to_input() {
         let b = PriceBook::default_book();
         let t = tokens(0, 0, 1_000_000, 0, 0);

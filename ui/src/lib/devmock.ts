@@ -393,7 +393,7 @@ export function installMock() {
       const a = args as Record<string, unknown>
       switch (cmd) {
         case 'app_info':
-          return { version: '0.5.3', data_dir: 'C:\\Users\\you\\AppData\\Local\\AIUsageTracker', pricing_origin: 'bundled', pricing_updated_at: '2026-10-09', platform: 'windows', supports_mica: false, accent_color: null, started_hidden: false, reports_dir: 'C:\\Users\\you\\Documents\\AI Usage Tracker' }
+          return { version: '0.5.3', data_dir: 'C:\\Users\\you\\AppData\\Local\\AIUsageTracker', pricing_origin: 'bundled', pricing_updated_at: '2026-10-10', platform: 'windows', supports_mica: false, accent_color: null, started_hidden: false, reports_dir: 'C:\\Users\\you\\Documents\\AI Usage Tracker' }
         case 'get_settings':
           return settings
         case 'save_settings':
