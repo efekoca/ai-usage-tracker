@@ -4,7 +4,7 @@
   import { invoke } from '@tauri-apps/api/core'
   import { applyAppearance, toolColor } from './lib/store.svelte'
   import { api, providerOfSource, providersOf, type ContextStats, type LimitView, type PlansFile, type Provider, type Report, type Sessions, type Settings } from './lib/api'
-  import { fmtCompact, fmtDate, fmtDateTime, fmtDec, fmtInt, fmtLimit, fmtMoney, fmtPct, fmtSpan, i18n, t, toolLabel, windowLabel } from './lib/i18n.svelte'
+  import { fmtCompact, fmtDate, fmtDateTime, fmtDec, fmtInt, fmtLimit, fmtMoney, fmtPct, fmtSpan, i18n, limitName, t, toolLabel, windowLabel } from './lib/i18n.svelte'
   import Columns from './components/charts/Columns.svelte'
 
   const qs = new URLSearchParams(location.search)
@@ -20,6 +20,11 @@
   let failed = $state('')
 
   onMount(async () => {
+    // a page that fails while drawing must not be saved as a report either
+    let broken = false
+    const onError = () => (broken = true)
+    window.addEventListener('error', onError)
+    window.addEventListener('unhandledrejection', onError)
     try {
       s = await api.getSettings()
       applyAppearance(s, null)
@@ -38,7 +43,9 @@
       new Promise((res) => setTimeout(res, 500)),
     ])
     // a page without its data must not be saved as a report
-    invoke('report_ready', { ok: !failed }).catch(() => {})
+    window.removeEventListener('error', onError)
+    window.removeEventListener('unhandledrejection', onError)
+    invoke('report_ready', { ok: !failed && !broken }).catch(() => {})
   })
 
   const mode = $derived(s?.limit_display ?? 'used')
@@ -157,9 +164,9 @@
           {:else}
             <table>
               <tbody>
-                {#each currentLimits as l (l.provider + l.window + l.source)}
+                {#each currentLimits as l (l.provider + l.limit_id + l.window + l.source)}
                   <tr>
-                    <th scope="row">{t(`provider.${l.provider}`)} · {windowLabel(l.window)}</th>
+                    <th scope="row">{limitName(l.provider, l.limit_id)} · {windowLabel(l.window)}</th>
                     <td class="num">
                       {#if l.state === 'fresh' && l.used_pct !== null}{fmtLimit(l.used_pct, mode)}
                       {:else if l.state === 'behind' && l.used_pct !== null}?{:else}—{/if}
