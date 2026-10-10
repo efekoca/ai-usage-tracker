@@ -55,7 +55,19 @@
   const series = $derived(
     (r?.by_tool ?? []).map((g) => ({ key: g.key, label: toolLabel(g.key), color: toolColor[g.key] ?? 'var(--s5)' })),
   )
-  const values = $derived((r?.daily ?? []).map((d) => d.by_tool))
+  // a long period reads better by month than as hundreds of thin days
+  const monthly = $derived((r?.daily.length ?? 0) > 92)
+  const chart = $derived.by(() => {
+    const daily = r?.daily ?? []
+    if (!monthly) return { dates: daily.map((d) => d.date), values: daily.map((d) => d.by_tool) }
+    const months = new Map<string, Record<string, number>>()
+    for (const d of daily) {
+      const sum = months.get(d.date.slice(0, 7)) ?? {}
+      for (const [k, v] of Object.entries(d.by_tool)) sum[k] = (sum[k] ?? 0) + v
+      months.set(d.date.slice(0, 7), sum)
+    }
+    return { dates: [...months.keys()].map((m) => `${m}-01`), values: [...months.values()] }
+  })
   const topSessions = $derived([...(sessions?.sessions ?? [])].sort((a, b) => b.totals.cost_usd - a.totals.cost_usd).slice(0, 5))
   const projectLabel = (name: string, hidden: boolean, id: string | number | null) =>
     hideAll || hidden ? `${t('projects.hidden')}${id !== null ? ` #${id}` : ''}` : name || t('projects.noProject')
@@ -123,8 +135,17 @@
       </section>
 
       <section class="block">
-        <h2>{t('rep.daily')}</h2>
-        <Columns dates={r.daily.map((d) => d.date)} {values} {series} format={fmtCompact} height={190} ariaLabel={t('rep.daily')} />
+        <h2>{t(monthly ? 'rep.monthly' : 'rep.daily')}</h2>
+        <Columns
+          dates={chart.dates}
+          values={chart.values}
+          {series}
+          format={fmtCompact}
+          height={190}
+          ariaLabel={t(monthly ? 'rep.monthly' : 'rep.daily')}
+          xLabel={monthly ? (k) => fmtDate(k, 'month') : undefined}
+          tipLabel={monthly ? (k) => fmtDate(k, 'monthLong') : undefined}
+        />
       </section>
 
       <div class="two">

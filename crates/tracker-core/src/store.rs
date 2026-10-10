@@ -134,6 +134,8 @@ const MIGRATIONS: &[&str] = &[
     DELETE FROM setting WHERE key = 'repair.codex_keys';
     DELETE FROM file_checkpoint WHERE parser = 'codex_rollout';
     "#,
+    // v11: an older import accepted web search counts past u32, which no real log holds
+    "DELETE FROM usage_event WHERE web_search < 0 OR web_search > 4294967295;",
 ];
 
 const MAX_IMPORTED_COUNT: i64 = 1_000_000_000_000;
@@ -327,7 +329,7 @@ impl Store {
                     reasoning: r.get::<_, i64>(11)? as u64,
                 },
                 request_input: r.get::<_, i64>(12)? as u64,
-                web_search: r.get::<_, i64>(13)? as u32,
+                web_search: u32::try_from(r.get::<_, i64>(13)?).unwrap_or(0),
                 speed: r.get(14)?,
                 inference_geo: r.get(15)?,
                 accuracy: Accuracy::parse(&acc),
@@ -481,7 +483,7 @@ impl Store {
             // a damaged or hand-made file must not bring negative or absurd counts
             let valid_counts: String = ["input", "cache_read", "cache_write", "cache_write_1h", "output", "reasoning", "request_input", "web_search"]
                 .iter()
-                .map(|c| format!(" AND typeof(e.{c}) = 'integer' AND e.{c} BETWEEN 0 AND {MAX_IMPORTED_COUNT}"))
+                .map(|c| format!(" AND typeof(e.{c}) = 'integer' AND e.{c} BETWEEN 0 AND {}", if *c == "web_search" { u32::MAX as i64 } else { MAX_IMPORTED_COUNT }))
                 .collect();
             let tx = self.conn.unchecked_transaction()?;
             tx.execute(

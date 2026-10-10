@@ -304,6 +304,8 @@ const tr: Dict = {
   "report.err.report_timeout": "Rapor sayfası zamanında hazırlanamadı.",
   "report.err.invalid_range": "Tarih aralığı geçersiz.",
   "report.err.report_data_failed": "Raporun verileri yüklenemedi.",
+  "report.err.export_target_is_archive": "Bu dosya uygulamanın kendi veri tabanı; PDF için başka bir dosya adı seçin.",
+  "report.err.report_busy": "Önceki rapor penceresi kapanmadı; biraz sonra yeniden deneyin.",
   'common.all': 'Tümü',
   'common.table': 'Tablo görünümü',
   'common.chart': 'Grafik',
@@ -711,6 +713,7 @@ const tr: Dict = {
   "rep.cacheSaved": "Net önbellek tasarrufu: {v}",
   "rep.requests": "{n} istek",
   "rep.daily": "Günlük kullanım",
+  "rep.monthly": "Aylık kullanım",
   "rep.byTool": "Araçlara göre",
   "rep.models": "Modeller",
   "rep.projects": "Projeler",
@@ -1237,6 +1240,8 @@ const en: Dict = {
   "report.err.report_timeout": "The report page did not get ready in time.",
   "report.err.invalid_range": "The date range is not valid.",
   "report.err.report_data_failed": "The report data could not be loaded.",
+  "report.err.export_target_is_archive": "This file is the app's own database; choose another file name for the PDF.",
+  "report.err.report_busy": "The previous report window has not closed yet; try again in a moment.",
   'common.all': 'All',
   'common.table': 'Table view',
   'common.chart': 'Chart',
@@ -1644,6 +1649,7 @@ const en: Dict = {
   "rep.cacheSaved": "Net cache saving: {v}",
   "rep.requests": "{n} requests",
   "rep.daily": "Daily usage",
+  "rep.monthly": "Monthly usage",
   "rep.byTool": "By tool",
   "rep.models": "Models",
   "rep.projects": "Projects",
@@ -1928,7 +1934,7 @@ export function fmtMoney(usd: number, opts: { compact?: boolean } = {}): string 
   }).format(v)
 }
 
-export function fmtDate(d: string | number | Date, style: 'short' | 'medium' | 'long' | 'weekday' = 'medium'): string {
+export function fmtDate(d: string | number | Date, style: 'short' | 'medium' | 'long' | 'weekday' | 'month' | 'monthLong' = 'medium'): string {
   const date = typeof d === 'string' ? new Date(d + (d.length === 10 ? 'T00:00:00' : '')) : new Date(d)
   const o: Intl.DateTimeFormatOptions =
     style === 'short'
@@ -1937,7 +1943,11 @@ export function fmtDate(d: string | number | Date, style: 'short' | 'medium' | '
         ? { day: 'numeric', month: 'long', year: 'numeric', weekday: 'long' }
         : style === 'weekday'
           ? { weekday: 'short' }
-          : { day: 'numeric', month: 'short', year: 'numeric' }
+          : style === 'month'
+            ? { month: 'short' }
+            : style === 'monthLong'
+              ? { month: 'long', year: 'numeric' }
+              : { day: 'numeric', month: 'short', year: 'numeric' }
   return new Intl.DateTimeFormat(locale(), o).format(date)
 }
 

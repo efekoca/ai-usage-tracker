@@ -413,6 +413,42 @@ fn a_stored_reading_dated_before_1970_is_never_shown_as_current() {
 }
 
 #[test]
+fn a_web_search_count_past_u32_is_never_imported_or_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let event = |conn: &tracker_core::rusqlite::Connection, key: &str, web: i64| {
+        conn.execute(
+            "INSERT INTO usage_event(key, ts_ms, tool, model, input, output, web_search, accuracy, source)
+             VALUES(?1, 1790000000000, 'claude_code', 'claude-opus-5-5', 10, 1, ?2, 'exact', 'test')",
+            tracker_core::rusqlite::params![key, web],
+        )
+        .unwrap();
+    };
+    let backup = dir.path().join("odd.db");
+    {
+        let odd = Store::open(&backup).unwrap();
+        for (key, web) in [("max", u32::MAX as i64), ("over1", u32::MAX as i64 + 1), ("over2", u32::MAX as i64 + 2), ("neg", -1)] {
+            event(odd.conn(), key, web);
+        }
+    }
+    let mut fresh = Store::open(&dir.path().join("fresh.db")).unwrap();
+    assert_eq!(fresh.merge_from(&backup).unwrap(), (1, 0), "only the count that fits u32 is imported");
+    let rows = fresh.events_between(0, i64::MAX).unwrap();
+    assert_eq!(rows.iter().map(|e| e.web_search).collect::<Vec<_>>(), [u32::MAX]);
+
+    // rows an older version imported are removed when the archive is opened
+    let old = dir.path().join("old.db");
+    {
+        let s = Store::open(&old).unwrap();
+        event(s.conn(), "kept", 3);
+        event(s.conn(), "wrapped", u32::MAX as i64 + 2);
+        s.conn().execute_batch("PRAGMA user_version = 10;").unwrap();
+    }
+    let reopened = Store::open(&old).unwrap();
+    let rows = reopened.events_between(0, i64::MAX).unwrap();
+    assert_eq!(rows.iter().map(|e| e.web_search).collect::<Vec<_>>(), [3]);
+}
+
+#[test]
 fn a_failed_export_keeps_the_existing_file_and_the_archive_is_never_a_target() {
     use std::io::Write;
     use tracker_core::export::write_atomically;

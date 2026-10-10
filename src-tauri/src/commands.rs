@@ -416,9 +416,7 @@ pub fn export_data(
     let store = state.db();
     let book = state.book.read().unwrap();
     let range = analytics::period_range(period, &chrono::Local, now_ms(), store.first_event_ms().map_err(err)?);
-    if store.is_live_file(&path) {
-        return Err("export_target_is_archive".into());
-    }
+    crate::pdf::not_the_archive(&store, &path)?;
     export::write_atomically(&path, |f| {
         // UTF-8 BOM so Excel opens Turkish characters correctly
         if format == Format::Csv {
