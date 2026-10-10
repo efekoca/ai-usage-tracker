@@ -106,7 +106,7 @@
 
     <section class="privacy">
       <button class="btn ghost" aria-expanded={showPrivacy} onclick={() => (showPrivacy = !showPrivacy)}><Icon name="lock" size={15} />{t('onb.privacy')}</button>
-      {#if showPrivacy}<p class="subtle small">{t('settings.privacy.text')}</p>{/if}
+      {#if showPrivacy}<p class="subtle small">{t('settings.privacy.text', { dir: app.info?.data_dir ?? '' })}</p>{/if}
     </section>
 
     <div class="cta">

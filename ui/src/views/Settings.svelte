@@ -398,7 +398,7 @@
     <span>{t('settings.hideProjects')}</span>
     <Toggle checked={s.hide_project_names} label={t('settings.hideProjects')} onchange={(v) => saveSettings({ hide_project_names: v }).then(refresh)} />
   </div>
-  <p class="subtle small prose">{t('settings.privacy.text')}</p>
+  <p class="subtle small prose">{t('settings.privacy.text', { dir: app.info?.data_dir ?? '' })}</p>
   <div class="item">
     <div><span>{t('settings.network')}</span><div class="subtle small">{t('settings.network.text')}</div></div>
     <Icon name="lock" size={16} />
