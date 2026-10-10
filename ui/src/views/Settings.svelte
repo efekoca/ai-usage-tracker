@@ -2,7 +2,7 @@
   import { ask, open, save } from '@tauri-apps/plugin-dialog'
   import { onMount } from 'svelte'
   import { app, refresh, saveSettings } from '../lib/store.svelte'
-  import { api, providersOf, type HotkeyStatus, type PricingFile, type Provider } from '../lib/api'
+  import { api, providersOf, type HotkeyStatus, type ModelPrice, type PricingFile, type Provider } from '../lib/api'
   import { fmtDate, fmtDateTime, fmtInt, fmtPct, localDate, t, windowLabel } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
   import Select from '../components/Select.svelte'
@@ -144,6 +144,11 @@
     ['google', 'seven_day'],
   ] as const
   const unpriced = $derived(models.filter((m) => pricing && !pricing.models.some((x) => x.id === m || x.aliases?.includes(m)) && !(m in (pricing.user_aliases ?? {}))))
+  // the full list is long; the models found in the logs are the ones worth editing
+  let allPrices = $state(false)
+  const used = (p: ModelPrice) => models.some((m) => m === p.id || p.aliases?.includes(m) || pricing?.user_aliases?.[m] === p.id)
+  const usedPrices = $derived.by(() => pricing?.models.filter(used) ?? [])
+  const shownPrices = $derived.by(() => (allPrices || !usedPrices.length ? (pricing?.models ?? []) : usedPrices))
 
   function flash(msg: string) {
     notice = msg
@@ -421,7 +426,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each pricing.models as m (m.id)}
+          {#each shownPrices as m (m.id)}
             <tr>
               <th scope="row" title={m.notes ?? ''}>{m.id}{#if m.long_context}<span class="subtle small">{' · '}&gt;{fmtInt(m.long_context.threshold / 1000)}K</span>{/if}</th>
               {#each ['input', 'output', 'cache_read', 'cache_write_5m', 'cache_write_1h'] as const as k (k)}
@@ -446,6 +451,15 @@
         </tbody>
       </table>
     </div>
+    {#if usedPrices.length && usedPrices.length < pricing.models.length}
+      <div class="row">
+        <span class="subtle small">{allPrices ? t('settings.pricing.allShown', { n: pricing.models.length }) : t('settings.pricing.usedShown', { n: usedPrices.length })}</span>
+        <span class="spacer"></span>
+        <button class="btn ghost small" aria-expanded={allPrices} onclick={() => (allPrices = !allPrices)}>
+          {allPrices ? t('settings.pricing.showUsed') : t('settings.pricing.showAll', { n: pricing.models.length })}
+        </button>
+      </div>
+    {/if}
 
     <h3 class="sub">{t('settings.pricing.alias')}</h3>
     {#each Object.entries(pricing.user_aliases ?? {}) as [from, to] (from)}
