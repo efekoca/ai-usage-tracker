@@ -435,7 +435,7 @@ fn a_web_search_count_past_u32_is_never_imported_or_kept() {
     let rows = fresh.events_between(0, i64::MAX).unwrap();
     assert_eq!(rows.iter().map(|e| e.web_search).collect::<Vec<_>>(), [u32::MAX]);
 
-    // rows an older version imported are removed when the archive is opened
+    // a count an older version imported is dropped when the archive is opened; the row's tokens stay
     let old = dir.path().join("old.db");
     {
         let s = Store::open(&old).unwrap();
@@ -444,8 +444,73 @@ fn a_web_search_count_past_u32_is_never_imported_or_kept() {
         s.conn().execute_batch("PRAGMA user_version = 10;").unwrap();
     }
     let reopened = Store::open(&old).unwrap();
-    let rows = reopened.events_between(0, i64::MAX).unwrap();
-    assert_eq!(rows.iter().map(|e| e.web_search).collect::<Vec<_>>(), [3]);
+    let mut rows: Vec<(u32, u64)> = reopened.events_between(0, i64::MAX).unwrap().iter().map(|e| (e.web_search, e.tokens.input)).collect();
+    rows.sort();
+    assert_eq!(rows, [(0, 10), (3, 10)]);
+}
+
+#[test]
+fn an_imported_backup_keeps_the_archives_projects_and_brings_their_spelling() {
+    let dir = tempfile::tempdir().unwrap();
+    let event = |s: &Store, key: &str, project: i64| {
+        s.conn()
+            .execute(
+                "INSERT INTO usage_event(key, ts_ms, tool, model, project_id, input, output, accuracy, source)
+                 VALUES(?1, 1790000000000, 'claude_code', 'claude-opus-5-5', ?2, 10, 1, 'exact', 'test')",
+                tracker_core::rusqlite::params![key, project],
+            )
+            .unwrap();
+    };
+    let project = |s: &Store, path: &str, display: &str| -> i64 {
+        s.conn().execute("INSERT INTO project(path, name, display_path) VALUES(?1, 'p', ?2)", [path, display]).unwrap();
+        s.conn().last_insert_rowid()
+    };
+    let backup = dir.path().join("old.db");
+    {
+        let b = Store::open(&backup).unwrap();
+        let wrong = project(&b, "c:\\old\\wrong", "C:\\Old\\Wrong");
+        event(&b, "cc:1", wrong);
+        let only = project(&b, "c:\\only\\here", "C:\\Only\\Here");
+        event(&b, "cc:2", only);
+    }
+    let main = Store::open(&dir.path().join("main.db")).unwrap();
+    let right = project(&main, "/right/project", "/right/project");
+    event(&main, "cc:1", right);
+    let mut main = main;
+    main.merge_from(&backup).unwrap();
+    let project_of = |key: &str| -> String {
+        main.conn()
+            .query_row("SELECT COALESCE(p.display_path, p.path) FROM usage_event e JOIN project p ON p.id = e.project_id WHERE e.key = ?1", [key], |r| r.get(0))
+            .unwrap()
+    };
+    assert_eq!(project_of("cc:1"), "/right/project", "the archive's project wins");
+    assert_eq!(project_of("cc:2"), "C:\\Only\\Here", "a project only the backup knows keeps its spelling");
+}
+
+#[test]
+fn a_reading_without_a_reset_time_takes_the_one_another_source_knows() {
+    let now = chrono::Utc::now().timestamp_millis();
+    let book = PriceBook::default_book();
+    let mut store = Store::open_in_memory().unwrap();
+    let reset_s = (now - 10 * 60_000) / 1000;
+    let mut tx = store.transaction().unwrap();
+    tx.insert_limits(&[
+        // Claude Code's read: 60 %, window ended ten minutes ago
+        snap(now - 90 * 60_000, Provider::Anthropic, Tool::ClaudeCode, "five_hour", 60.0, Some(reset_s), None, "claude_usage"),
+        // Claude desktop's sample, newer but taken before that reset and without a reset time
+        snap(now - 40 * 60_000, Provider::Anthropic, Tool::ClaudeDesktop, "five_hour", 80.0, None, None, "claude_plan_history"),
+    ])
+    .unwrap();
+    tx.commit().unwrap();
+    let v = limits_view(&store, &book, now, &[]).unwrap().into_iter().find(|l| l.window == "five_hour").unwrap();
+    assert_eq!((v.used_pct, v.resets_at, v.state), (Some(80.0), Some(reset_s), LimitState::Reset));
+
+    // a sample taken after that reset is a new window: the old end does not apply
+    let mut tx = store.transaction().unwrap();
+    tx.insert_limits(&[snap(now - 5 * 60_000, Provider::Anthropic, Tool::ClaudeDesktop, "five_hour", 4.0, None, None, "claude_plan_history")]).unwrap();
+    tx.commit().unwrap();
+    let v = limits_view(&store, &book, now, &[]).unwrap().into_iter().find(|l| l.window == "five_hour").unwrap();
+    assert_eq!((v.used_pct, v.resets_at, v.state), (Some(4.0), None, LimitState::Fresh));
 }
 
 #[test]

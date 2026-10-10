@@ -444,13 +444,28 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
     // newest reading per (provider, limit_id, window) across all sources: Claude's desktop
     // history, Cowork and Claude Code readings describe the same account-wide pool
     let mut newest: BTreeMap<(String, String, String), LimitSnapshot> = BTreeMap::new();
+    let mut known_reset: HashMap<(String, String, String), i64> = HashMap::new();
     for s in store.latest_limits()? {
         let k = (s.provider.as_str().to_owned(), s.limit_id.clone(), s.window.clone());
+        if let Some(r) = s.resets_at {
+            let e = known_reset.entry(k.clone()).or_insert(r);
+            *e = (*e).max(r);
+        }
         match newest.get(&k) {
             Some(cur) if cur.ts_ms >= s.ts_ms => {}
             _ => {
                 newest.insert(k, s);
             }
+        }
+    }
+    // a reading without a reset time (Claude's desktop history) still belongs to the window
+    // another source knows the end of, as long as that end comes after it
+    for (k, s) in newest.iter_mut() {
+        if s.resets_at.is_none()
+            && let Some(&r) = known_reset.get(k)
+            && r.saturating_mul(1000) > s.ts_ms
+        {
+            s.resets_at = Some(r);
         }
     }
     // drop windows that belong to a plan the user no longer has (e.g. a monthly window on an old plan)

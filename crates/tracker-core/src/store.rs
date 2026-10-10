@@ -134,8 +134,9 @@ const MIGRATIONS: &[&str] = &[
     DELETE FROM setting WHERE key = 'repair.codex_keys';
     DELETE FROM file_checkpoint WHERE parser = 'codex_rollout';
     "#,
-    // v11: an older import accepted web search counts past u32, which no real log holds
-    "DELETE FROM usage_event WHERE web_search < 0 OR web_search > 4294967295;",
+    // v11: an older import accepted web search counts past u32, which no real log holds; the
+    // row may also carry a real log's tokens (merged by key), so only the count is dropped
+    "UPDATE usage_event SET web_search = 0 WHERE web_search < 0 OR web_search > 4294967295;",
 ];
 
 const MAX_IMPORTED_COUNT: i64 = 1_000_000_000_000;
@@ -486,11 +487,18 @@ impl Store {
                 .map(|c| format!(" AND typeof(e.{c}) = 'integer' AND e.{c} BETWEEN 0 AND {}", if *c == "web_search" { u32::MAX as i64 } else { MAX_IMPORTED_COUNT }))
                 .collect();
             let tx = self.conn.unchecked_transaction()?;
+            let their_display = if theirs >= 3 { "display_path" } else { "NULL" };
             tx.execute(
-                "INSERT INTO project(path, name, hidden) SELECT path, name, hidden FROM other.project WHERE true
-                 ON CONFLICT(path) DO NOTHING",
+                &format!(
+                    "INSERT INTO project(path, name, hidden, display_path) SELECT path, name, hidden, {their_display} FROM other.project WHERE true
+                     ON CONFLICT(path) DO NOTHING"
+                ),
                 [],
             )?;
+            // a backup made by an older version may file an event under a project this archive
+            // has since corrected; the archive's project wins
+            let tail = UPSERT_EVENT_TAIL.replace("project_id = COALESCE(excluded.project_id, project_id)", "project_id = COALESCE(project_id, excluded.project_id)");
+            debug_assert_ne!(tail, UPSERT_EVENT_TAIL);
             let events = tx.execute(
                 &format!(
                     "INSERT INTO usage_event({EVENT_COLUMNS})
@@ -501,7 +509,7 @@ impl Store {
                      LEFT JOIN other.project op ON op.id = e.project_id
                      LEFT JOIN main.project p ON p.path = op.path
                      WHERE typeof(e.ts_ms) = 'integer' AND e.ts_ms BETWEEN 0 AND {MAX_IMPORTED_MS} {valid_counts} {old_events}
-                     {UPSERT_EVENT_TAIL}"
+                     {tail}"
                 ),
                 [],
             )?;
