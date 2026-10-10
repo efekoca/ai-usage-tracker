@@ -37,7 +37,7 @@
     "copyright": "MIT License",
     "category": "Utility",
     "shortDescription": "Private, local tracker for AI tool usage, cost and limits",
-    "longDescription": "Reads usage metadata that Claude Code, Cowork, the Claude desktop app and Codex already write on your computer, keeps a local archive and shows API-equivalent cost and plan limits. No content is stored and nothing leaves your machine.",
+    "longDescription": "Reads usage metadata that Claude Code, Cowork, the Claude desktop app, Codex and Antigravity already write on your computer, keeps a local archive and shows API-equivalent cost and plan limits. No content is stored and nothing leaves your machine.",
     "icon": [
       "icons/32x32.png",
       "icons/48x48.png",

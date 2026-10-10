@@ -263,7 +263,7 @@ The app updates itself in all three forms. For the `.deb` and `.rpm`, your syste
 
 **Widget shortcut.** It works from any app on KDE Plasma and GNOME, also under Wayland. On GNOME 47 and older the app adds a GNOME custom shortcut for it (Settings → Keyboard → Custom Shortcuts). On Sway or Hyprland, bind a key to `ai-usage-tracker --toggle-widget` yourself, for example `bindsym Ctrl+Alt+Shift+w exec ai-usage-tracker --toggle-widget` (Sway) or `bind = CTRL ALT SHIFT, W, exec, ai-usage-tracker --toggle-widget` (Hyprland).
 
-**Uninstall.** `sudo apt remove ai-usage-tracker` or `sudo dnf remove ai-usage-tracker`. Removing the package reverts the Claude Code settings changed under **Live capture** and the start-at-login entry, for every user who used the app. For the AppImage, turn those switches off first, then delete the file. Your data stays in `~/.local/share/AIUsageTracker` until you delete it. On GNOME, also remove the widget shortcut under **Settings → Widget shortcut → Remove**, or in GNOME's keyboard settings.
+**Uninstall.** `sudo apt remove ai-usage-tracker` or `sudo dnf remove ai-usage-tracker`. Removing the package reverts the Claude Code settings changed under **Live capture** and the start-at-login entry for every user who used the app with the default folders (`~/.local/share` and `~/.config`). For the AppImage, turn those switches off first, then delete the file. Your data stays in `~/.local/share/AIUsageTracker` until you delete it. On GNOME, also remove the widget shortcut under **Settings → Widget shortcut → Remove**, or in GNOME's keyboard settings.
 
 ### Verify a download
 
@@ -333,7 +333,7 @@ The app checks for a new version at startup and every 6 hours. The check downloa
 
 ## Build from source
 
-Requirements: Rust 1.90+ and Node 20.19+ or 22.12+, plus:
+Requirements: Rust 1.99+ (the version CI and the release builds use) and Node 20.19+ or 22.12+, plus:
 
 - **Windows:** Visual Studio Build Tools (C++)
 - **macOS:** Xcode Command Line Tools

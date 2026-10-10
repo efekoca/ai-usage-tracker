@@ -1,6 +1,8 @@
 # Code signing policy
 
-Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
+Windows installers are to be signed for free by [SignPath.io](https://about.signpath.io/), with a certificate by the [SignPath Foundation](https://signpath.org/). Until that is in place, the Windows installer is not code-signed and Windows may show "Unknown publisher".
+
+macOS apps and disk images are signed with an Apple Developer ID and notarized by Apple. Every download that the in-app updater installs carries its own signature, which the app checks before installing.
 
 ## Team
 
@@ -10,7 +12,7 @@ Free code signing provided by [SignPath.io](https://about.signpath.io/), certifi
 
 ## Build and approval
 
-Installers are built from this repository's source code by GitHub Actions on GitHub-hosted runners. Every signed release is approved by hand before it is signed.
+The Windows installer and the Linux packages are built from this repository's source code by GitHub Actions on GitHub-hosted runners. The macOS app is built from the same tagged commit on the maintainer's Mac, where it is signed and notarized. Every release is approved by hand before it is published.
 
 ## Privacy
 

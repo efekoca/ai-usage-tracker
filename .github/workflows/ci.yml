@@ -14,7 +14,8 @@ env:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # a newer push replaces a pull request's run; every commit on main keeps its own result
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
