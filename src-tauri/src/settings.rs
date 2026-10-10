@@ -50,6 +50,10 @@ pub struct WidgetSettings {
     pub items: Vec<WidgetItem>,
     /// Which providers to show; empty = all enabled ones.
     pub providers: Vec<String>,
+    /// Order of the providers' limits, top or left first.
+    pub provider_order: Vec<String>,
+    /// Antigravity pool shown: "fullest" | "gemini" | "3p" | "all".
+    pub antigravity_pool: String,
     /// "today" | "days7" | "month1"
     pub primary_period: String,
     /// "tokens" | "cost"
@@ -97,6 +101,8 @@ impl Default for WidgetSettings {
             layout: "horizontal".into(),
             items: default_items(),
             providers: Vec::new(),
+            provider_order: PROVIDER_ORDER.iter().map(|p| p.to_string()).collect(),
+            antigravity_pool: "fullest".into(),
             primary_period: "today".into(),
             primary_metric: "tokens".into(),
             limit_style: "ring".into(),
@@ -131,6 +137,16 @@ impl WidgetSettings {
             }
         }
         self.items.retain(|i| default_items().iter().any(|d| d.kind == i.kind));
+        let mut order: Vec<String> = Vec::new();
+        for p in self.provider_order.iter().map(String::as_str).chain(PROVIDER_ORDER) {
+            if PROVIDER_ORDER.contains(&p) && !order.iter().any(|o| o == p) {
+                order.push(p.to_owned());
+            }
+        }
+        self.provider_order = order;
+        if !["fullest", "gemini", "3p", "all"].contains(&self.antigravity_pool.as_str()) {
+            self.antigravity_pool = "fullest".into();
+        }
         self.opacity = self.opacity.clamp(0.3, 1.0);
         self.scale = if self.scale.is_finite() { self.scale.clamp(0.6, 2.0) } else { 1.0 };
         self.corner_radius = self.corner_radius.clamp(0.0, 28.0);
@@ -152,6 +168,9 @@ impl WidgetSettings {
         self.hotkey = self.hotkey.trim().chars().take(64).collect();
     }
 }
+
+/// The widget's order before it could be changed.
+const PROVIDER_ORDER: [&str; 3] = ["anthropic", "google", "openai"];
 
 /// Four keys, so it avoids combinations other programs or AltGr (Ctrl+Alt on many layouts) need.
 pub const DEFAULT_HOTKEY: &str = "Ctrl+Alt+Shift+W";
@@ -258,6 +277,8 @@ pub struct Settings {
     pub provider_colors: std::collections::BTreeMap<String, String>,
     /// Marks take the tool's color too; off keeps them in the text color.
     pub tint_icons: bool,
+    /// Each tool's mark next to its name in the app; the widget has its own switch.
+    pub show_icons: bool,
 }
 
 impl Default for Settings {
@@ -288,6 +309,7 @@ impl Default for Settings {
             update_check: true,
             provider_colors: Default::default(),
             tint_icons: false,
+            show_icons: true,
         }
     }
 }
@@ -401,6 +423,17 @@ mod tests {
         assert_eq!(s.provider_colors.into_iter().collect::<Vec<_>>(), [("anthropic".to_owned(), "#D97757".to_owned())]);
         let d = Settings::default();
         assert!(d.provider_colors.is_empty() && !d.tint_icons && !d.widget.show_icons);
+    }
+
+    #[test]
+    fn the_widget_keeps_a_complete_provider_order_and_a_known_pool() {
+        let mut s: Settings = serde_json::from_str(r#"{"widget":{"provider_order":["openai","grok","openai"],"antigravity_pool":"x"}}"#).unwrap();
+        s.normalize();
+        assert_eq!(s.widget.provider_order, ["openai", "anthropic", "google"]);
+        assert_eq!(s.widget.antigravity_pool, "fullest");
+        let old: Settings = serde_json::from_str(r#"{"onboarded":true}"#).unwrap();
+        assert!(old.show_icons, "icons stay on for settings saved before the switch");
+        assert_eq!(old.widget.provider_order, ["anthropic", "google", "openai"]);
     }
 
     #[test]

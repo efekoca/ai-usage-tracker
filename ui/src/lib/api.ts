@@ -156,7 +156,7 @@ export interface WidgetData {
   today: WidgetPeriod
   days7: WidgetPeriod
   month1: WidgetPeriod
-  limits: { provider: Provider; window: string; used_pct: number | null; state: LimitState; accuracy: Accuracy; resets_at: number | null; observed_ms: number | null }[]
+  limits: { provider: Provider; limit_id: string; window: string; used_pct: number | null; state: LimitState; accuracy: Accuracy; resets_at: number | null; observed_ms: number | null }[]
   providers: Provider[]
   updated_ms: number
 }
@@ -170,6 +170,8 @@ export interface Threshold {
 
 export type WidgetItemKind = 'primary' | 'cost' | 'limit_five_hour' | 'limit_seven_day' | 'tools' | 'week_tokens' | 'week_cost' | 'month_cost' | 'updated'
 
+export type AntigravityPool = 'fullest' | 'gemini' | '3p' | 'all'
+
 export interface WidgetSettings {
   visible: boolean
   opacity: number
@@ -182,6 +184,8 @@ export interface WidgetSettings {
   layout: 'horizontal' | 'vertical' | 'line'
   items: { kind: WidgetItemKind; enabled: boolean }[]
   providers: Provider[]
+  provider_order: Provider[]
+  antigravity_pool: AntigravityPool
   primary_period: 'today' | 'days7' | 'month1'
   primary_metric: 'tokens' | 'cost'
   limit_style: 'ring' | 'bar' | 'text'
@@ -273,6 +277,7 @@ export interface Settings {
   /** provider → #rrggbb; missing = the accent color */
   provider_colors: Partial<Record<Provider, string>>
   tint_icons: boolean
+  show_icons: boolean
 }
 
 export interface SourceInfo {

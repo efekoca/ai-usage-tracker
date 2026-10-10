@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onDestroy, onMount, untrack } from 'svelte'
   import { app, saveSettings } from '../lib/store.svelte'
-  import { api, PROVIDERS, type Provider, type WidgetData, type WidgetItemKind, type WidgetSettings } from '../lib/api'
+  import { api, PROVIDERS, type AntigravityPool, type Provider, type WidgetData, type WidgetItemKind, type WidgetSettings } from '../lib/api'
   import { fmtPct, searchKey, t } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
+  import Select from '../components/Select.svelte'
   import Toggle from '../components/Toggle.svelte'
   import ColorPick from '../components/ColorPick.svelte'
   import Icon from '../components/Icon.svelte'
@@ -96,6 +97,15 @@
     ws.providers = next.length === all.length ? [] : next
     commit('providers')
   }
+  const ordered = $derived([...PROVIDERS].sort((a, b) => (ws.provider_order ?? []).indexOf(a) - (ws.provider_order ?? []).indexOf(b)))
+  function moveProvider(i: number, d: -1 | 1) {
+    const j = i + d
+    if (j < 0 || j >= ordered.length) return
+    const next = [...ordered]
+    ;[next[i], next[j]] = [next[j], next[i]]
+    ws.provider_order = next
+    commit('provider_order')
+  }
   const providerOn = (p: Provider) => ws.providers.length === 0 || ws.providers.includes(p)
   const lastOn = (p: Provider) => {
     const all = (data?.providers ?? providers) as Provider[]
@@ -106,7 +116,7 @@
       visible: ws.visible, opacity: 0.85, size: 'm', scale: 1, x: ws.x, y: ws.y, anchor: 'bottom-right', auto_hide_fullscreen: true,
       layout: 'horizontal',
       items: (['primary', 'cost', 'limit_five_hour', 'limit_seven_day', 'tools', 'week_tokens', 'week_cost', 'month_cost', 'updated'] as WidgetItemKind[]).map((k, i) => ({ kind: k, enabled: i < 4 })),
-      providers: [], primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '',
+      providers: [], provider_order: ['anthropic', 'google', 'openai'], antigravity_pool: 'fullest', primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '',
       corner_radius: 14, border: true, shadow: false, show_labels: true, show_icons: false, show_reset_time: false, warn_at: 70, high_at: 90,
       always_on_top: true, lock_position: false, click_action: 'open_dashboard',
       font_family: '', text_scale: 1, number_scale: 1, number_weight: 700, tabular_nums: true,
@@ -169,14 +179,32 @@
         <span>{t('limits.mode')}<span class="subtle small block">{t('limits.mode.help')}</span></span>
         <Segmented label={t('limits.mode')} value={app.settings?.limit_display ?? 'used'} options={[{ value: 'used', label: t('limits.mode.used') }, { value: 'remaining', label: t('limits.mode.remaining') }]} onchange={(v) => saveSettings({ limit_display: v })} />
       </div>
-      <div class="item">
-        <span>{t('ws.providers')}</span>
-        <div class="row">
-          {#each providers as p (p)}
-            <label class="chk"><Toggle checked={providerOn(p)} disabled={lastOn(p)} label={t(`provider.${p}`)} onchange={(v) => toggleProvider(p, v)} />{t(`provider.${p}`)}</label>
+      <div class="item stack">
+        <span>{t('ws.providers')}<span class="subtle small block">{t('ws.providers.help')}</span></span>
+        <ul class="items" aria-label={t('ws.providers')}>
+          {#each ordered as p, i (p)}
+            <li class:off={!providerOn(p)}>
+              <Toggle checked={providerOn(p)} disabled={lastOn(p)} label={t(`provider.${p}`)} onchange={(v) => toggleProvider(p, v)} />
+              <span class="iname">{t(`provider.${p}`)}</span>
+              <span class="spacer"></span>
+              <button class="btn ghost icon" aria-label="{t(`provider.${p}`)}: {t('ws.up')}" disabled={i === 0} onclick={() => moveProvider(i, -1)}><Icon name="up" size={14} /></button>
+              <button class="btn ghost icon" aria-label="{t(`provider.${p}`)}: {t('ws.down')}" disabled={i === ordered.length - 1} onclick={() => moveProvider(i, 1)}><Icon name="down" size={14} /></button>
+            </li>
           {/each}
-        </div>
+        </ul>
       </div>
+      {#if providerOn('google')}
+        <div class="item">
+          <span>{t('ws.agPool')}<span class="subtle small block">{t('ws.agPool.help')}</span></span>
+          <Select
+            label={t('ws.agPool')}
+            value={ws.antigravity_pool}
+            minWidth={170}
+            options={(['fullest', 'gemini', '3p', 'all'] as AntigravityPool[]).map((v) => ({ value: v, label: t(`ws.agPool.${v}`) }))}
+            onchange={(v) => set('antigravity_pool', v as AntigravityPool)}
+          />
+        </div>
+      {/if}
     </section>
 
     <section class="card group">
@@ -407,12 +435,6 @@
     height: 28px;
     padding: 0;
     justify-content: center;
-  }
-  .chk {
-    display: inline-flex;
-    gap: 8px;
-    align-items: center;
-    margin-left: 12px;
   }
   .slider input {
     width: 170px;

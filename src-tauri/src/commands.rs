@@ -225,6 +225,7 @@ pub struct WidgetTool {
 #[derive(Serialize)]
 pub struct WidgetLimit {
     provider: Provider,
+    limit_id: String,
     window: String,
     used_pct: Option<f64>,
     state: LimitState,
@@ -298,6 +299,7 @@ pub fn get_widget_data(state: State<AppState>) -> Res<WidgetData> {
         .filter(|l| providers.contains(&l.provider) && (l.window == "five_hour" || l.window == "seven_day"))
         .map(|l| WidgetLimit {
             provider: l.provider,
+            limit_id: l.limit_id,
             window: l.window,
             used_pct: l.used_pct,
             state: l.state,
