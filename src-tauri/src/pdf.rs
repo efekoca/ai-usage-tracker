@@ -18,10 +18,10 @@ pub fn render(app: &AppHandle, from: &str, to: &str, out: &Path) -> Result<(), S
     if !valid(from) || !valid(to) || from > to {
         return Err("invalid_range".into());
     }
+    // the PDF replaces its target (manual and Monday saves alike)
+    not_the_archive(&app.state::<AppState>().db(), out)?;
     let _one = RENDERING.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(w) = app.get_webview_window(LABEL) {
-        let _ = w.destroy();
-    }
+    close(app)?;
     let (tx, rx) = mpsc::channel::<bool>();
     *app.state::<AppState>().report_ready.lock().unwrap() = Some(tx);
     let win = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App(format!("report.html?from={from}&to={to}").into()))
@@ -45,7 +45,30 @@ pub fn render(app: &AppHandle, from: &str, to: &str, out: &Path) -> Result<(), S
     if result.is_err() {
         let _ = std::fs::remove_file(&partial);
     }
+    // the next render reuses the label, so the window must be gone before the lock is released
+    if let Err(e) = close(app) {
+        log::warn!("report window still open: {e}");
+    }
     result
+}
+
+/// Closes the report window and waits until Tauri has let go of its label. Never called on the
+/// main thread, which does the closing.
+fn close(app: &AppHandle) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while let Some(w) = app.get_webview_window(LABEL) {
+        if std::time::Instant::now() > deadline {
+            return Err("report_busy".into());
+        }
+        let _ = w.destroy();
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    Ok(())
+}
+
+/// An export never writes over the open archive or its SQLite side files.
+pub fn not_the_archive(store: &tracker_core::store::Store, out: &Path) -> Result<(), String> {
+    if store.is_live_file(out) { Err("export_target_is_archive".into()) } else { Ok(()) }
 }
 
 fn partial_path(out: &Path) -> PathBuf {
@@ -322,6 +345,21 @@ fn print_to_pdf(_win: &tauri::WebviewWindow, _out: &Path) -> Result<(), String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_export_is_refused_over_the_archive_and_its_side_files() {
+        let dir = std::env::temp_dir().join(format!("aiut-target-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("tracker.db");
+        let store = tracker_core::store::Store::open(&db).unwrap();
+        for suffix in ["", "-wal", "-shm", "-journal"] {
+            let target = PathBuf::from(format!("{}{suffix}", db.display()));
+            assert_eq!(not_the_archive(&store, &target), Err("export_target_is_archive".into()), "{suffix}");
+        }
+        assert_eq!(not_the_archive(&store, &dir.join("AI-Usage.pdf")), Ok(()));
+        drop(store);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn last_full_week_is_monday_to_sunday_before_this_week() {

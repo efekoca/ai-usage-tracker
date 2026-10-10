@@ -40,7 +40,8 @@
   const y = $derived(scaleLinear().domain([0, Math.max(1e-9, ...totals)]).nice(4).range([ih, 0]))
   const ticks = $derived(Math.max(0, ...totals) > 0 ? y.ticks(4) : [0])
   const band = $derived(iw / Math.max(1, dates.length))
-  const bw = $derived(Math.max(3, Math.min(24, band * 0.62)))
+  // never wider than its own slot, or a long range draws one bar over the next
+  const bw = $derived(Math.min(band * 0.9, Math.max(3, Math.min(24, band * 0.62))))
   const GAP = 2
 
   const stacks = $derived(
