@@ -375,7 +375,7 @@ function mockDay(date: string) {
   }
 }
 
-const update = { current: '0.5.0', configured: true, checking: false, last_check_ms: Date.now() - 3600e3, last_error: null, available: null as null | { version: string; notes: string | null; date: string | null }, installing: false, downloaded: 0, total: null }
+const update = { current: '0.5.1', configured: true, checking: false, last_check_ms: Date.now() - 3600e3, last_error: null, available: null as null | { version: string; notes: string | null; date: string | null }, installing: false, downloaded: 0, total: null }
 
 const pricing = {
   schema_version: 1,
@@ -393,7 +393,7 @@ export function installMock() {
       const a = args as Record<string, unknown>
       switch (cmd) {
         case 'app_info':
-          return { version: '0.5.0', data_dir: 'C:\\Users\\you\\AppData\\Local\\AIUsageTracker', pricing_origin: 'bundled', pricing_updated_at: '2026-10-09', platform: 'windows', supports_mica: false, accent_color: null, started_hidden: false, reports_dir: 'C:\\Users\\you\\Documents\\AI Usage Tracker' }
+          return { version: '0.5.1', data_dir: 'C:\\Users\\you\\AppData\\Local\\AIUsageTracker', pricing_origin: 'bundled', pricing_updated_at: '2026-10-09', platform: 'windows', supports_mica: false, accent_color: null, started_hidden: false, reports_dir: 'C:\\Users\\you\\Documents\\AI Usage Tracker' }
         case 'get_settings':
           return settings
         case 'save_settings':
