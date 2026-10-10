@@ -23,9 +23,12 @@
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
-  ; the app writes its start-with-Windows entry for the current user only
-  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "AI Usage Tracker"
-  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" "AI Usage Tracker"
+  ; the app writes its start-with-Windows entry for the current user only; an update keeps it and
+  ; the "Disabled" mark Task Manager keeps under StartupApproved
+  ${If} $UpdateMode <> 1
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "AI Usage Tracker"
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" "AI Usage Tracker"
+  ${EndIf}
   ${If} $DeleteAppDataCheckboxState = 1
     RMDir /r "$LOCALAPPDATA\AIUsageTracker"
     ; the private copy left when the app was started from the Claude desktop app (MSIX)

@@ -1,8 +1,9 @@
 // Signs release files built elsewhere (CI has no update signing key) and adds them to latest.json.
 // Usage: npm --prefix ui run sign-release -- <folder>
-// Every package without a .sig is signed; every signature must name this version. latest.json in the
+// Every package without a .sig is signed; every signature must match its file and the app's public key
+// and name this version. latest.json in the
 // folder (or RELEASE_MANIFEST) is merged, and SHA256SUMS lists every download of this version.
-import { createHash } from 'node:crypto'
+import { createHash, createPublicKey, verify } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -14,7 +15,25 @@ if (!dir || !existsSync(dir)) {
   console.error('Usage: npm --prefix ui run sign-release -- <folder with the release files>')
   process.exit(1)
 }
-const version = JSON.parse(readFileSync(join(repo, 'src-tauri', 'tauri.conf.json'), 'utf8')).version
+const conf = JSON.parse(readFileSync(join(repo, 'src-tauri', 'tauri.conf.json'), 'utf8'))
+const version = conf.version
+
+// minisign, as the updater checks it: the key the app trusts, a signature over the file (BLAKE2b-512
+// of it for "ED"), and a second signature over the trusted comment that carries the version
+const lines = (b64) => Buffer.from(b64, 'base64').toString('utf8').split('\n')
+const pub = Buffer.from(lines(conf.plugins.updater.pubkey)[1], 'base64')
+const publicKey = createPublicKey({ key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), pub.subarray(10, 42)]), format: 'der', type: 'spki' })
+function signatureProblem(file, signature) {
+  const [, sigLine = '', trustedLine = '', globalLine = ''] = lines(signature)
+  const sig = Buffer.from(sigLine, 'base64')
+  if (sig.length !== 74 || !sig.subarray(2, 10).equals(pub.subarray(2, 10))) return 'is not made with the key the app trusts'
+  const data = readFileSync(file)
+  const signed = sig.subarray(0, 2).toString() === 'ED' ? createHash('blake2b512').update(data).digest() : data
+  if (!verify(null, signed, publicKey, sig.subarray(10))) return 'does not match the file (was the file changed after signing?)'
+  const trusted = Buffer.from(trustedLine.replace(/^trusted comment: /, ''), 'utf8')
+  if (!verify(null, Buffer.concat([sig.subarray(10), trusted]), publicKey, Buffer.from(globalLine, 'base64'))) return 'has an altered trusted comment'
+  return null
+}
 
 // the updater looks up `{os}-{arch}-{bundle type}` first, then `{os}-{arch}`
 const kinds = [
@@ -50,6 +69,11 @@ for (const file of readdirSync(dir).filter((f) => f.includes(`_${version}_`))) {
     if (r.status !== 0) process.exit(r.status ?? 1)
   }
   const signature = readFileSync(join(dir, `${file}.sig`), 'utf8').trim()
+  const problem = signatureProblem(join(dir, file), signature)
+  if (problem) {
+    console.error(`${file}.sig ${problem}, so installed apps would reject the update. Delete it and run this again.`)
+    process.exit(1)
+  }
   const trusted = Buffer.from(signature, 'base64').toString('utf8').split('\n').find((l) => l.startsWith('trusted comment:')) ?? ''
   if (!trusted.split('\t').includes(`version:${version}`)) {
     console.error(`${file}.sig is not bound to v${version}, so installed apps would reject the update. Delete it and run this again.`)

@@ -6,7 +6,7 @@ authors = ["Efe Koca <52746944+efekoca@users.noreply.github.com>"]
 description = "Local, private tracker for AI tool token usage, API-equivalent cost and plan limits"
 edition = "2024"
 license.workspace = true
-rust-version = "1.90"
+rust-version = "1.99"
 
 [lib]
 name = "ai_usage_tracker_lib"

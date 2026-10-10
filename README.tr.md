@@ -255,7 +255,7 @@ Uygulama üç biçimde de kendini günceller. `.deb` ve `.rpm` için sisteminiz 
 
 **Widget kısayolu.** KDE Plasma ve GNOME'da, Wayland'de de, hangi programda olursanız olun çalışır. GNOME 47 ve öncesinde uygulama bunun için bir GNOME özel kısayolu ekler (Ayarlar → Klavye → Özel Kısayollar). Sway ya da Hyprland kullanıyorsanız `ai-usage-tracker --toggle-widget` komutuna kendiniz bir tuş atayın; örneğin Sway'de `bindsym Ctrl+Alt+Shift+w exec ai-usage-tracker --toggle-widget`, Hyprland'de `bind = CTRL ALT SHIFT, W, exec, ai-usage-tracker --toggle-widget`.
 
-**Kaldırma.** `sudo apt remove ai-usage-tracker` ya da `sudo dnf remove ai-usage-tracker`. Paketi kaldırdığınızda, uygulamayı kullanan her kullanıcı için **Canlı yakalama** ile Claude Code ayarlarında yapılan değişiklikler ve oturum açılışında başlatma kaydı geri alınır. AppImage kullanıyorsanız önce bu anahtarları kapatın, sonra dosyayı silin. Verileriniz siz silene kadar `~/.local/share/AIUsageTracker` klasöründe kalır. GNOME'da widget kısayolunu da **Ayarlar → Widget kısayolu → Kaldır** bölümünden ya da GNOME'un klavye ayarlarından kaldırın.
+**Kaldırma.** `sudo apt remove ai-usage-tracker` ya da `sudo dnf remove ai-usage-tracker`. Paketi kaldırdığınızda, uygulamayı varsayılan klasörlerle (`~/.local/share` ve `~/.config`) kullanan her kullanıcı için **Canlı yakalama** ile Claude Code ayarlarında yapılan değişiklikler ve oturum açılışında başlatma kaydı geri alınır. AppImage kullanıyorsanız önce bu anahtarları kapatın, sonra dosyayı silin. Verileriniz siz silene kadar `~/.local/share/AIUsageTracker` klasöründe kalır. GNOME'da widget kısayolunu da **Ayarlar → Widget kısayolu → Kaldır** bölümünden ya da GNOME'un klavye ayarlarından kaldırın.
 
 ### Dosyanın doğruluğunu kontrol edin
 
@@ -327,7 +327,7 @@ Uygulama açılışta ve 6 saatte bir yeni sürüm olup olmadığına bakar. Bun
 
 ## Kaynaktan derleme
 
-Gereksinimler: Rust 1.90+ ve Node 20.19+ veya 22.12+; bunlara ek olarak:
+Gereksinimler: Rust 1.99+ (CI'ın ve sürüm derlemelerinin kullandığı sürüm) ve Node 20.19+ veya 22.12+; bunlara ek olarak:
 
 - **Windows:** Visual Studio Build Tools (C++)
 - **macOS:** Xcode Command Line Tools
