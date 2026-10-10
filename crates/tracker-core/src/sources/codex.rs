@@ -213,7 +213,7 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
                         recognised = true;
                     } else if let Some(last) = info.get("last_token_usage") {
                         st.last_total = total.clone();
-                        if u64_at(last, "input_tokens") + u64_at(last, "output_tokens") > 0 {
+                        if u64_at(last, "input_tokens").saturating_add(u64_at(last, "output_tokens")) > 0 {
                             let who = st.who(path);
                             let key = match total {
                                 Some(t) => format!("cx:{}:t{t}", st.key_thread(&who.thread)),

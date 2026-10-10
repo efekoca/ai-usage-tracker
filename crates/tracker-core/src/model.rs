@@ -226,7 +226,8 @@ impl LimitSnapshot {
     /// stored, it would outrank every real reading as the newest one.
     pub fn is_damaged(&self, now_ms: i64) -> bool {
         let window = self.window.strip_suffix('m').and_then(|n| n.parse::<i64>().ok());
-        !(0..=now_ms.saturating_add(MAX_CLOCK_SKEW_MS)).contains(&self.ts_ms) || window.is_some_and(|m| !(1..=MAX_WINDOW_MINUTES).contains(&m))
+        let pct = self.used_pct.is_some_and(|p| !(0.0..=1000.0).contains(&p));
+        !(0..=now_ms.saturating_add(MAX_CLOCK_SKEW_MS)).contains(&self.ts_ms) || window.is_some_and(|m| !(1..=MAX_WINDOW_MINUTES).contains(&m)) || pct
     }
 
     /// The reset time in milliseconds; `None` for a time outside 1970–3000 (a damaged record).
