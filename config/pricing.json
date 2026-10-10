@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-09",
+  "updated_at": "2026-10-10",
   "currency": "USD",
   "unit": "per_million_tokens",
   "sources": {
@@ -26,8 +26,11 @@
       "geo_multipliers": { "us": 1.1 }, "web_search_per_1k": 10, "verified_at": "2026-10-02" },
     { "id": "claude-mythos-5-1", "provider": "anthropic", "input": 10, "output": 50, "cache_read": 0.25, "cache_write_5m": 12.5, "cache_write_1h": 20,
       "geo_multipliers": { "us": 1.1 }, "web_search_per_1k": 10, "verified_at": "2026-10-02", "notes": "Limited availability (Project Glasswing)." },
-    { "id": "claude-sonnet-5-5", "provider": "anthropic", "aliases": ["claude-sonnet-5-5-thinking", "claude-sonnet-5-5-low", "claude-sonnet-5-5-medium", "claude-sonnet-5-5-high"], "input": 2, "output": 10, "cache_read": 0.2, "cache_write_5m": 2.5, "cache_write_1h": 4,
-      "geo_multipliers": { "us": 1.1 }, "web_search_per_1k": 10, "verified_at": "2026-10-02" },
+    { "id": "claude-sonnet-5-5", "provider": "anthropic", "aliases": ["claude-sonnet-5-5-thinking", "claude-sonnet-5-5-low", "claude-sonnet-5-5-medium", "claude-sonnet-5-5-high"], "input": 2, "output": 10, "cache_read": 0.1, "cache_write_5m": 2.5, "cache_write_1h": 4,
+      "geo_multipliers": { "us": 1.1 }, "web_search_per_1k": 10, "verified_at": "2026-10-10", "notes": "Cache hits are 0.05x the input price." },
+    { "id": "claude-haiku-5-5", "provider": "anthropic", "input": 0.1, "output": 0.5, "cache_read": 0.01, "cache_write_5m": 0.125, "cache_write_1h": 0.2,
+      "long_context": { "threshold": 100000, "input": 0.5, "output": 2.5, "cache_read": 0.05, "cache_write_5m": 0.625, "cache_write_1h": 1 },
+      "geo_multipliers": { "us": 1.1 }, "web_search_per_1k": 10, "verified_at": "2026-10-10", "notes": "A prompt over 100,000 tokens, cache reads and writes included, pays the higher prices." },
     { "id": "claude-haiku-4-5", "provider": "anthropic", "aliases": ["claude-haiku-4-5-20251001"], "input": 1, "output": 5, "cache_read": 0.1, "cache_write_5m": 1.25, "cache_write_1h": 2,
       "web_search_per_1k": 10, "verified_at": "2026-10-02", "notes": "Retirement announced for no sooner than 2026-10-15." },
     { "id": "claude-fable-5", "provider": "anthropic", "input": 10, "output": 50, "cache_read": 1.0, "cache_write_5m": 12.5, "cache_write_1h": 20,
