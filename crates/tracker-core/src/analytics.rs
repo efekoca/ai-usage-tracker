@@ -410,7 +410,8 @@ pub fn window_minutes(window: &str) -> Option<i64> {
         "one_day" => Some(1440),
         "seven_day" | "seven_day_opus" | "seven_day_sonnet" => Some(10080),
         "thirty_day" => Some(43200),
-        w => w.strip_suffix('m').and_then(|n| n.parse().ok()),
+        // a stored or imported damaged duration counts as unknown
+        w => w.strip_suffix('m').and_then(|n| n.parse().ok()).filter(|m| (1..=crate::model::MAX_WINDOW_MINUTES).contains(m)),
     }
 }
 
@@ -478,12 +479,12 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
         let reset_ms = s.resets_at_ms();
         let mut state = match (reset_ms, dur_ms) {
             (Some(r), _) if r <= now_ms => LimitState::Reset,
-            (None, Some(d)) if now_ms - s.ts_ms > d => LimitState::Stale,
+            (None, Some(d)) if now_ms.saturating_sub(s.ts_ms) > d => LimitState::Stale,
             _ => LimitState::Fresh,
         };
         let mut usage_since = Totals::default();
         if state == LimitState::Fresh {
-            let age = now_ms - s.ts_ms;
+            let age = now_ms.saturating_sub(s.ts_ms);
             if age >= BEHIND_GRACE_MS {
                 for e in store.events_between(s.ts_ms + 1, now_ms + 1)?.iter().filter(|e| counts_toward(s.provider, &s.limit_id, &s.window, e)) {
                     usage_since.add(e, cost_of(book, e).as_ref(), savings_of(book, e));
@@ -671,5 +672,8 @@ mod tests {
         assert_eq!(window_minutes("seven_day"), Some(10080));
         assert_eq!(window_minutes("90m"), Some(90));
         assert_eq!(window_minutes("so"), None);
+        assert_eq!(window_minutes("-1m"), None);
+        assert_eq!(window_minutes("0m"), None);
+        assert_eq!(window_minutes(&format!("{}m", i64::MAX)), None);
     }
 }

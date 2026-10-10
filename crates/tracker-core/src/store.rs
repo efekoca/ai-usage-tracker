@@ -1,7 +1,7 @@
 //! Local SQLite archive (`%LOCALAPPDATA%\AIUsageTracker\tracker.db`). Records stay here even
 //! after the source tools delete or rotate their logs. No content columns exist by design.
 
-use crate::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
+use crate::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent, MAX_CLOCK_SKEW_MS, MAX_WINDOW_MINUTES};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::Serialize;
 use std::cell::RefCell;
@@ -139,6 +139,11 @@ const MIGRATIONS: &[&str] = &[
 const MAX_IMPORTED_COUNT: i64 = 1_000_000_000_000;
 /// Imported times must fall between 1970 and 3000 (milliseconds; reset times are seconds).
 const MAX_IMPORTED_MS: i64 = 32_503_680_000_000;
+
+/// The newest reading time accepted now: a little ahead of the clock for drift, never far ahead.
+fn latest_accepted_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis() + MAX_CLOCK_SKEW_MS
+}
 
 /// A captured row is hidden when the same request also exists as an exact (log) row.
 const NOT_SUPERSEDED: &str = "NOT (u.accuracy = 'captured' AND u.request_id IS NOT NULL AND EXISTS (
@@ -372,19 +377,21 @@ impl Store {
         Ok(())
     }
 
-    /// Latest snapshot per (provider, tool, account, limit_id, window).
+    /// Latest snapshot per (provider, tool, account, limit_id, window). A row dated before 1970 or
+    /// ahead of the clock, stored by an older version, is passed over so it cannot stand in for a
+    /// real reading.
     pub fn latest_limits(&self) -> Result<Vec<LimitSnapshot>> {
         let mut st = self.conn.prepare(
             "SELECT s.ts_ms, s.provider, s.tool, s.account, s.limit_id, s.window, s.used_pct, s.resets_at,
                     s.status, s.plan, s.source, s.accuracy
              FROM limit_snapshot s
              JOIN (SELECT provider, tool, account, limit_id, window, MAX(ts_ms) AS m
-                   FROM limit_snapshot GROUP BY provider, tool, account, limit_id, window) g
+                   FROM limit_snapshot WHERE ts_ms BETWEEN 0 AND ?1 GROUP BY provider, tool, account, limit_id, window) g
                ON s.provider = g.provider AND s.tool = g.tool AND s.account = g.account
               AND s.limit_id = g.limit_id AND s.window = g.window AND s.ts_ms = g.m
              ORDER BY s.provider, s.window",
         )?;
-        let rows = st.query_map([], row_to_limit)?;
+        let rows = st.query_map([latest_accepted_ms()], row_to_limit)?;
         rows.collect()
     }
 
@@ -501,11 +508,13 @@ impl Store {
                      plan, source, accuracy)
                  SELECT ts_ms, provider, tool, account, limit_id, window, used_pct, resets_at, status, plan, source, accuracy
                  FROM other.limit_snapshot
-                 WHERE typeof(ts_ms) = 'integer' AND ts_ms BETWEEN 0 AND ?1
+                 WHERE typeof(ts_ms) = 'integer' AND ts_ms BETWEEN 0 AND ?2
                    AND (resets_at IS NULL OR (typeof(resets_at) = 'integer' AND resets_at BETWEEN 0 AND ?1 / 1000))
                    AND (used_pct IS NULL OR used_pct BETWEEN 0 AND 1000)
+                   AND window NOT GLOB '-*'
+                   AND NOT (window GLOB '[0-9]*m' AND CAST(substr(window, 1, length(window) - 1) AS INTEGER) NOT BETWEEN 1 AND ?3)
                  ON CONFLICT(source, account, limit_id, window, ts_ms) DO NOTHING",
-                [MAX_IMPORTED_MS],
+                [MAX_IMPORTED_MS, latest_accepted_ms(), MAX_WINDOW_MINUTES],
             )?;
             if theirs >= 7 {
                 tx.execute(
@@ -756,7 +765,12 @@ impl StoreTx<'_> {
                  used_pct = COALESCE(used_pct, excluded.used_pct),
                  resets_at = COALESCE(resets_at, excluded.resets_at)",
         )?;
+        let now = chrono::Utc::now().timestamp_millis();
         for l in limits {
+            if l.is_damaged(now) {
+                log::warn!("{} reading skipped: impossible time or window", l.source);
+                continue;
+            }
             st.execute(params![
                 l.ts_ms,
                 l.provider.as_str(),

@@ -156,10 +156,13 @@ pub fn statusline_main() -> i32 {
     0
 }
 
-/// I/O goes through helper threads, so a stalled child or its descendants cannot outlast the deadline.
 fn run_chained(cmd: &str, input: Vec<u8>) -> Option<String> {
+    run_within(cmd, input, Duration::from_secs(5))
+}
+
+/// I/O goes through helper threads, so a stalled child or its descendants cannot outlast the deadline.
+fn run_within(cmd: &str, input: Vec<u8>, deadline: Duration) -> Option<String> {
     use std::process::{Command, Stdio};
-    const DEADLINE: Duration = Duration::from_secs(5);
     const MAX_OUT: u64 = 64 * 1024;
     let mut c = match git_bash() {
         Some(bash) => {
@@ -179,12 +182,13 @@ fn run_chained(cmd: &str, input: Vec<u8>) -> Option<String> {
         }
     };
     c.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        c.creation_flags(0x0800_0000);
-    }
+    // its own process group, so a timeout also ends what the command started
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut c, 0);
+    #[cfg(unix)]
     let mut child = c.spawn().ok()?;
+    #[cfg(windows)]
+    let (mut child, job) = Job::spawn(&mut c).ok()?;
     if let Some(mut si) = child.stdin.take() {
         std::thread::spawn(move || {
             let _ = si.write_all(&input);
@@ -197,15 +201,125 @@ fn run_chained(cmd: &str, input: Vec<u8>) -> Option<String> {
         let _ = so.take(MAX_OUT).read_to_end(&mut out);
         let _ = tx.send(out);
     });
-    let out = rx.recv_timeout(DEADLINE).ok();
+    let out = rx.recv_timeout(deadline).ok();
     let left = Instant::now() + Duration::from_millis(200);
     while matches!(child.try_wait(), Ok(None)) && Instant::now() < left {
         std::thread::sleep(Duration::from_millis(20));
     }
-    if matches!(child.try_wait(), Ok(None)) {
-        let _ = child.kill();
+    // output still open at the deadline means something the command started is still running
+    if out.is_none() || matches!(child.try_wait(), Ok(None)) {
+        // Windows: the job also reaches what was started by a parent that has already exited
+        #[cfg(windows)]
+        if let Some(job) = &job {
+            job.terminate();
+        }
+        tracker_core::capture::kill_tree(&mut child);
     }
     out.map(|o| String::from_utf8_lossy(&o).into_owned())
+}
+
+/// A Job Object holding a command and every process it starts.
+#[cfg(windows)]
+struct Job(windows_sys::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+impl Job {
+    /// Starts the command suspended and lets it run only once it is in the job, so nothing it
+    /// starts can escape. Without a job (failure is logged) it runs as before, ended by `taskkill`.
+    fn spawn(c: &mut std::process::Command) -> std::io::Result<(std::process::Child, Option<Job>)> {
+        use std::os::windows::io::AsRawHandle;
+        use std::os::windows::process::CommandExt;
+        use windows_sys::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW};
+        const CREATE_SUSPENDED: u32 = 0x0000_0004;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        // SAFETY: an unnamed job with default security; the handle is closed on drop
+        let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        let mut job = if handle.is_null() {
+            Self::failed("create");
+            None
+        } else {
+            Some(Job(handle))
+        };
+        let mut child = c.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED).spawn()?;
+        // SAFETY: both handles stay open for the call
+        if let Some(j) = &job
+            && unsafe { AssignProcessToJobObject(j.0, child.as_raw_handle()) } == 0
+        {
+            Self::failed("assign");
+            job = None;
+        }
+        if let Err(e) = resume_suspended(child.id()) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(e);
+        }
+        Ok((child, job))
+    }
+
+    fn terminate(&self) {
+        // SAFETY: the handle is open until drop
+        if unsafe { windows_sys::Win32::System::JobObjects::TerminateJobObject(self.0, 1) } == 0 {
+            Self::failed("terminate");
+        }
+    }
+
+    fn failed(step: &str) -> std::io::Error {
+        Self::report(step, std::io::Error::last_os_error())
+    }
+
+    fn report(step: &str, e: std::io::Error) -> std::io::Error {
+        log::warn!("status line job {step} failed: {e}");
+        e
+    }
+}
+
+/// Resumes the main thread of a process started suspended.
+#[cfg(windows)]
+fn resume_suspended(pid: u32) -> std::io::Result<()> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32};
+    use windows_sys::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
+    // SAFETY: a thread snapshot, closed below; THREADENTRY32 is plain data with its size set
+    let snap = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    if snap == INVALID_HANDLE_VALUE {
+        return Err(Job::failed("resume"));
+    }
+    let mut entry: THREADENTRY32 = unsafe { std::mem::zeroed() };
+    entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+    let mut resumed = false;
+    // read right after the failing call; the scan and cleanup below overwrite the last error
+    let mut error = None;
+    let mut more = unsafe { Thread32First(snap, &mut entry) } != 0;
+    while more {
+        if entry.th32OwnerProcessID == pid {
+            // SAFETY: a handle to one of the child's threads, closed right after
+            let t = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID) };
+            if t.is_null() {
+                error = Some(std::io::Error::last_os_error());
+            } else {
+                if unsafe { ResumeThread(t) } == u32::MAX {
+                    error = Some(std::io::Error::last_os_error());
+                } else {
+                    resumed = true;
+                }
+                unsafe { CloseHandle(t) };
+            }
+        }
+        more = unsafe { Thread32Next(snap, &mut entry) } != 0;
+    }
+    unsafe { CloseHandle(snap) };
+    if resumed {
+        return Ok(());
+    }
+    Err(Job::report("resume", error.unwrap_or_else(|| std::io::Error::other(format!("no thread of process {pid} found")))))
+}
+
+#[cfg(windows)]
+impl Drop for Job {
+    fn drop(&mut self) {
+        // SAFETY: owned handle, closed once
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(self.0) };
+    }
 }
 
 /// `--revert-capture`, run by the uninstaller: undoes every change made outside the app's folder.
@@ -950,6 +1064,47 @@ pub fn start(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_chained_command_that_runs_too_long_is_ended_with_what_it_started() {
+        // Windows runs it through Git Bash, as Claude Code does; CI must really run it
+        if cfg!(windows) && git_bash().is_none() {
+            assert!(std::env::var_os("CI").is_none(), "Git Bash is required for this test on CI");
+            eprintln!("skipped: no Git Bash");
+            return;
+        }
+        // the shell waits for its child; or exits at once, leaving an orphan holding the output open
+        for (i, tail) in ["& wait", "&"].iter().enumerate() {
+            let marker = std::env::temp_dir().join(format!("aiut-chained-{}-{i}", std::process::id()));
+            let _ = std::fs::remove_file(&marker);
+            let cmd = format!("(sleep 1; echo survived > '{}') {tail}", marker.display().to_string().replace('\\', "/"));
+            let started = Instant::now();
+            assert_eq!(run_within(&cmd, Vec::new(), Duration::from_millis(300)), None, "{tail}");
+            assert!(started.elapsed() < Duration::from_secs(3), "{tail}");
+            std::thread::sleep(Duration::from_millis(1500));
+            assert!(!marker.exists(), "a process started by `{tail}` outlived the deadline");
+        }
+        assert_eq!(run_within("cat", b"ok".to_vec(), Duration::from_secs(5)).as_deref(), Some("ok"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_chained_command_runs_inside_its_job_from_the_start() {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::System::JobObjects::IsProcessInJob;
+        let mut c = std::process::Command::new(crate::system_exe(r"System32\WindowsPowerShell\v1.0\powershell.exe"));
+        c.args(["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep 30"]);
+        let (mut child, job) = Job::spawn(&mut c).unwrap();
+        let job = job.expect("the command was put in a job");
+        let mut inside = 0;
+        // SAFETY: both handles are open
+        assert_ne!(unsafe { IsProcessInJob(child.as_raw_handle(), job.0, &mut inside) }, 0);
+        assert_ne!(inside, 0);
+        let started = Instant::now();
+        job.terminate();
+        child.wait().unwrap();
+        assert!(started.elapsed() < Duration::from_secs(5), "the job ended the command");
+    }
 
     #[test]
     fn only_a_recent_uninstall_turns_captures_back_on() {

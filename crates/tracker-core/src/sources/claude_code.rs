@@ -216,8 +216,14 @@ pub(crate) fn usage_events(v: &Value, ctx: &ClaudeCtx) -> Vec<UsageEvent> {
             thread_id: thread_id.clone(),
         }
     };
+    let searches = usage.get("server_tool_use").map(|s| u64_at(s, "web_search_requests")).unwrap_or(0);
+    // a count past u32 means a damaged line; the whole record is dropped like an impossible token count
+    let Ok(web_search_requests) = u32::try_from(searches) else {
+        log::warn!("Claude record skipped: implausible web search count");
+        return Vec::new();
+    };
     let mut out = vec![UsageEvent {
-        web_search_requests: usage.get("server_tool_use").map(|s| u64_at(s, "web_search_requests")).unwrap_or(0) as u32,
+        web_search_requests,
         speed: str_at(usage, "speed").map(str::to_owned),
         ..event(key.clone(), model, tokens, prompt)
     }];
@@ -327,6 +333,14 @@ mod tests {
 
     fn events(usage: Value) -> Vec<UsageEvent> {
         usage_events(&line(usage), &ClaudeCtx { client_override: None, source: "test" })
+    }
+
+    #[test]
+    fn a_web_search_count_past_u32_drops_the_record_instead_of_wrapping() {
+        let ev = |n: u64| events(json!({"input_tokens": 1, "output_tokens": 1, "server_tool_use": {"web_search_requests": n}}));
+        assert_eq!(ev(3)[0].web_search_requests, 3);
+        assert_eq!(ev(u32::MAX as u64)[0].web_search_requests, u32::MAX);
+        assert!(ev(u32::MAX as u64 + 2).is_empty());
     }
 
     #[test]

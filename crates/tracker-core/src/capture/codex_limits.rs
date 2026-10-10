@@ -77,14 +77,14 @@ pub fn parse_result(result: &Value, now_ms: i64) -> Vec<LimitSnapshot> {
         for slot in ["primary", "secondary"] {
             let Some(w) = b.get(slot).filter(|w| w.is_object()) else { continue };
             // classify by duration, not slot: `secondary` can be absent
-            let Some(minutes) = i64_at(w, "windowDurationMins") else { continue };
+            let Some(window) = i64_at(w, "windowDurationMins").and_then(window_name) else { continue };
             snaps.push(LimitSnapshot {
                 ts_ms: now_ms,
                 provider: Provider::OpenAI,
                 tool: Tool::Codex,
                 account: None,
                 limit_id: limit_id.clone(),
-                window: window_name(minutes),
+                window,
                 used_pct: f64_at(w, "usedPercent"),
                 resets_at: i64_at(w, "resetsAt"),
                 status: str_at(b, "rateLimitReachedType").map(|s| format!("reached:{s}")),

@@ -301,6 +301,118 @@ fn a_backup_with_impossible_times_brings_only_its_sound_rows() {
 }
 
 #[test]
+fn an_impossible_window_length_is_dropped_on_every_path_and_never_breaks_the_limits() {
+    let now = chrono::Utc::now().timestamp_millis();
+    let reset = Some(now / 1000 + 3600);
+    let book = PriceBook::default_book();
+    let reply = |mins: i64| serde_json::json!({"rateLimits": {"primary": {"usedPercent": 40.0, "windowDurationMins": mins, "resetsAt": reset}}});
+    for mins in [-1, 0, i64::MAX] {
+        assert!(tracker_core::capture::codex_limits::parse_result(&reply(mins), now).is_empty(), "{mins}");
+    }
+    assert_eq!(tracker_core::capture::codex_limits::parse_result(&reply(90), now)[0].window, "90m");
+
+    let mut store = Store::open_in_memory().unwrap();
+    let mut tx = store.transaction().unwrap();
+    tx.insert_limits(&[snap(now - 60_000, Provider::OpenAI, Tool::Codex, "-1m", 40.0, reset, None, "codex_app_server")]).unwrap();
+    tx.commit().unwrap();
+    assert!(limits_view(&store, &book, now, &[]).unwrap().is_empty(), "the live path stores nothing");
+
+    // rows an older version stored or a backup brings are read without a duration
+    let dir = tempfile::tempdir().unwrap();
+    let backup = dir.path().join("odd.db");
+    Store::open(&backup).unwrap();
+    for (i, w) in ["-1m", "0m", "-60000m", "99999999999m", "90m"].iter().enumerate() {
+        let conn = tracker_core::rusqlite::Connection::open(&backup).unwrap();
+        conn.execute(
+            "INSERT INTO limit_snapshot(ts_ms, provider, tool, account, limit_id, window, used_pct, resets_at, status, plan, source, accuracy)
+             VALUES(?1, 'openai', 'codex', '', 'codex', ?2, 40, ?3, NULL, NULL, 'codex_app_server', 'captured')",
+            tracker_core::rusqlite::params![now - 60_000 - i as i64, w, reset],
+        )
+        .unwrap();
+        store.conn().execute(
+            "INSERT INTO limit_snapshot(ts_ms, provider, tool, account, limit_id, window, used_pct, resets_at, status, plan, source, accuracy)
+             VALUES(?1, 'openai', 'codex', '', 'codex', ?2, 40, ?3, NULL, NULL, 'codex_app_server', 'captured')",
+            tracker_core::rusqlite::params![now - 60_000 - i as i64, w, reset],
+        )
+        .unwrap();
+    }
+    let views = limits_view(&store, &book, now, &[]).unwrap();
+    assert!(views.iter().all(|v| v.forecast.is_none() || v.window == "90m"));
+    let mut fresh = Store::open(&dir.path().join("fresh.db")).unwrap();
+    assert_eq!(fresh.merge_from(&backup).unwrap(), (0, 1), "only the sound window is imported");
+    limits_view(&fresh, &book, now, &[]).unwrap();
+}
+
+#[test]
+fn a_reading_dated_in_the_future_never_hides_the_current_one() {
+    let now = chrono::Utc::now().timestamp_millis();
+    let book = PriceBook::default_book();
+    let dir = tempfile::tempdir().unwrap();
+    let history = dir.path().join("plan-usage-history.json");
+    std::fs::write(&history, format!(r#"{{"version":2,"samples":[{{"t":{},"u":{{"fh":95}}}},{{"t":{},"u":{{"fh":5}}}}]}}"#, i64::MAX, now - 60_000)).unwrap();
+    let out = tracker_core::sources::claude_plan::parse_file(&history).unwrap();
+    assert_eq!((out.limits.len(), out.warning_count), (1, 1));
+
+    let mut store = Store::open_in_memory().unwrap();
+    let mut tx = store.transaction().unwrap();
+    tx.insert_limits(&[
+        snap(i64::MAX, Provider::Anthropic, Tool::ClaudeDesktop, "five_hour", 95.0, None, None, "claude_plan_history"),
+        snap(now - 60_000, Provider::Anthropic, Tool::ClaudeDesktop, "five_hour", 5.0, None, None, "claude_plan_history"),
+    ])
+    .unwrap();
+    tx.commit().unwrap();
+    assert_eq!(store.conn().query_row("SELECT COUNT(*) FROM limit_snapshot", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+
+    // a row an older version stored is passed over, and an hour of clock drift is still accepted
+    store
+        .conn()
+        .execute(
+            "INSERT INTO limit_snapshot(ts_ms, provider, tool, account, limit_id, window, used_pct, resets_at, status, plan, source, accuracy)
+             VALUES(?1, 'anthropic', 'claude_desktop', '', '', 'five_hour', 95, NULL, NULL, NULL, 'claude_plan_history', 'exact')",
+            [i64::MAX],
+        )
+        .unwrap();
+    let v = &limits_view(&store, &book, now, &[]).unwrap()[0];
+    assert_eq!((v.used_pct, v.state), (Some(5.0), LimitState::Fresh));
+    let mut tx = store.transaction().unwrap();
+    tx.insert_limits(&[snap(now + 3_600_000, Provider::Anthropic, Tool::ClaudeDesktop, "five_hour", 7.0, None, None, "claude_plan_history")]).unwrap();
+    tx.commit().unwrap();
+    assert_eq!(limits_view(&store, &book, now, &[]).unwrap()[0].used_pct, Some(7.0));
+}
+
+#[test]
+fn a_stored_reading_dated_before_1970_is_never_shown_as_current() {
+    let now = chrono::Utc::now().timestamp_millis();
+    let book = PriceBook::default_book();
+    let mut store = Store::open_in_memory().unwrap();
+    // rows an older version could store; written directly, past today's insert checks
+    let legacy = |store: &Store, ts: i64, used: f64| {
+        store
+            .conn()
+            .execute(
+                "INSERT INTO limit_snapshot(ts_ms, provider, tool, account, limit_id, window, used_pct, resets_at, status, plan, source, accuracy)
+                 VALUES(?1, 'anthropic', 'claude_desktop', '', '', 'five_hour', ?2, NULL, NULL, NULL, 'claude_plan_history', 'exact')",
+                tracker_core::rusqlite::params![ts, used],
+            )
+            .unwrap();
+    };
+    legacy(&store, i64::MIN, 95.0);
+    legacy(&store, -1, 90.0);
+    assert!(limits_view(&store, &book, now, &[]).unwrap().is_empty());
+
+    // the first moment of 1970 is a valid, very old reading: it shows as stale, never current
+    legacy(&store, 0, 80.0);
+    let v = &limits_view(&store, &book, now, &[]).unwrap()[0];
+    assert_eq!((v.used_pct, v.state), (Some(80.0), LimitState::Stale));
+
+    let mut tx = store.transaction().unwrap();
+    tx.insert_limits(&[snap(now - 60_000, Provider::Anthropic, Tool::ClaudeDesktop, "five_hour", 5.0, None, None, "claude_plan_history")]).unwrap();
+    tx.commit().unwrap();
+    let v = &limits_view(&store, &book, now, &[]).unwrap()[0];
+    assert_eq!((v.used_pct, v.state), (Some(5.0), LimitState::Fresh));
+}
+
+#[test]
 fn a_failed_export_keeps_the_existing_file_and_the_archive_is_never_a_target() {
     use std::io::Write;
     use tracker_core::export::write_atomically;

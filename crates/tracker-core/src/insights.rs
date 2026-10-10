@@ -755,12 +755,16 @@ pub struct Forecast {
 /// hours (nights, breaks); a burst of recent work is not extrapolated as if it never stopped.
 /// Before a tenth of the window has passed the pace is not trusted.
 pub fn forecast(now_ms: i64, current: f64, resets_at_ms: i64, window_ms: i64) -> Forecast {
-    let started = resets_at_ms - window_ms;
-    let elapsed = (now_ms - started).clamp(0, window_ms);
-    let left_ms = (resets_at_ms - now_ms).max(0);
+    let base = Forecast { kind: ForecastKind::Insufficient, rate_per_hour: None, fills_at_ms: None, at_reset_pct: None, basis_minutes: 0 };
+    if window_ms <= 0 || !current.is_finite() {
+        return base;
+    }
+    let started = resets_at_ms.saturating_sub(window_ms);
+    let elapsed = now_ms.saturating_sub(started).clamp(0, window_ms);
+    let left_ms = resets_at_ms.saturating_sub(now_ms).max(0);
     let current = current.clamp(0.0, 100.0);
-    let base = Forecast { kind: ForecastKind::Insufficient, rate_per_hour: None, fills_at_ms: None, at_reset_pct: None, basis_minutes: elapsed / 60_000 };
-    if window_ms <= 0 || elapsed < window_ms / 10 {
+    let base = Forecast { basis_minutes: elapsed / 60_000, ..base };
+    if elapsed < window_ms / 10 {
         return base;
     }
     let per_ms = current / elapsed as f64;
@@ -770,7 +774,7 @@ pub fn forecast(now_ms: i64, current: f64, resets_at_ms: i64, window_ms: i64) ->
     }
     let to_full_ms = ((100.0 - current) / per_ms) as i64;
     if to_full_ms < left_ms {
-        Forecast { kind: ForecastKind::Fills, fills_at_ms: Some(now_ms + to_full_ms), ..base }
+        Forecast { kind: ForecastKind::Fills, fills_at_ms: Some(now_ms.saturating_add(to_full_ms)), ..base }
     } else {
         Forecast { kind: ForecastKind::Safe, at_reset_pct: Some((current + per_ms * left_ms as f64).min(100.0)), ..base }
     }
