@@ -218,21 +218,36 @@ pub struct LimitSnapshot {
 /// The latest time accepted from any source: the year 3000, in epoch seconds.
 pub const MAX_EPOCH_SECS: i64 = 32_503_680_000;
 
+/// How far ahead of the clock a reading may be dated (clock drift between processes and machines).
+pub const MAX_CLOCK_SKEW_MS: i64 = 86_400_000;
+
 impl LimitSnapshot {
+    /// A reading dated before 1970 or ahead of the clock, or with an impossible window, is damaged:
+    /// stored, it would outrank every real reading as the newest one.
+    pub fn is_damaged(&self, now_ms: i64) -> bool {
+        let window = self.window.strip_suffix('m').and_then(|n| n.parse::<i64>().ok());
+        !(0..=now_ms.saturating_add(MAX_CLOCK_SKEW_MS)).contains(&self.ts_ms) || window.is_some_and(|m| !(1..=MAX_WINDOW_MINUTES).contains(&m))
+    }
+
     /// The reset time in milliseconds; `None` for a time outside 1970–3000 (a damaged record).
     pub fn resets_at_ms(&self) -> Option<i64> {
         self.resets_at.filter(|r| (0..=MAX_EPOCH_SECS).contains(r)).map(|r| r * 1000)
     }
 }
 
-pub fn window_name(minutes: i64) -> String {
-    match minutes {
+/// The longest limit window accepted: a year. Anything else is a damaged reading.
+pub const MAX_WINDOW_MINUTES: i64 = 366 * 1440;
+
+/// `None` for a duration no limit window has (zero, negative or over a year).
+pub fn window_name(minutes: i64) -> Option<String> {
+    Some(match minutes {
         300 => "five_hour".into(),
         1440 => "one_day".into(),
         10080 => "seven_day".into(),
         43200 => "thirty_day".into(), // seen on the ChatGPT Go plan
-        m => format!("{m}m"),
-    }
+        m if (1..=MAX_WINDOW_MINUTES).contains(&m) => format!("{m}m"),
+        _ => return None,
+    })
 }
 
 pub fn parse_ts_ms(s: &str) -> Option<i64> {

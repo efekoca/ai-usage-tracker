@@ -392,14 +392,14 @@ fn rate_limits(rl: &Value, ts_ms: i64, out: &mut Vec<LimitSnapshot>) {
     let limit_id = str_at(rl, "limit_id").unwrap_or("codex").to_owned();
     for slot in ["primary", "secondary"] {
         let Some(w) = rl.get(slot).filter(|w| w.is_object()) else { continue };
-        let Some(minutes) = i64_at(w, "window_minutes") else { continue };
+        let Some(window) = i64_at(w, "window_minutes").and_then(window_name) else { continue };
         out.push(LimitSnapshot {
             ts_ms,
             provider: Provider::OpenAI,
             tool: Tool::Codex,
             account: None,
             limit_id: limit_id.clone(),
-            window: window_name(minutes),
+            window,
             used_pct: f64_at(w, "used_percent"),
             resets_at: i64_at(w, "resets_at"),
             status: str_at(rl, "rate_limit_reached_type").map(|s| format!("reached:{s}")),

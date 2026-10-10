@@ -104,7 +104,9 @@ impl ParseOutput {
 
     /// The parser stops after the line that fills a round; the next round resumes from there.
     pub fn round_full(&self) -> bool {
-        self.events.len() + self.limits.len() + self.tool_calls.len() + self.tool_results.len()
+        // old keys to clear count too: a log of repeated readings stores almost no events
+        let stale = self.stale_events.len() + self.stale_tool_calls.len() + self.stale_limits.len();
+        self.events.len() + self.limits.len() + self.tool_calls.len() + self.tool_results.len() + stale
             >= ROUND_RECORDS.load(std::sync::atomic::Ordering::Relaxed)
     }
 }

@@ -84,3 +84,32 @@ fn damaged_lines_are_all_counted_but_only_a_sample_is_kept() {
         store.conn().query_row("SELECT warnings, last_warning FROM file_checkpoint", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
     assert_eq!((count, last.as_str()), (1_000, read.warnings.last().unwrap().as_str()));
 }
+
+#[test]
+fn a_codex_log_of_repeated_readings_is_also_read_in_rounds() {
+    set_round_records(ROUND);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("rollout-2026-09-05T10-00-00-0199aaaa-bbbb-7ccc-8ddd-eeeeffff0011.jsonl");
+    let mut lines = vec![
+        r#"{"timestamp":"2026-09-05T10:00:00.000Z","type":"session_meta","payload":{"id":"0199aaaa-bbbb-7ccc-8ddd-eeeeffff0011","cwd":"/p"}}"#.to_owned(),
+        r#"{"timestamp":"2026-09-05T10:00:01.000Z","type":"turn_context","payload":{"model":"gpt-5.5"}}"#.to_owned(),
+    ];
+    // one use, then the same cumulative total again and again: one event, many old keys to clear
+    for i in 0..35 {
+        lines.push(format!(
+            r#"{{"timestamp":"2026-09-05T10:01:{i:02}.000Z","type":"event_msg","payload":{{"type":"token_count","info":{{"total_token_usage":{{"input_tokens":10,"output_tokens":1}},"last_token_usage":{{"input_tokens":10,"output_tokens":1}}}}}}}}"#
+        ));
+    }
+    fs::write(&path, lines.iter().map(|l| format!("{l}\n")).collect::<String>()).unwrap();
+    let len = fs::metadata(&path).unwrap().len();
+
+    let first = tracker_core::sources::codex::parse_file(&path, 0, &serde_json::Value::Null).unwrap();
+    assert!(first.round_full() && first.next_offset < len, "the round stops before the end of the file");
+    assert!(first.stale_events.len() <= ROUND);
+
+    let f = DiscoveredFile { file_id: file_identity(&path), path, parser: ParserKind::CodexRollout, source: SourceId::Codex };
+    let mut store = Store::open_in_memory().unwrap();
+    ingest_file(&mut store, &f).unwrap().unwrap();
+    assert_eq!(totals(&store), (1, 10));
+    assert_eq!(offset(&store, &f), len);
+}

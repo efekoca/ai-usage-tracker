@@ -146,16 +146,18 @@ fn run_installer(mut cmd: Command, timeout: Duration) -> Result<(), String> {
     Err(format!("install_failed:{}", if last.is_empty() { status.to_string() } else { last }))
 }
 
-/// Ends the installer and everything it started.
-fn kill_tree(child: &mut std::process::Child) {
+/// Ends a child and everything it started. On Unix the child must lead its own process group
+/// (`process_group(0)`).
+pub fn kill_tree(child: &mut std::process::Child) {
     // a direct call: procps-ng 4.0.2's `kill -KILL -<group>` (Debian 12) exits 0 and signals nothing
     #[cfg(unix)]
     if let Ok(group) = libc::pid_t::try_from(child.id()) {
-        // SAFETY: plain syscall; the group is the installer's own, created by `process_group(0)`
+        // SAFETY: plain syscall; the group is the child's own, created by `process_group(0)`
         unsafe { libc::kill(-group, libc::SIGKILL) };
     }
+    // Windows finds the tree through a running parent; an exited one's id may already be reused
     #[cfg(windows)]
-    {
+    if matches!(child.try_wait(), Ok(None)) {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let taskkill = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows")).join(r"System32\taskkill.exe");
