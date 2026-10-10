@@ -239,7 +239,8 @@ impl PriceBook {
                     .find(|(k, _)| k.eq_ignore_ascii_case(&m))
                     .and_then(|(_, target)| find(&target.to_ascii_lowercase()))
             })
-            .or_else(|| strip_date_suffix(&m).and_then(find))
+            // a dated id takes the price of its base, user aliases included
+            .or_else(|| strip_date_suffix(&m).and_then(|base| self.lookup(base)))
     }
 
     /// `None` when the model has no known price.
@@ -445,6 +446,7 @@ mod tests {
         f.user_aliases.insert("codex-auto-review".into(), "gpt-5.6-terra".into());
         let b = PriceBook::from_json(&serde_json::to_string(&f).unwrap()).unwrap();
         assert_eq!(b.lookup("codex-auto-review").unwrap().id, "gpt-5.6-terra");
+        assert_eq!(b.lookup("codex-auto-review-20261001").unwrap().id, "gpt-5.6-terra", "a dated id follows the alias too");
     }
 
     #[test]

@@ -321,10 +321,12 @@ fn read(path: &Path) -> Result<ParseOutput, Box<dyn std::error::Error + Send + S
     {
         let mut q = conn.prepare("SELECT idx, status, metadata, error_details IS NOT NULL AND length(error_details) > 0 FROM steps")?;
         let rows = q.query_map([], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, Option<Vec<u8>>>(2)?, r.get::<_, bool>(3)?))
+            Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, Option<i64>>(1)?, r.get::<_, Option<Vec<u8>>>(2)?, r.get::<_, Option<bool>>(3)?))
         })?;
         for row in rows {
-            let (idx, status, meta, has_error) = row?;
+            // a damaged step is skipped; the rest of the conversation is still read
+            let (Some(idx), status, meta, has_error) = row? else { continue };
+            let (status, has_error) = (status.unwrap_or_default(), has_error.unwrap_or_default());
             let meta = meta.unwrap_or_default();
             let call = msg(&meta, 4).and_then(|c| Some((text(c, 1), text(c, 2)?)));
             let failed = has_error || STEP_FAILED.contains(&status);

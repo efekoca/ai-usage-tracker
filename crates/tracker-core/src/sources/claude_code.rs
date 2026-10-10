@@ -35,10 +35,11 @@ fn encode_dir(p: &str) -> String {
     p.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
 }
 
+/// The folder after the last `projects`: the config root itself may sit under a `Projects` folder.
 fn project_folder(path: &Path) -> Option<String> {
-    let mut parts = path.components().map(|c| c.as_os_str().to_string_lossy().into_owned());
-    parts.by_ref().find(|c| c.eq_ignore_ascii_case("projects"))?;
-    parts.next()
+    let parts: Vec<String> = path.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+    let at = parts.iter().rposition(|c| c.eq_ignore_ascii_case("projects"))?;
+    parts.get(at + 1).cloned()
 }
 
 /// The directory a session was launched in: the deepest ancestor of `cwd` (itself included)
@@ -132,7 +133,7 @@ fn usage_tokens(u: &Value) -> Tokens {
 }
 
 fn prompt_size(t: &Tokens) -> u64 {
-    t.input + t.cache_read + t.cache_write
+    t.input.saturating_add(t.cache_read).saturating_add(t.cache_write)
 }
 
 fn consulted_model(it: &Value) -> Option<&str> {
@@ -319,6 +320,19 @@ fn version_gt(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_project_folder_follows_the_last_projects_folder() {
+        let p = Path::new("/x/Projects/cfg/projects/-p-app/sess/subagents/agent-a.jsonl");
+        assert_eq!(project_folder(p).as_deref(), Some("-p-app"));
+        assert_eq!(project_folder(Path::new("/home/u/.claude/projects/-p-app/s.jsonl")).as_deref(), Some("-p-app"));
+    }
+
+    #[test]
+    fn a_huge_count_does_not_overflow_the_prompt_size() {
+        let ev = events(json!({"input_tokens": u64::MAX, "cache_read_input_tokens": 1, "output_tokens": 1}));
+        assert_eq!(ev[0].request_input, u64::MAX);
+    }
 
     #[test]
     fn versions_compare_numerically() {

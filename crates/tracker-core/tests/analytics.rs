@@ -514,6 +514,27 @@ fn a_reading_without_a_reset_time_takes_the_one_another_source_knows() {
 }
 
 #[test]
+fn impossible_times_and_percentages_from_logs_are_not_stored() {
+    let now = chrono::Utc::now().timestamp_millis();
+    let mut store = Store::open_in_memory().unwrap();
+    let event = |key: &str, ts_ms: i64| ev(key, ts_ms, Tool::ClaudeCode, "claude-opus-5-5", "/p", 10, 1);
+    let mut tx = store.transaction().unwrap();
+    // year 1, a copy dated far ahead, and a real event
+    tx.upsert_events(&[event("year1", -62_135_596_800_000), event("ahead", now + 400 * 86_400_000), event("real", now - 60_000)]).unwrap();
+    tx.insert_limits(&[
+        snap(now - 60_000, Provider::Anthropic, Tool::ClaudeDesktop, "five_hour", 1e9, None, None, "claude_plan_history"),
+        snap(now - 60_000, Provider::Anthropic, Tool::ClaudeDesktop, "seven_day", -50.0, None, None, "claude_plan_history"),
+        snap(now - 60_000, Provider::OpenAI, Tool::Codex, "five_hour", 42.0, None, None, "codex_rollout"),
+    ])
+    .unwrap();
+    tx.commit().unwrap();
+    let keys: Vec<String> = store.conn().prepare("SELECT key FROM usage_event").unwrap().query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
+    assert_eq!(keys, ["real"]);
+    let pcts: Vec<f64> = store.conn().prepare("SELECT used_pct FROM limit_snapshot").unwrap().query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
+    assert_eq!(pcts, [42.0]);
+}
+
+#[test]
 fn a_failed_export_keeps_the_existing_file_and_the_archive_is_never_a_target() {
     use std::io::Write;
     use tracker_core::export::write_atomically;

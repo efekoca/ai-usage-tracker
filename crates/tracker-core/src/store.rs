@@ -497,6 +497,7 @@ impl Store {
             )?;
             // a backup made by an older version may file an event under a project this archive
             // has since corrected; the archive's project wins
+            let latest = latest_accepted_ms();
             let tail = UPSERT_EVENT_TAIL.replace("project_id = COALESCE(excluded.project_id, project_id)", "project_id = COALESCE(project_id, excluded.project_id)");
             debug_assert_ne!(tail, UPSERT_EVENT_TAIL);
             let events = tx.execute(
@@ -508,7 +509,7 @@ impl Store {
                      FROM other.usage_event e
                      LEFT JOIN other.project op ON op.id = e.project_id
                      LEFT JOIN main.project p ON p.path = op.path
-                     WHERE typeof(e.ts_ms) = 'integer' AND e.ts_ms BETWEEN 0 AND {MAX_IMPORTED_MS} {valid_counts} {old_events}
+                     WHERE typeof(e.ts_ms) = 'integer' AND e.ts_ms BETWEEN 0 AND {latest} {valid_counts} {old_events}
                      {tail}"
                 ),
                 [],
@@ -534,7 +535,7 @@ impl Store {
                          FROM other.tool_call c
                          LEFT JOIN other.project op ON op.id = c.project_id
                          LEFT JOIN main.project p ON p.path = op.path
-                         WHERE typeof(c.ts_ms) = 'integer' AND typeof(c.failed) IN ('integer', 'null') {old_calls}
+                         WHERE typeof(c.ts_ms) = 'integer' AND c.ts_ms BETWEEN 0 AND {latest} AND typeof(c.failed) IN ('integer', 'null') {old_calls}
                          ON CONFLICT(key) DO UPDATE SET failed = COALESCE(failed, excluded.failed)"
                     ),
                     [],
@@ -643,6 +644,11 @@ impl StoreTx<'_> {
                 log::warn!("event {} skipped: implausible token count", e.key);
                 continue;
             }
+            // a damaged date (year 1, far future) would also drag a real copy's time with it
+            if !(0..=latest_accepted_ms()).contains(&e.ts_ms) {
+                log::warn!("event {} skipped: impossible time", e.key);
+                continue;
+            }
             let pid = match &e.project_path {
                 Some(p) if !p.is_empty() => Some(self.project_id(p)?),
                 // captured events carry no working directory: borrow the project of a logged
@@ -696,7 +702,7 @@ impl StoreTx<'_> {
 
     /// Inserts tool calls; a repeated key (copies of a message) keeps the known outcome.
     pub fn upsert_tool_calls(&mut self, calls: &[ToolCall]) -> Result<()> {
-        for c in calls {
+        for c in calls.iter().filter(|c| (0..=latest_accepted_ms()).contains(&c.ts_ms)) {
             let pid = match &c.project_path {
                 Some(p) if !p.is_empty() => Some(self.project_id(p)?),
                 _ => None,
