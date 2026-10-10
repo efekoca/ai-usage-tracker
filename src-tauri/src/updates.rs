@@ -198,7 +198,8 @@ fn install_package(update: &tauri_plugin_updater::Update, bytes: &[u8], data_dir
     let file = dir.join(format!("ai-usage-tracker.{ext}"));
     std::fs::write(&file, bytes).map_err(|e| e.to_string())?;
     let has = |tool: &str| ["/usr/bin", "/bin", "/usr/sbin", "/sbin"].iter().any(|d| std::path::Path::new(d).join(tool).is_file());
-    let args = package_command(ext, &file, has);
+    let sha: String = sha2::Digest::finalize(<sha2::Sha256 as sha2::Digest>::new_with_prefix(bytes)).iter().map(|b| format!("{b:02x}")).collect();
+    let args = root_install(ext, &file, &sha, &package_command(ext, has));
     log::info!("installing the update with pkexec {}", args.join(" "));
     let status = std::process::Command::new("pkexec").args(&args).status();
     let _ = std::fs::remove_dir_all(&dir);
@@ -221,10 +222,10 @@ fn install_package(update: &tauri_plugin_updater::Update, bytes: &[u8], _data_di
     update.install(bytes).map_err(|e| e.to_string())
 }
 
+/// The package tool and its options; the package path is added last.
 #[cfg(any(target_os = "linux", test))]
-fn package_command(ext: &str, file: &std::path::Path, has: impl Fn(&str) -> bool) -> Vec<String> {
-    let file = file.to_string_lossy().into_owned();
-    let v = |a: &[&str]| a.iter().map(|s| s.to_string()).chain([file.clone()]).collect();
+fn package_command(ext: &str, has: impl Fn(&str) -> bool) -> Vec<String> {
+    let v = |a: &[&str]| a.iter().map(|s| s.to_string()).collect();
     match ext {
         "deb" if has("apt-get") => v(&["apt-get", "install", "-y", "--allow-downgrades"]),
         "deb" => v(&["dpkg", "-i"]),
@@ -233,6 +234,29 @@ fn package_command(ext: &str, file: &std::path::Path, has: impl Fn(&str) -> bool
         _ if has("zypper") => v(&["zypper", "--non-interactive", "install", "--allow-unsigned-rpm"]),
         _ => v(&["rpm", "-U"]),
     }
+}
+
+#[cfg(any(target_os = "linux", test))]
+/// Run as root: copies the package into a root-owned folder and installs that copy only if it
+/// still matches the bytes whose signature the updater checked. The downloaded file sits in a
+/// folder the user's own programs can write to while the password prompt is open.
+const ROOT_INSTALL: &str = r#"set -eu
+src=$1; sum=$2; ext=$3; shift 3
+dir=$(mktemp -d)
+trap 'rm -rf "$dir"' EXIT
+chmod 755 "$dir"
+pkg="$dir/ai-usage-tracker.$ext"
+cp -- "$src" "$pkg"
+chmod 644 "$pkg"
+if [ "$(sha256sum "$pkg" | cut -d ' ' -f 1)" != "$sum" ]; then
+  echo "the update package changed after its signature check" >&2
+  exit 3
+fi
+"$@" "$pkg""#;
+
+#[cfg(any(target_os = "linux", test))]
+fn root_install(ext: &str, file: &std::path::Path, sha: &str, tool: &[String]) -> Vec<String> {
+    ["/bin/sh", "-c", ROOT_INSTALL, "sh"].iter().map(|s| s.to_string()).chain([file.to_string_lossy().into_owned(), sha.to_owned(), ext.to_owned()]).chain(tool.iter().cloned()).collect()
 }
 
 pub fn start(app: AppHandle) {
@@ -263,14 +287,43 @@ mod tests {
 
     #[test]
     fn packages_are_installed_with_the_distributions_tool() {
-        let f = Path::new("/home/u/.local/share/AIUsageTracker/update/ai-usage-tracker.deb");
         let only = |tools: &'static [&'static str]| move |t: &str| tools.contains(&t);
-        assert_eq!(package_command("deb", f, only(&["apt-get", "dpkg"])), ["apt-get", "install", "-y", "--allow-downgrades", f.to_str().unwrap()]);
-        assert_eq!(package_command("deb", f, only(&["dpkg"]))[..2], ["dpkg", "-i"]);
-        let r = Path::new("/x/ai-usage-tracker.rpm");
-        assert_eq!(package_command("rpm", r, only(&["dnf", "rpm"]))[..3], ["dnf", "install", "-y"]);
-        assert!(package_command("rpm", r, only(&["zypper", "rpm"])).contains(&"--allow-unsigned-rpm".to_string()));
-        assert_eq!(package_command("rpm", r, only(&["rpm"])), ["rpm", "-U", "/x/ai-usage-tracker.rpm"]);
+        assert_eq!(package_command("deb", only(&["apt-get", "dpkg"])), ["apt-get", "install", "-y", "--allow-downgrades"]);
+        assert_eq!(package_command("deb", only(&["dpkg"])), ["dpkg", "-i"]);
+        assert_eq!(package_command("rpm", only(&["dnf", "rpm"])), ["dnf", "install", "-y"]);
+        assert!(package_command("rpm", only(&["zypper", "rpm"])).contains(&"--allow-unsigned-rpm".to_string()));
+        assert_eq!(package_command("rpm", only(&["rpm"])), ["rpm", "-U"]);
+        let f = Path::new("/home/u/.local/share/AIUsageTracker/update/ai-usage-tracker.deb");
+        let args = root_install("deb", f, "ab12", &package_command("deb", only(&["dpkg"])));
+        assert_eq!(args[..2], ["/bin/sh", "-c"]);
+        assert_eq!(args[3..], ["sh", f.to_str().unwrap(), "ab12", "deb", "dpkg", "-i"]);
+    }
+
+    /// The root step installs a copy only when it still matches the signed bytes.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_package_changed_after_its_signature_check_is_not_installed() {
+        use sha2::Digest;
+        let dir = std::env::temp_dir().join(format!("aiut-root-install-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("ai-usage-tracker.deb");
+        let out = dir.join("installed");
+        let signed = b"signed package";
+        let sha: String = sha2::Sha256::digest(signed).iter().map(|b| format!("{b:02x}")).collect();
+        // stands in for the package tool: records what it was given
+        let tool: Vec<String> = ["sh", "-c", r#"cat "$1" > "$0""#].iter().map(|s| s.to_string()).chain([out.to_string_lossy().into_owned()]).collect();
+        let run = |content: &[u8]| {
+            std::fs::write(&file, content).unwrap();
+            let _ = std::fs::remove_file(&out);
+            let args = root_install("deb", &file, &sha, &tool);
+            std::process::Command::new(&args[0]).args(&args[1..]).status().unwrap()
+        };
+        assert!(run(signed).success());
+        assert_eq!(std::fs::read(&out).unwrap(), signed);
+        let swapped = run(b"another package");
+        assert_eq!(swapped.code(), Some(3));
+        assert!(!out.exists(), "a swapped package must not reach the package tool");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

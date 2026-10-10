@@ -52,3 +52,5 @@ webkit2gtk = "2.0"
 gtk = "0.18"
 # already pulled in by the single-instance plugin; talks to xdg-desktop-portal for Wayland shortcuts
 zbus = "5"
+# already in the tree; the root install checks the package against the signed bytes
+sha2 = "0.10"
