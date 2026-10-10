@@ -114,7 +114,7 @@
   <section class="card">
     <h2><Icon name="warning" size={16} /> {t('sources.warnings')}</h2>
     <p class="subtle small help">{t('sources.warnings.help')}</p>
-    {#each warnings.slice(0, 20) as w (w.path)}
+    {#each warnings.slice(0, 20) as w, i (i)}
       <div class="list-row warn">
         <span class="path small">{w.path}</span>
         <span class="spacer"></span>

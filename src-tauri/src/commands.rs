@@ -146,9 +146,24 @@ pub struct ParserWarning {
 }
 
 #[tauri::command]
-pub fn parser_warnings(state: State<AppState>) -> Res<Vec<ParserWarning>> {
+pub fn parser_warnings(window: WebviewWindow, state: State<AppState>) -> Res<Vec<ParserWarning>> {
+    main_only(&window)?;
+    let hide = state.settings.read().unwrap().hide_project_names;
     let rows = state.db().files_with_warnings().map_err(err)?;
-    Ok(rows.into_iter().map(|(path, parser, count, last)| ParserWarning { path, parser, count, last }).collect())
+    Ok(rows.into_iter().map(|(path, parser, count, last)| ParserWarning { path: if hide { mask_project_folder(&path) } else { path }, parser, count, last }).collect())
+}
+
+/// Claude Code names each project's log folder after its path (`projects/-Users-me-app/…`).
+fn mask_project_folder(path: &str) -> String {
+    let mut after_projects = false;
+    path.split_inclusive(['/', '\\'])
+        .map(|part| {
+            let name = part.trim_end_matches(['/', '\\']);
+            let out = if after_projects { part.replacen(name, "…", 1) } else { part.to_owned() };
+            after_projects = name == "projects";
+            out
+        })
+        .collect()
 }
 
 fn mask_report(r: &mut Report, hide_all: bool) {
@@ -798,4 +813,19 @@ pub async fn get_day_detail(app: AppHandle, date: String, filter: Option<Filter>
         }
     }
     Ok(d)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_hidden_project_name_stays_out_of_log_paths() {
+        assert_eq!(
+            mask_project_folder("/Users/me/.claude/projects/-Users-me-secret-app/0199-sess/subagents/agent-a.jsonl"),
+            "/Users/me/.claude/projects/…/0199-sess/subagents/agent-a.jsonl"
+        );
+        assert_eq!(mask_project_folder(r"C:\Users\me\.claude\projects\C--Work-secret\s.jsonl"), r"C:\Users\me\.claude\projects\…\s.jsonl");
+        assert_eq!(mask_project_folder("/Users/me/.codex/sessions/2026/10/rollout-1.jsonl"), "/Users/me/.codex/sessions/2026/10/rollout-1.jsonl");
+    }
 }
