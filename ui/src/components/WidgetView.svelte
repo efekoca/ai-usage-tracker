@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Provider, WidgetData, WidgetItemKind, WidgetPeriod, WidgetSettings } from '../lib/api'
-  import { fmtCompact, fmtDec, fmtDuration, fmtMoney, fmtPct, fmtTime, limitShown, lower, t, toolLabel, type LimitMode } from '../lib/i18n.svelte'
+  import { fmtCompact, fmtDec, fmtDuration, fmtMoney, fmtPct, fmtTime, has, limitShown, lower, t, toolLabel, type LimitMode } from '../lib/i18n.svelte'
   import { toolColor } from '../lib/store.svelte'
   import BrandIcon from './BrandIcon.svelte'
 
@@ -20,16 +20,30 @@
   const limitOrder = $derived(order.filter((k) => limitKinds.includes(k)))
 
   const period = $derived(data ? data[ws.primary_period] : null)
+  const rankOf = (p: Provider) => {
+    const i = (ws.provider_order ?? []).indexOf(p)
+    return i < 0 ? 99 : i
+  }
   const providers = $derived(
-    (data?.providers ?? []).filter((p) => ws.providers.length === 0 || ws.providers.includes(p)) as Provider[],
+    (data?.providers ?? []).filter((p) => ws.providers.length === 0 || ws.providers.includes(p)).sort((a, b) => rankOf(a) - rankOf(b)) as Provider[],
+  )
+  // a provider with several pools (Antigravity) gets a row per pool when all are shown
+  const entries = $derived(
+    providers.flatMap((p) => {
+      if (p !== 'google' || ws.antigravity_pool === 'fullest' || !ws.antigravity_pool) return [{ p, pool: null as string | null }]
+      if (ws.antigravity_pool !== 'all') return [{ p, pool: ws.antigravity_pool as string }]
+      const pools = [...new Set((data?.limits ?? []).filter((l) => l.provider === p && l.limit_id).map((l) => l.limit_id))]
+      if (!pools.length) return [{ p, pool: null as string | null }]
+      return pools.sort((a, b) => (a === 'gemini' ? -1 : b === 'gemini' ? 1 : a.localeCompare(b))).map((pool) => ({ p, pool: pool as string | null }))
+    }),
   )
   const periodLabel = $derived(t(`widget.period.${ws.primary_period}`))
 
-  function limit(p: Provider, kind: WidgetItemKind) {
+  function limit(p: Provider, kind: WidgetItemKind, pool: string | null) {
     const w = kind === 'limit_five_hour' ? 'five_hour' : 'seven_day'
     // with several pools (Antigravity) the fullest current one is shown, as in the tray
     const rank = (x: { state: string; used_pct: number | null }) => (x.state === 'fresh' ? 1000 : 0) + (x.used_pct ?? -1)
-    const l = (data?.limits ?? []).filter((x) => x.provider === p && x.window === w).sort((a, b) => rank(b) - rank(a))[0]
+    const l = (data?.limits ?? []).filter((x) => x.provider === p && x.window === w && (pool === null || x.limit_id === pool)).sort((a, b) => rank(b) - rank(a))[0]
     if (!l) return null
     const known = l.state === 'fresh' && l.used_pct !== null
     // 'behind': the current value is unknown, so only the last reading is shown
@@ -81,16 +95,19 @@
   {/if}
 {/snippet}
 
-{#snippet name(p: Provider)}
+{#snippet name(p: Provider, pool: string | null)}
+  {@const short = pool && has(`widget.pool.${p}.${pool}`) ? t(`widget.pool.${p}.${pool}`) : ''}
+  {@const title = short ? `${t(`provider.${p}`)} · ${t(`limits.pool.${p}.${pool}`)}` : t(`provider.${p}`)}
   {#if ws.show_labels}
-    <span class="pn">{#if ws.show_icons}<BrandIcon provider={p} color={tintIcons ? colors?.[p] : null} />{/if}{t(`provider.${p}`)} <span class="mode">{t(`widget.mode.${mode}`)}</span></span>
+    <!-- a pool row names its pool where the others name the mode, so it is no wider -->
+    <span class="pn" title={short ? title : undefined}>{#if ws.show_icons}<BrandIcon provider={p} color={tintIcons ? colors?.[p] : null} always />{/if}{t(`provider.${p}`)} <span class="mode">{short || t(`widget.mode.${mode}`)}</span></span>
   {:else if ws.show_icons}
-    <span class="pn"><BrandIcon provider={p} color={tintIcons ? colors?.[p] : null} label={t(`provider.${p}`)} /></span>
+    <span class="pn"><BrandIcon provider={p} color={tintIcons ? colors?.[p] : null} label={title} always /></span>
   {/if}
 {/snippet}
 
-{#snippet providerLimits(p: Provider, kinds: WidgetItemKind[])}
-  {@const rows = kinds.map((k) => ({ k, l: limit(p, k) })).filter((x) => x.l !== null) as { k: WidgetItemKind; l: NonNullable<ReturnType<typeof limit>> }[]}
+{#snippet providerLimits(p: Provider, pool: string | null, kinds: WidgetItemKind[])}
+  {@const rows = kinds.map((k) => ({ k, l: limit(p, k, pool) })).filter((x) => x.l !== null) as { k: WidgetItemKind; l: NonNullable<ReturnType<typeof limit>> }[]}
   {#if rows.length}
     {@const lead = rows[0]}
     {#if ws.limit_style === 'ring'}
@@ -103,7 +120,7 @@
           <text x="20" y="20" dy="0.35em" text-anchor="middle">{lead.l.val !== null ? fmtDec(lead.l.val) : lead.l.last ? '?' : '–'}</text>
         </svg>
         <div class="rl">
-          {@render name(p)}
+          {@render name(p, pool)}
           <span class="sub">
             {winShort(lead.k)}{lead.l.estimated ? ' ≈' : ''}{lead.l.last ? ` · ${t('widget.lastShort', { pct: fmtPct(lead.l.last.pct) })}` : ws.show_reset_time && lead.l.resets ? ` · ${fmtDuration(lead.l.resets * 1000 - now)}` : ''}
             {#each rows.slice(1) as r (r.k)}
@@ -114,7 +131,7 @@
       </div>
     {:else if ws.limit_style === 'bar'}
       <div class="barrow">
-        {@render name(p)}
+        {@render name(p, pool)}
         {#each rows as r (r.k)}
           <div class="bh">
             <span class="sub">{winShort(r.k)}{ws.show_reset_time && r.l.resets ? ` · ${fmtDuration(r.l.resets * 1000 - now)}` : ''}</span>
@@ -125,7 +142,7 @@
       </div>
     {:else}
       <span class="textlimit">
-        {@render name(p)}
+        {@render name(p, pool)}
         {#each rows as r, i (r.k)}
           {#if i > 0}<span class="sub">·</span>{/if}
           <span class="sub">{winShort(r.k)}</span>
@@ -151,7 +168,7 @@
   {:else if ws.layout === 'line'}
     {#each order as kind (kind)}
       {#if kind === limitOrder[0]}
-        {#each providers as p (p)}{@render providerLimits(p, limitOrder)}{/each}
+        {#each entries as e (e.p + e.pool)}{@render providerLimits(e.p, e.pool, limitOrder)}{/each}
       {:else if !limitKinds.includes(kind)}
         {@render stat(kind)}
       {/if}
@@ -164,7 +181,7 @@
     {/if}
     {#if limitOrder.length && (on('limit_five_hour') || on('limit_seven_day'))}
       <div class="col limits" class:barstyle={ws.limit_style === 'bar'}>
-        {#each providers as p (p)}{@render providerLimits(p, limitOrder)}{/each}
+        {#each entries as e (e.p + e.pool)}{@render providerLimits(e.p, e.pool, limitOrder)}{/each}
       </div>
     {/if}
   {/if}

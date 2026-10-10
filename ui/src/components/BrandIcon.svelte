@@ -10,12 +10,14 @@
 
 <script lang="ts">
   import type { Provider } from '../lib/api'
+  import { app } from '../lib/store.svelte'
 
-  // decorative unless labelled: the tool name is usually written next to it
-  let { provider, size = 14, color = null, label = '' }: { provider: Provider; size?: number; color?: string | null; label?: string } = $props()
+  // decorative unless labelled: the tool name is usually written next to it; the widget passes
+  // `always` because it has its own switch
+  let { provider, size = 14, color = null, label = '', always = false }: { provider: Provider; size?: number; color?: string | null; label?: string; always?: boolean } = $props()
 </script>
 
-{#if marks[provider]}
+{#if marks[provider] && (always || app.settings?.show_icons !== false)}
   <svg class="brand" width={size} height={size} viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd" role={label ? 'img' : undefined} aria-label={label || undefined} aria-hidden={label ? undefined : 'true'} focusable="false" style:color={color}><path d={marks[provider]} /></svg>
 {/if}
 

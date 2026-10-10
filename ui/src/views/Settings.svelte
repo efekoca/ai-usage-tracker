@@ -259,6 +259,10 @@
     </div>
   </div>
   <div class="item">
+    <div><span>{t('settings.showIcons')}</span><div class="subtle small">{t('settings.showIcons.help')}</div></div>
+    <Toggle checked={s.show_icons} label={t('settings.showIcons')} onchange={(v) => saveSettings({ show_icons: v })} />
+  </div>
+  <div class="item">
     <div><span>{t('settings.tintIcons')}</span><div class="subtle small">{t('settings.tintIcons.help')}</div></div>
     <Toggle checked={s.tint_icons} label={t('settings.tintIcons')} onchange={(v) => saveSettings({ tint_icons: v })} />
   </div>

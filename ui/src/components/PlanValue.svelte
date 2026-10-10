@@ -28,6 +28,8 @@
   })
 
   const providers = $derived(providersOf(app.settings?.enabled_sources ?? []))
+  // a tool without use in the period would only fill a column with "no use"
+  const used = $derived(providers.filter((p) => (value?.providers.find((x) => x.provider === p)?.events ?? 0) > 0))
 
   const DAYS_PER_MONTH = 365.25 / 12
   function planOf(p: Provider): PlanDef | undefined {
@@ -104,8 +106,9 @@
   {:else if !value || !plans}
     <p class="muted small">{t('common.loading')}</p>
   {:else}
+    {#if !used.length}<p class="muted small">{t('value.noUse')}</p>{/if}
     <div class="rows">
-      {#each providers as p (p)}
+      {#each used as p (p)}
         {@const r = row(p)}
         <div class="prow">
           <div class="who">
