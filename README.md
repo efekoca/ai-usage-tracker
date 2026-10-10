@@ -318,7 +318,7 @@ Everything runs on your computer:
 
 ## Updates
 
-The app checks for a new version at startup and every 6 hours. The check downloads only a small version file from this repository's releases and sends nothing. An update is installed only after you confirm it, and only if its signature matches the key built into the app. You can turn the check off under **Settings → Updates**.
+The app checks for a new version at startup and every 6 hours. The check downloads only a small version file from this repository's releases and sends nothing. When a new version is ready, it is shown at the bottom left of the window until you install it. An update is installed only after you confirm it, and only if its signature matches the key built into the app. You can turn the check off under **Settings → Updates**.
 
 ## Known limitations
 
