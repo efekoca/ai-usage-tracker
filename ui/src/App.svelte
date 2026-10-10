@@ -130,6 +130,17 @@
           <div class="progress"><span style="width:{(app.scan.done / Math.max(1, app.scan.total)) * 100}%"></span></div>
         </div>
       {/if}
+      <!-- stays until the update is installed, unlike the banner, and on every page -->
+      {#if app.update?.available}
+        {@const v = app.update.available.version}
+        <button class="update-pill" disabled={app.update.installing} title={t('update.sidebar.title', { v })} onclick={() => installUpdate(v)}>
+          <span class="mark"><Icon name="download" size={16} /><i class="dot" aria-hidden="true"></i></span>
+          <span class="label">
+            <b>{app.update.installing ? t('update.sidebar.installing') : t('update.sidebar')}</b>
+            <span class="ver">v{v}</span>
+          </span>
+        </button>
+      {/if}
     </nav>
     <main class="content">
       {#if withToolbar.includes(app.view)}
@@ -256,6 +267,48 @@
     background: var(--accent);
     transition: width 200ms linear;
   }
+  .update-pill {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 6px;
+    padding: 8px 10px;
+    border: 0.5px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    color: var(--ink);
+    font-size: 13px;
+    text-align: left;
+    transition: background var(--dur) var(--ease);
+  }
+  .update-pill:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 17%, transparent);
+  }
+  .update-pill :global(svg) {
+    color: var(--accent);
+  }
+  .update-pill .label {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.25;
+  }
+  .ver {
+    font-size: 11.5px;
+    color: var(--ink-2);
+  }
+  .mark {
+    position: relative;
+    display: inline-flex;
+  }
+  .dot {
+    position: absolute;
+    top: -2px;
+    right: -3px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
   .content {
     container: main / inline-size;
     display: flex;
@@ -304,6 +357,10 @@
     }
     .scan {
       padding: 8px 4px;
+    }
+    .update-pill {
+      justify-content: center;
+      padding: 9px 0;
     }
     .page {
       padding: 6px 20px 28px;
