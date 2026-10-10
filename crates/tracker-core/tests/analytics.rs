@@ -450,6 +450,35 @@ fn a_web_search_count_past_u32_is_never_imported_or_kept() {
 }
 
 #[test]
+fn a_backup_row_with_a_value_of_the_wrong_type_or_no_key_is_not_imported() {
+    let dir = tempfile::tempdir().unwrap();
+    let backup = dir.path().join("odd.db");
+    {
+        let odd = Store::open(&backup).unwrap();
+        let c = odd.conn();
+        c.execute_batch(
+            "INSERT INTO project(path, name, hidden) VALUES('/ok', 'ok', 0), ('/odd', 'odd', 'yes');
+             INSERT INTO usage_event(key, ts_ms, tool, model, input, output, accuracy, source) VALUES
+               ('good', 1790000000000, 'claude_code', 'claude-opus-5-5', 10, 1, 'exact', 'test'),
+               ('blob', 1790000000000, 'claude_code', x'00ff', 10, 1, 'exact', 'test'),
+               (NULL, 1790000000000, 'claude_code', 'claude-opus-5-5', 10, 1, 'exact', 'test');
+             INSERT INTO limit_snapshot(ts_ms, provider, tool, window, used_pct, status, source, accuracy) VALUES
+               (1790000000000, 'anthropic', 'claude_code', 'five_hour', 10, 'allowed', 'test', 'exact'),
+               (1790000000001, 'anthropic', 'claude_code', 'five_hour', 10, x'01', 'test', 'exact');
+             INSERT INTO tool_call(key, ts_ms, tool, name) VALUES('call', 1790000000000, 'claude_code', 'Read'), ('odd-call', 1790000000000, 'claude_code', x'01');",
+        )
+        .unwrap();
+    }
+    let mut fresh = Store::open(&dir.path().join("fresh.db")).unwrap();
+    assert_eq!(fresh.merge_from(&backup).unwrap(), (1, 1));
+    assert_eq!(fresh.merge_from(&backup).unwrap(), (1, 0), "a second import adds nothing");
+    assert_eq!(fresh.events_between(0, i64::MAX).unwrap().len(), 1);
+    assert_eq!(fresh.limits_between(0, i64::MAX).unwrap().len(), 1);
+    assert_eq!(fresh.tool_calls_between(0, i64::MAX).unwrap().len(), 1);
+    assert_eq!(fresh.projects().unwrap().len(), 1);
+}
+
+#[test]
 fn an_imported_backup_keeps_the_archives_projects_and_brings_their_spelling() {
     let dir = tempfile::tempdir().unwrap();
     let event = |s: &Store, key: &str, project: i64| {

@@ -20,6 +20,8 @@ node_modules/
 *.sqlite-*
 *.key
 *.pem
+*.p8
+*.p12
 .tauri/
 
 # local Claude Code notes

@@ -119,7 +119,7 @@ pub fn parse_logs(body: &Value) -> Vec<UsageEvent> {
                     model: text(&a, "model").unwrap_or("unknown").to_owned(),
                     project_path: None,
                     session_id: session,
-                    request_input: tokens.input + tokens.cache_read + tokens.cache_write,
+                    request_input: tokens.input.saturating_add(tokens.cache_read).saturating_add(tokens.cache_write),
                     tokens,
                     web_search_requests: 0,
                     speed: text(&a, "speed").filter(|s| *s == "fast").map(str::to_owned),

@@ -179,7 +179,8 @@ fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {
 fn backup(path: &Path, data_dir: &Path, now_ms: i64) -> std::io::Result<PathBuf> {
     let dir = data_dir.join("backups");
     fs::create_dir_all(&dir)?;
-    let dest = dir.join(format!("claude-settings-{now_ms}.json"));
+    // two installs in the same millisecond must not share one backup
+    let dest = dir.join(format!("claude-settings-{now_ms}-{}.json", TMP_SEQ.fetch_add(1, Ordering::Relaxed)));
     // read + write rather than copy, so the backup never inherits a read-only attribute
     match fs::read(path) {
         Ok(bytes) => create_private(&dest, &bytes)?,

@@ -486,11 +486,28 @@ impl Store {
                 .iter()
                 .map(|c| format!(" AND typeof(e.{c}) = 'integer' AND e.{c} BETWEEN 0 AND {}", if *c == "web_search" { u32::MAX as i64 } else { MAX_IMPORTED_COUNT }))
                 .collect();
+            // readers reject a value of another type, so one such row would break every report
+            let texts = |t: &str, required: &[&str], optional: &[&str]| -> String {
+                let req = required.iter().map(|c| format!(" AND typeof({t}{c}) = 'text'"));
+                req.chain(optional.iter().map(|c| format!(" AND typeof({t}{c}) IN ('text', 'null')"))).collect()
+            };
+            let mut event_optional = vec!["client", "session_id", "speed", "service_tier", "inference_geo"];
+            if theirs >= 2 {
+                event_optional.push("request_id");
+            }
+            if theirs >= 7 {
+                event_optional.extend(["branch", "agent", "thread_id"]);
+            }
+            let event_texts = texts("e.", &["key", "tool", "model", "accuracy", "source"], &event_optional);
+            let project_texts = texts("", &["path", "name"], if theirs >= 3 { &["display_path"] } else { &[] });
+            let limit_texts = texts("", &["provider", "tool", "account", "limit_id", "window", "source", "accuracy"], &["status", "plan"]);
+            let call_texts = texts("c.", &["key", "tool", "name"], &["session_id", "agent"]);
             let tx = self.conn.unchecked_transaction()?;
             let their_display = if theirs >= 3 { "display_path" } else { "NULL" };
             tx.execute(
                 &format!(
-                    "INSERT INTO project(path, name, hidden, display_path) SELECT path, name, hidden, {their_display} FROM other.project WHERE true
+                    "INSERT INTO project(path, name, hidden, display_path) SELECT path, name, hidden, {their_display} FROM other.project
+                     WHERE typeof(hidden) = 'integer' {project_texts}
                      ON CONFLICT(path) DO NOTHING"
                 ),
                 [],
@@ -509,22 +526,23 @@ impl Store {
                      FROM other.usage_event e
                      LEFT JOIN other.project op ON op.id = e.project_id
                      LEFT JOIN main.project p ON p.path = op.path
-                     WHERE typeof(e.ts_ms) = 'integer' AND e.ts_ms BETWEEN 0 AND {latest} {valid_counts} {old_events}
+                     WHERE typeof(e.ts_ms) = 'integer' AND e.ts_ms BETWEEN 0 AND {latest} {valid_counts} {event_texts} {old_events}
                      {tail}"
                 ),
                 [],
             )?;
             let limits = tx.execute(
-                "INSERT INTO limit_snapshot(ts_ms, provider, tool, account, limit_id, window, used_pct, resets_at, status,
+                &format!("INSERT INTO limit_snapshot(ts_ms, provider, tool, account, limit_id, window, used_pct, resets_at, status,
                      plan, source, accuracy)
                  SELECT ts_ms, provider, tool, account, limit_id, window, used_pct, resets_at, status, plan, source, accuracy
                  FROM other.limit_snapshot
                  WHERE typeof(ts_ms) = 'integer' AND ts_ms BETWEEN 0 AND ?2
                    AND (resets_at IS NULL OR (typeof(resets_at) = 'integer' AND resets_at BETWEEN 0 AND ?1 / 1000))
-                   AND (used_pct IS NULL OR used_pct BETWEEN 0 AND 1000)
+                   AND (used_pct IS NULL OR (typeof(used_pct) IN ('integer', 'real') AND used_pct BETWEEN 0 AND 1000))
                    AND window NOT GLOB '-*'
                    AND NOT (window GLOB '[0-9]*m' AND CAST(substr(window, 1, length(window) - 1) AS INTEGER) NOT BETWEEN 1 AND ?3)
-                 ON CONFLICT(source, account, limit_id, window, ts_ms) DO NOTHING",
+                   {limit_texts}
+                 ON CONFLICT(source, account, limit_id, window, ts_ms) DO NOTHING"),
                 [MAX_IMPORTED_MS, latest_accepted_ms(), MAX_WINDOW_MINUTES],
             )?;
             if theirs >= 7 {
@@ -535,7 +553,7 @@ impl Store {
                          FROM other.tool_call c
                          LEFT JOIN other.project op ON op.id = c.project_id
                          LEFT JOIN main.project p ON p.path = op.path
-                         WHERE typeof(c.ts_ms) = 'integer' AND c.ts_ms BETWEEN 0 AND {latest} AND typeof(c.failed) IN ('integer', 'null') {old_calls}
+                         WHERE typeof(c.ts_ms) = 'integer' AND c.ts_ms BETWEEN 0 AND {latest} AND typeof(c.failed) IN ('integer', 'null') {call_texts} {old_calls}
                          ON CONFLICT(key) DO UPDATE SET failed = COALESCE(failed, excluded.failed)"
                     ),
                     [],

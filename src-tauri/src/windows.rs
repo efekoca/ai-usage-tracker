@@ -427,21 +427,30 @@ pub fn handle_menu(app: &AppHandle, id: &str) {
         }
         _ => {}
     }
-    let Some(change) = menu_change(id) else { return };
-    // applied to the current settings under the store lock, so a concurrent change is kept
-    match state.update_settings(change) {
-        Ok(s) => {
-            if let Some(corner) = id.strip_prefix("w:pos:")
-                && let Some(w) = app.get_webview_window(WIDGET)
-            {
-                place_widget(&w, corner);
-            }
-            apply_widget_settings(app, &s);
-            let _ = app.emit("settings-changed", &s);
-            crate::tray::refresh_soon();
-        }
-        Err(e) => log::warn!("menu setting not saved: {e}"),
+    if menu_change(id).is_none() {
+        return;
     }
+    // a long query may hold the store; waiting for it here would freeze the event loop
+    let (app, id) = (app.clone(), id.to_owned());
+    off_main(move || {
+        let Some(change) = menu_change(&id) else { return };
+        // applied to the current settings under the store lock, so a concurrent change is kept
+        match app.state::<AppState>().update_settings(change) {
+            Ok(s) => {
+                if let Some(corner) = id.strip_prefix("w:pos:")
+                    && let Some(w) = app.get_webview_window(WIDGET)
+                {
+                    place_widget(&w, corner);
+                }
+                // a quick second press may have saved after this one: show what is saved now
+                let latest = app.state::<AppState>().settings.read().unwrap().clone();
+                apply_widget_settings(&app, &latest);
+                let _ = app.emit("settings-changed", &s);
+                crate::tray::refresh_soon();
+            }
+            Err(e) => log::warn!("menu setting not saved: {e}"),
+        }
+    });
 }
 
 type SettingsChange<'a> = Box<dyn FnOnce(&mut Settings) + 'a>;
