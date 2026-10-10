@@ -274,6 +274,9 @@
     margin: 0;
     height: auto;
     overflow: visible;
+    /* print the color keys (legend and session swatches), which are backgrounds */
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
   }
   .page {
     /* the printable width of A4 with 12 mm margins */
@@ -309,6 +312,7 @@
     font-size: 13px;
     font-weight: 650;
     margin: 0 0 8px;
+    break-after: avoid;
   }
   h2.gap {
     margin-top: 16px;
@@ -342,6 +346,8 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 22px;
+    /* WebKit does not keep grid items whole across pages, so the pair moves as one */
+    break-inside: avoid;
   }
   .two > section {
     min-width: 0;
