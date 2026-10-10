@@ -118,7 +118,19 @@ pub fn claude_config_roots(env: &Env, extra: &ExtraPaths) -> Vec<PathBuf> {
         v.push(h.join(".config").join("claude"));
     }
     v.extend(extra.claude_config_dirs.iter().cloned());
-    v
+    unique(v)
+}
+
+/// A folder listed twice (an extra that is also the default, or twice in `CLAUDE_CONFIG_DIR`)
+/// is one root.
+fn unique(v: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::with_capacity(v.len());
+    for p in v {
+        if !out.contains(&p) {
+            out.push(p);
+        }
+    }
+    out
 }
 
 pub fn codex_homes(env: &Env, extra: &ExtraPaths) -> Vec<PathBuf> {
@@ -129,7 +141,7 @@ pub fn codex_homes(env: &Env, extra: &ExtraPaths) -> Vec<PathBuf> {
         v.push(h.join(".codex"));
     }
     v.extend(extra.codex_homes.iter().cloned());
-    v
+    unique(v)
 }
 
 /// `%APPDATA%\Claude` and the MSIX-virtualised `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`.
@@ -323,4 +335,19 @@ fn has_cloud_sessions(sessions_dir: &Path) -> bool {
                 .and_then(|v| v.get("entries")?.as_array().map(|a| !a.is_empty()))
                 .unwrap_or(false)
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_folder_listed_twice_is_one_root() {
+        let env = Env { home: Some(PathBuf::from("/home/u")), roaming: None, local: None, claude_config_dir: None, codex_home: None, antigravity_data_dir: None };
+        let extra = ExtraPaths { claude_config_dirs: vec![PathBuf::from("/home/u/.claude/"), PathBuf::from("/x")], codex_homes: vec![PathBuf::from("/home/u/.codex")] };
+        assert_eq!(claude_config_roots(&env, &extra), [PathBuf::from("/home/u/.claude"), PathBuf::from("/home/u/.config/claude"), PathBuf::from("/x")]);
+        assert_eq!(codex_homes(&env, &extra), [PathBuf::from("/home/u/.codex")]);
+        let twice = Env { claude_config_dir: Some("/a,/b,/a".into()), ..env };
+        assert_eq!(claude_config_roots(&twice, &ExtraPaths::default()), [PathBuf::from("/a"), PathBuf::from("/b")]);
+    }
 }

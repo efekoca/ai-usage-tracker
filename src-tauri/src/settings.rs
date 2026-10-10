@@ -137,6 +137,16 @@ impl WidgetSettings {
             }
         }
         self.items.retain(|i| default_items().iter().any(|d| d.kind == i.kind));
+        // each item once: the widget keys its rows by kind
+        let mut seen = Vec::new();
+        self.items.retain(|i| !seen.contains(&i.kind) && {
+            seen.push(i.kind.clone());
+            true
+        });
+        // the accent is placed into CSS, so only a plain hex color is kept
+        if !self.accent.is_empty() && !is_hex_color(&self.accent) {
+            self.accent.clear();
+        }
         let mut order: Vec<String> = Vec::new();
         for p in self.provider_order.iter().map(String::as_str).chain(PROVIDER_ORDER) {
             if PROVIDER_ORDER.contains(&p) && !order.iter().any(|o| o == p) {
@@ -240,13 +250,15 @@ pub struct Settings {
     pub language: String,
     /// "system" | "light" | "dark"
     pub theme: String,
+    #[serde(deserialize_with = "known")]
     pub enabled_sources: Vec<SourceId>,
     /// Sources this install has offered; one added by a later version starts enabled.
-    #[serde(default = "sources_before_antigravity")]
+    #[serde(default = "sources_before_antigravity", deserialize_with = "known")]
     pub known_sources: Vec<SourceId>,
     pub extra_paths: ExtraPaths,
     /// Provider ("anthropic" / "openai") → plan id from plans.json.
     pub plans: std::collections::BTreeMap<String, String>,
+    #[serde(deserialize_with = "known")]
     pub thresholds: Vec<Threshold>,
     pub hide_project_names: bool,
     /// Display currency; costs are always computed in USD.
@@ -314,6 +326,17 @@ impl Default for Settings {
     }
 }
 
+/// `#rrggbb` only.
+fn is_hex_color(c: &str) -> bool {
+    c.len() == 7 && c.starts_with('#') && c[1..].bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Entries this version does not know (a source or provider from a newer version, after a
+/// downgrade) are dropped; otherwise one of them would make every setting fall back to its default.
+fn known<'de, D: serde::Deserializer<'de>, T: serde::de::DeserializeOwned>(d: D) -> Result<Vec<T>, D::Error> {
+    Ok(Vec::<serde_json::Value>::deserialize(d)?.into_iter().filter_map(|v| serde_json::from_value(v).ok()).collect())
+}
+
 fn sources_before_antigravity() -> Vec<SourceId> {
     vec![SourceId::ClaudeCode, SourceId::Cowork, SourceId::ClaudeDesktop, SourceId::Codex, SourceId::ChatgptDesktop]
 }
@@ -353,9 +376,7 @@ impl Settings {
             self.fx_rate = 1.0;
         }
         // the value is placed into CSS, so only a plain hex color is kept
-        self.provider_colors.retain(|p, c| {
-            ["anthropic", "openai", "google"].contains(&p.as_str()) && c.len() == 7 && c.starts_with('#') && c[1..].bytes().all(|b| b.is_ascii_hexdigit())
-        });
+        self.provider_colors.retain(|p, c| ["anthropic", "openai", "google"].contains(&p.as_str()) && is_hex_color(c));
     }
 
     /// Normalizes in place first, so what callers keep and publish is exactly what was stored.
@@ -423,6 +444,32 @@ mod tests {
         assert_eq!(s.provider_colors.into_iter().collect::<Vec<_>>(), [("anthropic".to_owned(), "#D97757".to_owned())]);
         let d = Settings::default();
         assert!(d.provider_colors.is_empty() && !d.tint_icons && !d.widget.show_icons);
+    }
+
+    #[test]
+    fn entries_from_a_newer_version_are_dropped_without_losing_the_rest() {
+        let s: Settings = serde_json::from_str(
+            r#"{"onboarded":true,"plans":{"anthropic":"max5x"},"enabled_sources":["claude_code","grok_cli"],
+                "known_sources":["claude_code","grok_cli"],"thresholds":[{"provider":"xai","window":"five_hour"},{"provider":"openai","window":"seven_day"}]}"#,
+        )
+        .unwrap();
+        assert!(s.onboarded, "the user's settings are kept");
+        assert_eq!(s.plans.get("anthropic").map(String::as_str), Some("max5x"));
+        assert_eq!(s.enabled_sources, [SourceId::ClaudeCode]);
+        assert_eq!(s.known_sources, [SourceId::ClaudeCode]);
+        assert_eq!(s.thresholds.len(), 1);
+    }
+
+    #[test]
+    fn widget_items_appear_once_and_the_accent_is_a_plain_color() {
+        let mut s: Settings = serde_json::from_str(r#"{"widget":{"items":[{"kind":"primary","enabled":true},{"kind":"primary","enabled":false}],"accent":"red;zoom:9"}}"#).unwrap();
+        s.normalize();
+        assert_eq!(s.widget.items.iter().filter(|i| i.kind == "primary").count(), 1);
+        assert!(s.widget.items[0].enabled, "the first copy wins");
+        assert_eq!(s.widget.accent, "");
+        s.widget.accent = "#2a78d6".into();
+        s.normalize();
+        assert_eq!(s.widget.accent, "#2a78d6");
     }
 
     #[test]
