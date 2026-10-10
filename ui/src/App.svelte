@@ -366,6 +366,9 @@
       padding: 6px 20px 28px;
     }
   }
+  .banner {
+    margin-bottom: 16px;
+  }
   .banner.update {
     align-items: center;
   }
