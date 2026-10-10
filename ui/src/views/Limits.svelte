@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import { app, saveSettings, markTint } from '../lib/store.svelte'
   import { api, providersOf, type PlansFile, type Provider, type Threshold } from '../lib/api'
-  import { fmtCompact, fmtMoney, fmtPct, i18n, limitName, t, windowLabel } from '../lib/i18n.svelte'
+  import { fmtCompact, fmtMoney, fmtPct, i18n, limitName, parseNumber, t, windowLabel } from '../lib/i18n.svelte'
   import LimitMeter from '../components/LimitMeter.svelte'
   import AccuracyBadge from '../components/AccuracyBadge.svelte'
   import Icon from '../components/Icon.svelte'
@@ -35,7 +35,7 @@
 
   const reloadLimits = () => api.limits().then((l) => (app.limits = l))
   function addThreshold() {
-    const v = Number(draftValue.replace(',', '.'))
+    const v = parseNumber(draftValue) ?? 0
     if (!(v > 0) || !draftProvider) return
     const th: Threshold = { provider: draftProvider, window: draft.window, tokens: draftKind === 'tokens' ? Math.round(v) : null, cost_usd: draftKind === 'cost' ? v : null }
     saveSettings((c) => ({ thresholds: [...c.thresholds.filter((x) => !(x.provider === th.provider && x.window === th.window)), th] })).then(reloadLimits)
@@ -46,10 +46,12 @@
   }
   const planNote = (p: Provider) => plans?.providers[p]?.plans.find((x) => x.id === app.settings?.plans[p])
   function setPrice(p: Provider, raw: string) {
-    const v = Number(raw.replace(',', '.'))
+    // an empty field removes the custom price; text that is not a price changes nothing
+    const v = parseNumber(raw)
+    if (raw.trim() !== '' && !(v !== null && v > 0)) return
     saveSettings((c) => {
       const next = { ...c.plan_prices }
-      if (v > 0) next[p] = v
+      if (v !== null && v > 0) next[p] = v
       else delete next[p]
       return { plan_prices: next }
     })

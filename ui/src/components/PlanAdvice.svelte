@@ -26,7 +26,7 @@
         : t(`advice.kind.${a.kind}`),
   )
   const price = $derived(
-    a.monthly_delta_usd === null
+    a.monthly_delta_usd === null || Math.abs(a.monthly_delta_usd) < 0.005
       ? ''
       : a.monthly_delta_usd > 0
         ? t('advice.price.more', { usd: fmtMoney(a.monthly_delta_usd) })

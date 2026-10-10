@@ -103,7 +103,7 @@
       {#each dirs as d (d)}
         <div class="list-row">
           <Icon name="folder" size={15} /><span class="path">{d}</span><span class="spacer"></span>
-          <button class="btn ghost" aria-label={t('common.remove')} onclick={() => removeFolder(kind as 'claude' | 'codex', d as string)}><Icon name="trash" size={15} /></button>
+          <button class="btn ghost" aria-label="{t('common.remove')}: {d}" onclick={() => removeFolder(kind as 'claude' | 'codex', d as string)}><Icon name="trash" size={15} /></button>
         </div>
       {/each}
     </div>

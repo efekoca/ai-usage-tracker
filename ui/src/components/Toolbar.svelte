@@ -26,7 +26,9 @@
 
   const customError = $derived(!from || !to ? t('period.invalid.empty') : from > to ? t('period.invalid.order') : '')
   function pick(k: Kind) {
+    // the dates shown apply at once, so the selected period always matches the data
     if (k !== 'custom') setPeriod({ kind: k } as Period)
+    else applyCustom()
   }
   function applyCustom() {
     if (customError) return

@@ -3,7 +3,7 @@
   import { untrack } from 'svelte'
   import { app, latest, providerColor, saveSettings, tint, markTint } from '../lib/store.svelte'
   import { api, providersOf, type PlanDef, type PlansFile, type PlanValue, type Provider } from '../lib/api'
-  import { fmtDate, fmtDec, fmtInt, fmtMoney, i18n, t } from '../lib/i18n.svelte'
+  import { fmtDate, fmtDec, fmtInt, fmtMoney, i18n, parseNumber, t } from '../lib/i18n.svelte'
   import Icon from './Icon.svelte'
   import BrandIcon from './BrandIcon.svelte'
   import AccuracyBadge from './AccuracyBadge.svelte'
@@ -46,10 +46,12 @@
     saveSettings((c) => ({ plans: { ...c.plans, [p]: id } }))
   }
   function setPrice(p: Provider, raw: string) {
-    const v = Number(raw.replace(',', '.'))
+    // an empty field removes the custom price; text that is not a price changes nothing
+    const v = parseNumber(raw)
+    if (raw.trim() !== '' && !(v !== null && v > 0)) return
     saveSettings((c) => {
       const next = { ...c.plan_prices }
-      if (v > 0) next[p] = v
+      if (v !== null && v > 0) next[p] = v
       else delete next[p]
       return { plan_prices: next }
     })
