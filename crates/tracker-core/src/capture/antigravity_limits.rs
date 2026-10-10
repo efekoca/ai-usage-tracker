@@ -113,6 +113,9 @@ pub fn query(bin: &Path, work_dir: &Path, timeout: Duration, now_ms: i64) -> Res
     }
     #[cfg(not(windows))]
     super::set_child_path(&mut cmd, bin);
+    // its own process group, so ending it also ends what the CLI started
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
     let mut child = cmd.spawn().map_err(|e| format!("cannot start agy: {e}"))?;
     let mut stdout = child.stdout.take().ok_or("no stdout")?;
     let (tx, rx) = std::sync::mpsc::channel();
@@ -122,8 +125,7 @@ pub fn query(bin: &Path, work_dir: &Path, timeout: Duration, now_ms: i64) -> Res
         let _ = tx.send(buf);
     });
     let out = rx.recv_timeout(timeout + Duration::from_secs(5));
-    let _ = child.kill();
-    let _ = child.wait();
+    super::kill_tree(&mut child);
     let out = out.map_err(|_| "agy did not answer in time".to_string())?;
     let doc = json_document(&String::from_utf8_lossy(&out)).ok_or(NOT_SIGNED_IN)?;
     if let Some(status) = str_at(&doc, "status").filter(|s| !s.eq_ignore_ascii_case("success")) {

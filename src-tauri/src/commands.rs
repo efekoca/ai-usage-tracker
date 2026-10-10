@@ -499,6 +499,9 @@ pub async fn wipe_all_data(window: WebviewWindow, app: AppHandle) -> Res<()> {
         }
     };
     state.worker.send(Msg::Reconfigure);
+    // onboarding starts over: the widget hides and the tray drops the old limits
+    crate::windows::apply_widget_settings(&app, &s);
+    crate::tray::refresh_soon();
     let _ = app.emit("settings-changed", &s);
     let _ = app.emit("data-changed", ());
     Ok(())
@@ -637,7 +640,10 @@ pub async fn plan_value(app: AppHandle) -> Res<insights::PlanValue> {
 #[tauri::command]
 pub async fn export_report(window: WebviewWindow, app: AppHandle, from: String, to: String, path: PathBuf) -> Res<()> {
     main_only(&window)?;
-    crate::pdf::render(&app, &from, &to, &path)?;
+    // rendering blocks for seconds while the report page calls async commands of its own
+    let handle = app.clone();
+    let out = path.clone();
+    tauri::async_runtime::spawn_blocking(move || crate::pdf::render(&handle, &from, &to, &out)).await.map_err(err)??;
     *app.state::<AppState>().last_report.lock().unwrap() = Some(path);
     Ok(())
 }

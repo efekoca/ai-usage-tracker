@@ -200,6 +200,8 @@ impl Receiver {
         if token.trim().is_empty() {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "the receiver needs an access key"));
         }
+        // opened first: a receiver that cannot store must not listen and leave requests waiting
+        let mut store = Store::open(&db_path).map_err(|e| std::io::Error::other(e.to_string()))?;
         let server = tiny_http::Server::http(("127.0.0.1", port)).map_err(|e| std::io::Error::other(e.to_string()))?;
         let port = server.server_addr().to_ip().map(|a| a.port()).unwrap_or(port);
         let server = Arc::new(server);
@@ -207,23 +209,13 @@ impl Receiver {
         let stats = Arc::new(ReceiverStats::default());
         let (srv, st, stp, tok) = (server.clone(), stats.clone(), stop.clone(), token.clone());
         let thread = std::thread::Builder::new().name("otlp-receiver".into()).spawn(move || {
-            let mut store = match Store::open(&db_path) {
-                Ok(s) => s,
-                Err(e) => {
-                    log::error!("otlp receiver cannot open database: {e}");
-                    return;
-                }
-            };
             // tiny_http has no read deadline, so bodies are read off the serving thread
             let (done_tx, done_rx) = mpsc::channel::<ReadBody>();
             let readers = Arc::new(AtomicUsize::new(0));
             while !stp.load(Ordering::SeqCst) {
                 while let Ok((req, body)) = done_rx.try_recv() {
                     let code = match body {
-                        Ok(body) => {
-                            store_batch(&mut store, &body, &st, &on_events);
-                            200
-                        }
+                        Ok(body) => store_batch(&mut store, &body, &st, &on_events),
                         Err(code) => code,
                     };
                     let _ = req.respond(reply(code));
@@ -269,10 +261,13 @@ impl Receiver {
     }
 }
 
-fn store_batch(store: &mut Store, body: &[u8], st: &ReceiverStats, on_events: &impl Fn(usize)) {
-    let events = serde_json::from_slice::<Value>(body).map(|v| parse_logs(&v)).unwrap_or_default();
+/// The HTTP status: 503 asks the exporter to send the batch again (the archive was busy), 400
+/// tells it the body was not OTLP JSON.
+fn store_batch(store: &mut Store, body: &[u8], st: &ReceiverStats, on_events: &impl Fn(usize)) -> u16 {
+    let Ok(doc) = serde_json::from_slice::<Value>(body) else { return 400 };
+    let events = parse_logs(&doc);
     if events.is_empty() {
-        return;
+        return 200;
     }
     let stored = store.transaction().and_then(|mut tx| {
         tx.upsert_events(&events)?;
@@ -283,8 +278,12 @@ fn store_batch(store: &mut Store, body: &[u8], st: &ReceiverStats, on_events: &i
             st.events.fetch_add(events.len() as u64, Ordering::Relaxed);
             st.last_event_ms.store(chrono::Utc::now().timestamp_millis(), Ordering::Relaxed);
             on_events(events.len());
+            200
         }
-        Err(e) => log::warn!("otlp receiver could not store events: {e}"),
+        Err(e) => {
+            log::warn!("otlp receiver could not store events: {e}");
+            503
+        }
     }
 }
 
@@ -389,6 +388,23 @@ mod tests {
         assert!(post(r.port, "X-AIUT-Token: secret-1\r\n", &body).starts_with("HTTP/1.1 200"));
         assert_eq!(count(&db), 1);
         assert_eq!(r.stats.rejected.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn a_batch_that_was_not_stored_is_answered_so_the_exporter_knows() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("t.db");
+        Store::open(&db).unwrap().conn().execute_batch("CREATE TRIGGER full AFTER INSERT ON usage_event BEGIN SELECT RAISE(ABORT, 'disk full'); END;").unwrap();
+        let r = Receiver::start(0, db.clone(), "k".into(), |_| {}).unwrap();
+        let auth = "x-aiut-token: k\r\n";
+        assert!(post(r.port, auth, "not json").starts_with("HTTP/1.1 400"));
+        assert!(post(r.port, auth, &sample("req_a", "claude-haiku-4-5", 3).to_string()).starts_with("HTTP/1.1 503"), "503 asks for the batch again");
+        assert!(post(r.port, auth, r#"{"resourceLogs":[]}"#).starts_with("HTTP/1.1 200"));
+
+        // an archive that cannot be opened is reported before anything listens
+        let file = dir.path().join("a-file");
+        std::fs::write(&file, b"x").unwrap();
+        assert!(Receiver::start(0, file.join("t.db"), "k".into(), |_| {}).is_err());
     }
 
     #[test]

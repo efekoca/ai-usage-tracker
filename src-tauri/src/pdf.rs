@@ -85,10 +85,18 @@ pub fn last_full_week(today: NaiveDate) -> (NaiveDate, NaiveDate) {
     (monday - Days::new(7), monday - Days::new(1))
 }
 
-/// The file name carries the week, so an existing file means that week is done.
+/// The last week saved, so a file the user moved or deleted is not made again.
+const LAST_WEEK_SAVED: &str = "weekly_report.last_week";
+
+/// The file name carries the week, so an existing file also means that week is done.
 pub fn start_weekly(app: AppHandle) {
     let _ = std::thread::Builder::new().name("weekly-report".into()).spawn(move || {
         std::thread::sleep(Duration::from_secs(90));
+        // the first scan after login may still be reading the week's logs
+        let scan_deadline = std::time::Instant::now() + Duration::from_secs(15 * 60);
+        while app.state::<AppState>().status.lock().unwrap().last_scan_ms.is_none() && std::time::Instant::now() < scan_deadline {
+            std::thread::sleep(Duration::from_secs(5));
+        }
         loop {
             let state = app.state::<AppState>();
             if state.quitting.load(std::sync::atomic::Ordering::SeqCst) {
@@ -100,10 +108,14 @@ pub fn start_weekly(app: AppHandle) {
                 if let Some(dir) = dir {
                     let (from, to) = last_full_week(chrono::Local::now().date_naive());
                     let file = dir.join(format!("AI-Usage_{from}_{to}.pdf"));
-                    if !file.exists() {
+                    let saved = state.db().setting(LAST_WEEK_SAVED).ok().flatten().is_some_and(|w| w == from.to_string());
+                    if !saved && !file.exists() {
                         let r = std::fs::create_dir_all(&dir).map_err(|e| e.to_string()).and_then(|_| render(&app, &from.to_string(), &to.to_string(), &file));
                         match r {
-                            Ok(()) => log::info!("weekly summary saved"),
+                            Ok(()) => {
+                                let _ = state.db().set_setting(LAST_WEEK_SAVED, &from.to_string());
+                                log::info!("weekly summary saved");
+                            }
                             Err(e) => log::warn!("weekly summary failed: {e}"),
                         }
                     }

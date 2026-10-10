@@ -176,6 +176,9 @@ pub fn query(bin: &Path, work_dir: &Path, config_dir: Option<&Path>, timeout: Du
     }
     #[cfg(not(windows))]
     super::set_child_path(&mut cmd, bin);
+    // its own process group, so ending it also ends what the CLI started
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
     let mut child = cmd.spawn().map_err(|e| fail(format!("cannot start claude: {e}")))?;
     let mut stdin = child.stdin.take().ok_or_else(|| fail("no stdin".into()))?;
     let stdout = child.stdout.take().ok_or_else(|| fail("no stdout".into()))?;
@@ -198,8 +201,7 @@ pub fn query(bin: &Path, work_dir: &Path, config_dir: Option<&Path>, timeout: Du
         }
     })();
     drop(stdin);
-    let _ = child.kill();
-    let _ = child.wait();
+    super::kill_tree(&mut child);
     result
 }
 
