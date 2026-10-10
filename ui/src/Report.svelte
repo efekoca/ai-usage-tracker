@@ -193,7 +193,7 @@
                       {:else if l.state === 'behind' && l.used_pct !== null}?{:else}—{/if}
                     </td>
                   </tr>
-                  {#if l.state === 'fresh' && l.forecast && (l.forecast.kind === 'fills' || l.forecast.kind === 'safe')}
+                  {#if l.state === 'fresh' && (l.used_pct ?? 0) < 99.5 && l.forecast && (l.forecast.kind === 'fills' || l.forecast.kind === 'safe')}
                     <tr class="sub">
                       <td colspan="2" class="muted small">
                         {#if l.forecast.kind === 'fills' && l.forecast.fills_at_ms}{t('forecast.fillsShort', { t: fmtDateTime(l.forecast.fills_at_ms) })}

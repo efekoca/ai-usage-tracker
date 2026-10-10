@@ -186,7 +186,7 @@ const tr: Dict = {
   'sources.help': 'Uygulama yalnızca açık olan kaynakların kullanım kayıtlarını okur. İçerik (prompt/yanıt) hiçbir zaman saklanmaz.',
   'sources.rescan': 'Şimdi tara',
   'sources.scanning': 'Taranıyor… {done}/{total}',
-  'sources.lastScan': 'Son tarama: {t}',
+  'sources.lastScan': 'Son tarama: {t} önce',
   'sources.extra': 'Ek klasörler',
   'sources.extra.claude': 'Claude Code yapılandırma klasörü',
   'sources.extra.codex': 'Codex klasörü (CODEX_HOME)',
@@ -1122,7 +1122,7 @@ const en: Dict = {
   'sources.help': 'Only enabled sources are read. Content (prompts/responses) is never stored.',
   'sources.rescan': 'Rescan now',
   'sources.scanning': 'Scanning… {done}/{total}',
-  'sources.lastScan': 'Last scan: {t}',
+  'sources.lastScan': 'Last scan: {t} ago',
   'sources.extra': 'Extra folders',
   'sources.extra.claude': 'Claude Code config folder',
   'sources.extra.codex': 'Codex folder (CODEX_HOME)',
@@ -1167,8 +1167,8 @@ const en: Dict = {
   'settings.plans': 'Plans',
   'settings.pricing': 'Prices',
   'settings.pricing.help': 'USD per 1M tokens, taken from official provider pages. Edit them or return to the defaults. Models without a price are left out of costs.',
-  'settings.pricing.usedShown': 'Showing the {n} models found in your logs.',
-  'settings.pricing.allShown': 'Showing all {n} models.',
+  'settings.pricing.usedShown': 'Showing the {n} {n|model|models} found in your logs.',
+  'settings.pricing.allShown': 'Showing all {n} {n|model|models}.',
   'settings.pricing.showAll': 'Show all models ({n})',
   'settings.pricing.showUsed': 'Show only the models you use',
   'settings.pricing.updated': 'Last updated: {d}',
@@ -1277,8 +1277,8 @@ const en: Dict = {
   "days.perActive": "Per active day",
   "days.perActiveSub": "average of {n} active days",
   "days.streak": "Longest active streak",
-  "days.streakValue": "{n} days",
-  "days.streakNow": "Current streak: {n} days",
+  "days.streakValue": "{n} {n|day|days}",
+  "days.streakNow": "Current streak: {n} {n|day|days}",
   "days.weekend": "Weekend share",
   "days.weekendSub": "Saturday and Sunday",
   "days.prev": "Previous active day",
@@ -1324,7 +1324,7 @@ const en: Dict = {
   "history.stat.toFull": "Average time to fill",
   "history.stat.toFullSub": "from the window start until full",
   "history.stat.capacity": "{p}: a whole window",
-  "history.stat.capacitySub": "from {n} windows · range {min}–{max}",
+  "history.stat.capacitySub": "from {n} {n|window|windows} · range {min}–{max}",
   "history.stat.capacityHelp": "Windows watched to their end and at least 10 % full: this computer's API-equivalent use divided by the window's percentage (median). If the same limit was also used on another device, the web or the desktop chat, the real value is higher.",
   "history.dist": "Distribution of peaks",
   "history.dist.full": "Filled",
@@ -1406,7 +1406,7 @@ const en: Dict = {
   "tools.showAll": "Show all ({n})",
   "tools.showLess": "Show fewer",
   "tools.none": "No tool calls in this period.",
-  "tools.total": "{n} calls",
+  "tools.total": "{n} {n|call|calls}",
   "branches.title": "Branches",
   "branches.lead": "Usage per project and git branch. Claude Code records the branch with every request, Codex and Antigravity at the start of a session.",
   "branches.col.project": "Project",
@@ -1436,9 +1436,9 @@ const en: Dict = {
   "history.tip.running": "Running",
   "history.tip.noReset": "Reset time not recorded",
   "history.tip.earlyReset": "Reset before its time (a new window began)",
-  "history.tip.readings": "{n} readings",
+  "history.tip.readings": "{n} {n|reading|readings}",
   "history.empty": "No limit history yet. It appears as limit readings accumulate.",
-  "history.summary": "{n} windows · filled {full} times · highest {peak}",
+  "history.summary": "{n} {n|window|windows} · filled {full} {full|time|times} · highest {peak}",
   "advice.title": "Plan recommendation",
   "advice.lead": "Based on the last 28 days of limit readings and the plan information the providers publish.",
   "advice.detected": "detected from readings",
@@ -1452,9 +1452,9 @@ const en: Dict = {
   "advice.kind.not_applicable": "No recommendation for this plan",
   "advice.price.more": "{usd} more per month",
   "advice.price.less": "{usd} less per month",
-  "advice.fact.five": "Five-hour: {n} windows · filled {full} times · highest {peak}",
+  "advice.fact.five": "Five-hour: {n} {n|window|windows} · filled {full} {full|time|times} · highest {peak}",
   "advice.fact.fiveFull": " · full for {d} in total",
-  "advice.fact.week": "Weekly: {n} windows · filled {full} times · highest {peak}",
+  "advice.fact.week": "Weekly: {n} {n|window|windows} · filled {full} {full|time|times} · highest {peak}",
   "advice.fact.days": "Days with readings: {n}/{of}",
   "advice.why.ratio": "{to} offers {x} times {from}'s per-session (five-hour) allowance (Anthropic).",
   "advice.why.noFive": "{to} has no five-hour limit (OpenAI).",
@@ -1476,30 +1476,30 @@ const en: Dict = {
   "tips.how": "How it is calculated",
   "tips.empty": "Nothing in this period calls for a tip.",
   "tips.checked": "Checked: the cache written again after a pause, long-context surcharges, fast mode and regional surcharges, the share of large-context requests, tool error rates.",
-  "tips.basis": "{requests} requests and {calls} tool calls examined.",
+  "tips.basis": "{requests} {requests|request|requests} and {calls} tool calls examined.",
   "tips.share": "{pct} of the period's cost",
   "tip.cache_rebuild.title": "The cache was written again after a pause",
-  "tip.cache_rebuild.body": "{n} requests ({sessions} sessions) wrote {tokens} tokens of context to the cache again after it had expired. Reading the same tokens from the cache would have cost {usd} less.",
+  "tip.cache_rebuild.body": "{n} {n|request|requests} ({sessions} {sessions|session|sessions}) wrote {tokens} tokens of context to the cache again after it had expired. Reading the same tokens from the cache would have cost {usd} less.",
   "tip.cache_rebuild.what": "Coming back to a session after a long pause writes its whole context again. If the topic changed, start a new session with /clear; if you will carry on, shrink the context with /compact before the pause.",
   "tip.cache_rebuild.how": "Claude keeps its cache for 5 minutes (an hour for 1-hour writes). A request counts when, after a longer pause, on the same model and with at least 20K tokens of context, at least 40 % of the context was written again. Difference = the price of those writes − the price of reading the same tokens from the cache.",
   "tip.long_context.title": "Long-context surcharge",
-  "tip.long_context.body": "{n} requests went over their model's long-context threshold and were priced higher: +{usd} over the standard rate. Models: {models}.",
+  "tip.long_context.body": "{n} {n|request|requests} went over their model's long-context threshold and were priced higher: +{usd} over the standard rate. Models: {models}.",
   "tip.long_context.what": "Using /compact or starting a new session as the context nears the threshold avoids the surcharge. Details on the Context page.",
   "tip.long_context.how": "Per request, the long-context price minus the same request at the standard rate, from the price list.",
   "tip.fast_mode.title": "Fast mode surcharge",
-  "tip.fast_mode.body": "{n} requests ran in fast mode; at standard speed they would have cost {usd} less.",
+  "tip.fast_mode.body": "{n} {n|request|requests} ran in fast mode; at standard speed they would have cost {usd} less.",
   "tip.fast_mode.what": "Fast mode answers sooner but multiplies the price; standard speed is enough for work that is not urgent.",
   "tip.fast_mode.how": "Per fast request, the price with the price list's speed multiplier minus the price without it.",
   "tip.residency.title": "Data residency surcharge",
-  "tip.residency.body": "{n} requests ran in a specific region (data residency): +{usd}.",
+  "tip.residency.body": "{n} {n|request|requests} ran in a specific region (data residency): +{usd}.",
   "tip.residency.what": "If data residency is not required, global inference is cheaper.",
   "tip.residency.how": "Per request, the price with the regional multiplier minus the price without it, from the price list.",
   "tip.large_contexts.title": "Most of the cost comes from large-context requests",
-  "tip.large_contexts.body": "{n} requests with more than {threshold} tokens of context ({rp} of requests) made up {cp} of the cost ({usd}).",
+  "tip.large_contexts.body": "{n} {n|request|requests} with more than {threshold} tokens of context ({rp} of requests) made up {cp} of the cost ({usd}).",
   "tip.large_contexts.what": "Every request sends the whole conversation again, so each answer costs more as a session grows. A new session for unrelated work (/clear) and an occasional /compact in long work lower this share.",
   "tip.large_contexts.how": "Context = every input token of the request (cache reads and writes included). Shown from 20 requests and more than half of the cost.",
   "tip.tool_errors.title": "{tool} · {name} calls often return an error",
-  "tip.tool_errors.body": "{failed} of {known} calls with a known outcome returned an error ({rate}).",
+  "tip.tool_errors.body": "{failed} of {known} {known|call|calls} with a known outcome returned an error ({rate}).",
   "tip.tool_errors.what": "Each error usually means a round of fixing, so at least one more request. Writing frequent commands and project rules into CLAUDE.md or AGENTS.md can cut the retries. Note: Codex also counts a non-zero exit code (e.g. a failing test) as an error.",
   "tip.tool_errors.how": "The outcome the tool records itself (Claude Code: is_error, Codex: the action status, Antigravity: the step status). Shown at an error rate of 25 % or more over at least 20 calls with a known outcome.",
   "settings.tray": "Tray icon",
@@ -1561,7 +1561,7 @@ const en: Dict = {
   "sessions.more": "Show more ({n} left)",
   "sessions.none": "No sessions in this period.",
   "sessions.noMatch": "No session matches the search.",
-  "sessions.withoutId": "{n} requests carry no session id in their logs, so they are not in this table.",
+  "sessions.withoutId": "{n} {n|request|requests} carry no session id in their logs, so they are not in this table.",
   "sessions.partial": "A session that crosses the period boundary counts only its part inside the period.",
   "sessions.id": "Session id",
   "sessions.copy": "Copy id",
@@ -1581,7 +1581,7 @@ const en: Dict = {
   "context.cost": "API equivalent",
   "context.long": "Long-context surcharge",
   "context.longHelp": "Some models charge more once the context passes a size (e.g. 272K tokens for GPT-5.x). The surcharge is the difference to what the same requests would cost at standard rates.",
-  "context.longCount": "{n} requests at long-context rates",
+  "context.longCount": "{n} {n|request|requests} at long-context rates",
   "context.trend": "Daily context size",
   "context.byModel": "By model",
   "context.threshold": "Long-context threshold",
@@ -1600,9 +1600,9 @@ const en: Dict = {
   "compare.same": "same",
   "compare.all": "All",
   "compare.caveat": "Token counts are taken as they are. Model families split the same text into different numbers of tokens (Claude 4.7 and later about 30 % more), so comparisons across families are approximate. Quality and speed are not taken into account.",
-  "compare.excluded": "{n} requests belong to a model without a price and are left out.",
+  "compare.excluded": "{n} {n|request|requests} belong to a model without a price and are left out.",
   "compare.none": "No priced usage to compare.",
-  "compare.basis": "{n} requests · {t} tokens",
+  "compare.basis": "{n} {n|request|requests} · {t} tokens",
   "compare.model": "Model",
   "compare.cost": "Cost of this usage",
   "compare.diff": "Difference",
@@ -1640,14 +1640,14 @@ const en: Dict = {
   "value.noUse": "No use in the last 30 days.",
   "rep.title": "AI Usage Summary",
   "rep.generated": "Generated {d}",
-  "rep.days": "{n} days",
+  "rep.days": "{n} {n|day|days}",
   "rep.vsPrev": "vs the previous period",
   "rep.tokens": "Total tokens",
   "rep.cost": "API-equivalent cost",
   "rep.activeDays": "Active days",
   "rep.cacheHit": "Cache hit rate",
   "rep.cacheSaved": "Net cache saving: {v}",
-  "rep.requests": "{n} requests",
+  "rep.requests": "{n} {n|request|requests}",
   "rep.daily": "Daily usage",
   "rep.monthly": "Monthly usage",
   "rep.byTool": "By tool",
@@ -1655,7 +1655,7 @@ const en: Dict = {
   "rep.projects": "Projects",
   "rep.sessions": "Most expensive sessions",
   "rep.context": "Context size",
-  "rep.contextLine": "Average {avg} · p90 {p90} · largest {max} tokens. Long-context surcharge: {extra} ({n} requests).",
+  "rep.contextLine": "Average {avg} · p90 {p90} · largest {max} tokens. Long-context surcharge: {extra} ({n} {n|request|requests}).",
   "rep.limits": "Plan limits (at report time)",
   "rep.limitNone": "No limit readings.",
   "rep.value": "Plan value (this period)",
@@ -1822,7 +1822,7 @@ const en: Dict = {
   'cap.otel.name': 'Local telemetry receiver',
   'cap.otel.what': 'Takes per-request token counts from Claude Code\'s official OpenTelemetry events, including helper model calls the log files do not contain.',
   'cap.otel.changes': 'Log-export settings only, in the env block of:',
-  'cap.otel.ok': 'Listening on 127.0.0.1:{port} · {n} events · last {t}',
+  'cap.otel.ok': 'Listening on 127.0.0.1:{port} · {n} {n|event|events} · last {t}',
   'cap.otel.notListening': 'The receiver could not start',
   'cap.otel.note': 'Listens on this computer only (127.0.0.1). Content options stay off; identity fields such as e-mail and account ids are not stored. A request that also appears in the log files is not counted twice. While the app is closed these events are lost; log files are still read.',
   'cap.msg.enabled': 'Turned on.',
@@ -1884,7 +1884,11 @@ export function resolveLang(pref: string): 'tr' | 'en' {
 
 export function t(key: string, params?: Record<string, string | number>): string {
   let s = dicts[i18n.lang][key] ?? dicts.en[key] ?? key
-  if (params) for (const [k, v] of Object.entries(params)) s = s.replaceAll(`{${k}}`, String(v))
+  if (params) {
+    for (const [k, v] of Object.entries(params)) s = s.replaceAll(`{${k}}`, String(v))
+    // `{n|day|days}`: the first form when n is 1
+    s = s.replace(/\{(\w+)\|([^|{}]*)\|([^|{}]*)\}/g, (_, k: string, one: string, many: string) => (String(params[k]) === '1' ? one : many))
+  }
   return s
 }
 
@@ -1893,6 +1897,28 @@ export function has(key: string): boolean {
 }
 
 const locale = () => (i18n.lang === 'tr' ? 'tr-TR' : navigator.language?.startsWith('en') ? navigator.language : 'en-US')
+
+/** A typed amount in either notation ("1.250,50", "1,250.50", "5.000.000", "12,5"); `null` when it
+ * is not a number. A single separator followed by exactly three digits groups thousands in the
+ * notation of the app's language. */
+export function parseNumber(raw: string): number | null {
+  let s = raw.trim().replace(/[\s\u00a0'’_$€£₺]/g, '')
+  if (!/^-?[\d.,]+$/.test(s)) return null
+  const dots = s.split('.').length - 1
+  const commas = s.split(',').length - 1
+  if (dots && commas) {
+    const dec = s.lastIndexOf('.') > s.lastIndexOf(',') ? '.' : ','
+    s = s.replaceAll(dec === '.' ? ',' : '.', '').replace(dec, '.')
+  } else if (dots + commas > 1) {
+    s = s.replaceAll(dots ? '.' : ',', '')
+  } else if (dots + commas === 1) {
+    const sep = dots ? '.' : ','
+    const grouping = i18n.lang === 'tr' ? '.' : ','
+    s = sep === grouping && /^-?\d{1,3}[.,]\d{3}$/.test(s) ? s.replace(sep, '') : s.replace(sep, '.')
+  }
+  const n = Number(s)
+  return Number.isFinite(n) ? n : null
+}
 
 export function fmtInt(n: number): string {
   return new Intl.NumberFormat(locale(), { maximumFractionDigits: 0 }).format(n)

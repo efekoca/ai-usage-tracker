@@ -111,7 +111,7 @@
   {#if rows.length}
     {@const lead = rows[0]}
     {#if ws.limit_style === 'ring'}
-      <div class="ring" aria-label="{t(`provider.${p}`)} {rows.map((r) => `${winShort(r.k)} ${r.l.val !== null ? fmtPct(r.l.val) : r.l.last ? t('widget.lastReading', { pct: fmtPct(r.l.last.pct), t: r.l.last.ago }) : '—'}`).join(', ')}">
+      <div class="ring" role="img" aria-label="{t(`provider.${p}`)}{pool && has(`widget.pool.${p}.${pool}`) ? ` ${t(`widget.pool.${p}.${pool}`)}` : ''} {rows.map((r) => `${winShort(r.k)} ${r.l.val !== null ? fmtPct(r.l.val) : r.l.last ? t('widget.lastReading', { pct: fmtPct(r.l.last.pct), t: r.l.last.ago }) : '—'}`).join(', ')}">
         <svg viewBox="0 0 40 40" aria-hidden="true">
           <circle cx="20" cy="20" r={R} class="track" />
           {#if lead.l.pct !== null}

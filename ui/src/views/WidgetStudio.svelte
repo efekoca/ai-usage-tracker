@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount, untrack } from 'svelte'
-  import { app, saveSettings } from '../lib/store.svelte'
+  import { app, latest, saveSettings } from '../lib/store.svelte'
   import { api, PROVIDERS, type AntigravityPool, type Provider, type WidgetData, type WidgetItemKind, type WidgetSettings } from '../lib/api'
   import { fmtPct, searchKey, t } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
@@ -27,8 +27,12 @@
   let fonts = $state<string[]>([])
   let fontQuery = $state('')
   onMount(() => {
-    api.widgetData().then((d) => (data = d))
     api.listFonts().then((f) => (fonts = f)).catch(() => {})
+  })
+  // follows new data like the widget does; a failed read keeps the last preview
+  $effect(() => {
+    void app.tick
+    return latest(() => api.widgetData(), (d) => (data = d), () => {})
   })
   const SUGGESTED = ['Segoe UI Variable Display', 'Segoe UI', 'Aptos', 'Bahnschrift', 'Calibri', 'Cascadia Mono', 'Consolas', 'Georgia', 'Verdana', 'Arial']
   const suggested = $derived(SUGGESTED.filter((f) => fonts.includes(f)))
@@ -162,8 +166,8 @@
             <Toggle checked={it.enabled} label={t(`ws.item.${it.kind}`)} onchange={(v) => toggleItem(i, v)} />
             <span class="iname">{t(`ws.item.${it.kind}`)}</span>
             <span class="spacer"></span>
-            <button class="btn ghost icon" aria-label={t('ws.up')} disabled={i === 0} onclick={() => move(i, -1)}><Icon name="up" size={14} /></button>
-            <button class="btn ghost icon" aria-label={t('ws.down')} disabled={i === ws.items.length - 1} onclick={() => move(i, 1)}><Icon name="down" size={14} /></button>
+            <button class="btn ghost icon" aria-label="{t(`ws.item.${it.kind}`)}: {t('ws.up')}" disabled={i === 0} onclick={() => move(i, -1)}><Icon name="up" size={14} /></button>
+            <button class="btn ghost icon" aria-label="{t(`ws.item.${it.kind}`)}: {t('ws.down')}" disabled={i === ws.items.length - 1} onclick={() => move(i, 1)}><Icon name="down" size={14} /></button>
           </li>
         {/each}
       </ul>

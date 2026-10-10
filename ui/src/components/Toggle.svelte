@@ -15,8 +15,9 @@
   {disabled}
   class:on={checked}
   onclick={() => {
-    checked = !checked
-    onchange?.(checked)
+    // with a handler the owner's value decides, so a failed save never leaves the switch flipped
+    if (onchange) onchange(!checked)
+    else checked = !checked
   }}
 >
   <span></span>

@@ -3,7 +3,7 @@
   import { onMount } from 'svelte'
   import { app, refresh, saveSettings } from '../lib/store.svelte'
   import { api, providersOf, type HotkeyStatus, type ModelPrice, type PricingFile, type Provider } from '../lib/api'
-  import { fmtDate, fmtDateTime, fmtInt, fmtPct, localDate, t, windowLabel } from '../lib/i18n.svelte'
+  import { fmtDate, fmtDateTime, fmtInt, fmtPct, localDate, parseNumber, t, windowLabel } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
   import Select from '../components/Select.svelte'
   import Toggle from '../components/Toggle.svelte'
@@ -200,9 +200,8 @@
     cache_write_1h: `${t('metric.cacheWrite')} 1h`,
   })
   function num(v: string): number | null {
-    if (v.trim() === '') return null
-    const n = Number(v.replace(',', '.'))
-    return Number.isFinite(n) && n >= 0 ? n : null
+    const n = parseNumber(v)
+    return n !== null && n >= 0 ? n : null
   }
 
   async function doExport() {
@@ -437,10 +436,14 @@
                     aria-label="{m.id}: {priceLabel[k]}"
                     value={m[k] ?? ''}
                     onchange={(e) => {
-                      const v = num(e.currentTarget.value)
-                      if (k === 'input' || k === 'output') {
-                        if (v !== null) m[k] = v
-                      } else m[k] = v
+                      const raw = e.currentTarget.value
+                      const v = num(raw)
+                      // text that is not a price goes back to the saved value instead of staying in the cell
+                      if (v === null && (raw.trim() !== '' || k === 'input' || k === 'output')) {
+                        e.currentTarget.value = String(m[k] ?? '')
+                        return
+                      }
+                      m[k] = v as number
                       pricingDirty = true
                     }}
                   />

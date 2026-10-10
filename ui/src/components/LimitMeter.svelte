@@ -91,7 +91,8 @@
       <span class="subtle">{t('limits.observed', { t: fmtDuration(now - observedMs) })}</span>
     {/if}
   </div>
-  {#if known && forecast && (!compact || forecast.kind === 'fills')}
+  <!-- a full window needs no forecast of when it fills -->
+  {#if known && level !== 'full' && forecast && (!compact || forecast.kind === 'fills')}
     {@const f = forecast}
     <p class="forecast" class:warn={f.kind === 'fills'} title={t('forecast.help')}>
       <Icon name={f.kind === 'fills' ? 'warning' : f.kind === 'insufficient' ? 'clock' : 'chart'} size={13} />

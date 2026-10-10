@@ -151,7 +151,7 @@
               {@const isOpen = open === s.tool + s.session_id}
               <tr class:open={isOpen}>
                 <td class="toggle-col">
-                  <button class="btn ghost icon" aria-expanded={isOpen} aria-label={t('sessions.detail')} onclick={() => (open = isOpen ? null : s.tool + s.session_id)}>
+                  <button class="btn ghost icon" aria-expanded={isOpen} aria-label="{t('sessions.detail')}: {fmtDateTime(s.started_ms)}" onclick={() => (open = isOpen ? null : s.tool + s.session_id)}>
                     <span class="chev" class:down={isOpen}><Icon name="chevron" size={13} /></span>
                   </button>
                 </td>

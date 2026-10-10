@@ -13,9 +13,19 @@
   let note = $state<Record<string, { ok: boolean; text: string }>>({})
   let now = $state(Date.now())
 
+  // the interval, data changes and toggles all load; only the newest answer is shown
+  let gen = 0
   async function load() {
-    st = await api.captureStatus()
-    now = Date.now()
+    const mine = ++gen
+    try {
+      const s = await api.captureStatus()
+      if (mine === gen) {
+        st = s
+        now = Date.now()
+      }
+    } catch {
+      /* the next tick tries again */
+    }
   }
   onMount(() => {
     load()
