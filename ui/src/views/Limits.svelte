@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import { app, saveSettings, markTint } from '../lib/store.svelte'
   import { api, providersOf, type PlansFile, type Provider, type Threshold } from '../lib/api'
-  import { fmtCompact, fmtMoney, fmtPct, i18n, limitName, parseNumber, t, windowLabel } from '../lib/i18n.svelte'
+  import { fmtCompact, fmtInput, fmtMoney, fmtPct, i18n, limitName, parseNumber, t, windowLabel } from '../lib/i18n.svelte'
   import LimitMeter from '../components/LimitMeter.svelte'
   import AccuracyBadge from '../components/AccuracyBadge.svelte'
   import Icon from '../components/Icon.svelte'
@@ -45,16 +45,17 @@
     saveSettings((c) => ({ thresholds: c.thresholds.filter((x) => !(x.provider === th.provider && x.window === th.window)) })).then(reloadLimits)
   }
   const planNote = (p: Provider) => plans?.providers[p]?.plans.find((x) => x.id === app.settings?.plans[p])
-  function setPrice(p: Provider, raw: string) {
+  function setPrice(p: Provider, raw: string): boolean {
     // an empty field removes the custom price; text that is not a price changes nothing
     const v = parseNumber(raw)
-    if (raw.trim() !== '' && !(v !== null && v > 0)) return
+    if (raw.trim() !== '' && !(v !== null && v > 0)) return false
     saveSettings((c) => {
       const next = { ...c.plan_prices }
       if (v !== null && v > 0) next[p] = v
       else delete next[p]
       return { plan_prices: next }
     })
+    return true
   }
 </script>
 
@@ -91,7 +92,7 @@
             {@const own = app.settings?.plan_prices?.[p]}
             <label class="price">
               <span class="subtle small">{t('value.price')}</span>
-              <input class="field" inputmode="decimal" value={own ?? ''} placeholder={typeof pl.monthly_usd === 'number' ? `${pl.monthly_usd} (${t('value.listPrice')})` : '—'} onchange={(e) => setPrice(p, e.currentTarget.value)} title={pl.price_note?.[i18n.lang] ?? ''} />
+              <input class="field" inputmode="decimal" value={fmtInput(own)} placeholder={typeof pl.monthly_usd === 'number' ? `${fmtInput(pl.monthly_usd)} (${t('value.listPrice')})` : '—'} onchange={(e) => { if (!setPrice(p, e.currentTarget.value)) e.currentTarget.value = fmtInput(own) }} title={pl.price_note?.[i18n.lang] ?? ''} />
             </label>
           {/if}
           <span class="subtle small">{pl.note ? pl.note[i18n.lang] : ''}</span>

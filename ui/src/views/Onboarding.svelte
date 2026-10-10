@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { app, saveSettings } from '../lib/store.svelte'
+  import { app, refreshSoon, saveSettings } from '../lib/store.svelte'
   import { api, providersOf, type PlansFile, type Provider, type SourceId, type SourceInfo } from '../lib/api'
   import { i18n, t } from '../lib/i18n.svelte'
   import Toggle from '../components/Toggle.svelte'
@@ -44,6 +44,8 @@
     for (const [k, v] of Object.entries(chosen)) if (v) planMap[k] = v
     try {
       await saveSettings({ enabled_sources: list, plans: planMap, onboarded: true })
+      // the settings event may arrive after the save already set onboarded, and then it refreshes nothing
+      refreshSoon()
     } catch (e) {
       saveError = String(e)
     } finally {

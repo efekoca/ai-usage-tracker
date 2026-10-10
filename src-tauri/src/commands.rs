@@ -65,8 +65,10 @@ fn main_only(w: &WebviewWindow) -> Res<()> {
     if w.label() == windows::MAIN { Ok(()) } else { Err("not_allowed".into()) }
 }
 
+// Commands that lock the store are async: a sync command runs on the event loop, and a long
+// query holding the store would freeze every window until it ends.
 #[tauri::command]
-pub fn save_settings(app: AppHandle, window: WebviewWindow, state: State<AppState>, settings: Settings) -> Res<Settings> {
+pub async fn save_settings(app: AppHandle, window: WebviewWindow, state: State<'_, AppState>, settings: Settings) -> Res<Settings> {
     main_only(&window)?;
     save_settings_inner(&app, &state, |_| settings)
 }
@@ -146,7 +148,7 @@ pub struct ParserWarning {
 }
 
 #[tauri::command]
-pub fn parser_warnings(window: WebviewWindow, state: State<AppState>) -> Res<Vec<ParserWarning>> {
+pub async fn parser_warnings(window: WebviewWindow, state: State<'_, AppState>) -> Res<Vec<ParserWarning>> {
     main_only(&window)?;
     let hide = state.settings.read().unwrap().hide_project_names;
     let rows = state.db().files_with_warnings().map_err(err)?;
@@ -187,7 +189,7 @@ fn mask_limits(v: &mut [LimitView], hide_all: bool) {
 }
 
 #[tauri::command]
-pub fn get_report(state: State<AppState>, period: Period, filter: Option<Filter>) -> Res<Report> {
+pub async fn get_report(state: State<'_, AppState>, period: Period, filter: Option<Filter>) -> Res<Report> {
     let store = state.db();
     let book = state.book.read().unwrap();
     let range = analytics::period_range(period, &chrono::Local, now_ms(), store.first_event_ms().map_err(err)?);
@@ -216,7 +218,7 @@ pub(crate) fn enabled_providers(s: &Settings) -> HashSet<Provider> {
 }
 
 #[tauri::command]
-pub fn get_limits(state: State<AppState>) -> Res<Vec<LimitView>> {
+pub async fn get_limits(state: State<'_, AppState>) -> Res<Vec<LimitView>> {
     let settings = state.settings.read().unwrap().clone();
     let store = state.db();
     let book = state.book.read().unwrap();
@@ -302,7 +304,7 @@ fn widget_period(
 }
 
 #[tauri::command]
-pub fn get_widget_data(state: State<AppState>) -> Res<WidgetData> {
+pub async fn get_widget_data(state: State<'_, AppState>) -> Res<WidgetData> {
     let settings = state.settings.read().unwrap().clone();
     let providers = enabled_providers(&settings);
     let store = state.db();
@@ -336,7 +338,7 @@ pub fn get_widget_data(state: State<AppState>) -> Res<WidgetData> {
 }
 
 #[tauri::command]
-pub fn list_projects(state: State<AppState>) -> Res<Vec<ProjectRow>> {
+pub async fn list_projects(state: State<'_, AppState>) -> Res<Vec<ProjectRow>> {
     let hide = state.settings.read().unwrap().hide_project_names;
     let mut v = state.db().projects().map_err(err)?;
     for p in &mut v {
@@ -351,13 +353,13 @@ pub fn list_projects(state: State<AppState>) -> Res<Vec<ProjectRow>> {
 
 /// Unmasked: the settings screen is where the user chooses what to hide.
 #[tauri::command]
-pub fn list_projects_for_settings(window: WebviewWindow, state: State<AppState>) -> Res<Vec<ProjectRow>> {
+pub async fn list_projects_for_settings(window: WebviewWindow, state: State<'_, AppState>) -> Res<Vec<ProjectRow>> {
     main_only(&window)?;
     state.db().projects().map_err(err)
 }
 
 #[tauri::command]
-pub fn set_project_hidden(window: WebviewWindow, app: AppHandle, state: State<AppState>, id: i64, hidden: bool) -> Res<()> {
+pub async fn set_project_hidden(window: WebviewWindow, app: AppHandle, state: State<'_, AppState>, id: i64, hidden: bool) -> Res<()> {
     main_only(&window)?;
     state.db().set_project_hidden(id, hidden).map_err(err)?;
     let _ = app.emit("data-changed", ());
@@ -365,7 +367,7 @@ pub fn set_project_hidden(window: WebviewWindow, app: AppHandle, state: State<Ap
 }
 
 #[tauri::command]
-pub fn list_models(state: State<AppState>) -> Res<Vec<String>> {
+pub async fn list_models(state: State<'_, AppState>) -> Res<Vec<String>> {
     let store = state.db();
     let mut st = store.conn().prepare("SELECT DISTINCT model FROM usage_event ORDER BY model").map_err(err)?;
     let rows = st.query_map([], |r| r.get::<_, String>(0)).map_err(err)?;
@@ -417,9 +419,9 @@ pub fn get_plans() -> serde_json::Value {
 }
 
 #[tauri::command]
-pub fn export_data(
+pub async fn export_data(
     window: WebviewWindow,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     path: PathBuf,
     period: Period,
     filter: Option<Filter>,
@@ -442,7 +444,7 @@ pub fn export_data(
 }
 
 #[tauri::command]
-pub fn backup_database(window: WebviewWindow, state: State<AppState>, path: PathBuf) -> Res<()> {
+pub async fn backup_database(window: WebviewWindow, state: State<'_, AppState>, path: PathBuf) -> Res<()> {
     main_only(&window)?;
     state.db().backup_to(&path).map_err(err)
 }
@@ -454,7 +456,7 @@ pub struct ImportResult {
 }
 
 #[tauri::command]
-pub fn import_database(window: WebviewWindow, app: AppHandle, state: State<AppState>, path: PathBuf) -> Res<ImportResult> {
+pub async fn import_database(window: WebviewWindow, app: AppHandle, state: State<'_, AppState>, path: PathBuf) -> Res<ImportResult> {
     main_only(&window)?;
     let (events, limits) = state.db().merge_from(&path).map_err(|e| match e {
         tracker_core::rusqlite::Error::InvalidQuery => "not an AI Usage Tracker database".to_string(),
@@ -545,7 +547,7 @@ pub async fn list_fonts(app: AppHandle) -> Vec<String> {
 
 /// `remember` makes `corner` the anchor the widget keeps while resizing.
 #[tauri::command]
-pub fn place_widget(app: AppHandle, state: State<AppState>, corner: String, remember: Option<bool>) -> Res<()> {
+pub async fn place_widget(app: AppHandle, state: State<'_, AppState>, corner: String, remember: Option<bool>) -> Res<()> {
     if let Some(w) = tauri::Manager::get_webview_window(&app, windows::WIDGET) {
         windows::place_widget(&w, &corner);
     }

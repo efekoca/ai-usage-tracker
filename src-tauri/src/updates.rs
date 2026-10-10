@@ -128,6 +128,26 @@ pub async fn check(app: &AppHandle) -> Result<UpdateStatus, String> {
 }
 
 pub async fn install(app: &AppHandle) -> Result<(), String> {
+    // one install at a time: the check below can take seconds while every update button still works
+    let mut busy = false;
+    set(app, |s| {
+        busy = std::mem::replace(&mut s.installing, true);
+        if !busy {
+            s.downloaded = 0;
+            s.total = None;
+        }
+    });
+    if busy {
+        return Ok(());
+    }
+    let r = install_claimed(app).await;
+    if r.is_err() {
+        set(app, |s| s.installing = false);
+    }
+    r
+}
+
+async fn install_claimed(app: &AppHandle) -> Result<(), String> {
     // where the app may not be replaced directly, the updater moves it with an AppleScript that
     // breaks on these characters in its path
     #[cfg(target_os = "macos")]

@@ -340,9 +340,12 @@ pub fn revert_all_main() -> i32 {
         }
     };
     let had = (state.statusline.is_some(), state.otel.is_some());
-    let statusline_ok = cs::uninstall_statusline(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: status line: {e}")).is_ok();
-    let otel_ok = cs::uninstall_otel(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: telemetry: {e}")).is_ok();
-    let reverted = Reverted { statusline: had.0 && statusline_ok, otel: had.1 && otel_ok, at_ms: now_ms() };
+    let statusline = cs::uninstall_statusline(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: status line: {e}"));
+    let otel = cs::uninstall_otel(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: telemetry: {e}"));
+    let (statusline_ok, otel_ok) = (statusline.is_ok(), otel.is_ok());
+    // only what the uninstaller itself took out is put back; a value the user changed stays theirs
+    let restored = |r: &Result<RevertOutcome, _>| matches!(r, Ok(RevertOutcome::Restored));
+    let reverted = Reverted { statusline: had.0 && restored(&statusline), otel: had.1 && restored(&otel), at_ms: now_ms() };
     if reverted.statusline || reverted.otel {
         let _ = std::fs::write(reverted_file(&data_dir), serde_json::to_string(&reverted).unwrap_or_default());
     }

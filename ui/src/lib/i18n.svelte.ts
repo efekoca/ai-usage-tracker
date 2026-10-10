@@ -482,7 +482,7 @@ const tr: Dict = {
   "branches.none": "dal yok",
   "branches.hidden": "gizli dal",
   "branches.noneHelp": "Git deposu dışında çalışıldı ya da araç dal bildirmedi.",
-  "branches.coverage": "İsteklerin {pct}'inde dal bilgisi var.",
+  "branches.coverage": "Dal bilgisi olan isteklerin oranı: {pct}.",
   "branches.empty": "Bu dönemde kayıt yok.",
   "branches.filter": "Bu projeye filtrele",
   "history.title": "Limit geçmişi",
@@ -559,7 +559,7 @@ const tr: Dict = {
   "tip.residency.what": "Veri yerleşimi zorunlu değilse genel çıkarım daha ucuzdur.",
   "tip.residency.how": "Her istek için bölge çarpanlı fiyat ile çarpansız fiyat arasındaki fark, fiyat listesine göre.",
   "tip.large_contexts.title": "Maliyetin çoğu büyük bağlamlı isteklerden",
-  "tip.large_contexts.body": "Bağlamı {threshold} tokenı aşan {n} istek (isteklerin {rp}'i) maliyetin {cp} kadarını oluşturdu ({usd}).",
+  "tip.large_contexts.body": "Bağlamı {threshold} tokenı aşan {n} istek (isteklerdeki payı {rp}) maliyetin {cp} kadarını oluşturdu ({usd}).",
   "tip.large_contexts.what": "Her istek konuşmanın tamamını yeniden gönderir; oturum uzadıkça her yanıt daha pahalıya gelir. İlgisiz işler için yeni oturum (/clear), uzun işlerde ara ara /compact bu payı düşürür.",
   "tip.large_contexts.how": "Bağlam = istekteki tüm girdi tokenları (önbellekten okunan ve yazılan dahil). En az 20 istek ve maliyetin yarısı aşıldığında gösterilir.",
   "tip.tool_errors.title": "{tool} · {name} çağrıları sık hata döndürüyor",
@@ -997,7 +997,7 @@ const en: Dict = {
   'source.cloud': 'In the cloud',
   'source.notFound': 'Not found',
   'source.unsupported': 'No data',
-  'source.files': '{n} files',
+  'source.files': '{n} {n|file|files}',
 
   'acc.exact': 'Exact',
   'acc.estimated': 'Estimated',
@@ -1239,7 +1239,7 @@ const en: Dict = {
   "settings.data.format": "File format",
   "value.notSavings": "This is a hypothetical comparison at list prices, not money you actually saved. The logs cannot tell API-key use from subscription use, so both are counted.",
   "widget.unpriced": "Models without a known price are not in this sum; the real amount is higher.",
-  "tip.tool_errors.unknown": "{n} more calls have no recorded outcome and are not in the rate.",
+  "tip.tool_errors.unknown": "{n} more {n|call has|calls have} no recorded outcome and {n|is|are} not in the rate.",
   "report.err.report_timeout": "The report page did not get ready in time.",
   "report.err.invalid_range": "The date range is not valid.",
   "report.err.report_data_failed": "The report data could not be loaded.",
@@ -1278,7 +1278,7 @@ const en: Dict = {
   "days.metric.events": "Requests",
   "days.peak": "Busiest day",
   "days.perActive": "Per active day",
-  "days.perActiveSub": "average of {n} active days",
+  "days.perActiveSub": "average of {n} active {n|day|days}",
   "days.streak": "Longest active streak",
   "days.streakValue": "{n} {n|day|days}",
   "days.streakNow": "Current streak: {n} {n|day|days}",
@@ -1479,7 +1479,7 @@ const en: Dict = {
   "tips.how": "How it is calculated",
   "tips.empty": "Nothing in this period calls for a tip.",
   "tips.checked": "Checked: the cache written again after a pause, long-context surcharges, fast mode and regional surcharges, the share of large-context requests, tool error rates.",
-  "tips.basis": "{requests} {requests|request|requests} and {calls} tool calls examined.",
+  "tips.basis": "{requests} {requests|request|requests} and {calls} tool {calls|call|calls} examined.",
   "tips.share": "{pct} of the period's cost",
   "tip.cache_rebuild.title": "The cache was written again after a pause",
   "tip.cache_rebuild.body": "{n} {n|request|requests} ({sessions} {sessions|session|sessions}) wrote {tokens} tokens of context to the cache again after it had expired. Reading the same tokens from the cache would have cost {usd} less.",
@@ -1639,7 +1639,7 @@ const en: Dict = {
   "value.customPrice": "your price",
   "value.reset": "Use the list price",
   "value.lowerBound": "Chat use in Claude and ChatGPT is not in local logs, so it is not counted; the real value can be higher.",
-  "value.unpriced": "{n} unpriced requests are not counted.",
+  "value.unpriced": "{n} unpriced {n|request is|requests are} not counted.",
   "value.chart.api": "API equivalent (running)",
   "value.chart.plan": "Plan price",
   "value.source": "List prices verified on the official pages on {d}.",
@@ -1665,7 +1665,7 @@ const en: Dict = {
   "rep.limits": "Plan limits (at report time)",
   "rep.limitNone": "No limit readings.",
   "rep.value": "Plan value (this period)",
-  "rep.valueLine": "API list-price equivalent {c}; the plan price for these {n} days {s}.",
+  "rep.valueLine": "API list-price equivalent {c}; the plan price for {n|this day|these {n} days} {s}.",
   "rep.noPlan": "No plan selected.",
   "rep.share": "Share",
   "rep.none": "No usage in this period.",
@@ -1905,8 +1905,8 @@ export function has(key: string): boolean {
 const locale = () => (i18n.lang === 'tr' ? 'tr-TR' : navigator.language?.startsWith('en') ? navigator.language : 'en-US')
 
 /** A typed amount in either notation ("1.250,50", "1,250.50", "5.000.000", "12,5"); `null` when it
- * is not a number. A single separator followed by exactly three digits groups thousands in the
- * notation of the app's language. */
+ * is not a number. A single separator after a non-zero digit and followed by exactly three digits
+ * groups thousands in the notation of the app's language. */
 export function parseNumber(raw: string): number | null {
   let s = raw.trim().replace(/[\s\u00a0'’_$€£₺]/g, '')
   if (!/^-?[\d.,]+$/.test(s) || !/\d/.test(s)) return null
@@ -1925,10 +1925,17 @@ export function parseNumber(raw: string): number | null {
   } else if (dots + commas === 1) {
     const sep = dots ? '.' : ','
     const grouping = i18n.lang === 'tr' ? '.' : ','
-    s = sep === grouping && /^-?\d{1,3}[.,]\d{3}$/.test(s) ? s.replace(sep, '') : s.replace(sep, '.')
+    s = sep === grouping && /^-?[1-9]\d{0,2}[.,]\d{3}$/.test(s) ? s.replace(sep, '') : s.replace(sep, '.')
   }
   const n = Number(s)
   return Number.isFinite(n) ? n : null
+}
+
+/** A number for an input field, with the app language's decimal mark and no grouping, so
+ * `parseNumber` reads it back as the same value. */
+export function fmtInput(n: number | null | undefined): string {
+  if (n === null || n === undefined) return ''
+  return i18n.lang === 'tr' ? String(n).replace('.', ',') : String(n)
 }
 
 export function fmtInt(n: number): string {

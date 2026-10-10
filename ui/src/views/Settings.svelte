@@ -3,7 +3,7 @@
   import { onMount } from 'svelte'
   import { app, refresh, saveSettings } from '../lib/store.svelte'
   import { api, providersOf, type HotkeyStatus, type ModelPrice, type PricingFile, type Provider } from '../lib/api'
-  import { fmtDate, fmtDateTime, fmtInt, fmtPct, localDate, parseNumber, t, windowLabel } from '../lib/i18n.svelte'
+  import { fmtDate, fmtDateTime, fmtInput, fmtInt, fmtPct, localDate, parseNumber, t, windowLabel } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
   import Select from '../components/Select.svelte'
   import Toggle from '../components/Toggle.svelte'
@@ -288,7 +288,7 @@
       <Select label={t('settings.currency')} value={s.currency} minWidth={110} options={['USD', 'TRY', 'EUR', 'GBP'].map((c) => ({ value: c, label: c }))} onchange={(v) => saveSettings({ currency: v })} />
       {#if s.currency !== 'USD'}
         <label class="row small muted">{t('settings.fxRate')}
-          <input class="field rate" inputmode="decimal" value={String(s.fx_rate)} onchange={(e) => { const n = num(e.currentTarget.value); if (n) saveSettings({ fx_rate: n }) }} />
+          <input class="field rate" inputmode="decimal" value={fmtInput(s.fx_rate)} onchange={(e) => { const n = num(e.currentTarget.value); if (n) saveSettings({ fx_rate: n }); else e.currentTarget.value = fmtInput(s.fx_rate) }} />
           {s.currency}</label>
       {/if}
     </div>
@@ -434,13 +434,13 @@
                     class="cell"
                     inputmode="decimal"
                     aria-label="{m.id}: {priceLabel[k]}"
-                    value={m[k] ?? ''}
+                    value={fmtInput(m[k])}
                     onchange={(e) => {
                       const raw = e.currentTarget.value
                       const v = num(raw)
                       // text that is not a price goes back to the saved value instead of staying in the cell
                       if (v === null && (raw.trim() !== '' || k === 'input' || k === 'output')) {
-                        e.currentTarget.value = String(m[k] ?? '')
+                        e.currentTarget.value = fmtInput(m[k])
                         return
                       }
                       m[k] = v as number
