@@ -1909,13 +1909,18 @@ const locale = () => (i18n.lang === 'tr' ? 'tr-TR' : navigator.language?.startsW
  * notation of the app's language. */
 export function parseNumber(raw: string): number | null {
   let s = raw.trim().replace(/[\s\u00a0'’_$€£₺]/g, '')
-  if (!/^-?[\d.,]+$/.test(s)) return null
+  if (!/^-?[\d.,]+$/.test(s) || !/\d/.test(s)) return null
   const dots = s.split('.').length - 1
   const commas = s.split(',').length - 1
+  const grouped = (int: string, sep: string) => new RegExp(`^-?\\d{1,3}(\\${sep}\\d{3})+$`).test(int)
   if (dots && commas) {
     const dec = s.lastIndexOf('.') > s.lastIndexOf(',') ? '.' : ','
-    s = s.replaceAll(dec === '.' ? ',' : '.', '').replace(dec, '.')
+    const group = dec === '.' ? ',' : '.'
+    const [int, frac] = [s.slice(0, s.lastIndexOf(dec)), s.slice(s.lastIndexOf(dec) + 1)]
+    if (!grouped(int, group) || !/^\d+$/.test(frac)) return null
+    s = `${int.replaceAll(group, '')}.${frac}`
   } else if (dots + commas > 1) {
+    if (!grouped(s, dots ? '.' : ',')) return null
     s = s.replaceAll(dots ? '.' : ',', '')
   } else if (dots + commas === 1) {
     const sep = dots ? '.' : ','
