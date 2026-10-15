@@ -57,6 +57,9 @@ jobs:
       - name: Type-check UI
         run: npm --prefix ui run check
 
+      - name: Test UI
+        run: npm --prefix ui test
+
       # the desktop crate embeds ui/dist, so the UI is built before any cargo step
       - name: Build UI
         run: npm --prefix ui run build
