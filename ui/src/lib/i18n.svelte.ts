@@ -1099,7 +1099,7 @@ const en: Dict = {
   'limits.state.stale': 'Reading is old; current use is unknown.',
   'limits.state.behind': 'Last reading {pct} · {t} ago',
   'limits.state.behind.help': 'This reading may not include later use (from this computer, another device or the web), so the current value is at least the last reading and probably higher. It updates when a new reading arrives.',
-  'limits.state.behind.since': '{n} tokens used since the last reading; the current value is unknown.',
+  'limits.state.behind.since': '{n} {n|token|tokens} used since the last reading; the current value is unknown.',
   'limits.state.behind.claudeHint': 'For a live value, turn on Sources → Live capture → Claude limit reads: it updates every 5 minutes while Claude is in use.',
   'limits.state.behind.hint': 'It updates when a new reading arrives.',
   'limits.status.outdated': 'Outdated',
@@ -1229,8 +1229,8 @@ const en: Dict = {
   'settings.data.wipe': 'Delete all my data',
   'settings.data.wipe.confirm': 'All usage records in this app’s archive will be deleted. The tools’ own log files are not touched. Setup will open again and nothing is re-read until you confirm. Continue?',
   'settings.data.done': 'Done',
-  'settings.data.exported': 'Exported {n} rows',
-  'settings.data.imported': 'Merged {n} records',
+  'settings.data.exported': 'Exported {n} {n|row|rows}',
+  'settings.data.imported': 'Merged {n} {n|record|records}',
   'settings.network': 'Network',
   'settings.network.text': "The app itself goes online only to check for updates: it downloads the version information from the project's page and sends nothing (turn it off under Updates). The Claude, Codex and Antigravity limit reads, on by default, run your own Claude Code, Codex and Antigravity CLI, which ask their own services for your plan's limit percentages only. Turn them off under Sources → Live capture.",
   'settings.about': 'About',
@@ -1837,7 +1837,7 @@ const en: Dict = {
   'subcache.writeShare': 'Share of write cost',
   'subcache.writeShare.help': 'The part of the cache write cost (API equivalent) that comes from subagents.',
   'subcache.runs': 'Subagent runs',
-  'subcache.runsIn': 'in {n} sessions',
+  'subcache.runsIn': 'in {n} {n|session|sessions}',
   'subcache.compare': 'Main conversation and subagents',
   'subcache.findings': 'Findings',
   'subcache.byAgent': 'Cache by agent type',
@@ -1854,7 +1854,7 @@ const en: Dict = {
   'subcache.col.first.help': 'The part of each run\'s first prompt that was read from cache.',
   'subcache.f.mainOk': 'Subagents do not hurt the main conversation\'s cache. The first request after a subagent finished hit {after}, other requests {other}.',
   'subcache.f.mainDrop': 'The first main-conversation request after a subagent finished hit {after}, other requests {other}. While you wait on a long subagent, the main conversation\'s cache (5 minutes or 1 hour) can expire.',
-  'subcache.f.mainFew': 'Not enough requests to measure the effect on the main conversation: {n} requests followed a subagent, at least {min} are needed.',
+  'subcache.f.mainFew': 'Not enough requests to measure the effect on the main conversation: {n} {n|request|requests} followed a subagent, at least {min} are needed.',
   'subcache.f.subLower': 'Subagents hit the cache {pts} points less often than the main conversation. A subagent finishes in {req} requests on average, so each token it writes is read only {reuse} times on average.',
   'subcache.f.subLowerNoReuse': 'Subagents hit the cache {pts} points less often than the main conversation. A subagent finishes in {req} requests on average, so what it writes is read only a few times.',
   'subcache.f.subClose': 'Subagents hit the cache about as often as the main conversation: {sub} and {main}.',
@@ -1945,7 +1945,7 @@ const en: Dict = {
   'widget.week': 'Week',
 }
 
-const dicts: Record<string, Dict> = { tr, en }
+export const dicts: Record<'tr' | 'en', Dict> = { tr, en }
 
 export const i18n = $state({ lang: 'en' as 'tr' | 'en', currency: 'USD', fx: 1 })
 
