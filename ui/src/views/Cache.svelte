@@ -7,6 +7,7 @@
   import Segmented from '../components/Segmented.svelte'
   import Icon from '../components/Icon.svelte'
   import BarValue from '../components/BarValue.svelte'
+  import SubagentCache from '../components/SubagentCache.svelte'
 
   const r = $derived(app.report)
   const prompt = (k: Tokens) => k.input + k.cache_read + k.cache_write
@@ -81,46 +82,49 @@
     </section>
   </div>
 
+  <SubagentCache />
+
   <section class="card table-card">
     <div class="th">
       <h2>{t('cache.breakdown')}</h2>
       <span class="spacer"></span>
       <Segmented label={t('cache.breakdown')} bind:value={breakdown} options={[{ value: 'model', label: t('common.model') }, { value: 'client', label: t('common.tool') }, { value: 'project', label: t('common.project') }]} />
     </div>
-    <table>
-      <thead>
-        <tr>
-          <th scope="col">{breakdown === 'model' ? t('common.model') : breakdown === 'client' ? t('common.tool') : t('common.project')}</th>
-          <th scope="col" class="num">{t('cache.promptTokens')}</th>
-          <th scope="col" class="num">{t('metric.cacheRead')}</th>
-          <th scope="col" class="num">{t('metric.cacheWrite')}</th>
-          <th scope="col" class="num">{t('cache.hitRate')}</th>
-          <th scope="col" class="num">{t('cache.reuse')}</th>
-          <th scope="col" class="num">{t('cache.savings')}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {#each rows as g (g.key)}
-          {@const k = g.totals.tokens}
-          {@const h = hit(k) ?? 0}
+    <div class="scroll">
+      <table>
+        <thead>
           <tr>
-            <th scope="row">
-              {#if breakdown === 'client'}<i class="swatch" style="background:{toolColor[g.key.split(':')[0]]}"></i>{/if}
-              {label(g)}
-            </th>
-            <td class="num">{fmtCompact(prompt(k))}</td>
-            <td class="num">{fmtCompact(k.cache_read)}</td>
-            <td class="num">{fmtCompact(k.cache_write)}</td>
-            <td class="num"><BarValue pct={h} tone="teal" text={fmtPct(h, 1)} /></td>
-            <td class="num">{reuse(g.totals) !== null ? `${fmtDec(reuse(g.totals) ?? 0, 1)}×` : '—'}</td>
-            <td class="num" class:neg={g.totals.cache_savings_usd < 0}>{g.totals.unpriced_events === g.totals.events ? '—' : fmtMoney(g.totals.cache_savings_usd)}</td>
+            <th scope="col">{breakdown === 'model' ? t('common.model') : breakdown === 'client' ? t('common.tool') : t('common.project')}</th>
+            <th scope="col" class="num">{t('cache.promptTokens')}</th>
+            <th scope="col" class="num">{t('metric.cacheRead')}</th>
+            <th scope="col" class="num">{t('metric.cacheWrite')}</th>
+            <th scope="col" class="num">{t('cache.hitRate')}</th>
+            <th scope="col" class="num">{t('cache.reuse')}</th>
+            <th scope="col" class="num">{t('cache.savings')}</th>
           </tr>
-        {/each}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {#each rows as g (g.key)}
+            {@const k = g.totals.tokens}
+            {@const h = hit(k) ?? 0}
+            <tr>
+              <th scope="row">
+                {#if breakdown === 'client'}<i class="swatch" style="background:{toolColor[g.key.split(':')[0]]}"></i>{/if}
+                {label(g)}
+              </th>
+              <td class="num">{fmtCompact(prompt(k))}</td>
+              <td class="num">{fmtCompact(k.cache_read)}</td>
+              <td class="num">{fmtCompact(k.cache_write)}</td>
+              <td class="num"><BarValue pct={h} tone="teal" text={fmtPct(h, 1)} /></td>
+              <td class="num">{reuse(g.totals) !== null ? `${fmtDec(reuse(g.totals) ?? 0, 1)}×` : '—'}</td>
+              <td class="num" class:neg={g.totals.cache_savings_usd < 0}>{g.totals.unpriced_events === g.totals.events ? '—' : fmtMoney(g.totals.cache_savings_usd)}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+    <footer class="foot subtle small"><Icon name="info" size={13} /><span>{t('cache.method')}</span></footer>
   </section>
-
-  <p class="footnote subtle small"><Icon name="info" size={13} /> {t('cache.method')}</p>
 {/if}
 
 <style>
@@ -196,20 +200,23 @@
     padding-left: 12px;
   }
   .table-card {
-    padding: 6px 0;
-    overflow-x: auto;
+    padding: 0;
+    overflow: hidden;
   }
   .th {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 12px 16px 4px;
+    padding: 18px 20px 10px;
   }
   .th h2 {
     margin: 0;
   }
   .spacer {
     flex: 1;
+  }
+  .scroll {
+    overflow-x: auto;
   }
   table {
     width: 100%;
@@ -218,16 +225,24 @@
   }
   .table-card th,
   .table-card td {
-    padding: 8px 12px;
+    padding: 10px 14px;
     text-align: left;
-    border-bottom: 0.5px solid var(--hairline);
+    border-top: 0.5px solid var(--hairline);
     white-space: nowrap;
+  }
+  .table-card th:first-child,
+  .table-card td:first-child {
+    padding-left: 20px;
+  }
+  .table-card th:last-child,
+  .table-card td:last-child {
+    padding-right: 20px;
   }
   .table-card .num {
     text-align: right;
   }
   thead th {
-    color: var(--ink-2);
+    color: var(--ink-3);
     font-weight: 500;
     font-size: 12px;
     white-space: normal;
@@ -240,24 +255,26 @@
     display: inline-block;
     margin-right: 6px;
   }
-  tbody tr:last-child td,
-  tbody tr:last-child th {
-    border-bottom: 0;
-  }
   .neg {
     color: var(--bad-ink);
   }
-  .footnote {
+  .foot {
     display: flex;
-    gap: 6px;
+    gap: 8px;
     align-items: flex-start;
-    max-width: 820px;
+    padding: 14px 20px 16px;
+    border-top: 0.5px solid var(--hairline);
+    line-height: 1.5;
+  }
+  .foot :global(svg) {
+    flex: none;
+    margin-top: 2px;
   }
   @container main (max-width: 1040px) {
-    th,
-    td {
-      padding-left: 8px;
-      padding-right: 8px;
+    .table-card th,
+    .table-card td {
+      padding-left: 10px;
+      padding-right: 10px;
     }
   }
 </style>

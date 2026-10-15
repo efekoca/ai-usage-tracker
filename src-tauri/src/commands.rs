@@ -696,6 +696,14 @@ pub async fn get_agents_tools(app: AppHandle, period: Period, filter: Option<Fil
 }
 
 #[tauri::command]
+pub async fn get_subagent_cache(app: AppHandle, period: Period, filter: Option<Filter>) -> Res<insights::SubagentCache> {
+    let state = app.state::<AppState>();
+    let store = state.db();
+    let book = state.book.read().unwrap();
+    insights::subagent_cache(&store, &book, range_for(&store, period)?, &filter.unwrap_or_default(), &chrono::Local).map_err(err)
+}
+
+#[tauri::command]
 pub async fn get_tips(app: AppHandle, period: Period, filter: Option<Filter>) -> Res<tracker_core::tips::Tips> {
     let state = app.state::<AppState>();
     let store = state.db();

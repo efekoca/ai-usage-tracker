@@ -517,6 +517,31 @@ export interface AgentsTools {
   filtered_by_session: boolean
 }
 
+export interface PromptShare {
+  requests: number
+  prompt: number
+  cache_read: number
+}
+export interface CacheAgentRow {
+  tool: Tool
+  agent: string | null
+  totals: Totals
+  runs: number
+  first: PromptShare
+}
+export interface SubagentCache {
+  main: Totals
+  subagents: Totals
+  runs: number
+  sessions: number
+  first: PromptShare
+  main_after_run: PromptShare
+  main_other: PromptShare
+  previous_main: PromptShare
+  previous_subagents: PromptShare
+  rows: CacheAgentRow[]
+}
+
 export type Tip =
   | { kind: 'cache_rebuild'; requests: number; sessions: number; tokens: number; extra_usd: number; cost_share_pct: number }
   | { kind: 'long_context'; requests: number; extra_usd: number; cost_share_pct: number; models: string[] }
@@ -668,6 +693,7 @@ export const api = {
   listFonts: () => invoke<string[]>('list_fonts'),
   branches: (period: Period, filter?: Filter) => invoke<Branches>('get_branches', { period, filter }),
   agentsTools: (period: Period, filter?: Filter) => invoke<AgentsTools>('get_agents_tools', { period, filter }),
+  subagentCache: (period: Period, filter?: Filter) => invoke<SubagentCache>('get_subagent_cache', { period, filter }),
   tips: (period: Period, filter?: Filter) => invoke<Tips>('get_tips', { period, filter }),
   limitHistory: (days?: number) => invoke<LimitHistoryView>('get_limit_history', { days }),
   dayDetail: (date: string, filter?: Filter) => invoke<DayDetail>('get_day_detail', { date, filter }),

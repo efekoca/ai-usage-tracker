@@ -1,6 +1,6 @@
 use chrono::{FixedOffset, TimeZone};
 use tracker_core::analytics::{Filter, Range};
-use tracker_core::insights::{agents_tools, branches, compare_models, context_stats, day_detail, forecast, plan_value, sessions, ForecastKind};
+use tracker_core::insights::{agents_tools, branches, compare_models, context_stats, day_detail, forecast, plan_value, sessions, subagent_cache, ForecastKind, PromptShare};
 use tracker_core::tips::{cache_rebuilds, tips, Tip, Tips};
 use tracker_core::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
 use tracker_core::pricing::{CostInput, PriceBook};
@@ -350,6 +350,34 @@ fn subagent_share_and_tool_calls_are_counted() {
     assert_eq!((r.tool_calls, r.filtered_by_session), (0, true));
     let f = Filter { tools: vec![Tool::Codex], ..Default::default() };
     assert_eq!(agents_tools(&s, &PriceBook::default_book(), all(), &f).unwrap().tool_calls, 1);
+}
+
+#[test]
+fn subagent_cache_separates_runs_and_the_main_request_after_each_run() {
+    let t = ms(2026, 9, 10, 9, 0);
+    let cc = |key, at, input, read, write| ev(key, at, Tool::ClaudeCode, "claude-sonnet-5", Some("s1"), "C:/w/app", input, read, 10).cache_write(write, 0);
+    let s = store_with(&[
+        cc("m1", t, 1000, 0, 0),
+        cc("a1", t + MIN, 0, 600, 400).agent("Explore", "agent-1"),
+        cc("a2", t + 2 * MIN, 0, 900, 100).agent("Explore", "agent-1"),
+        cc("m2", t + 3 * MIN, 950, 50, 0),
+        cc("m3", t + 4 * MIN, 0, 1000, 0),
+        cc("b1", t + 5 * MIN, 0, 0, 3000).agent("general-purpose", "agent-2"),
+        ev("m4", t, Tool::ClaudeCode, "claude-sonnet-5", Some("s2"), "C:/w/app", 0, 500, 10),
+        ev("p1", ms(2026, 9, 9, 12, 0), Tool::ClaudeCode, "claude-sonnet-5", Some("s0"), "C:/w/app", 100, 300, 10).agent("Explore", "agent-0"),
+    ]);
+    let day = Range { from_ms: ms(2026, 9, 10, 0, 0), to_ms: ms(2026, 9, 11, 0, 0) };
+    let r = subagent_cache(&s, &PriceBook::default_book(), day, &Filter::default(), &FixedOffset::east_opt(0).unwrap()).unwrap();
+    assert_eq!((r.runs, r.sessions), (2, 1));
+    assert_eq!((r.main.events, r.subagents.events), (4, 3));
+    assert_eq!(r.first, PromptShare { requests: 2, prompt: 4000, cache_read: 600 });
+    assert_eq!(r.main_after_run, PromptShare { requests: 1, prompt: 1000, cache_read: 50 });
+    assert_eq!(r.main_other, PromptShare { requests: 2, prompt: 2000, cache_read: 1000 });
+    assert_eq!(r.previous_subagents, PromptShare { requests: 1, prompt: 400, cache_read: 300 });
+    assert_eq!(r.previous_main.requests, 0);
+    let rows: Vec<_> = r.rows.iter().map(|x| (x.agent.as_deref(), x.runs, x.totals.events)).collect();
+    assert_eq!(rows, vec![(None, 0, 4), (Some("general-purpose"), 1, 1), (Some("Explore"), 1, 2)]);
+    assert!(r.subagents.cost.cache_write > 0.0);
 }
 
 fn tip_kinds(t: &Tips) -> Vec<String> {

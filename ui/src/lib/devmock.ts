@@ -278,6 +278,46 @@ function mockAgentsTools() {
   }
 }
 
+function mockSubagentCache() {
+  const share = (requests: number, prompt: number, hit: number) => ({ requests, prompt, cache_read: Math.round(prompt * hit) })
+  const tot = (tokens: number, cost: number, hit: number, oneHour: number) => {
+    const x = totals(tokens, cost)
+    const prompt = tokens - x.tokens.output
+    const cr = Math.round(prompt * hit)
+    const cw = Math.round((prompt - cr) * 0.97)
+    return {
+      ...x,
+      tokens: { ...x.tokens, cache_read: cr, cache_write: cw, cache_write_1h: Math.round(cw * oneHour), input: prompt - cr - cw },
+      cost: { ...x.cost, cache_write: cost * (1 - hit) * 2.4 },
+      cache_read_with_writes: cr,
+      cache_write_with_reads: cw,
+    }
+  }
+  const main = tot(310_000_000, 251.2, 0.986, 1)
+  const general = tot(28_000_000, 19.4, 0.9, 0)
+  const explore = tot(9_000_000, 4.1, 0.88, 0)
+  const guardian = { ...tot(1_200_000, 0, 0.62, 0), unpriced_events: 40, events: 40, cost_usd: 0 }
+  const sum = (a: Totals[]) => a.reduce((s, x) => ({ ...s, events: s.events + x.events, tokens: { input: s.tokens.input + x.tokens.input, output: s.tokens.output + x.tokens.output, cache_read: s.tokens.cache_read + x.tokens.cache_read, cache_write: s.tokens.cache_write + x.tokens.cache_write, cache_write_1h: s.tokens.cache_write_1h + x.tokens.cache_write_1h, reasoning: 0 }, cost: { ...s.cost, cache_write: s.cost.cache_write + x.cost.cache_write }, cache_savings_usd: s.cache_savings_usd + x.cache_savings_usd, cache_read_with_writes: s.cache_read_with_writes + x.cache_read_with_writes, cache_write_with_reads: s.cache_write_with_reads + x.cache_write_with_reads }))
+  return {
+    main,
+    subagents: sum([general, explore, guardian]),
+    runs: 28,
+    sessions: 9,
+    first: share(28, 1_900_000, 0.81),
+    main_after_run: share(26, 3_100_000, 0.978),
+    main_other: share(1840, 210_000_000, 0.991),
+    previous_main: share(1500, 260_000_000, 0.981),
+    previous_subagents: share(180, 30_000_000, 0.86),
+    rows: [
+      { tool: 'claude_code', agent: null, totals: main, runs: 0, first: share(0, 0, 0) },
+      { tool: 'claude_code', agent: 'general-purpose', totals: general, runs: 14, first: share(14, 1_100_000, 0.83) },
+      { tool: 'claude_code', agent: 'Explore', totals: explore, runs: 9, first: share(9, 620_000, 0.79) },
+      { tool: 'codex', agent: null, totals: tot(52_000_000, 13.3, 0.93, 0), runs: 0, first: share(0, 0, 0) },
+      { tool: 'codex', agent: 'guardian', totals: guardian, runs: 5, first: share(5, 180_000, 0.7) },
+    ],
+  }
+}
+
 function mockTips() {
   return {
     tips: [
@@ -468,6 +508,8 @@ export function installMock() {
           return mockBranches()
         case 'get_agents_tools':
           return mockAgentsTools()
+        case 'get_subagent_cache':
+          return mockSubagentCache()
         case 'get_tips':
           return mockTips()
         case 'get_limit_history':

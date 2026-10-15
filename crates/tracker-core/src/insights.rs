@@ -624,6 +624,140 @@ pub fn agents_tools(store: &Store, book: &PriceBook, range: Range, filter: &Filt
     Ok(AgentsTools { agents, tools, tool_calls: total, filtered_by_session: by_session })
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct PromptShare {
+    pub requests: u64,
+    pub prompt: u64,
+    pub cache_read: u64,
+}
+
+impl PromptShare {
+    fn add(&mut self, t: &crate::model::Tokens) {
+        self.requests += 1;
+        self.prompt = self.prompt.saturating_add(t.input).saturating_add(t.cache_read).saturating_add(t.cache_write);
+        self.cache_read = self.cache_read.saturating_add(t.cache_read);
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CacheAgentRow {
+    pub tool: Tool,
+    pub agent: Option<String>,
+    pub totals: Totals,
+    pub runs: u64,
+    pub first: PromptShare,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SubagentCache {
+    pub main: Totals,
+    pub subagents: Totals,
+    pub runs: u64,
+    pub sessions: u64,
+    pub first: PromptShare,
+    /// Main requests in sessions with subagents: the first one after each run, and the rest.
+    pub main_after_run: PromptShare,
+    pub main_other: PromptShare,
+    pub previous_main: PromptShare,
+    pub previous_subagents: PromptShare,
+    pub rows: Vec<CacheAgentRow>,
+}
+
+type SessionKey<'a> = (&'static str, &'a str);
+
+pub fn subagent_cache<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filter: &Filter, tz: &Tz) -> Result<SubagentCache> {
+    let events: Vec<EventRow> = store.events_between(range.from_ms, range.to_ms)?.into_iter().filter(|e| filter.matches(e)).collect();
+    let (mut main, mut subagents) = (Totals::default(), Totals::default());
+    struct Acc {
+        totals: Totals,
+        runs: std::collections::HashSet<String>,
+        first: PromptShare,
+    }
+    let mut acc: BTreeMap<(&'static str, Option<String>), Acc> = BTreeMap::new();
+    // events come sorted by time, so the last one seen ends the run
+    let mut runs: HashMap<SessionKey, (SessionKey, i64)> = HashMap::new();
+    let mut first = PromptShare::default();
+    for e in &events {
+        let a = acc
+            .entry((e.tool.as_str(), e.agent.clone()))
+            .or_insert_with(|| Acc { totals: Totals::default(), runs: Default::default(), first: PromptShare::default() });
+        add(&mut a.totals, book, e);
+        if e.agent.is_none() {
+            add(&mut main, book, e);
+            continue;
+        }
+        add(&mut subagents, book, e);
+        let Some(thread) = e.thread_id.as_deref() else { continue };
+        if a.runs.insert(thread.to_owned()) {
+            a.first.add(&e.tokens);
+            first.add(&e.tokens);
+        }
+        if let Some(session) = e.session_id.as_deref() {
+            runs.entry((e.tool.as_str(), thread)).or_insert(((e.tool.as_str(), session), e.ts_ms)).1 = e.ts_ms;
+        }
+    }
+
+    let mut main_by_session: HashMap<SessionKey, Vec<&EventRow>> = HashMap::new();
+    for e in events.iter().filter(|e| e.agent.is_none()) {
+        if let Some(s) = e.session_id.as_deref() {
+            main_by_session.entry((e.tool.as_str(), s)).or_default().push(e);
+        }
+    }
+    let mut after: std::collections::HashSet<(&'static str, &str, usize)> = std::collections::HashSet::new();
+    let mut sessions: std::collections::HashSet<SessionKey> = std::collections::HashSet::new();
+    for (session, end) in runs.values() {
+        sessions.insert(*session);
+        if let Some(evs) = main_by_session.get(session) {
+            let i = evs.partition_point(|e| e.ts_ms <= *end);
+            if i < evs.len() {
+                after.insert((session.0, session.1, i));
+            }
+        }
+    }
+    let (mut main_after_run, mut main_other) = (PromptShare::default(), PromptShare::default());
+    for (key, evs) in &main_by_session {
+        if !sessions.contains(key) {
+            continue;
+        }
+        for (i, e) in evs.iter().enumerate() {
+            if after.contains(&(key.0, key.1, i)) { main_after_run.add(&e.tokens) } else { main_other.add(&e.tokens) }
+        }
+    }
+
+    let prev = range.previous(tz);
+    let (mut previous_main, mut previous_subagents) = (PromptShare::default(), PromptShare::default());
+    for e in store.events_between(prev.from_ms, prev.to_ms)?.iter().filter(|e| filter.matches(e)) {
+        if e.agent.is_none() { previous_main.add(&e.tokens) } else { previous_subagents.add(&e.tokens) }
+    }
+
+    let prompt = |t: &Totals| t.tokens.input + t.tokens.cache_read + t.tokens.cache_write;
+    let mut rows: Vec<CacheAgentRow> = acc
+        .into_iter()
+        .filter_map(|((tool, agent), a)| Some(CacheAgentRow { tool: Tool::parse(tool)?, runs: a.runs.len() as u64, agent, first: a.first, totals: a.totals }))
+        .filter(|r| prompt(&r.totals) > 0)
+        .collect();
+    rows.sort_by(|a, b| {
+        a.tool
+            .as_str()
+            .cmp(b.tool.as_str())
+            .then(a.agent.is_some().cmp(&b.agent.is_some()))
+            .then(prompt(&b.totals).cmp(&prompt(&a.totals)))
+            .then(a.agent.cmp(&b.agent))
+    });
+    Ok(SubagentCache {
+        runs: rows.iter().map(|r| r.runs).sum(),
+        sessions: sessions.len() as u64,
+        main,
+        subagents,
+        first,
+        main_after_run,
+        main_other,
+        previous_main,
+        previous_subagents,
+        rows,
+    })
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct HourPoint {
     pub hour: u32,

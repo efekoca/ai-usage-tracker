@@ -422,6 +422,7 @@ pub fn run() {
             commands::install_cli,
             commands::get_branches,
             commands::get_agents_tools,
+            commands::get_subagent_cache,
             commands::get_tips,
             commands::get_limit_history,
             commands::get_day_detail,
