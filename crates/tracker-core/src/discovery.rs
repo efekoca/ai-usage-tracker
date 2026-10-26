@@ -19,6 +19,8 @@ pub enum SourceId {
     Codex,
     ChatgptDesktop,
     Antigravity,
+    // one word, as `as_str` writes it; 0.6.0 saved `open_code` in the settings
+    #[serde(rename = "opencode", alias = "open_code")]
     OpenCode,
 }
 
@@ -393,6 +395,16 @@ fn has_cloud_sessions(sessions_dir: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sources_reach_the_ui_and_settings_under_their_own_names() {
+        for s in SourceId::ALL {
+            let json = serde_json::to_string(&s).unwrap();
+            assert_eq!(json, format!("\"{}\"", s.as_str()));
+            assert_eq!(serde_json::from_str::<SourceId>(&json).unwrap(), s);
+        }
+        assert_eq!(serde_json::from_str::<SourceId>("\"open_code\"").unwrap(), SourceId::OpenCode, "saved by 0.6.0");
+    }
 
     #[test]
     fn a_folder_listed_twice_is_one_root() {
