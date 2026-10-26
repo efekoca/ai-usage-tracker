@@ -409,6 +409,18 @@ mod tests {
     }
 
     #[test]
+    fn opencode_switched_off_in_0_6_0_stays_off() {
+        let store = Store::open_in_memory().unwrap();
+        let known = r#"["claude_code","cowork","claude_desktop","codex","antigravity","open_code","chatgpt_desktop"]"#;
+        store.set_setting(KEY, &format!(r#"{{"onboarded":true,"enabled_sources":["claude_code","codex"],"known_sources":{known}}}"#)).unwrap();
+        let s = Settings::load(&store);
+        assert_eq!(s.enabled_sources, [SourceId::ClaudeCode, SourceId::Codex]);
+        assert!(s.known_sources.contains(&SourceId::OpenCode));
+        store.set_setting(KEY, r#"{"onboarded":true,"enabled_sources":["open_code"],"known_sources":[]}"#).unwrap();
+        assert!(Settings::load(&store).enabled_sources.contains(&SourceId::OpenCode));
+    }
+
+    #[test]
     fn a_source_added_by_an_update_starts_on_without_reviving_switched_off_ones() {
         let store = Store::open_in_memory().unwrap();
         store.set_setting(KEY, r#"{"onboarded":true,"enabled_sources":["claude_code","cowork"]}"#).unwrap();

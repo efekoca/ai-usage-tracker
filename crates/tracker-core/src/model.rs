@@ -13,6 +13,8 @@ pub enum Tool {
     Codex,
     ClaudeDesktop,
     Antigravity,
+    // one word, as `as_str` writes it; 0.6.0 sent `open_code`
+    #[serde(rename = "opencode", alias = "open_code")]
     OpenCode,
 }
 
@@ -265,6 +267,28 @@ pub fn parse_ts_ms(s: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tools_and_providers_reach_the_ui_under_the_names_the_archive_uses() {
+        for t in [Tool::ClaudeCode, Tool::Codex, Tool::ClaudeDesktop, Tool::Antigravity, Tool::OpenCode] {
+            // a new tool fails to compile here until it is listed above
+            match t {
+                Tool::ClaudeCode | Tool::Codex | Tool::ClaudeDesktop | Tool::Antigravity | Tool::OpenCode => {}
+            }
+            let json = serde_json::to_string(&t).unwrap();
+            assert_eq!(json, format!("\"{}\"", t.as_str()));
+            assert_eq!(serde_json::from_str::<Tool>(&json).unwrap(), t);
+            assert_eq!(Tool::parse(t.as_str()), Some(t));
+        }
+        assert_eq!(serde_json::from_str::<Tool>("\"open_code\"").unwrap(), Tool::OpenCode, "what 0.6.0 sent");
+        for p in [Provider::Anthropic, Provider::OpenAI, Provider::Google] {
+            match p {
+                Provider::Anthropic | Provider::OpenAI | Provider::Google => {}
+            }
+            assert_eq!(serde_json::to_string(&p).unwrap(), format!("\"{}\"", p.as_str()));
+            assert_eq!(Provider::parse(p.as_str()), Some(p));
+        }
+    }
 
     #[test]
     fn unknown_accuracy_is_not_exact() {
