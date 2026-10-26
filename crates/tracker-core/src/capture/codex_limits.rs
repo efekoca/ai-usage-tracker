@@ -130,7 +130,9 @@ pub fn query(bin: &Path, timeout: Duration, now_ms: i64) -> Result<Vec<LimitSnap
             if msg.get("id").and_then(Value::as_i64) == Some(id) {
                 if let Some(err) = msg.get("error") {
                     let text = str_at(err, "message").unwrap_or("codex returned an error");
-                    return Err(if text.contains("authentication required") { NOT_SIGNED_IN.into() } else { text.to_owned() });
+                    // a 401 from the usage service is a sign-in that expired
+                    let signed_out = text.contains("authentication required") || text.contains("401 Unauthorized");
+                    return Err(if signed_out { NOT_SIGNED_IN.into() } else { text.to_owned() });
                 }
                 return Ok(msg.get("result").cloned().unwrap_or(Value::Null));
             }
@@ -220,6 +222,13 @@ mod tests {
         .unwrap();
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(query(&bin, Duration::from_secs(5), 0), Err(NOT_SIGNED_IN.to_owned()));
+
+        std::fs::write(
+            &bin,
+            "#!/bin/sh\nread l; echo '{\"id\":0,\"result\":{}}'\nread l; read l\necho '{\"error\":{\"code\":-32603,\"message\":\"failed to fetch codex rate limits: GET https://chatgpt.com/backend-api/wham/usage failed: 401 Unauthorized\"},\"id\":1}'\nsleep 1\n",
+        )
+        .unwrap();
+        assert_eq!(query(&bin, Duration::from_secs(5), 0), Err(NOT_SIGNED_IN.to_owned()), "an expired sign-in");
     }
 
     #[test]

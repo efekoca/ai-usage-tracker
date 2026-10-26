@@ -1,6 +1,7 @@
-use crate::settings::Settings;
+use crate::settings::{Settings, TraySettings};
+use crate::tray_text::{needs_usage, shown_value, Data, Format, Reading, Usage};
 use crate::state::AppState;
-use crate::windows::{handle_menu, show_main, system_is_turkish};
+use crate::windows::{handle_menu, system_is_turkish};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -8,7 +9,9 @@ use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
-use tracker_core::analytics::{self, LimitState};
+use tracker_core::analytics::{self, LimitState, Period};
+use tracker_core::discovery::SourceId;
+use tracker_core::insights::ForecastKind;
 use tracker_core::model::Provider;
 
 const ID: &str = "main-tray";
@@ -21,6 +24,9 @@ static DIRTY: AtomicBool = AtomicBool::new(true);
 #[derive(Default, PartialEq, Clone)]
 struct Shown {
     icon: Option<(String, Level, u32)>,
+    /// macOS: text without the icon.
+    icon_hidden: bool,
+    title: String,
     tooltip: String,
     menu: (bool, Option<String>, String),
 }
@@ -56,13 +62,17 @@ fn menu(app: &AppHandle, tr: bool, update: Option<&str>, hotkey: &str) -> tauri:
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "app:quit", t("Quit", "Çık"), true, None::<&str>)?;
-    match update {
+    let menu = match update {
         Some(v) => {
             let up = MenuItem::with_id(app, "tray:update", t(&format!("Update to v{v}…"), &format!("v{v} sürümüne güncelle…")), true, None::<&str>)?;
-            Menu::with_items(app, &[&open, &widget, &rescan, &sep, &up, &sep2, &quit])
+            Menu::with_items(app, &[&open, &widget, &rescan, &sep, &up, &sep2, &quit])?
         }
-        None => Menu::with_items(app, &[&open, &widget, &rescan, &sep, &quit]),
-    }
+        None => Menu::with_items(app, &[&open, &widget, &rescan, &sep, &quit])?,
+    };
+    // Linux trays report no clicks, so the panel is opened from the menu
+    #[cfg(target_os = "linux")]
+    menu.insert(&MenuItem::with_id(app, "tray:panel", t("Control panel", "Kontrol paneli"), true, None::<&str>)?, 0)?;
+    Ok(menu)
 }
 
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
@@ -73,8 +83,8 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     }
     b.on_menu_event(|app, e| handle_menu(app, e.id().as_ref()))
         .on_tray_icon_event(|tray, e| {
-            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e {
-                show_main(tray.app_handle());
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, rect, .. } = e {
+                crate::panel::toggle(tray.app_handle(), Some(rect));
             }
         })
         .build(app)?;
@@ -116,8 +126,9 @@ pub struct Current {
     pub behind: bool,
 }
 
-/// `None` when limits cannot be read right now; the tray then keeps what it shows.
-fn current_limits(app: &AppHandle, s: &Settings) -> Option<Vec<Current>> {
+/// Every pool's current window; `None` when limits cannot be read right now, so the tray keeps
+/// what it shows.
+pub(crate) fn readings(app: &AppHandle, s: &Settings) -> Option<Vec<Reading>> {
     let state = app.state::<AppState>();
     let providers = crate::commands::enabled_providers(s);
     let views = {
@@ -125,20 +136,113 @@ fn current_limits(app: &AppHandle, s: &Settings) -> Option<Vec<Current>> {
         let book = state.book.read().unwrap();
         analytics::limits_view(&store, &book, chrono::Utc::now().timestamp_millis(), &[]).ok()?
     };
+    Some(
+        views
+            .into_iter()
+            .filter(|v| providers.contains(&v.provider) && (v.window == "five_hour" || v.window == "seven_day"))
+            .filter(|v| matches!(v.state, LimitState::Fresh | LimitState::Behind))
+            .filter_map(|v| {
+                let (fills_at_ms, at_reset) = match &v.forecast {
+                    Some(f) if f.kind == ForecastKind::Fills => (f.fills_at_ms, None),
+                    Some(f) if matches!(f.kind, ForecastKind::Safe | ForecastKind::Idle) => (None, f.at_reset_pct),
+                    _ => (None, None),
+                };
+                Some(Reading {
+                    provider: v.provider,
+                    pool: v.limit_id,
+                    window: v.window,
+                    used: v.used_pct?,
+                    behind: v.state == LimitState::Behind,
+                    resets_at: v.resets_at,
+                    fills_at_ms,
+                    at_reset,
+                })
+            })
+            .collect(),
+    )
+}
+
+/// The fullest pool of each provider's window, for the icon and the tooltip.
+fn current_limits(readings: &[Reading]) -> Vec<Current> {
     let mut out: Vec<Current> = Vec::new();
-    for v in views {
-        if !providers.contains(&v.provider) || !(v.window == "five_hour" || v.window == "seven_day") {
-            continue;
-        }
-        let (Some(used), true) = (v.used_pct, matches!(v.state, LimitState::Fresh | LimitState::Behind)) else { continue };
-        let c = Current { provider: v.provider, window: v.window.clone(), used, behind: v.state == LimitState::Behind };
+    for r in readings {
+        let c = Current { provider: r.provider, window: r.window.clone(), used: r.used, behind: r.behind };
         match out.iter_mut().find(|x| x.provider == c.provider && x.window == c.window) {
             Some(x) if x.used >= c.used => {}
             Some(x) => *x = c,
             None => out.push(c),
         }
     }
+    out
+}
+
+/// The shown tools' usage today, over 7 and over 30 days, read only when an item asks for it.
+pub(crate) fn usage(app: &AppHandle, s: &Settings) -> Option<[Usage; 3]> {
+    let state = app.state::<AppState>();
+    let providers = crate::commands::enabled_providers(s);
+    let opencode = s.enabled_sources.contains(&SourceId::OpenCode);
+    let store = state.db();
+    let book = state.book.read().unwrap();
+    let now = chrono::Utc::now().timestamp_millis();
+    let starts = [Period::Today, Period::Days7, Period::Month1].map(|p| analytics::period_range(p, &chrono::Local, now, None).from_ms);
+    let mut out = [Usage::default(); 3];
+    let mut sessions: [std::collections::HashSet<String>; 3] = Default::default();
+    for e in store.events_between(starts[2], now + 1).ok()? {
+        if !e.tool.provider().map_or(opencode, |p| providers.contains(&p)) {
+            continue;
+        }
+        let cost = book.cost(&tracker_core::pricing::CostInput {
+            model: &e.model,
+            tokens: &e.tokens,
+            request_input: e.request_input,
+            web_search_requests: e.web_search,
+            speed: e.speed.as_deref(),
+            inference_geo: e.inference_geo.as_deref(),
+        });
+        for (i, u) in out.iter_mut().enumerate() {
+            if e.ts_ms < starts[i] {
+                continue;
+            }
+            u.tokens += e.tokens.total();
+            u.cost_usd += cost.as_ref().map_or(0.0, |c| c.total());
+            u.prompt += e.tokens.input + e.tokens.cache_read + e.tokens.cache_write;
+            u.cache_read += e.tokens.cache_read;
+            if let Some(id) = &e.session_id {
+                sessions[i].insert(format!("{}:{id}", e.tool.as_str()));
+            }
+        }
+    }
+    for (u, ids) in out.iter_mut().zip(&sessions) {
+        u.sessions = ids.len() as u64;
+    }
     Some(out)
+}
+
+pub(crate) fn data(app: &AppHandle, s: &Settings, cfg: &TraySettings, readings: Vec<Reading>) -> Data {
+    let usage = if needs_usage(cfg) { usage(app, s) } else { None };
+    let scan_ms = app.state::<AppState>().status.lock().unwrap().last_scan_ms;
+    Data { readings, usage, scan_ms }
+}
+
+pub(crate) fn format<'a>(s: &'a Settings, cfg: &'a TraySettings) -> Format<'a, chrono::Local> {
+    Format {
+        cfg,
+        tr: turkish(s),
+        app_remaining: s.limit_display == "remaining",
+        warn_at: s.widget.warn_at,
+        currency: &s.currency,
+        fx: s.fx_rate,
+        now_ms: chrono::Utc::now().timestamp_millis(),
+        tz: &chrono::Local,
+    }
+}
+
+/// The text next to the icon for `cfg`, as the tray shows it; empty on Windows.
+pub(crate) fn title(app: &AppHandle, s: &Settings, cfg: &TraySettings, readings: &[Reading]) -> String {
+    if !cfg.title || cfg!(windows) {
+        return String::new();
+    }
+    format(s, cfg).title(&data(app, s, cfg, readings.to_vec()))
 }
 
 pub fn pick<'a>(limits: &'a [Current], choice: &str) -> Option<&'a Current> {
@@ -158,10 +262,6 @@ pub fn level(used: f64, warn_at: f64, high_at: f64) -> Level {
     }
 }
 
-pub fn shown_value(used: f64, remaining: bool) -> u32 {
-    let v = if remaining { 100.0 - used } else { used };
-    v.clamp(0.0, 100.0).round() as u32
-}
 
 fn tooltip(limits: &[Current], s: &Settings, update: Option<&str>) -> String {
     let tr = turkish(s);
@@ -199,7 +299,8 @@ fn tooltip(limits: &[Current], s: &Settings, update: Option<&str>) -> String {
 fn update(app: &AppHandle) {
     let s = app.state::<AppState>().settings.read().unwrap().clone();
     let Some(tray) = app.tray_by_id(ID) else { return };
-    let Some(limits) = current_limits(app, &s) else { return };
+    let Some(readings) = readings(app, &s) else { return };
+    let limits = current_limits(&readings);
     let update = app.state::<AppState>().updates.lock().unwrap().available.as_ref().map(|a| a.version.clone());
     let size = icon_size(app);
     let icon = if s.tray.show_percent && s.onboarded {
@@ -209,20 +310,35 @@ fn update(app: &AppHandle) {
     } else {
         None
     };
-    let next = Shown { icon, tooltip: tooltip(&limits, &s, update.as_deref()), menu: (turkish(&s), update.clone(), s.widget.hotkey.clone()) };
+    let title = if s.onboarded { title(app, &s, &s.tray, &readings) } else { String::new() };
+    // a menu bar item needs something to show: the icon stays while the text is empty
+    let icon_hidden = cfg!(target_os = "macos") && s.tray.hide_icon && !title.is_empty();
+    let next = Shown {
+        icon,
+        icon_hidden,
+        title,
+        tooltip: tooltip(&limits, &s, update.as_deref()),
+        menu: (turkish(&s), update.clone(), s.widget.hotkey.clone()),
+    };
     let mut shown = SHOWN.lock().unwrap();
     let prev = shown.clone().unwrap_or_default();
     if shown.is_some() && prev == next {
         return;
     }
-    if shown.is_none() || prev.icon != next.icon {
+    if shown.is_none() || prev.icon != next.icon || prev.icon_hidden != next.icon_hidden {
         let image = match &next.icon {
+            _ if next.icon_hidden => None,
             Some((text, lvl, size)) => Some(Image::new_owned(badge(text, *size, *lvl), *size, *size)),
             None => app.default_window_icon().cloned(),
         };
         if let Err(e) = tray.set_icon(image) {
             log::warn!("tray icon: {e}");
         }
+    }
+    // Windows has no text next to a tray icon
+    #[cfg(not(windows))]
+    if shown.is_none() || prev.title != next.title {
+        let _ = tray.set_title((!next.title.is_empty()).then_some(next.title.as_str()));
     }
     if shown.is_none() || prev.tooltip != next.tooltip {
         let _ = tray.set_tooltip(Some(&next.tooltip));

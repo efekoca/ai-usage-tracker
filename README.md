@@ -181,7 +181,9 @@ The **Widget studio** page changes what the widget shows and how it looks, with 
 
 The widget also comes with a tray icon and a shortcut:
 
-- **Tray icon** (next to the clock on Windows, in the menu bar on macOS, in the system tray on Linux): it can show a limit's percentage, either the fullest current one or one you pick, in the widget's warning colors. Hovering over it lists every limit. Set it up under **Settings → Tray icon**.
+- **Tray icon, control panel and menu bar** (next to the clock on Windows, in the menu bar on macOS, in the system tray on Linux): click the icon to open a control panel with tiles for your limits (rings or bars, one window or both), when a limit will fill at your current pace, usage for today, 7 or 30 days, the last scan, and one-click buttons to open the app, show the widget or scan now. Right-click opens a small menu; on Linux the panel opens from that menu. The icon can also show a limit's percentage in the widget's warning colors, and on macOS and Linux text next to it, such as `Cl 5h 42% · Cl W ▰▰▰▱▱`.
+  - Set it all up on the **Menu bar** page: drag tiles from a gallery into a live preview of the panel, drag them to reorder or back to the gallery to remove them, and click a tile to pick its size (small, wide, large or full width) and whether it shows a ring or a bar.
+  - The text next to the icon takes any limit, forecast, usage figure or the last scan, in the order you choose, with full names, short ones or none; used or left; percent, a bar, both, or a circle; the reset as a countdown or a clock time; a separator, text at both ends, and a ⚠︎ past the warning threshold. On macOS the icon can be hidden so only the text shows.
 - **Shortcut:** a system-wide key combination shows or hides the widget (default **Ctrl+Alt+Shift+W**, on macOS **⌃⌥⇧W**). To change it, open **Settings → Widget** and press the new combination. A combination that another program owns is refused.
 
 ### Weekly PDF, export, and your own prices

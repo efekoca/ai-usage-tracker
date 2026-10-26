@@ -188,14 +188,247 @@ pub const DEFAULT_HOTKEY: &str = "Ctrl+Alt+Shift+W";
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct TraySettings {
+    /// The chosen limit's percent drawn into the icon.
     pub show_percent: bool,
     /// "auto" (the fullest current limit) or "<provider>:<window>", e.g. "anthropic:five_hour".
     pub limit: String,
+    /// Text next to the icon (macOS and Linux; Windows has no room for it).
+    pub title: bool,
+    /// What the text shows, in order.
+    pub items: Vec<TrayItem>,
+    /// "name" ("Claude 5h"), "short" ("Cl 5h") or "none".
+    pub label: String,
+    /// "app" (the app's used/remaining choice), "used" or "remaining".
+    pub value: String,
+    /// "none", "countdown" ("2h 14m") or "time" ("18:40").
+    pub reset: String,
+    /// "percent", "bar" ("▰▰▱▱▱"), "bar_percent" or "dot" ("◑").
+    pub style: String,
+    pub separator: String,
+    pub prefix: String,
+    pub suffix: String,
+    /// "⚠︎" before a value past the warning threshold.
+    pub warn_mark: bool,
+    /// Text only, without the icon (macOS).
+    pub hide_icon: bool,
 }
+
+/// One piece of the text next to the icon. `kind`: "limit", "forecast" (when a limit fills at
+/// the current pace), "tokens", "cost", "sessions", "cache" (hit rate) or "scan" (last scan).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default)]
+pub struct TrayItem {
+    pub kind: String,
+    pub provider: String,
+    /// "five_hour" or "seven_day".
+    pub window: String,
+    /// Antigravity's pool, "gemini" or "3p"; empty elsewhere.
+    pub pool: String,
+    /// "today", "days7" or "month1" for usage kinds.
+    pub period: String,
+}
+
+impl TrayItem {
+    pub fn key(&self) -> (&str, &str, &str, &str, &str) {
+        (&self.kind, &self.provider, &self.window, &self.pool, &self.period)
+    }
+}
+
+const POOLS: [(&str, &str); 4] = [("anthropic", ""), ("openai", ""), ("google", "gemini"), ("google", "3p")];
+const WINDOWS: [&str; 2] = ["five_hour", "seven_day"];
+const PERIODS: [&str; 3] = ["today", "days7", "month1"];
+
+/// Every item the text next to the icon can show.
+pub fn tray_catalog() -> Vec<TrayItem> {
+    let mut out = Vec::new();
+    for kind in ["limit", "forecast"] {
+        for (provider, pool) in POOLS {
+            for window in WINDOWS {
+                out.push(TrayItem { kind: kind.into(), provider: provider.into(), window: window.into(), pool: pool.into(), ..TrayItem::default() });
+            }
+        }
+    }
+    for kind in ["tokens", "cost", "sessions", "cache"] {
+        for period in PERIODS {
+            out.push(TrayItem { kind: kind.into(), period: period.into(), ..TrayItem::default() });
+        }
+    }
+    out.push(TrayItem { kind: "scan".into(), ..TrayItem::default() });
+    out
+}
+
+pub const MAX_TRAY_ITEMS: usize = 12;
 
 impl Default for TraySettings {
     fn default() -> Self {
-        TraySettings { show_percent: true, limit: "auto".into() }
+        let limit = |provider: &str, window: &str| TrayItem { kind: "limit".into(), provider: provider.into(), window: window.into(), ..TrayItem::default() };
+        TraySettings {
+            show_percent: true,
+            limit: "auto".into(),
+            title: false,
+            items: vec![limit("anthropic", "five_hour"), limit("anthropic", "seven_day"), limit("openai", "five_hour"), limit("openai", "seven_day")],
+            label: "short".into(),
+            value: "app".into(),
+            reset: "none".into(),
+            style: "percent".into(),
+            separator: " · ".into(),
+            prefix: String::new(),
+            suffix: String::new(),
+            warn_mark: true,
+            hide_icon: false,
+        }
+    }
+}
+
+/// One line of plain text, at most `max` characters.
+fn short_text(v: &mut String, max: usize) {
+    *v = v.chars().filter(|c| !c.is_control()).take(max).collect();
+}
+
+/// Keeps the known entries of `list` once each, in order, at most `max`.
+fn known_once<T>(list: &mut Vec<T>, max: usize, known: impl Fn(&T) -> bool, same: impl Fn(&T, &T) -> bool) {
+    let mut kept: Vec<T> = Vec::new();
+    for x in list.drain(..) {
+        if kept.len() < max && known(&x) && !kept.iter().any(|k| same(k, &x)) {
+            kept.push(x);
+        }
+    }
+    *list = kept;
+}
+
+impl TraySettings {
+    pub fn normalize(&mut self) {
+        let catalog = tray_catalog();
+        known_once(&mut self.items, MAX_TRAY_ITEMS, |i| catalog.iter().any(|k| k.key() == i.key()), |a, b| a.key() == b.key());
+        let pick = |v: &mut String, allowed: &[&str], fallback: &str| {
+            if !allowed.contains(&v.as_str()) {
+                *v = fallback.into();
+            }
+        };
+        pick(&mut self.label, &["name", "short", "none"], "short");
+        pick(&mut self.value, &["app", "used", "remaining"], "app");
+        pick(&mut self.reset, &["none", "countdown", "time"], "none");
+        pick(&mut self.style, &["percent", "bar", "bar_percent", "dot"], "percent");
+        short_text(&mut self.separator, 6);
+        if self.separator.is_empty() {
+            self.separator = " · ".into();
+        }
+        short_text(&mut self.prefix, 12);
+        short_text(&mut self.suffix, 12);
+    }
+}
+
+/// The panel of tiles the tray icon opens.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct PanelSettings {
+    pub modules: Vec<PanelModule>,
+    /// "app" (the app's used/remaining choice), "used" or "remaining".
+    pub value: String,
+}
+
+/// `kind`: "limit" (one window), "provider" (both windows of a pool), "usage" (a period),
+/// "forecast", "scan" or "action" (`action`: "open", "widget", "rescan", "settings").
+/// `size`: "s" 1×1, "w" 2×1, "m" 2×2 or "l" 4×1 cells. `style`: "ring" or "bar" for limits.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default)]
+pub struct PanelModule {
+    pub kind: String,
+    pub provider: String,
+    pub pool: String,
+    pub window: String,
+    pub period: String,
+    pub action: String,
+    pub size: String,
+    pub style: String,
+}
+
+impl PanelModule {
+    fn key(&self) -> (&str, &str, &str, &str, &str, &str) {
+        (&self.kind, &self.provider, &self.pool, &self.window, &self.period, &self.action)
+    }
+
+    /// The sizes a kind can take, the first one being its default.
+    pub fn sizes(kind: &str) -> &'static [&'static str] {
+        match kind {
+            "limit" => &["w", "s", "m"],
+            "provider" => &["m", "w", "l"],
+            "usage" => &["w", "s", "m"],
+            "forecast" => &["w", "l"],
+            "scan" => &["w"],
+            "action" => &["s", "w"],
+            _ => &[],
+        }
+    }
+}
+
+pub const MAX_PANEL_MODULES: usize = 16;
+
+/// Every module the panel offers, at its default size.
+pub fn panel_catalog() -> Vec<PanelModule> {
+    let m = |kind: &str| PanelModule { kind: kind.into(), size: PanelModule::sizes(kind)[0].into(), ..PanelModule::default() };
+    let mut out = Vec::new();
+    for (provider, pool) in POOLS {
+        out.push(PanelModule { provider: provider.into(), pool: pool.into(), style: "ring".into(), ..m("provider") });
+    }
+    for (provider, pool) in POOLS {
+        for window in WINDOWS {
+            out.push(PanelModule { provider: provider.into(), pool: pool.into(), window: window.into(), style: "ring".into(), ..m("limit") });
+        }
+    }
+    for (provider, pool) in POOLS {
+        for window in WINDOWS {
+            out.push(PanelModule { provider: provider.into(), pool: pool.into(), window: window.into(), ..m("forecast") });
+        }
+    }
+    for period in PERIODS {
+        out.push(PanelModule { period: period.into(), ..m("usage") });
+    }
+    out.push(m("scan"));
+    for action in ["open", "widget", "rescan", "settings"] {
+        out.push(PanelModule { action: action.into(), ..m("action") });
+    }
+    out
+}
+
+impl Default for PanelSettings {
+    fn default() -> Self {
+        let find = |f: &dyn Fn(&PanelModule) -> bool| panel_catalog().into_iter().find(|x| f(x)).expect("in the catalog");
+        PanelSettings {
+            value: "app".into(),
+            modules: vec![
+                find(&|x| x.kind == "provider" && x.provider == "anthropic"),
+                find(&|x| x.kind == "provider" && x.provider == "openai"),
+                find(&|x| x.kind == "usage" && x.period == "today"),
+                find(&|x| x.kind == "forecast" && x.provider == "anthropic" && x.window == "five_hour"),
+                find(&|x| x.action == "open"),
+                find(&|x| x.action == "widget"),
+                find(&|x| x.action == "rescan"),
+                find(&|x| x.action == "settings"),
+            ],
+        }
+    }
+}
+
+impl PanelSettings {
+    pub fn normalize(&mut self) {
+        if !["app", "used", "remaining"].contains(&self.value.as_str()) {
+            self.value = "app".into();
+        }
+        let catalog = panel_catalog();
+        known_once(&mut self.modules, MAX_PANEL_MODULES, |m| catalog.iter().any(|k| k.key() == m.key()), |a, b| a.key() == b.key());
+        for m in &mut self.modules {
+            let sizes = PanelModule::sizes(&m.kind);
+            if !sizes.contains(&m.size.as_str()) {
+                m.size = sizes[0].into();
+            }
+            let styled = matches!(m.kind.as_str(), "limit" | "provider");
+            if !styled {
+                m.style.clear();
+            } else if m.style != "bar" {
+                m.style = "ring".into();
+            }
+        }
     }
 }
 
@@ -282,6 +515,7 @@ pub struct Settings {
     /// Empty = Documents\AI Usage Tracker.
     pub weekly_report_dir: String,
     pub tray: TraySettings,
+    pub panel: PanelSettings,
     /// Only the version file is downloaded; nothing is sent. No effect until the build names a
     /// release location.
     pub update_check: bool,
@@ -318,6 +552,7 @@ impl Default for Settings {
             weekly_report_auto: false,
             weekly_report_dir: String::new(),
             tray: TraySettings::default(),
+            panel: PanelSettings::default(),
             update_check: true,
             provider_colors: Default::default(),
             tint_icons: false,
@@ -347,6 +582,8 @@ impl Settings {
             Ok(Some(s)) => serde_json::from_str::<Settings>(&s)
                 .map(|mut s| {
                     s.widget.normalize();
+                    s.tray.normalize();
+                    s.panel.normalize();
                     s.adopt_new_sources();
                     s
                 })
@@ -372,6 +609,8 @@ impl Settings {
 
     pub fn normalize(&mut self) {
         self.widget.normalize();
+        self.tray.normalize();
+        self.panel.normalize();
         if !(self.fx_rate.is_finite() && self.fx_rate > 0.0) {
             self.fx_rate = 1.0;
         }
@@ -418,6 +657,54 @@ mod tests {
         assert!(s.known_sources.contains(&SourceId::OpenCode));
         store.set_setting(KEY, r#"{"onboarded":true,"enabled_sources":["open_code"],"known_sources":[]}"#).unwrap();
         assert!(Settings::load(&store).enabled_sources.contains(&SourceId::OpenCode));
+    }
+
+    #[test]
+    fn menu_bar_settings_from_older_versions_keep_their_icon_and_start_without_text() {
+        let s: Settings = serde_json::from_str(r#"{"tray":{"show_percent":false,"limit":"openai:five_hour"}}"#).unwrap();
+        assert_eq!((s.tray.show_percent, s.tray.limit.as_str(), s.tray.title), (false, "openai:five_hour", false));
+        assert_eq!(s.tray.items.len(), 4);
+        assert_eq!(s.panel, PanelSettings::default());
+
+        let mut t: TraySettings = serde_json::from_str(
+            r#"{"items":[{"kind":"limit","provider":"openai","window":"seven_day"},
+                         {"kind":"limit","provider":"openai","window":"seven_day"},
+                         {"kind":"limit","provider":"nobody","window":"five_hour"},
+                         {"kind":"tokens","period":"days7"}],
+                "label":"huge","value":"x","reset":"y","style":"z","separator":"","prefix":"a\tb"}"#,
+        )
+        .unwrap();
+        t.normalize();
+        assert_eq!(t.items.iter().map(|i| i.kind.as_str()).collect::<Vec<_>>(), ["limit", "tokens"], "duplicates and unknown items are dropped, the order is kept");
+        assert_eq!((t.label.as_str(), t.value.as_str(), t.reset.as_str(), t.style.as_str()), ("short", "app", "none", "percent"));
+        assert_eq!((t.separator.as_str(), t.prefix.as_str()), (" · ", "ab"));
+        t.items = tray_catalog();
+        t.normalize();
+        assert_eq!(t.items.len(), MAX_TRAY_ITEMS);
+    }
+
+    #[test]
+    fn panel_modules_keep_the_users_order_and_only_sizes_their_kind_allows() {
+        let mut p: PanelSettings = serde_json::from_str(
+            r#"{"modules":[{"kind":"usage","period":"days7","size":"l","style":"bar"},
+                           {"kind":"provider","provider":"anthropic","size":"l","style":"bar"},
+                           {"kind":"provider","provider":"anthropic","size":"s"},
+                           {"kind":"action","action":"format_disk","size":"s"},
+                           {"kind":"limit","provider":"google","pool":"gemini","window":"seven_day","size":"m","style":"neon"}]}"#,
+        )
+        .unwrap();
+        p.normalize();
+        let got: Vec<_> = p.modules.iter().map(|m| (m.kind.as_str(), m.size.as_str(), m.style.as_str())).collect();
+        assert_eq!(got, [("usage", "w", ""), ("provider", "l", "bar"), ("limit", "m", "ring")]);
+
+        assert_eq!(p.value, "app", "a panel saved without the choice follows the app");
+        let mut p = PanelSettings { modules: panel_catalog(), value: "left".into() };
+        p.normalize();
+        assert_eq!((p.modules.len(), p.value.as_str()), (MAX_PANEL_MODULES, "app"));
+        assert!(panel_catalog().iter().all(|m| PanelModule::sizes(&m.kind).first() == Some(&m.size.as_str())));
+        let mut empty = PanelSettings { modules: vec![], value: "remaining".into() };
+        empty.normalize();
+        assert!(empty.modules.is_empty(), "an emptied panel stays empty");
     }
 
     #[test]

@@ -1,7 +1,8 @@
 import { api, on, type AppInfo, type Filter, type LimitView, type Period, type Provider, type Report, type ScanStatus, type Settings, type UpdateStatus } from './api'
 import { i18n, resolveLang } from './i18n.svelte'
 
-export type View = 'overview' | 'tips' | 'daily' | 'breakdown' | 'sessions' | 'cache' | 'context' | 'limits' | 'projects' | 'sources' | 'widget' | 'settings'
+const VIEWS = ['overview', 'tips', 'daily', 'breakdown', 'sessions', 'cache', 'context', 'limits', 'projects', 'sources', 'widget', 'menubar', 'settings'] as const
+export type View = (typeof VIEWS)[number]
 
 export const app = $state({
   ready: false,
@@ -109,6 +110,9 @@ export async function init() {
   app.info = info
   app.settings = settings
   applyAppearance(settings, info)
+  // the tray panel opens a new window straight on a page
+  const start = location.hash.slice(1)
+  if ((VIEWS as readonly string[]).includes(start)) app.view = start as View
   app.scan = await api.scanStatus()
   app.ready = true
 
@@ -128,7 +132,7 @@ export async function init() {
   await on<UpdateStatus>('update-status', (u) => {
     app.update = u
   })
-  // the tray menu's "update" item opens the settings
+  // the tray menu and panel open pages in a window that is already open
   await on<View>('navigate', (v) => {
     app.view = v
   })

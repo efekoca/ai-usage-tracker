@@ -135,14 +135,6 @@
       flash(String(e) === 'update_install_manual' ? t('settings.updates.manual') : t('common.error', { e: String(e) }))
     }
   }
-  const trayLimits = [
-    ['anthropic', 'five_hour'],
-    ['anthropic', 'seven_day'],
-    ['openai', 'five_hour'],
-    ['openai', 'seven_day'],
-    ['google', 'five_hour'],
-    ['google', 'seven_day'],
-  ] as const
   const unpriced = $derived(models.filter((m) => pricing && !pricing.models.some((x) => x.id === m || x.aliases?.includes(m)) && !(m in (pricing.user_aliases ?? {}))))
   // the full list is long; the models found in the logs are the ones worth editing
   let allPrices = $state(false)
@@ -329,26 +321,6 @@
         {#if s.widget.hotkey !== DEFAULT_HOTKEY}<button class="btn ghost" onclick={() => setHotkey(DEFAULT_HOTKEY)}>{t('settings.hotkey.reset')}</button>{/if}
       {/if}
     </div>
-  </div>
-</section>
-
-<section class="card group">
-  <h2>{t('settings.tray')}</h2>
-  <p class="subtle small prose">{t('settings.tray.help')}</p>
-  <div class="item">
-    <div><span>{t('settings.tray.show')}</span><div class="subtle small">{t('settings.tray.showHelp', { warn: fmtPct(s.widget.warn_at), high: fmtPct(s.widget.high_at) })}</div></div>
-    <Toggle checked={s.tray.show_percent} label={t('settings.tray.show')} onchange={(v) => saveSettings((c) => ({ tray: { ...c.tray, show_percent: v } }))} />
-  </div>
-  <div class="item">
-    <span>{t('settings.tray.limit')}</span>
-    <Select
-      label={t('settings.tray.limit')}
-      value={s.tray.limit}
-      disabled={!s.tray.show_percent}
-      minWidth={220}
-      options={[{ value: 'auto', label: t('settings.tray.auto') }, ...trayLimits.map(([p, w]) => ({ value: `${p}:${w}`, label: `${t(`provider.${p}`)} · ${windowLabel(w)}` }))]}
-      onchange={(v) => saveSettings((c) => ({ tray: { ...c.tray, limit: v } }))}
-    />
   </div>
 </section>
 

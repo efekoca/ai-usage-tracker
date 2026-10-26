@@ -8,10 +8,12 @@ mod gnome_shortcut;
 mod kde_shortcut;
 #[cfg(target_os = "linux")]
 mod portal_shortcut;
+mod panel;
 mod pdf;
 mod settings;
 mod state;
 mod tray;
+mod tray_text;
 mod updates;
 mod windows;
 mod worker;
@@ -407,6 +409,9 @@ pub fn run() {
             commands::open_main,
             commands::set_widget_visible,
             commands::widget_menu,
+            commands::tray_preview,
+            panel::panel_data,
+            panel::panel_action,
             commands::place_widget,
             commands::list_fonts,
             commands::get_sessions,
