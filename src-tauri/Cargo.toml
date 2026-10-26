@@ -22,7 +22,8 @@ tauri-plugin-log = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-global-shortcut = "2"
-tauri-plugin-updater = "2"
+# without "zip": updates are a plain setup.exe, AppImage or .app.tar.gz (tar is always on for macOS)
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "system-proxy"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = "0.4"
