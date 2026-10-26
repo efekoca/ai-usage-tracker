@@ -280,6 +280,7 @@
         <p class="small muted">{t('rep.note1')}</p>
         <p class="small muted">{t('rep.note2')}</p>
         {#if r.unpriced_models.length}<p class="small muted">{t('rep.note3', { m: r.unpriced_models.join(', ') })}</p>{/if}
+        {#if r.catalog_models?.length}<p class="small muted">{t('rep.note4', { m: r.catalog_models.join(', ') })}</p>{/if}
         <p class="small muted">AI Usage Tracker · {i18n.lang === 'tr' ? 'yerel rapor' : 'local report'}</p>
       </section>
     {/if}

@@ -64,6 +64,7 @@ fn input_of(e: &EventRow) -> CostInput<'_> {
         web_search_requests: e.web_search,
         speed: e.speed.as_deref(),
         inference_geo: e.inference_geo.as_deref(),
+        ts_ms: Some(e.ts_ms),
     }
 }
 

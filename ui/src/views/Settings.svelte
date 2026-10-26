@@ -30,7 +30,9 @@
   let pricingOrigin = $state('bundled')
   let pricingDirty = $state(false)
   let notice = $state('')
+  const SOURCE_NAMES: Record<string, string> = { anthropic: 'Anthropic', openai: 'OpenAI', google: 'Google', vertex_ai: 'Vertex AI', deepseek: 'DeepSeek', moonshotai: 'Moonshot AI', zai: 'Z.ai', alibaba: 'Alibaba Cloud', xai: 'xAI', mistral: 'Mistral', minimax: 'MiniMax' }
   let models: string[] = $state([])
+  let cataloged: ModelPrice[] = $state([])
   let aliasFrom = $state('')
   let aliasTo = $state('')
   let exportFormat: 'csv' | 'json' = $state('csv')
@@ -46,6 +48,7 @@
     hk = await api.hotkeyStatus().catch(() => null)
     await loadPricing()
     models = await api.models()
+    cataloged = await api.catalogPrices(models).catch(() => [])
   })
 
   const DEFAULT_HOTKEY = 'Ctrl+Alt+Shift+W'
@@ -426,6 +429,28 @@
         </tbody>
       </table>
     </div>
+    {#if cataloged.some((c) => !pricing?.models.some((m) => m.id === c.id))}
+      <h3 class="sub">{t('settings.pricing.catalog')}</h3>
+      <p class="subtle small prose">{t('settings.pricing.catalogHelp')}</p>
+      <div class="list">
+        {#each cataloged.filter((c) => !pricing?.models.some((m) => m.id === c.id)) as c (c.id)}
+          <div class="list-row">
+            <code>{c.id}</code>
+            <span class="badge-unverified">{t('settings.pricing.unverified')}</span>
+            <span class="muted small num">{t('settings.pricing.catalogRates', { i: fmtInput(c.input), o: fmtInput(c.output), r: c.cache_read == null ? '—' : fmtInput(c.cache_read) })}</span>
+            <span class="spacer"></span>
+            <button
+              class="btn small"
+              onclick={() => {
+                if (!pricing) return
+                pricing.models = [...pricing.models, { ...c, notes: null, verified_at: null }]
+                pricingDirty = true
+              }}>{t('settings.pricing.catalogAdd')}</button
+            >
+          </div>
+        {/each}
+      </div>
+    {/if}
     {#if usedPrices.length && usedPrices.length < pricing.models.length}
       <div class="row">
         <span class="subtle small">{allPrices ? t('settings.pricing.allShown', { n: pricing.models.length }) : t('settings.pricing.usedShown', { n: usedPrices.length })}</span>
@@ -458,10 +483,13 @@
       </div>
     {/if}
 
-    <div class="row wrap actions">
+    <div class="row wrap sources">
+      <span class="muted small">{t('settings.pricing.sources')}</span>
       {#each Object.entries(pricing.sources ?? {}) as [prov, url] (prov)}
-        <button class="btn ghost small" onclick={() => api.openUrl(url)}><Icon name="external" size={13} />{prov === 'openai' ? 'OpenAI' : prov === 'google' ? 'Google' : prov === 'vertex_ai' ? 'Vertex AI' : 'Anthropic'}</button>
+        <button class="btn ghost small" onclick={() => api.openUrl(url)}><Icon name="external" size={13} />{SOURCE_NAMES[prov] ?? prov}</button>
       {/each}
+    </div>
+    <div class="row wrap actions">
       <span class="spacer"></span>
       <button class="btn" onclick={resetPricing} disabled={pricingOrigin === 'bundled' && !pricingDirty}>{t('settings.pricing.reset')}</button>
       <button class="btn primary" onclick={savePricing} disabled={!pricingDirty}>{t('settings.pricing.save')}</button>
@@ -664,5 +692,17 @@
     display: block;
     height: 100%;
     background: var(--accent);
+  }
+  .sources {
+    gap: 2px 4px;
+    margin-top: 14px;
+  }
+  .badge-unverified {
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--warning) 18%, transparent);
+    color: var(--ink-2);
+    font-size: 11px;
+    font-weight: 600;
   }
 </style>

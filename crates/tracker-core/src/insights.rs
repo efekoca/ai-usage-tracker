@@ -17,6 +17,7 @@ fn input_of(e: &EventRow) -> CostInput<'_> {
         web_search_requests: e.web_search,
         speed: e.speed.as_deref(),
         inference_geo: e.inference_geo.as_deref(),
+        ts_ms: Some(e.ts_ms),
     }
 }
 
@@ -207,11 +208,13 @@ pub fn compare_models(store: &Store, book: &PriceBook, range: Range, filter: &Fi
             None => excluded += 1,
         }
     }
+    // the comparison offers the plan providers' models; other vendors have no place in it yet
     let mut targets: Vec<CompareTarget> = book
         .file()
         .models
         .iter()
-        .map(|m| {
+        .filter_map(|m| Some((m, Provider::parse(&m.provider)?)))
+        .map(|(m, provider)| {
             let cost: f64 = basis
                 .iter()
                 .map(|e| {
@@ -222,7 +225,7 @@ pub fn compare_models(store: &Store, book: &PriceBook, range: Range, filter: &Fi
                 .sum();
             CompareTarget {
                 model: m.id.clone(),
-                provider: m.provider,
+                provider,
                 cost_usd: cost,
                 delta_usd: cost - actual,
                 verified_at: m.verified_at.clone(),

@@ -191,6 +191,8 @@ export interface Report {
   avg_daily_tokens: number
   avg_daily_cost: number
   unpriced_models: string[]
+  /** Priced only from OpenCode's model catalog, not from a vendor's page. */
+  catalog_models: string[]
   by_accuracy: Record<string, number>
 }
 
@@ -411,12 +413,15 @@ export interface Rates {
 
 export interface ModelPrice extends Rates {
   id: string
-  provider: Provider
+  /** The vendor whose list price this is. */
+  provider: string
   aliases?: string[]
   long_context?: (Rates & { threshold: number }) | null
   speed_multipliers?: Record<string, number>
   geo_multipliers?: Record<string, number>
   web_search_per_1k?: number | null
+  /** A lower price outside the vendor's busy hours (`[start, end)` UTC, Monday to Friday). */
+  off_peak?: { multiplier: number; peak_hours_utc: [number, number][] } | null
   verified_at?: string | null
   notes?: string | null
 }
@@ -755,6 +760,7 @@ export const api = {
   models: () => invoke<string[]>('list_models'),
   pricing: () => invoke<{ file: PricingFile; origin: 'bundled' | 'user' }>('get_pricing'),
   savePricing: (file: PricingFile) => invoke<void>('save_pricing', { file }),
+  catalogPrices: (models: string[]) => invoke<ModelPrice[]>('catalog_prices', { models }),
   resetPricing: () => invoke<void>('reset_pricing'),
   plans: () => invoke<PlansFile>('get_plans'),
   exportData: (path: string, period: Period, filter: Filter | undefined, granularity: 'events' | 'daily', format: 'csv' | 'json') =>

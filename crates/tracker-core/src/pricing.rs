@@ -1,7 +1,7 @@
 //! API-equivalent cost calculation driven by an editable `pricing.json`.
 //! Unknown models are never priced by guesswork: they are reported as unpriced.
 
-use crate::model::{Provider, Tokens};
+use crate::model::Tokens;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -57,7 +57,8 @@ pub struct LongContext {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelPrice {
     pub id: String,
-    pub provider: Provider,
+    /// The vendor whose list price this is (`anthropic`, `deepseek`, `moonshotai`…).
+    pub provider: String,
     #[serde(default)]
     pub aliases: Vec<String>,
     #[serde(flatten)]
@@ -71,9 +72,32 @@ pub struct ModelPrice {
     #[serde(default)]
     pub web_search_per_1k: Option<f64>,
     #[serde(default)]
+    pub off_peak: Option<OffPeak>,
+    #[serde(default)]
     pub verified_at: Option<String>,
     #[serde(default)]
     pub notes: Option<String>,
+}
+
+/// A lower price outside the vendor's busy hours (DeepSeek halves it).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OffPeak {
+    /// Multiplies every token category outside the busy hours.
+    pub multiplier: f64,
+    /// The busy hours, `[start, end)` in UTC, Monday to Friday; weekends are off-peak.
+    pub peak_hours_utc: Vec<[u8; 2]>,
+}
+
+impl OffPeak {
+    fn applies(&self, ts_ms: i64) -> bool {
+        use chrono::{Datelike, Timelike, Weekday};
+        let Some(t) = chrono::DateTime::from_timestamp_millis(ts_ms) else { return false };
+        if matches!(t.weekday(), Weekday::Sat | Weekday::Sun) {
+            return true;
+        }
+        let h = t.hour() as u8;
+        !self.peak_hours_utc.iter().any(|[start, end]| (*start..*end).contains(&h))
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
@@ -106,6 +130,8 @@ pub struct CostInput<'a> {
     pub web_search_requests: u32,
     pub speed: Option<&'a str>,
     pub inference_geo: Option<&'a str>,
+    /// When the request was made; `None` prices it at the list (busy-hours) rate.
+    pub ts_ms: Option<i64>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -162,6 +188,12 @@ fn validate(file: &PricingFile) -> Result<(), PricingError> {
         if let Some(v) = m.web_search_per_1k {
             check_rate(&format!("{id}.web_search_per_1k"), v)?;
         }
+        if let Some(op) = &m.off_peak {
+            check_rate(&format!("{id}.off_peak.multiplier"), op.multiplier)?;
+            if op.peak_hours_utc.iter().any(|[start, end]| start >= end || *end > 24) {
+                return Err(PricingError::Invalid(format!("{id}.off_peak hours must be [start, end) within 0..24")));
+            }
+        }
     }
     for (alias, target) in &file.user_aliases {
         if !names.contains(&target.to_ascii_lowercase()) {
@@ -174,6 +206,48 @@ fn validate(file: &PricingFile) -> Result<(), PricingError> {
 pub struct PriceBook {
     file: PricingFile,
     index: HashMap<String, usize>,
+    /// Prices from OpenCode's model catalog, for models the price list does not know.
+    catalog: HashMap<String, ModelPrice>,
+}
+
+/// Vendors whose own catalog entry is their international list price. Resellers are left out
+/// (their price is not the model's), and so are the China sites, which list some prices in CNY.
+const CATALOG_VENDORS: [&str; 13] = ["anthropic", "openai", "google", "deepseek", "moonshotai", "zai", "xai", "mistral", "minimax", "alibaba", "cohere", "perplexity", "inception"];
+
+/// Prices from OpenCode's local model catalog (`models.json`, a models.dev snapshot), keyed by
+/// lowercase model id. Nothing here was checked against a pricing page: the app marks them.
+pub fn catalog_prices(json: &str) -> HashMap<String, ModelPrice> {
+    let mut out = HashMap::new();
+    let Ok(serde_json::Value::Object(all)) = serde_json::from_str::<serde_json::Value>(json) else { return out };
+    let num = |v: &serde_json::Value, k: &str| v.get(k).and_then(serde_json::Value::as_f64).filter(|x| x.is_finite() && *x >= 0.0);
+    let rates = |c: &serde_json::Value| -> Option<Rates> {
+        Some(Rates { input: num(c, "input")?, output: num(c, "output")?, cache_read: num(c, "cache_read"), cache_write_5m: num(c, "cache_write"), cache_write_1h: None })
+    };
+    for vendor in CATALOG_VENDORS {
+        let Some(models) = all.get(vendor).and_then(|p| p.get("models")).and_then(serde_json::Value::as_object) else { continue };
+        for (key, m) in models {
+            let Some(cost) = m.get("cost") else { continue };
+            // a free or subscription-only entry has no price to show
+            let Some(r) = rates(cost).filter(|r| r.input > 0.0 || r.output > 0.0) else { continue };
+            let id = m.get("id").and_then(serde_json::Value::as_str).unwrap_or(key);
+            let id = id.rsplit('/').next().unwrap_or(id).to_ascii_lowercase();
+            let long_context = cost.get("context_over_200k").and_then(rates).map(|rates| LongContext { threshold: 200_000, rates });
+            out.entry(id.clone()).or_insert(ModelPrice {
+                id,
+                provider: vendor.into(),
+                aliases: Vec::new(),
+                rates: r,
+                long_context,
+                speed_multipliers: HashMap::new(),
+                geo_multipliers: HashMap::new(),
+                web_search_per_1k: None,
+                off_peak: None,
+                verified_at: None,
+                notes: Some("OpenCode model catalog".into()),
+            });
+        }
+    }
+    out
 }
 
 impl PriceBook {
@@ -194,7 +268,7 @@ impl PriceBook {
                 index.insert(a.to_ascii_lowercase(), i);
             }
         }
-        Ok(PriceBook { file, index })
+        Ok(PriceBook { file, index, catalog: HashMap::new() })
     }
 
     /// A saved price list keeps its edits but still learns models and aliases added to the
@@ -226,9 +300,12 @@ impl PriceBook {
         &self.file
     }
 
-    /// Exact id → alias → user alias → id without a `-YYYYMMDD` date suffix. Nothing fuzzier,
-    /// so a new model is reported as unpriced instead of silently getting a wrong price.
-    pub fn lookup(&self, model: &str) -> Option<&ModelPrice> {
+    pub fn with_catalog(mut self, catalog: HashMap<String, ModelPrice>) -> PriceBook {
+        self.catalog = catalog;
+        self
+    }
+
+    fn listed(&self, model: &str) -> Option<&ModelPrice> {
         let m = model.trim().to_ascii_lowercase();
         let find = |k: &str| self.index.get(k).map(|&i| &self.file.models[i]);
         let named = |k: &str| {
@@ -244,6 +321,28 @@ impl PriceBook {
         named(&m).or_else(|| strip_date_suffix(&m).and_then(named))
     }
 
+    fn cataloged(&self, model: &str) -> Option<&ModelPrice> {
+        let m = model.trim().to_ascii_lowercase();
+        self.catalog.get(&m).or_else(|| strip_date_suffix(&m).and_then(|b| self.catalog.get(b)))
+    }
+
+    /// Priced only by OpenCode's catalog, not by the price list.
+    pub fn from_catalog(&self, model: &str) -> bool {
+        self.listed(model).is_none() && self.cataloged(model).is_some()
+    }
+
+    /// The catalog prices of `models` the price list does not know.
+    pub fn catalog_entries<'a>(&self, models: impl IntoIterator<Item = &'a str>) -> Vec<ModelPrice> {
+        models.into_iter().filter(|m| self.from_catalog(m)).filter_map(|m| self.cataloged(m).cloned()).collect()
+    }
+
+    /// Exact id → alias → user alias → id without a `-YYYYMMDD` date suffix, then OpenCode's
+    /// catalog. Nothing fuzzier, so a new model is reported as unpriced instead of silently
+    /// getting a wrong price.
+    pub fn lookup(&self, model: &str) -> Option<&ModelPrice> {
+        self.listed(model).or_else(|| self.cataloged(model))
+    }
+
     /// `None` when the model has no known price.
     pub fn cost(&self, c: &CostInput) -> Option<Cost> {
         let p = self.lookup(c.model)?;
@@ -251,8 +350,7 @@ impl PriceBook {
             Some(lc) if c.request_input > lc.threshold => &lc.rates,
             _ => &p.rates,
         };
-        let mult = c.speed.and_then(|s| p.speed_multipliers.get(s)).copied().unwrap_or(1.0)
-            * c.inference_geo.and_then(|g| p.geo_multipliers.get(g)).copied().unwrap_or(1.0);
+        let mult = multiplier(p, c);
         let per = |tokens: u64, rate: f64| tokens as f64 * rate / 1_000_000.0 * mult;
         let cw5_rate = rates.cache_write_5m.unwrap_or(rates.input);
         let cw1_rate = rates.cache_write_1h.unwrap_or(cw5_rate);
@@ -268,6 +366,15 @@ impl PriceBook {
     }
 }
 
+/// Speed, region and time of day, which scale every token category alike.
+fn multiplier(p: &ModelPrice, c: &CostInput) -> f64 {
+    let off_peak = match (&p.off_peak, c.ts_ms) {
+        (Some(op), Some(ts)) if op.applies(ts) => op.multiplier,
+        _ => 1.0,
+    };
+    c.speed.and_then(|s| p.speed_multipliers.get(s)).copied().unwrap_or(1.0) * c.inference_geo.and_then(|g| p.geo_multipliers.get(g)).copied().unwrap_or(1.0) * off_peak
+}
+
 impl PriceBook {
     /// Net API-equivalent saving from prompt caching for one request: cache reads billed below
     /// the input price, minus the premium paid for cache writes. Negative when writes were
@@ -278,8 +385,7 @@ impl PriceBook {
             Some(lc) if c.request_input > lc.threshold => &lc.rates,
             _ => &p.rates,
         };
-        let mult = c.speed.and_then(|s| p.speed_multipliers.get(s)).copied().unwrap_or(1.0)
-            * c.inference_geo.and_then(|g| p.geo_multipliers.get(g)).copied().unwrap_or(1.0);
+        let mult = multiplier(p, c);
         let per = |tokens: u64, rate: f64| tokens as f64 * rate / 1_000_000.0 * mult;
         let read_rate = rates.cache_read.unwrap_or(rates.input);
         let cw5 = rates.cache_write_5m.unwrap_or(rates.input);
@@ -326,7 +432,7 @@ mod tests {
     }
 
     fn cost(book: &PriceBook, model: &str, t: &Tokens, req: u64, speed: Option<&str>, geo: Option<&str>) -> Option<f64> {
-        book.cost(&CostInput { model, tokens: t, request_input: req, web_search_requests: 0, speed, inference_geo: geo })
+        book.cost(&CostInput { model, tokens: t, request_input: req, web_search_requests: 0, speed, inference_geo: geo, ts_ms: None })
             .map(|c| (c.total() * 1e6).round() / 1e6)
     }
 
@@ -454,11 +560,88 @@ mod tests {
     }
 
     #[test]
+    fn opencode_vendors_are_priced_under_the_names_opencode_logs() {
+        let b = PriceBook::default_book();
+        let t = tokens(1_000_000, 1_000_000, 0, 0, 1_000_000);
+        // a retired DeepSeek name is billed as its successor, at the peak price
+        assert_eq!(cost(&b, "deepseek-v4-flash", &t, 0, None, None), Some(0.30 + 0.006 + 1.20));
+        // Fireworks' and Bedrock's spellings of GLM
+        assert_eq!(cost(&b, "glm-5p1", &t, 0, None, None), cost(&b, "glm-5.1", &t, 0, None, None));
+        assert_eq!(cost(&b, "zai.glm-4.7", &t, 0, None, None), Some(0.6 + 0.11 + 2.2));
+        assert_eq!(cost(&b, "glm4.7", &t, 0, None, None), cost(&b, "zai.glm-4.7", &t, 0, None, None), "NVIDIA's spelling");
+        // xAI doubles a request whose prompt reaches 200k; a retired Grok costs Grok 4.3
+        assert_eq!(cost(&b, "grok-4.7", &t, 250_000, None, None), Some(4.0 + 1.0 + 12.0));
+        assert_eq!(cost(&b, "grok-code-fast-1", &t, 0, None, None), Some(1.25 + 0.2 + 2.5));
+        // Qwen's cache reads at the documented 20 %, and its first input tier
+        assert_eq!(cost(&b, "qwen3-coder-flash", &t, 40_000, None, None), Some(0.5 + 0.1 + 2.5));
+        assert_eq!(b.lookup("MiniMax-M3").map(|m| m.provider.as_str()), Some("minimax"));
+    }
+
+    #[test]
+    fn deepseek_is_half_price_outside_its_busy_hours() {
+        let b = PriceBook::default_book();
+        let t = tokens(1_000_000, 1_000_000, 0, 0, 1_000_000);
+        let at = |ts: Option<i64>| {
+            b.cost(&CostInput { model: "deepseek-v4-pro", tokens: &t, request_input: 0, web_search_requests: 0, speed: None, inference_geo: None, ts_ms: ts })
+                .map(|c| (c.total() * 1e6).round() / 1e6)
+        };
+        let utc = |d: u32, h: u32, m: u32| chrono::NaiveDate::from_ymd_opt(2026, 10, d).unwrap().and_hms_opt(h, m, 0).unwrap().and_utc().timestamp_millis();
+        let full = Some(5.324); // 1.32 + 0.044 + 3.96
+        let half = Some(2.662);
+        assert_eq!(at(None), full, "no time: the list price");
+        // Monday 2026-10-26
+        assert_eq!(at(Some(utc(26, 1, 0))), full);
+        assert_eq!(at(Some(utc(26, 3, 59))), full);
+        assert_eq!(at(Some(utc(26, 4, 0))), half, "the busy hours end at 04:00");
+        assert_eq!(at(Some(utc(26, 9, 30))), full);
+        assert_eq!(at(Some(utc(26, 22, 0))), half);
+        // Saturday 2026-10-24, inside the weekday busy hours
+        assert_eq!(at(Some(utc(24, 7, 0))), half);
+        // other models do not change with the time
+        let claude = |ts| b.cost(&CostInput { model: "claude-sonnet-5", tokens: &t, request_input: 0, web_search_requests: 0, speed: None, inference_geo: None, ts_ms: ts }).map(|c| c.total());
+        assert_eq!(claude(Some(utc(24, 7, 0))), claude(None));
+    }
+
+    fn catalog() -> HashMap<String, ModelPrice> {
+        catalog_prices(
+            r#"{
+              "deepseek": { "models": { "deepseek-chat": { "id": "deepseek-chat", "cost": { "input": 0.14, "output": 0.28, "cache_read": 0.028 } } } },
+              "openrouter": { "models": { "meta-llama/llama-4": { "id": "meta-llama/llama-4", "cost": { "input": 0.2, "output": 0.6 } } } },
+              "zhipuai": { "models": { "glm-5-turbo": { "id": "glm-5-turbo", "cost": { "input": 6, "output": 24 } } } },
+              "zai": { "models": {
+                "glm-5-turbo": { "id": "glm-5-turbo", "cost": { "input": 1.2, "output": 4, "cache_read": 0.24 } },
+                "glm-4.7-flash": { "id": "glm-4.7-flash", "cost": { "input": 0, "output": 0 } },
+                "glm-5.1": { "id": "glm-5.1", "cost": { "input": 9, "output": 9 } } } },
+              "xai": { "models": { "grok-4-old": { "id": "grok-4-old", "cost": { "input": 3, "output": 15, "context_over_200k": { "input": 6, "output": 30 } } } } }
+            }"#,
+        )
+    }
+
+    #[test]
+    fn opencode_catalog_prices_only_what_the_list_lacks_and_only_from_the_vendor() {
+        let b = PriceBook::default_book().with_catalog(catalog());
+        let t = tokens(1_000_000, 1_000_000, 0, 0, 1_000_000);
+        assert_eq!(cost(&b, "deepseek-chat", &t, 0, None, None), Some(0.448));
+        assert!(b.from_catalog("deepseek-chat") && b.from_catalog("deepseek-chat-20260101"));
+        // the vendor's own entry, not the China site's CNY figures
+        assert_eq!(cost(&b, "glm-5-turbo", &t, 0, None, None), Some(5.44));
+        // a verified price beats the catalog's
+        assert_eq!(cost(&b, "glm-5.1", &t, 0, None, None), Some(6.06));
+        assert!(!b.from_catalog("glm-5.1"));
+        assert_eq!(cost(&b, "grok-4-old", &t, 300_000, None, None), Some(42.0), "context_over_200k is the long-context price");
+        // only resellers have it, or it is free: no price
+        assert_eq!(cost(&b, "llama-4", &t, 0, None, None), None);
+        assert_eq!(cost(&b, "glm-4.7-flash", &t, 0, None, None), None);
+        assert_eq!(b.catalog_entries(["deepseek-chat", "glm-5.1", "llama-4"]).iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["deepseek-chat"]);
+        assert!(catalog_prices("not json").is_empty());
+    }
+
+    #[test]
     fn web_search_fee_is_per_request() {
         let b = PriceBook::default_book();
         let t = Tokens::default();
         let c = b
-            .cost(&CostInput { model: "claude-sonnet-5", tokens: &t, request_input: 0, web_search_requests: 3, speed: None, inference_geo: None })
+            .cost(&CostInput { model: "claude-sonnet-5", tokens: &t, request_input: 0, web_search_requests: 3, speed: None, inference_geo: None, ts_ms: None })
             .unwrap();
         assert!((c.web_search - 0.03).abs() < 1e-12);
     }
@@ -469,15 +652,15 @@ mod tests {
         // opus 5.5: input 4, read 0.2, 5m write 5, 1h write 8 ($/1M)
         let t = tokens(0, 1_000_000, 1_000_000, 0, 0);
         let s = b
-            .cache_savings(&CostInput { model: "claude-opus-5-5", tokens: &t, request_input: 0, web_search_requests: 0, speed: None, inference_geo: None })
+            .cache_savings(&CostInput { model: "claude-opus-5-5", tokens: &t, request_input: 0, web_search_requests: 0, speed: None, inference_geo: None, ts_ms: None })
             .unwrap();
         assert!((s - (3.8 - 1.0)).abs() < 1e-9, "{s}");
         let t = tokens(0, 0, 1_000_000, 1_000_000, 0);
         let s = b
-            .cache_savings(&CostInput { model: "claude-opus-5-5", tokens: &t, request_input: 0, web_search_requests: 0, speed: None, inference_geo: None })
+            .cache_savings(&CostInput { model: "claude-opus-5-5", tokens: &t, request_input: 0, web_search_requests: 0, speed: None, inference_geo: None, ts_ms: None })
             .unwrap();
         assert!((s + 4.0).abs() < 1e-9, "{s}"); // a 1h write nobody read: pure premium
-        assert!(b.cache_savings(&CostInput { model: "nope", tokens: &t, request_input: 0, web_search_requests: 0, speed: None, inference_geo: None }).is_none());
+        assert!(b.cache_savings(&CostInput { model: "nope", tokens: &t, request_input: 0, web_search_requests: 0, speed: None, inference_geo: None, ts_ms: None }).is_none());
     }
 
     #[test]
@@ -501,6 +684,8 @@ mod tests {
         })
         .is_err());
         assert!(edit(&|f| f.models[0].web_search_per_1k = Some(-10.0)).is_err());
+        assert!(edit(&|f| f.models[0].off_peak = Some(OffPeak { multiplier: 0.5, peak_hours_utc: vec![[10, 4]] })).is_err());
+        assert!(edit(&|f| f.models[0].off_peak = Some(OffPeak { multiplier: -1.0, peak_hours_utc: vec![] })).is_err());
         assert!(edit(&|f| f.currency = "EUR".into()).is_err());
         assert!(edit(&|f| f.unit = "per_token".into()).is_err());
         assert!(edit(&|f| {
