@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 
 /// The product that produced the usage. Cowork sessions are Claude Code under the hood,
 /// so they share `ClaudeCode` and are told apart by [`UsageEvent::client`]; the Antigravity
-/// app, IDE and CLI likewise share `Antigravity`.
+/// app, IDE and CLI likewise share `Antigravity`. OpenCode runs models of many providers and
+/// keeps the provider it used as its client (`anthropic`, `openrouter`, `github-copilot`, …).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Tool {
@@ -12,6 +13,7 @@ pub enum Tool {
     Codex,
     ClaudeDesktop,
     Antigravity,
+    OpenCode,
 }
 
 impl Tool {
@@ -21,6 +23,7 @@ impl Tool {
             Tool::Codex => "codex",
             Tool::ClaudeDesktop => "claude_desktop",
             Tool::Antigravity => "antigravity",
+            Tool::OpenCode => "opencode",
         }
     }
     pub fn parse(s: &str) -> Option<Tool> {
@@ -29,14 +32,18 @@ impl Tool {
             "codex" => Some(Tool::Codex),
             "claude_desktop" => Some(Tool::ClaudeDesktop),
             "antigravity" => Some(Tool::Antigravity),
+            "opencode" => Some(Tool::OpenCode),
             _ => None,
         }
     }
-    pub fn provider(self) -> Provider {
+    /// Whose plan the usage counts toward. `None` for OpenCode: its records do not say whether
+    /// a request went through a subscription or an API key.
+    pub fn provider(self) -> Option<Provider> {
         match self {
-            Tool::ClaudeCode | Tool::ClaudeDesktop => Provider::Anthropic,
-            Tool::Codex => Provider::OpenAI,
-            Tool::Antigravity => Provider::Google,
+            Tool::ClaudeCode | Tool::ClaudeDesktop => Some(Provider::Anthropic),
+            Tool::Codex => Some(Provider::OpenAI),
+            Tool::Antigravity => Some(Provider::Google),
+            Tool::OpenCode => None,
         }
     }
 }

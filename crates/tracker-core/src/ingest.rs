@@ -4,7 +4,7 @@
 
 use crate::discovery::DiscoveredFile;
 use crate::capture::statusline;
-use crate::sources::{antigravity, claude_code, claude_plan, codex, cowork_audit, ParseOutput, ParserKind, MAX_WARNING_DETAILS};
+use crate::sources::{antigravity, claude_code, claude_plan, codex, cowork_audit, opencode, ParseOutput, ParserKind, MAX_WARNING_DETAILS};
 use crate::store::Store;
 use serde::Serialize;
 use std::time::UNIX_EPOCH;
@@ -92,7 +92,7 @@ pub struct FileRead {
 /// interrupted scan resumes after the last stored round.
 pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<FileRead>, String> {
     let (mut size, mut mtime_ms) = size_and_mtime(&f.path).map_err(|e| e.to_string())?;
-    if f.parser == ParserKind::AntigravityDb {
+    if f.parser.has_wal() {
         // new rows land in the WAL until SQLite checkpoints them into the database file
         let mut wal = f.path.clone().into_os_string();
         wal.push("-wal");
@@ -107,6 +107,7 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<FileR
     let (mut offset, mut state) = match &cp {
         Some(c) if c.file_id == f.file_id && c.size == size && c.mtime_ms == mtime_ms => return Ok(None),
         Some(c) if f.parser.is_incremental() && c.file_id == f.file_id && size >= c.offset => (c.offset, c.state.clone()),
+        Some(c) if f.parser.keeps_state() && c.file_id == f.file_id => (0, c.state.clone()),
         _ => (0, serde_json::Value::Null), // new, replaced, truncated or whole-document file
     };
 
@@ -175,5 +176,6 @@ fn parse(f: &DiscoveredFile, offset: u64, state: &serde_json::Value) -> std::io:
         ParserKind::CodexRollout => codex::parse_file(&f.path, offset, state),
         ParserKind::StatuslineCapture => statusline::parse_file(&f.path, offset),
         ParserKind::AntigravityDb => antigravity::parse_file(&f.path),
+        ParserKind::OpenCodeDb => opencode::parse_file(&f.path, state),
     }
 }

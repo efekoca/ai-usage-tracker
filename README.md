@@ -2,7 +2,7 @@
 
 # AI Usage Tracker
 
-**Your Claude Code, Codex and Antigravity usage, cost, and plan limits, on your own computer.**
+**Your Claude Code, Codex, Antigravity and OpenCode usage, cost, and plan limits, on your own computer.**
 
 A private app for Windows, macOS, and Linux that reads the usage logs your AI tools already write, keeps its own archive, and shows tokens, API-equivalent cost, and live limit percentages. No account, no cloud, no telemetry.
 
@@ -212,6 +212,7 @@ The widget also comes with a tray icon and a shortcut:
 | **Claude desktop: plan usage** | *Claude folder*`/plan-usage-history.json` | — | **Exact %** | Chat tokens are not stored locally, so **none** |
 | **Codex** (CLI and desktop) | `$CODEX_HOME` or `~/.codex/{sessions,archived_sessions}` | **Exact** | **Exact %** (every request) | |
 | **Antigravity** (app, IDE and `agy` CLI) | `~/.gemini/{antigravity,antigravity-ide,antigravity-cli}/conversations/*.db` or `$ANTIGRAVITY_APP_DATA_DIR` | **Exact** | **Captured %** (through `agy`) | A copy of each database is read, so Antigravity's files are never touched. Gemini and Claude/GPT limits are shown separately |
+| **OpenCode** | `$XDG_DATA_HOME/opencode` or `~/.local/share/opencode` (also on Windows): `opencode.db`, or `$OPENCODE_DB` | **Exact** | — | Every provider you use in OpenCode (Anthropic, OpenAI, OpenRouter, GitHub Copilot, OpenCode Zen, …), priced at the model maker's own API price. OpenCode does not record whether a request used a subscription or an API key, so this usage is not added to any plan's value. Sessions made with versions before 1.3.16 are not counted |
 | ChatGPT desktop | — | **None** | — | Detection only |
 
 `~` is your home folder (`%USERPROFILE%` on Windows). The *Claude folder* is `%APPDATA%\Claude` on Windows and `~/Library/Application Support/Claude` on macOS; the Claude desktop app is not available for Linux.
@@ -281,6 +282,7 @@ Every release includes `SHA256SUMS`, the checksum of each file. Put it next to y
 - **Stored:** only those values, in `tracker.db` (SQLite) in the app's data folder: `%LOCALAPPDATA%\AIUsageTracker` on Windows, `~/Library/Application Support/AIUsageTracker` on macOS, and `~/.local/share/AIUsageTracker` on Linux. Project names stay local. You can hide them one by one or all at once, and hidden names are masked in exports too.
 - **Never kept in the app's archive:** prompts, responses, file contents, credentials, or tokens. The app does **not** read the tools' credential files.
 - **Antigravity's temporary copy:** Antigravity keeps its conversations, text included, in a database. So as never to touch that file, the app copies it into a temporary folder only you can open, reads the counts and deletes the copy right away. If the app is forced to quit, the next Antigravity read deletes leftover copies older than 10 minutes. Conversation text never reaches the app's archive.
+- **OpenCode's database:** OpenCode keeps its sessions, text included, in one database. The app opens it read-only and asks it only for token counts, model, provider, agent, project folder, and the name, result and time of each tool call; text is never read.
 - **Network:** the app itself connects only to check for updates. The check downloads the release's version file and sends nothing (**Settings → Updates**). The limit reads, on by default, run your own Claude Code, Codex and Antigravity CLI, which ask their own services for your plan's limit percentages; the app starts them with their telemetry and error reporting turned off. You can turn the reads off under **Sources → Live capture**. If you install a tool from the app, its installer is downloaded from the maker's site. Prices and plans ship with the app, and currency conversion uses a rate you enter yourself.
 
 ### Live capture
@@ -310,7 +312,7 @@ Safeguards:
 
 Everything runs on your computer:
 
-1. Claude Code, Cowork, Claude desktop, the Codex CLI and desktop app, and the Antigravity app, IDE and CLI write usage logs to disk, as they already do.
+1. Claude Code, Cowork, Claude desktop, the Codex CLI and desktop app, the Antigravity app, IDE and CLI, and OpenCode write usage logs to disk, as they already do.
 2. The app reads each log from where it left off, so a rescan only touches what is new. It takes only details such as token counts, model, and time; prompt and response text is never saved to the app's archive.
 3. When the limit reads are on, your own `claude`, `codex` and `agy` CLIs supply the limit percentages.
 4. Only counts and metadata reach the local archive (SQLite). Duplicates from streaming, resumed or forked sessions, and Codex logs moved to the archive are counted once.
@@ -329,6 +331,7 @@ The app checks for a new version at startup and every 6 hours. The check downloa
 - **`codex-auto-review`:** has no published price.
 - **Older Antigravity conversations:** conversations that older Antigravity versions kept encrypted as `.pb` files, and conversations whose database is gone, are not read; they hold no real token counts.
 - **Google AI plan prices:** they differ by country and offer, so you enter what you pay for your Antigravity plan.
+- **OpenCode:** it does not record the requests that name a session, so those are missing, and a request stopped before the model reported its usage is recorded with no tokens. The cost shown is the model maker's API price, not what OpenRouter, GitHub Copilot or OpenCode Zen charged.
 - **Log formats:** these are not documented interfaces and may change. The app skips unknown fields and lists unrecognized files under **Sources**.
 
 ## Build from source

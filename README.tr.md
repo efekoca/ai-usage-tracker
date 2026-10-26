@@ -2,7 +2,7 @@
 
 # AI Usage Tracker
 
-**Claude Code, Codex ve Antigravity kullanımınızı, API eşdeğeri maliyetinizi ve plan limitlerinizi tek yerden izleyin.**
+**Claude Code, Codex, Antigravity ve OpenCode kullanımınızı, API eşdeğeri maliyetinizi ve plan limitlerinizi tek yerden izleyin.**
 
 AI Usage Tracker, Windows, macOS ve Linux'ta çalışan bir uygulamadır. Yapay zekâ araçlarınızın bilgisayarınıza zaten yazdığı kullanım kayıtlarını okur ve size anlaşılır bir panelde sunar. Ne kadar token harcadığınızı, bu kullanımın API fiyatlarıyla ne tutacağını ve limitlerinizin ne zaman dolacağını görürsünüz. Hesap açmanız gerekmez; verileriniz bulutta değil, kendi bilgisayarınızda kalır.
 
@@ -204,6 +204,7 @@ Haftalık kullanımınızı PDF olarak kaydedebilir, verilerinizi dışa aktarı
 | **Claude masaüstü: plan kullanımı**                    | *Claude klasörü*`/plan-usage-history.json` | —         | **Kesin %**                | Sohbet token'ları yerelde tutulmadığı için token verisi **yok**                     |
 | **Codex** (CLI ve masaüstü)                            | `$CODEX_HOME` ya da `~/.codex/{sessions,archived_sessions}` | **Kesin** | **Kesin %** (her istekte)  |                                                                                     |
 | **Antigravity** (uygulama, IDE ve `agy` CLI)           | `~/.gemini/{antigravity,antigravity-ide,antigravity-cli}/conversations/*.db` ya da `$ANTIGRAVITY_APP_DATA_DIR` | **Kesin** | **Yakalanan %** (`agy` ile) | Veritabanının bir kopyası okunur; Antigravity'nin dosyalarına dokunulmaz. Gemini ile Claude/GPT modellerinin limitleri ayrı gösterilir |
+| **OpenCode**                                           | `$XDG_DATA_HOME/opencode` ya da `~/.local/share/opencode` (Windows'ta da): `opencode.db`, ya da `$OPENCODE_DB` | **Kesin** | —                          | OpenCode'da kullandığınız her sağlayıcı (Anthropic, OpenAI, OpenRouter, GitHub Copilot, OpenCode Zen…) modelin kendi API fiyatıyla hesaplanır. OpenCode bir isteğin abonelikle mi API anahtarıyla mı yapıldığını kaydetmediği için bu kullanım hiçbir planın değerine eklenmez. 1.3.16'dan eski sürümlerle yapılan oturumlar sayılmaz |
 | ChatGPT masaüstü                                       | —                                                                        | **Yok**   | —                          | Yalnızca algılanır                                                                  |
 
 `~` kullanıcı klasörünüzü gösterir (Windows'ta `%USERPROFILE%`, örneğin `C:\Users\adınız`). *Claude klasörü* Windows'ta `%APPDATA%\Claude`, macOS'te `~/Library/Application Support/Claude` klasörüdür; Claude masaüstü uygulamasının Linux sürümü yoktur.
@@ -273,6 +274,7 @@ Her sürümde, her dosyanın sağlama değerini içeren bir `SHA256SUMS` dosyas�
 - **Saklananlar:** Yalnızca bu sayılar ve meta veriler. Hepsi uygulamanın veri klasöründeki `tracker.db` (SQLite) dosyasında durur: Windows'ta `%LOCALAPPDATA%\AIUsageTracker`, macOS'te `~/Library/Application Support/AIUsageTracker`, Linux'ta `~/.local/share/AIUsageTracker`. Proje adları bu bilgisayardan çıkmaz. İsterseniz adları tek tek ya da toplu olarak gizleyebilirsiniz; gizlenen adlar dışa aktarımlarda da maskelenir.
 - **Uygulamanın arşivinde hiçbir zaman tutulmayanlar:** Prompt ve yanıtlar, dosya içerikleri, kimlik bilgileri ve erişim token'ları. Uygulama, araçların oturum anahtarlarını tutan dosyaları (`.credentials.json`, `auth.json`) **okumaz**.
 - **Antigravity'nin geçici kopyası:** Antigravity, sohbetlerini metinleriyle birlikte bir veri tabanında tutar. Uygulama bu dosyaya dokunmamak için onu, yalnızca sizin erişebildiğiniz geçici bir klasöre kopyalar, sayıları okur ve kopyayı hemen siler. Uygulama zorla kapatılırsa kalan kopyalar, Antigravity bir sonraki okunduğunda 10 dakikadan eskiyse silinir. Sohbet metni uygulamanın arşivine hiçbir zaman alınmaz.
+- **OpenCode'un veritabanı:** OpenCode, oturumlarını metinleriyle birlikte tek bir veritabanında tutar. Uygulama bu dosyayı salt okunur açar ve yalnızca token sayılarını, modeli, sağlayıcıyı, ajanı, proje klasörünü ve araç çağrılarının adını, sonucunu ve zamanını sorar; metin hiç okunmaz.
 - **İnternet bağlantısı:** Uygulamanın kendisi internete yalnızca güncelleme denetimi için bağlanır. Bu denetimde yalnızca sürüm dosyası indirilir, hiçbir veri gönderilmez (**Ayarlar → Güncellemeler**). Varsayılan olarak açık gelen limit okumaları bilgisayarınızdaki Claude Code, Codex ve Antigravity CLI'ı çalıştırır; bu araçlar limit yüzdenizi kendi servislerinden sorar. Uygulama onları telemetri ve hata raporlaması kapalı olarak başlatır. Limit okumalarını **Kaynaklar → Canlı yakalama** bölümünden kapatabilirsiniz. Bir aracı uygulamadan kurarsanız kurulum dosyası üreticinin sitesinden indirilir. Fiyat ve plan dosyaları uygulamayla birlikte gelir. Döviz kuru için de internetten veri çekilmez; kuru kendiniz girersiniz.
 
 ### Canlı yakalama
@@ -302,7 +304,7 @@ Güvenlik önlemleri:
 
 Her şey sizin bilgisayarınızda olur:
 
-1. Claude Code, Cowork, Claude masaüstü, Codex (CLI ve masaüstü) ve Antigravity (uygulama, IDE ve CLI) kullanım kayıtlarını diske yazar.
+1. Claude Code, Cowork, Claude masaüstü, Codex (CLI ve masaüstü), Antigravity (uygulama, IDE ve CLI) ve OpenCode kullanım kayıtlarını diske yazar.
 2. Uygulama bu kayıtları okur ve içlerinden yalnızca token sayısı, model ve zaman gibi bilgileri alır. Prompt ve yanıt metinleri uygulamanın arşivine kaydedilmez.
 3. Limit okumaları açıksa limit yüzdeleri bilgisayarınızdaki `claude`, `codex` ve `agy` üzerinden alınır.
 4. Yerel veri tabanına (SQLite) yalnızca sayılar ve meta veriler yazılır.
@@ -323,6 +325,7 @@ Uygulama açılışta ve 6 saatte bir yeni sürüm olup olmadığına bakar. Bun
 - **`codex-auto-review`:** Bu modelin resmi fiyatı yayımlanmamıştır.
 - **Eski Antigravity konuşmaları:** Antigravity'nin eski sürümlerinin şifreli olarak sakladığı `.pb` konuşmaları ve veritabanı silinmiş konuşmalar okunmaz; bunlarda gerçek token sayısı bulunmaz.
 - **Google AI plan fiyatları:** Ülkeye ve kampanyaya göre değiştiği için Antigravity planınızın aylık ücretini kendiniz girersiniz.
+- **OpenCode:** Oturuma ad veren istekler OpenCode tarafından kaydedilmediği için bunlar eksik kalır; model kullanımını bildirmeden durdurulan bir istek de token'sız kaydedilir. Gösterilen maliyet modelin kendi API fiyatıdır; OpenRouter, GitHub Copilot ya da OpenCode Zen'in aldığı ücret değildir.
 - **Kayıt biçimleri:** Araçların kayıt biçimleri resmi olarak belgelenmiş değildir ve sürümden sürüme değişebilir. Uygulama bilmediği alanları atlar ve tanıyamadığı kayıtları **Kaynaklar** ekranında listeler.
 
 ## Kaynaktan derleme

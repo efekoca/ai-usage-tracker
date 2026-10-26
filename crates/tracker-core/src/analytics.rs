@@ -126,7 +126,7 @@ impl Totals {
     }
 
     fn add(&mut self, e: &EventRow, cost: Option<&Cost>, savings: f64) {
-        self.add_counted(e, cost, savings, e.tool.provider() == Provider::Anthropic)
+        self.add_counted(e, cost, savings, e.tool.provider() == Some(Provider::Anthropic))
     }
 
     fn add_counted(&mut self, e: &EventRow, cost: Option<&Cost>, savings: f64, reuse: bool) {
@@ -221,7 +221,7 @@ fn savings_of(book: &PriceBook, e: &EventRow) -> f64 {
 
 fn cache_writers<'a>(events: impl Iterator<Item = &'a EventRow>) -> impl Fn(&EventRow) -> bool {
     let models: HashSet<String> = events.filter(|e| e.tokens.cache_write > 0).map(|e| e.model.clone()).collect();
-    move |e| e.tool.provider() == Provider::Anthropic || models.contains(&e.model)
+    move |e| e.tool.provider() == Some(Provider::Anthropic) || models.contains(&e.model)
 }
 
 fn sorted_groups(map: HashMap<String, (String, bool, Totals)>) -> Vec<Group> {

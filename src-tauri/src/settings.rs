@@ -413,12 +413,12 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         store.set_setting(KEY, r#"{"onboarded":true,"enabled_sources":["claude_code","cowork"]}"#).unwrap();
         let mut s = Settings::load(&store);
-        assert_eq!(s.enabled_sources, [SourceId::ClaudeCode, SourceId::Cowork, SourceId::Antigravity]);
+        assert_eq!(s.enabled_sources, [SourceId::ClaudeCode, SourceId::Cowork, SourceId::Antigravity, SourceId::OpenCode]);
         assert!(SourceId::ALL.iter().all(|x| s.known_sources.contains(x)) && s.known_sources.len() == SourceId::ALL.len());
 
         s.enabled_sources.retain(|x| *x != SourceId::Antigravity);
         s.save(&store).unwrap();
-        assert_eq!(Settings::load(&store).enabled_sources, [SourceId::ClaudeCode, SourceId::Cowork], "an explicit choice is kept");
+        assert_eq!(Settings::load(&store).enabled_sources, [SourceId::ClaudeCode, SourceId::Cowork, SourceId::OpenCode], "an explicit choice is kept");
         assert!(Settings::default().enabled_sources.contains(&SourceId::Antigravity));
     }
 
