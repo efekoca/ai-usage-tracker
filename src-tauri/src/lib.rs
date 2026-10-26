@@ -397,6 +397,7 @@ pub fn run() {
             commands::set_project_hidden,
             commands::list_models,
             commands::get_pricing,
+            commands::catalog_prices,
             commands::save_pricing,
             commands::reset_pricing,
             commands::get_plans,

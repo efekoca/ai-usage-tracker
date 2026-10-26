@@ -35,8 +35,9 @@
   const hasClaude = $derived(toolsPresent.includes('claude_code'))
   // dismissal covers only the listed models; a newly unpriced one still warns
   const unpriced = $derived((app.report?.unpriced_models ?? []).filter((m) => !(app.settings?.dismissed_unpriced ?? []).includes(m)))
+  const cataloged = $derived((app.report?.catalog_models ?? []).filter((m) => !(app.settings?.dismissed_unpriced ?? []).includes(m)))
   function dismissUnpriced() {
-    const now = [...unpriced]
+    const now = [...unpriced, ...cataloged]
     saveSettings((c) => ({ dismissed_unpriced: [...new Set([...c.dismissed_unpriced, ...now])] }))
   }
   // the badge names the least certain source in the period; the tooltip gives the mix
@@ -59,10 +60,14 @@
     <p>{t('common.empty')}</p>
   </div>
 {:else}
-  {#if unpriced.length}
+  {#if unpriced.length || cataloged.length}
     <div class="banner" role="status">
       <Icon name="info" size={16} />
-      <span>{t('overview.unpriced', { n: unpriced.length, models: unpriced.join(', ') })}</span>
+      <span>
+        {#if unpriced.length}{t('overview.unpriced', { n: unpriced.length, models: unpriced.join(', ') })}{/if}
+        {#if unpriced.length && cataloged.length}<br />{/if}
+        {#if cataloged.length}{t('overview.catalog', { n: cataloged.length, models: cataloged.join(', ') })}{/if}
+      </span>
       <span class="spacer"></span>
       <button class="btn" onclick={() => (app.view = 'settings')}>{t('overview.unpricedAction')}</button>
       <button class="btn ghost dismiss" aria-label={t('overview.unpricedDismiss')} title={t('overview.unpricedDismiss')} onclick={dismissUnpriced}><Icon name="close" size={14} /></button>

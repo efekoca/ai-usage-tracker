@@ -186,7 +186,10 @@ fn every_priced_model_is_compared_on_the_same_requests() {
     let same = c.targets.iter().find(|x| x.model == "claude-sonnet-5").unwrap();
     assert!(close(same.delta_usd, 0.0));
     assert!(c.targets.windows(2).all(|w| w[0].cost_usd <= w[1].cost_usd), "cheapest first");
-    assert_eq!(c.targets.len(), PriceBook::default_book().file().models.len());
+    // the plan providers' models; other vendors are not offered in the comparison
+    let plan_models = PriceBook::default_book().file().models.iter().filter(|m| Provider::parse(&m.provider).is_some()).count();
+    assert_eq!(c.targets.len(), plan_models);
+    assert!(c.targets.iter().all(|x| x.model != "deepseek-flash"));
 }
 
 #[test]
@@ -219,7 +222,7 @@ fn context_sizes_are_bucketed_and_long_context_premiums_counted() {
 fn long_context_premium_is_zero_at_the_threshold() {
     let book = PriceBook::default_book();
     let tokens = Tokens { input: 272_000, output: 10, ..Default::default() };
-    let at = CostInput { model: "gpt-5.5", tokens: &tokens, request_input: 272_000, web_search_requests: 0, speed: None, inference_geo: None };
+    let at = CostInput { model: "gpt-5.5", tokens: &tokens, request_input: 272_000, web_search_requests: 0, speed: None, inference_geo: None, ts_ms: None };
     assert!(!book.is_long_context(&at));
     assert_eq!(book.long_context_premium(&at), Some(0.0));
     assert_eq!(book.long_context_premium(&CostInput { model: "no-such-model", ..at }), None);

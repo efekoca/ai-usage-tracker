@@ -291,6 +291,7 @@ fn widget_period(
             web_search_requests: e.web_search,
             speed: e.speed.as_deref(),
             inference_geo: e.inference_geo.as_deref(),
+            ts_ms: Some(e.ts_ms),
         });
         let c = cost.map(|c| c.total()).unwrap_or(0.0);
         out.has_unpriced |= cost.is_none();
@@ -388,11 +389,17 @@ pub fn get_pricing(state: State<AppState>) -> PricingInfo {
     PricingInfo { file: state.book.read().unwrap().file().clone(), origin: state.pricing_origin.read().unwrap().clone() }
 }
 
+/// OpenCode catalog prices of the models in `models` the price list does not know.
+#[tauri::command]
+pub fn catalog_prices(state: State<AppState>, models: Vec<String>) -> Vec<tracker_core::pricing::ModelPrice> {
+    state.book.read().unwrap().catalog_entries(models.iter().map(String::as_str))
+}
+
 #[tauri::command]
 pub fn save_pricing(window: WebviewWindow, app: AppHandle, state: State<AppState>, file: PricingFile) -> Res<()> {
     main_only(&window)?;
     let json = serde_json::to_string_pretty(&file).map_err(err)?;
-    let book = PriceBook::from_json(&json).map_err(err)?; // validate before writing
+    let book = PriceBook::from_json(&json).map_err(err)?.with_catalog(crate::state::opencode_catalog()); // validate before writing
     std::fs::write(state.user_pricing_path(), json).map_err(err)?;
     *state.book.write().unwrap() = book;
     *state.pricing_origin.write().unwrap() = "user".into();

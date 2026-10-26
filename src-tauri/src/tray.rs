@@ -198,6 +198,7 @@ pub(crate) fn usage(app: &AppHandle, s: &Settings) -> Option<[Usage; 3]> {
             web_search_requests: e.web_search,
             speed: e.speed.as_deref(),
             inference_geo: e.inference_geo.as_deref(),
+            ts_ms: Some(e.ts_ms),
         });
         for (i, u) in out.iter_mut().enumerate() {
             if e.ts_ms < starts[i] {

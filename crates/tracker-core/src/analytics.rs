@@ -197,6 +197,8 @@ pub struct Report {
     pub avg_daily_tokens: f64,
     pub avg_daily_cost: f64,
     pub unpriced_models: Vec<String>,
+    /// Models priced only from OpenCode's model catalog, not from a vendor's page.
+    pub catalog_models: Vec<String>,
     pub by_accuracy: BTreeMap<String, u64>,
 }
 
@@ -208,6 +210,7 @@ fn input_of(e: &EventRow) -> CostInput<'_> {
         web_search_requests: e.web_search,
         speed: e.speed.as_deref(),
         inference_geo: e.inference_geo.as_deref(),
+        ts_ms: Some(e.ts_ms),
     }
 }
 
@@ -245,6 +248,7 @@ pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filte
     let mut days: BTreeMap<NaiveDate, DayAcc> = BTreeMap::new();
     let mut heat = vec![vec![0u64; 24]; 7];
     let mut unpriced = BTreeMap::new();
+    let mut catalog = std::collections::BTreeSet::new();
     let mut by_accuracy = BTreeMap::new();
 
     let writers = cache_writers(events.iter().filter(|e| filter.matches(e)));
@@ -266,6 +270,8 @@ pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filte
         }
         if c.is_none() {
             *unpriced.entry(e.model.clone()).or_insert(0u64) += 1;
+        } else if book.from_catalog(&e.model) {
+            catalog.insert(e.model.clone());
         }
         *by_accuracy.entry(e.accuracy.as_str().to_owned()).or_insert(0u64) += 1;
 
@@ -335,6 +341,7 @@ pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filte
         days_in_range,
         active_days,
         unpriced_models: unpriced.into_keys().collect(),
+        catalog_models: catalog.into_iter().collect(),
         by_accuracy,
     })
 }

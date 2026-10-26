@@ -67,9 +67,25 @@ pub fn load_price_book(data_dir: &std::path::Path) -> (PriceBook, String) {
     let p = data_dir.join("pricing.json");
     if let Ok(s) = std::fs::read_to_string(&p) {
         match PriceBook::from_user_json(&s) {
-            Ok(b) => return (b, "user".into()),
+            Ok(b) => return (b.with_catalog(opencode_catalog()), "user".into()),
             Err(e) => log::warn!("user pricing.json ignored: {e}"),
         }
     }
-    (PriceBook::default_book(), "bundled".into())
+    (PriceBook::default_book().with_catalog(opencode_catalog()), "bundled".into())
+}
+
+/// OpenCode keeps its model catalog in `$XDG_CACHE_HOME/opencode`, else `~/.cache/opencode`, on
+/// every system; an app started from the Dock may not see the shell's variable.
+pub fn opencode_catalog() -> std::collections::HashMap<String, tracker_core::pricing::ModelPrice> {
+    let mut dirs = Vec::new();
+    if let Some(x) = std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()) {
+        dirs.push(x);
+    }
+    if let Some(h) = tracker_core::discovery::Env::from_system().home {
+        dirs.push(h.join(".cache"));
+    }
+    dirs.iter()
+        .find_map(|d| std::fs::read_to_string(d.join("opencode").join("models.json")).ok())
+        .map(|s| tracker_core::pricing::catalog_prices(&s))
+        .unwrap_or_default()
 }

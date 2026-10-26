@@ -167,6 +167,7 @@ function report(p: Period): Report {
     avg_daily_tokens: total / n,
     avg_daily_cost: cost / n,
     unpriced_models: ocMissing ? ['codex-auto-review'] : ['codex-auto-review', 'big-pickle'],
+    catalog_models: ocMissing ? [] : ['deepseek-chat'],
     by_accuracy: { exact: 1200 },
   }
 }
@@ -559,7 +560,7 @@ const pricing = {
   schema_version: 1,
   updated_at: '2026-10-02',
   currency: 'USD',
-  sources: { anthropic: 'https://platform.claude.com/docs/en/about-claude/pricing', openai: 'https://developers.openai.com/api/docs/pricing', google: 'https://ai.google.dev/gemini-api/docs/pricing', vertex_ai: 'https://cloud.google.com/vertex-ai/generative-ai/pricing' },
+  sources: { anthropic: 'https://platform.claude.com/docs/en/about-claude/pricing', openai: 'https://developers.openai.com/api/docs/pricing', google: 'https://ai.google.dev/gemini-api/docs/pricing', vertex_ai: 'https://cloud.google.com/vertex-ai/generative-ai/pricing', deepseek: 'https://api-docs.deepseek.com/quick_start/pricing/', moonshotai: 'https://platform.kimi.ai/docs/pricing/chat', zai: 'https://docs.z.ai/guides/overview/pricing', alibaba: 'https://www.alibabacloud.com/help/en/model-studio/model-pricing', xai: 'https://docs.x.ai/developers/pricing', mistral: 'https://docs.mistral.ai/inference/pricing', minimax: 'https://platform.minimax.io/docs/guides/pricing-paygo' },
   notes: [],
   models: models.filter((m) => m[3] > 0).map(([id, tool, , i, o, cr]) => ({ id, provider: tool === 'codex' ? 'openai' : tool === 'antigravity' ? 'google' : 'anthropic', input: i, output: o, cache_read: cr, cache_write_5m: i * 1.25, cache_write_1h: tool === 'codex' ? null : i * 2, verified_at: '2026-10-02' })),
   user_aliases: {},
@@ -652,9 +653,11 @@ export function installMock() {
         case 'list_projects_for_settings':
           return projects.map((p, i) => ({ id: i + 1, name: p, path: `C:\\Projects\\${p}`, hidden: i === 4 }))
         case 'list_models':
-          return models.map((m) => m[0])
+          return [...models.map((m) => m[0]), ...(ocMissing ? [] : ['deepseek-chat'])]
         case 'get_pricing':
           return { file: pricing, origin: 'bundled' }
+        case 'catalog_prices':
+          return (a.models as string[]).includes('deepseek-chat') && !ocMissing ? [{ id: 'deepseek-chat', provider: 'deepseek', aliases: [], input: 0.14, output: 0.28, cache_read: 0.028, verified_at: null, notes: 'OpenCode model catalog' }] : []
         case 'get_plans':
           return plansJson
         case 'get_branches':

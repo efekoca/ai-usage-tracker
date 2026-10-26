@@ -333,7 +333,7 @@ The app checks for a new version at startup and every 6 hours. The check downloa
 - **`codex-auto-review`:** has no published price.
 - **Older Antigravity conversations:** conversations that older Antigravity versions kept encrypted as `.pb` files, and conversations whose database is gone, are not read; they hold no real token counts.
 - **Google AI plan prices:** they differ by country and offer, so you enter what you pay for your Antigravity plan.
-- **OpenCode:** it does not record the requests that name a session, so those are missing, and a request stopped before the model reported its usage is recorded with no tokens. The cost shown is the model maker's API price, not what OpenRouter, GitHub Copilot or OpenCode Zen charged.
+- **OpenCode:** it does not record the requests that name a session, so those are missing, and a request stopped before the model reported its usage is recorded with no tokens. The cost shown is the model maker's API price, not what OpenRouter, GitHub Copilot or OpenCode Zen charged. Models from Anthropic, OpenAI, Google, DeepSeek, Moonshot AI (Kimi), Z.ai (GLM), Alibaba Cloud (Qwen), xAI (Grok), Mistral and MiniMax are priced from each maker's own price page; DeepSeek at half price for requests made outside its busy hours, as it charges. Other models take the price from OpenCode's own model catalog on your computer when the maker itself lists one there; the app marks those prices as unverified. A model with no maker price stays out of the cost.
 - **Log formats:** these are not documented interfaces and may change. The app skips unknown fields and lists unrecognized files under **Sources**.
 
 ## Build from source

@@ -292,6 +292,7 @@ pub fn add_local_usage(h: &mut LimitHistory, store: &Store, book: &PriceBook) ->
                     web_search_requests: e.web_search,
                     speed: e.speed.as_deref(),
                     inference_geo: e.inference_geo.as_deref(),
+                    ts_ms: Some(e.ts_ms),
                 };
                 let cost = book.cost(&input).map(|c| c.total());
                 for x in std::iter::once(&mut u).chain((e.ts_ms <= w.peak_ms).then_some(&mut p)) {
