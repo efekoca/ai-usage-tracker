@@ -27,6 +27,85 @@ export function providersOf(sources: Iterable<string>): Provider[] {
   return PROVIDERS.filter((p) => s.has(p))
 }
 
+/** A limit window (`kind` "limit") or today's usage (`today_tokens`, `today_cost`). */
+export interface TrayItem {
+  kind: 'limit' | 'forecast' | 'tokens' | 'cost' | 'sessions' | 'cache' | 'scan'
+  provider: string
+  window: string
+  /** Antigravity's pool ("gemini" | "3p"); empty elsewhere. */
+  pool: string
+  /** "today" | "days7" | "month1" for usage kinds. */
+  period: string
+}
+export interface TraySettings {
+  show_percent: boolean
+  limit: string
+  title: boolean
+  items: TrayItem[]
+  label: 'name' | 'short' | 'none'
+  value: 'app' | 'used' | 'remaining'
+  reset: 'none' | 'countdown' | 'time'
+  style: 'percent' | 'bar' | 'bar_percent' | 'dot'
+  separator: string
+  prefix: string
+  suffix: string
+  warn_mark: boolean
+  hide_icon: boolean
+}
+export interface TrayPreview {
+  title: string
+  /** Each item's own text in `items` and in the catalog; empty without a value. */
+  parts: string[]
+  catalog: string[]
+}
+
+export type PanelKind = 'limit' | 'provider' | 'usage' | 'forecast' | 'scan' | 'action'
+/** s 1×1, w 2×1, m 2×2, l 4×1 cells. */
+export type PanelSize = 's' | 'w' | 'm' | 'l'
+export interface PanelModule {
+  kind: PanelKind
+  provider: string
+  pool: string
+  window: string
+  period: string
+  action: string
+  size: PanelSize
+  /** "ring" | "bar" for limits; empty elsewhere. */
+  style: string
+}
+export interface PanelSettings {
+  modules: PanelModule[]
+  value: 'app' | 'used' | 'remaining'
+}
+export interface PanelUsage {
+  tokens: number
+  cost_usd: number
+  sessions: number
+  prompt: number
+  cache_read: number
+}
+export interface PanelLimit {
+  provider: Provider
+  limit_id: string
+  window: string
+  used_pct: number | null
+  state: LimitState
+  resets_at: number | null
+  forecast: Forecast | null
+}
+export interface PanelData {
+  limits: PanelLimit[]
+  /** Today, the last 7 and the last 30 days. */
+  usage: [PanelUsage, PanelUsage, PanelUsage] | null
+  last_scan_ms: number | null
+  scanning: boolean
+  widget_visible: boolean
+  update: string | null
+  providers: Provider[]
+  /** Signed out of the tool the limits are read through, with no current reading left. */
+  signed_out: Provider[]
+}
+
 export type Period =
   | { kind: 'today' }
   | { kind: 'days7' }
@@ -273,7 +352,8 @@ export interface Settings {
   plan_prices: Record<string, number>
   weekly_report_auto: boolean
   weekly_report_dir: string
-  tray: { show_percent: boolean; limit: string }
+  tray: TraySettings
+  panel: PanelSettings
   update_check: boolean
   /** provider → #rrggbb; missing = the accent color */
   provider_colors: Partial<Record<Provider, string>>
@@ -668,6 +748,7 @@ export const api = {
   exportReport: (from: string, to: string, path: string) => invoke<void>('export_report', { from, to, path }),
   openLastReport: () => invoke<void>('open_last_report'),
   widgetData: () => invoke<WidgetData>('get_widget_data'),
+  trayPreview: (tray: TraySettings) => invoke<TrayPreview>('tray_preview', { tray }),
   projects: () => invoke<ProjectRow[]>('list_projects'),
   projectsForSettings: () => invoke<ProjectRow[]>('list_projects_for_settings'),
   setProjectHidden: (id: number, hidden: boolean) => invoke<void>('set_project_hidden', { id, hidden }),
@@ -686,6 +767,8 @@ export const api = {
   openMain: () => invoke<void>('open_main'),
   setWidgetVisible: (visible: boolean) => invoke<void>('set_widget_visible', { visible }),
   widgetMenu: () => invoke<void>('widget_menu'),
+  panelData: () => invoke<PanelData>('panel_data'),
+  panelAction: (action: string) => invoke<void>('panel_action', { action }),
   quit: () => invoke<void>('quit_app'),
   captureStatus: () => invoke<CaptureStatus>('capture_status'),
   setCapture: (kind: CaptureKind, enabled: boolean) => invoke<string>('set_capture', { kind, enabled }),

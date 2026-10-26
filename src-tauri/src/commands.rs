@@ -561,6 +561,37 @@ pub async fn place_widget(app: AppHandle, state: State<'_, AppState>, corner: St
     Ok(())
 }
 
+#[derive(Serialize)]
+pub struct TrayPreview {
+    title: String,
+    /// Each item's own text in `items` and in the catalog; empty when it has no value.
+    parts: Vec<String>,
+    catalog: Vec<String>,
+}
+
+/// What the text next to the tray icon would show with `tray`, before it is saved.
+#[tauri::command]
+pub async fn tray_preview(app: AppHandle, tray: crate::settings::TraySettings) -> Res<TrayPreview> {
+    let mut tray = tray;
+    tray.normalize();
+    let s = app.state::<AppState>().settings.read().unwrap().clone();
+    let readings = crate::tray::readings(&app, &s).unwrap_or_default();
+    let mut data = crate::tray::data(&app, &s, &tray, readings);
+    // the catalog shows every kind's value
+    if data.usage.is_none() {
+        data.usage = crate::tray::usage(&app, &s);
+    }
+    let f = crate::tray::format(&s, &tray);
+    // catalog chips carry their own names
+    let bare = crate::settings::TraySettings { label: "none".into(), ..tray.clone() };
+    let g = crate::tray::format(&s, &bare);
+    Ok(TrayPreview {
+        title: if tray.title && !cfg!(windows) { f.title(&data) } else { String::new() },
+        parts: tray.items.iter().map(|i| f.part(i, &data).unwrap_or_default()).collect(),
+        catalog: crate::settings::tray_catalog().iter().map(|i| g.part(i, &data).unwrap_or_default()).collect(),
+    })
+}
+
 #[tauri::command]
 pub fn widget_menu(app: AppHandle) {
     windows::popup_widget_menu(&app);

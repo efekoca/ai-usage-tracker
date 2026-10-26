@@ -49,6 +49,12 @@
   --good-ink: #006300;
   --bad-ink: #b42323;
 
+  /* tray panel tiles, on the system's glass or on --surface */
+  --cc-tile: rgba(255, 255, 255, 0.62);
+  --cc-tile-hover: rgba(255, 255, 255, 0.82);
+  --cc-edge: rgba(11, 11, 11, 0.07);
+  --cc-track: rgba(11, 11, 11, 0.1);
+
   --radius: 14px;
   --radius-sm: 9px;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -91,6 +97,10 @@
     --seq-7: #b7d3f6;
     --good-ink: #0ca30c;
     --bad-ink: #e66767;
+    --cc-tile: rgba(255, 255, 255, 0.1);
+    --cc-tile-hover: rgba(255, 255, 255, 0.16);
+    --cc-edge: rgba(255, 255, 255, 0.07);
+    --cc-track: rgba(255, 255, 255, 0.15);
   }
 }
 :root[data-theme='dark'],
@@ -129,6 +139,10 @@
   --seq-7: #b7d3f6;
   --good-ink: #0ca30c;
   --bad-ink: #e66767;
+  --cc-tile: rgba(255, 255, 255, 0.1);
+  --cc-tile-hover: rgba(255, 255, 255, 0.16);
+  --cc-edge: rgba(255, 255, 255, 0.07);
+  --cc-track: rgba(255, 255, 255, 0.15);
 }
 
 /* With Mica the window itself is translucent; the page plane stays clear. */

@@ -13,6 +13,7 @@ export default defineConfig({
       input: {
         main: resolve(import.meta.dirname, 'index.html'),
         widget: resolve(import.meta.dirname, 'widget.html'),
+        panel: resolve(import.meta.dirname, 'panel.html'),
         report: resolve(import.meta.dirname, 'report.html'),
       },
     },

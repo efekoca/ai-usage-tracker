@@ -14,6 +14,7 @@
   import SettingsView from './views/Settings.svelte'
   import Cache from './views/Cache.svelte'
   import WidgetStudio from './views/WidgetStudio.svelte'
+  import MenuBar from './views/MenuBar.svelte'
   import Sessions from './views/Sessions.svelte'
   import Context from './views/Context.svelte'
   import Tips from './views/Tips.svelte'
@@ -57,6 +58,7 @@
     { section: 'nav.section.manage', items: [
       { id: 'sources', icon: 'sources' },
       { id: 'widget', icon: 'widget' },
+      { id: 'menubar', icon: 'menubar' },
       { id: 'settings', icon: 'settings' },
     ] },
   ]
@@ -172,6 +174,7 @@
         {:else if app.view === 'sessions'}<Sessions />
         {:else if app.view === 'context'}<Context />
         {:else if app.view === 'widget'}<WidgetStudio />
+        {:else if app.view === 'menubar'}<MenuBar />
         {/if}
       </div>
     </main>

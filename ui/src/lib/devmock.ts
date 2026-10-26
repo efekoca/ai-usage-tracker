@@ -1,7 +1,7 @@
 // Dev-only IPC mock for running the UI in a plain browser; never in production builds (see main.ts).
 import { mockIPC } from '@tauri-apps/api/mocks'
 import plansJson from '../../../config/plans.json'
-import type { DayPoint, Group, LimitView, Period, Report, Settings, Totals } from './api'
+import type { DayPoint, Group, LimitView, Period, Report, Settings, Totals, PanelModule, TrayItem, TraySettings } from './api'
 
 const scenario = new URLSearchParams(location.search)
 let claudeMode = scenario.get('claude')
@@ -13,6 +13,8 @@ let agyMissing = scenario.get('agy') === 'missing'
 const showcase = scenario.get('showcase') === '1'
 // ?opencode=missing: OpenCode not installed
 const ocMissing = scenario.get('opencode') === 'missing'
+// ?platform=macos | linux: the pages as they look there
+const platform = scenario.get('platform') ?? 'windows'
 
 let seed = 7
 const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
@@ -45,7 +47,31 @@ const settings: Settings = {
   plan_prices: showcase ? { google: 19.99 } : {},
   weekly_report_auto: false,
   weekly_report_dir: '',
-  tray: { show_percent: true, limit: 'auto' },
+  tray: {
+    show_percent: true,
+    limit: 'auto',
+    title: false,
+    items: trayDefaults(),
+    label: 'short',
+    value: 'app',
+    reset: 'none',
+    style: 'percent',
+    separator: ' · ',
+    prefix: '',
+    suffix: '',
+    warn_mark: true,
+    hide_icon: false,
+  },
+  panel: {
+    value: 'app',
+    modules: [
+      pm({ kind: 'provider', provider: 'anthropic', size: 'm', style: 'ring' }),
+      pm({ kind: 'provider', provider: 'openai', size: 'm', style: 'ring' }),
+      pm({ kind: 'usage', period: 'today', size: 'w' }),
+      pm({ kind: 'forecast', provider: 'anthropic', window: 'five_hour', size: 'w' }),
+      ...['open', 'widget', 'rescan', 'settings'].map((action) => pm({ kind: 'action', action, size: 's' })),
+    ],
+  },
   update_check: true,
   provider_colors: {},
   tint_icons: false,
@@ -437,6 +463,96 @@ function mockDay(date: string) {
   }
 }
 
+function trayDefaults(): TrayItem[] {
+  return (['anthropic', 'openai'] as const).flatMap((provider) => ['five_hour', 'seven_day'].map((window): TrayItem => ({ kind: 'limit', provider, window, pool: '', period: '' })))
+}
+
+function pm(m: Partial<PanelModule>): PanelModule {
+  return { kind: 'limit', provider: '', pool: '', window: '', period: '', action: '', size: 's', style: '', ...m }
+}
+
+/** A rough stand-in for the Rust formatter (`tray_text.rs`), enough to try the Menu bar page. */
+function mockTrayPreview(tray: TraySettings) {
+  const tr = settings.language === 'system' ? navigator.language.startsWith('tr') : settings.language === 'tr'
+  const remaining = tray.value === 'remaining' || (tray.value === 'app' && settings.limit_display === 'remaining')
+  const found = (it: TrayItem) => {
+    const l = limits().find((l) => l.provider === it.provider && l.window === it.window && (it.provider !== 'google' || (it.pool === 'gemini') === (l.limit_id === 'gemini')))
+    return l && l.used_pct !== null && (l.state === 'fresh' || l.state === 'behind') ? l : null
+  }
+  const pct = (v: number | string) => (tr ? `%${v}` : `${v}%`)
+  const bar = (v: number) => '▰'.repeat(Math.min(5, Math.round(v / 20))) + '▱'.repeat(5 - Math.min(5, Math.round(v / 20)))
+  const dot = (v: number) => ['○', '◔', '◑', '◕', '●'][Math.min(4, Math.floor((v + 12) / 25))]
+  const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 5)
+  const short: Record<string, string> = { anthropic: 'Cl', openai: 'Cx', gemini: 'Gm', '3p': 'AG' }
+  const name = (it: TrayItem) => (it.provider === 'google' ? (it.pool === 'gemini' ? 'Antigravity Gemini' : tr ? 'Antigravity Claude ve GPT' : 'Antigravity Claude and GPT') : it.provider === 'anthropic' ? 'Claude' : 'Codex')
+  const usage: Record<string, [string, string, number, number]> = { today: ['18,4 Mn', '$12,84', 4, 81], days7: ['412 Mn', '$286,10', 23, 84], month1: ['1,9 Mr', '$1.204', 96, 86] }
+  const periods: Record<string, [string, string]> = { today: [tr ? 'Bugün' : 'Today', tr ? 'Bugün' : 'Today'], days7: [tr ? '7g' : '7d', tr ? '7 gün' : '7 days'], month1: [tr ? '30g' : '30d', tr ? '30 gün' : '30 days'] }
+  const label = (it: TrayItem, cfg: TraySettings) => {
+    if (cfg.label === 'none') return ''
+    if (it.kind === 'scan') return tr ? 'Tarama ' : 'Scan '
+    if (it.period) return `${periods[it.period][cfg.label === 'short' ? 0 : 1]} `
+    const w5 = it.window === 'five_hour'
+    return cfg.label === 'name' ? `${name(it)} ${w5 ? (tr ? '5 sa' : '5h') : tr ? 'hafta' : 'week'} ` : `${short[it.provider === 'google' ? it.pool : it.provider]} ${w5 ? (tr ? '5s' : '5h') : tr ? 'H' : 'W'} `
+  }
+  const part = (it: TrayItem, cfg: TraySettings) => {
+    if (it.kind === 'scan') return `${label(it, cfg)}${clock(Date.now() - 42000)}`
+    if (it.kind !== 'limit' && it.kind !== 'forecast') {
+      const [tok, cost, sess, hit] = usage[it.period]
+      const v = it.kind === 'tokens' ? tok : it.kind === 'cost' ? cost : it.kind === 'sessions' ? (tr ? `${sess} oturum` : `${sess} sessions`) : tr ? `önbellek ${pct(hit)}` : `cache ${pct(hit)}`
+      return `${label(it, cfg)}${v}`
+    }
+    const l = found(it)
+    if (!l) return ''
+    if (it.kind === 'forecast') {
+      const f = l.forecast
+      if (f?.fills_at_ms) return `${label(it, cfg)}⇡${clock(f.fills_at_ms)}`
+      return f?.at_reset_pct != null ? `${label(it, cfg)}→${pct(Math.round(remaining ? 100 - f.at_reset_pct : f.at_reset_pct))}` : ''
+    }
+    const used = Math.round(l.used_pct!)
+    const v = remaining ? 100 - used : used
+    const warn = cfg.warn_mark && used >= settings.widget.warn_at ? '⚠︎' : ''
+    const sign = l.state === 'behind' ? (remaining ? '≤' : '≥') : ''
+    const value = cfg.style === 'bar' ? bar(v) : cfg.style === 'bar_percent' ? `${bar(v)} ${sign}${pct(v)}` : cfg.style === 'dot' ? dot(v) : `${sign}${pct(v)}`
+    const at = l.resets_at ? l.resets_at * 1000 : 0
+    const left = at ? Math.max(1, Math.round((at - Date.now()) / 60000)) : 0
+    const cd = left >= 1440 ? `${Math.floor(left / 1440)}${tr ? 'g' : 'd'}${Math.floor((left % 1440) / 60)}${tr ? 'sa' : 'h'}` : `${Math.floor(left / 60)}${tr ? 'sa' : 'h'}${left % 60}${tr ? 'dk' : 'm'}`
+    const r = !at ? '' : cfg.reset === 'countdown' ? ` ↻${cd}` : cfg.reset === 'time' ? ` ↻${clock(at)}` : ''
+    return `${label(it, cfg)}${warn}${value}${r}`
+  }
+  const parts = tray.items.map((it) => part(it, tray))
+  const shown = parts.filter(Boolean)
+  const bare = { ...tray, label: 'none' as const }
+  const catalog = trayCatalog().map((it) => part(it, bare))
+  return { title: tray.title && shown.length && platform !== 'windows' ? `${tray.prefix}${shown.join(tray.separator)}${tray.suffix}` : '', parts, catalog }
+}
+
+function trayCatalog(): TrayItem[] {
+  const blank = { provider: '', window: '', pool: '', period: '' }
+  return [
+    ...(['limit', 'forecast'] as const).flatMap((kind) =>
+      [['anthropic', ''], ['openai', ''], ['google', 'gemini'], ['google', '3p']].flatMap(([provider, pool]) => ['five_hour', 'seven_day'].map((window) => ({ ...blank, kind, provider, pool, window }))),
+    ),
+    ...(['tokens', 'cost', 'sessions', 'cache'] as const).flatMap((kind) => ['today', 'days7', 'month1'].map((period) => ({ ...blank, kind, period }))),
+    { ...blank, kind: 'scan' as const },
+  ]
+}
+
+let mockScanning = false
+
+function mockPanelData() {
+  const usage = (tokens: number, cost: number, sessions: number, hit: number) => ({ tokens, cost_usd: cost, sessions, prompt: 1_000_000, cache_read: hit * 10_000 })
+  return {
+    limits: limits().map((l) => ({ provider: l.provider, limit_id: l.limit_id, window: l.window, used_pct: l.used_pct, state: l.state, resets_at: l.resets_at, forecast: l.forecast })),
+    usage: [usage(18_400_000, 12.84, 4, 81), usage(412_000_000, 286.1, 23, 84), usage(1_900_000_000, 1204, 96, 86)],
+    last_scan_ms: Date.now() - 42_000,
+    scanning: mockScanning,
+    widget_visible: settings.widget.visible,
+    update: scenario.get('update') === '1' ? '0.6.1' : null,
+    providers: ['anthropic', 'google', 'openai'],
+    signed_out: scenario.get('claude') === 'nologin' ? ['anthropic'] : [],
+  }
+}
+
 const update = { current: '0.6.0', configured: true, checking: false, last_check_ms: Date.now() - 3600e3, last_error: null, available: null as null | { version: string; notes: string | null; date: string | null }, installing: false, downloaded: 0, total: null }
 
 const pricing = {
@@ -455,7 +571,7 @@ export function installMock() {
       const a = args as Record<string, unknown>
       switch (cmd) {
         case 'app_info':
-          return { version: '0.6.0', data_dir: 'C:\\Users\\you\\AppData\\Local\\AIUsageTracker', pricing_origin: 'bundled', pricing_updated_at: '2026-10-10', platform: 'windows', supports_mica: false, accent_color: null, started_hidden: false, reports_dir: 'C:\\Users\\you\\Documents\\AI Usage Tracker' }
+          return { version: '0.6.0', data_dir: 'C:\\Users\\you\\AppData\\Local\\AIUsageTracker', pricing_origin: 'bundled', pricing_updated_at: '2026-10-10', platform, supports_mica: false, accent_color: null, started_hidden: false, reports_dir: 'C:\\Users\\you\\Documents\\AI Usage Tracker' }
         case 'get_settings':
           return settings
         case 'save_settings':
@@ -475,6 +591,18 @@ export function installMock() {
           return mockPlanValue()
         case 'get_limits':
           return limits()
+        case 'tray_preview':
+          return mockTrayPreview(a.tray as TraySettings)
+        case 'panel_data':
+          return mockPanelData()
+        case 'panel_action':
+          if (a.action === 'widget') settings.widget.visible = !settings.widget.visible
+          if (a.action === 'rescan') {
+            mockScanning = true
+            setTimeout(() => (mockScanning = false), 2500)
+          }
+          console.info('panel action', a.action)
+          return null
         case 'get_widget_data': {
           const per = (tok: number, cost: number) => ({ tokens: tok, cost_usd: cost, has_unpriced: false, tools: [{ tool: 'claude_code', tokens: tok * 0.75, cost_usd: cost * 0.83 }, { tool: 'codex', tokens: tok * 0.15, cost_usd: cost * 0.12 }, { tool: 'antigravity', tokens: tok * 0.07, cost_usd: cost * 0.03 }, ...(ocMissing ? [] : [{ tool: 'opencode', tokens: tok * 0.03, cost_usd: cost * 0.02 }])] })
           return { today: per(18_400_000, 12.84), days7: per(96_000_000, 71.3), month1: per(402_000_000, 288.1), limits: limits().map((l) => ({ provider: l.provider, limit_id: l.limit_id, window: l.window, used_pct: l.used_pct, state: l.state, accuracy: l.accuracy, resets_at: l.resets_at, observed_ms: l.observed_ms })), providers: ['anthropic', 'openai', 'google'], updated_ms: Date.now() - 60000 }

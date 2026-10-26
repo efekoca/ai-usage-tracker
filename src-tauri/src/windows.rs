@@ -80,17 +80,25 @@ fn off_main(f: impl FnOnce() + Send + 'static) {
 }
 
 pub fn show_main(app: &AppHandle) {
+    show_main_at(app, None);
+}
+
+/// Shows the main window, on `view` when given.
+pub fn show_main_at(app: &AppHandle, view: Option<&str>) {
     if let Some(w) = app.get_webview_window(MAIN) {
         let _ = w.unminimize();
         let _ = w.show();
         let _ = w.set_focus();
+        if let Some(v) = view {
+            let _ = app.emit_to(MAIN, "navigate", v);
+        }
         return;
     }
-    let app = app.clone();
-    off_main(move || build_main(&app));
+    let (app, view) = (app.clone(), view.map(str::to_owned));
+    off_main(move || build_main(&app, view.as_deref()));
 }
 
-fn build_main(app: &AppHandle) {
+fn build_main(app: &AppHandle, view: Option<&str>) {
     if app.get_webview_window(MAIN).is_some() {
         return; // a concurrent request already built it
     }
@@ -101,7 +109,9 @@ fn build_main(app: &AppHandle) {
         }
         _ => (1360.0, 880.0, 860.0, 560.0),
     };
-    let mut b = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::App("index.html".into()))
+    // a new window reads its first page from the address; an event would arrive before it listens
+    let url = view.map_or_else(|| "index.html".to_owned(), |v| format!("index.html#{v}"));
+    let mut b = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::App(url.into()))
         .title("AI Usage Tracker")
         .inner_size(w, h)
         .min_inner_size(min_w, min_h)
@@ -122,7 +132,7 @@ fn build_main(app: &AppHandle) {
 }
 
 /// Mica and the title bar follow the window theme, not the page's.
-fn window_theme(s: &Settings) -> Option<tauri::Theme> {
+pub(crate) fn window_theme(s: &Settings) -> Option<tauri::Theme> {
     match s.theme.as_str() {
         "light" => Some(tauri::Theme::Light),
         "dark" => Some(tauri::Theme::Dark),
@@ -134,6 +144,7 @@ pub fn apply_theme(app: &AppHandle, s: &Settings) {
     if let Some(w) = app.get_webview_window(MAIN) {
         let _ = w.set_theme(window_theme(s));
     }
+    crate::panel::apply_theme(app, s);
 }
 
 /// Fits the work area minus the frame, or the page bottom is out of reach on small screens.
@@ -413,6 +424,7 @@ pub fn handle_menu(app: &AppHandle, id: &str) {
     let state = app.state::<AppState>();
     match id {
         "w:open" | "tray:open" => return show_main(app),
+        "tray:panel" => return crate::panel::toggle(app, None),
         "app:quit" => {
             state.quitting.store(true, Ordering::SeqCst);
             state.worker.send(Msg::Shutdown);
@@ -420,11 +432,7 @@ pub fn handle_menu(app: &AppHandle, id: &str) {
             return;
         }
         "tray:rescan" => return state.worker.send(Msg::Scan),
-        "tray:update" => {
-            show_main(app);
-            let _ = app.emit("navigate", "settings");
-            return;
-        }
+        "tray:update" => return show_main_at(app, Some("settings")),
         _ => {}
     }
     if menu_change(id).is_none() {
