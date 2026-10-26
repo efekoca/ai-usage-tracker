@@ -11,6 +11,9 @@ permissions:
 env:
   # the same compiler as release.yml, so a new Rust release cannot fail an unrelated pull request
   RUST_TOOLCHAIN: 1.99.0
+  LINUX_PACKAGES: libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
+  # a stalled mirror connection is retried instead of holding the job
+  APT_OPTS: -o Acquire::Retries=3 -o Acquire::http::Timeout=60
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -38,11 +41,37 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
 
+      # WebKitGTK and its ~120 dependencies come from a mirror that is sometimes very slow. The
+      # packages are cached under their exact versions; apt checks every cached file against the
+      # signed index before it uses it.
+      - name: Linux package list
+        id: apt
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        run: |
+          sudo apt-get $APT_OPTS update
+          sum=$(apt-get install -s --no-install-recommends $LINUX_PACKAGES | grep '^Inst ' | sha256sum | cut -c1-16)
+          echo "key=apt-${{ matrix.os }}-$sum" >> "$GITHUB_OUTPUT"
+
+      - name: Linux package cache
+        if: runner.os == 'Linux'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/apt-archives
+          key: ${{ steps.apt.outputs.key }}
+          restore-keys: apt-${{ matrix.os }}-
+
       - name: Linux system libraries
         if: runner.os == 'Linux'
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
+          mkdir -p ~/apt-archives/partial
+          sudo apt-get $APT_OPTS -o Dir::Cache::Archives="$HOME/apt-archives" install -y --no-install-recommends $LINUX_PACKAGES
+          # versions the mirror no longer has would only grow the cache
+          sudo apt-get -o Dir::Cache::Archives="$HOME/apt-archives" autoclean
+          # the cache is saved by this user after the job
+          sudo rm -f ~/apt-archives/lock
+          sudo chown -R "$(id -u):$(id -g)" ~/apt-archives
 
       - name: Rust toolchain
         run: |
@@ -72,7 +101,7 @@ jobs:
 
       # every ingest scenario again with one record per read round
       - name: Tests in read rounds
-        run: cargo test -p tracker-core --locked --test ingest --test antigravity --test rounds
+        run: cargo test -p tracker-core --locked --test ingest --test antigravity --test rounds --test opencode
         env:
           TRACKER_TEST_ROUND: "1"
 
