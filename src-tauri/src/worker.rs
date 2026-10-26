@@ -205,6 +205,9 @@ fn watch_roots(env: &Env, s: &Settings) -> Vec<(PathBuf, bool)> {
     if on(SourceId::Antigravity) {
         v.extend(discovery::antigravity_dirs(env).into_iter().map(|d| (d.join("conversations"), false)));
     }
+    if on(SourceId::OpenCode) {
+        v.extend(discovery::opencode_dirs(env).into_iter().map(|d| (d, false)));
+    }
     v.retain(|(p, _)| p.is_dir());
     v.sort();
     v.dedup();

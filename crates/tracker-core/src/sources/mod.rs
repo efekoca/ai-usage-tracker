@@ -6,6 +6,7 @@ pub mod claude_code;
 pub mod claude_plan;
 pub mod codex;
 pub mod cowork_audit;
+pub mod opencode;
 
 use crate::model::{LimitSnapshot, ToolCall, UsageEvent};
 use serde_json::Value;
@@ -23,6 +24,7 @@ pub enum ParserKind {
     /// This app's own Claude Code status-line capture file.
     StatuslineCapture,
     AntigravityDb,
+    OpenCodeDb,
 }
 
 impl ParserKind {
@@ -35,12 +37,21 @@ impl ParserKind {
             ParserKind::CodexRollout => "codex_rollout",
             ParserKind::StatuslineCapture => "statusline_capture",
             ParserKind::AntigravityDb => antigravity::SOURCE,
+            ParserKind::OpenCodeDb => opencode::SOURCE,
         }
     }
     /// Whole-file documents (JSON, SQLite) are re-read completely when they change;
     /// JSONL files are read incrementally from a byte offset.
     pub fn is_incremental(self) -> bool {
-        !matches!(self, ParserKind::ClaudePlanHistory | ParserKind::AntigravityDb)
+        !matches!(self, ParserKind::ClaudePlanHistory | ParserKind::AntigravityDb | ParserKind::OpenCodeDb)
+    }
+    /// SQLite databases whose new rows land in a `-wal` file next to them first.
+    pub fn has_wal(self) -> bool {
+        matches!(self, ParserKind::AntigravityDb | ParserKind::OpenCodeDb)
+    }
+    /// A whole-document parser that still carries its state to the next read of the same file.
+    pub fn keeps_state(self) -> bool {
+        matches!(self, ParserKind::OpenCodeDb)
     }
 }
 

@@ -161,6 +161,7 @@ export const toolColor: Record<string, string> = {
   claude_code: 'var(--s2)',
   claude_desktop: 'var(--s3)',
   antigravity: 'var(--s4)',
+  opencode: 'var(--s5)',
 }
 
 /** The color the user picked for a tool's limits and mark, if any. */

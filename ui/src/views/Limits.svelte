@@ -149,6 +149,10 @@
   {/each}
 </div>
 
+{#if app.settings?.enabled_sources.includes('opencode') && app.limits.some((l) => l.provider === 'anthropic' || l.provider === 'openai')}
+  <p class="subtle small oc-note"><Icon name="info" size={13} />{t('limits.opencode')}</p>
+{/if}
+
 <section class="card">
   <h2>{t('limits.thresholds')}</h2>
   <p class="subtle small help">{t('limits.thresholds.help')}</p>
@@ -238,6 +242,17 @@
   }
   .cards section {
     margin: 0;
+  }
+  .oc-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin: -4px 0 16px;
+    line-height: 1.5;
+  }
+  .oc-note :global(svg) {
+    flex: none;
+    margin-top: 2px;
   }
   .limit {
     display: flex;

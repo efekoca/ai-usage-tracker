@@ -211,7 +211,8 @@ pub(crate) fn enabled_providers(s: &Settings) -> HashSet<Provider> {
             SourceId::Antigravity => {
                 p.insert(Provider::Google);
             }
-            SourceId::ChatgptDesktop => {}
+            // OpenCode counts toward no plan: its records do not say how a request was paid
+            SourceId::ChatgptDesktop | SourceId::OpenCode => {}
         }
     }
     p
@@ -274,13 +275,13 @@ fn widget_period(
     book: &PriceBook,
     period: Period,
     now: i64,
-    providers: &HashSet<Provider>,
+    shown: &impl Fn(Tool) -> bool,
 ) -> Res<WidgetPeriod> {
     let range = analytics::period_range(period, &chrono::Local, now, None);
     let mut out = WidgetPeriod::default();
     let mut per: std::collections::BTreeMap<&'static str, WidgetTool> = Default::default();
     for e in store.events_between(range.from_ms, range.to_ms).map_err(err)? {
-        if !providers.contains(&e.tool.provider()) {
+        if !shown(e.tool) {
             continue;
         }
         let cost = book.cost(&tracker_core::pricing::CostInput {
@@ -325,12 +326,14 @@ pub async fn get_widget_data(state: State<'_, AppState>) -> Res<WidgetData> {
             observed_ms: l.observed_ms,
         })
         .collect();
+    let opencode = settings.enabled_sources.contains(&SourceId::OpenCode);
+    let shown = |t: Tool| t.provider().map_or(opencode, |p| providers.contains(&p));
     let mut provs: Vec<Provider> = providers.iter().copied().collect();
     provs.sort_by_key(|p| p.as_str());
     Ok(WidgetData {
-        today: widget_period(&store, &book, Period::Today, now, &providers)?,
-        days7: widget_period(&store, &book, Period::Days7, now, &providers)?,
-        month1: widget_period(&store, &book, Period::Month1, now, &providers)?,
+        today: widget_period(&store, &book, Period::Today, now, &shown)?,
+        days7: widget_period(&store, &book, Period::Days7, now, &shown)?,
+        month1: widget_period(&store, &book, Period::Month1, now, &shown)?,
         limits,
         providers: provs,
         updated_ms: state.status.lock().unwrap().last_scan_ms.unwrap_or(now),

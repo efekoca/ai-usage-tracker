@@ -1,6 +1,7 @@
 //! Finds the data sources installed on *this* machine for *this* user. Nothing is hardcoded:
 //! roots come from Known Folders (`dirs`), tool-specific environment variables
-//! (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `ANTIGRAVITY_APP_DATA_DIR`) and user-added paths. MSIX packages expose the same
+//! (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `ANTIGRAVITY_APP_DATA_DIR`, `XDG_DATA_HOME`, `OPENCODE_DB`)
+//! and user-added paths. MSIX packages expose the same
 //! folder under two paths, so files are de-duplicated by their NTFS file id.
 
 use crate::sources::ParserKind;
@@ -18,15 +19,17 @@ pub enum SourceId {
     Codex,
     ChatgptDesktop,
     Antigravity,
+    OpenCode,
 }
 
 impl SourceId {
-    pub const ALL: [SourceId; 6] = [
+    pub const ALL: [SourceId; 7] = [
         SourceId::ClaudeCode,
         SourceId::Cowork,
         SourceId::ClaudeDesktop,
         SourceId::Codex,
         SourceId::Antigravity,
+        SourceId::OpenCode,
         SourceId::ChatgptDesktop,
     ];
 
@@ -38,6 +41,7 @@ impl SourceId {
             SourceId::Codex => "codex",
             SourceId::ChatgptDesktop => "chatgpt_desktop",
             SourceId::Antigravity => "antigravity",
+            SourceId::OpenCode => "opencode",
         }
     }
     /// Whether usage can actually be read (ChatGPT desktop is detection-only).
@@ -57,6 +61,8 @@ pub struct Env {
     pub claude_config_dir: Option<String>,
     pub codex_home: Option<String>,
     pub antigravity_data_dir: Option<String>,
+    pub xdg_data_home: Option<String>,
+    pub opencode_db: Option<String>,
 }
 
 impl Env {
@@ -69,6 +75,8 @@ impl Env {
             claude_config_dir: var("CLAUDE_CONFIG_DIR"),
             codex_home: var("CODEX_HOME"),
             antigravity_data_dir: var("ANTIGRAVITY_APP_DATA_DIR"),
+            xdg_data_home: var("XDG_DATA_HOME"),
+            opencode_db: var("OPENCODE_DB"),
         }
     }
 }
@@ -200,6 +208,44 @@ pub fn antigravity_dirs(env: &Env) -> Vec<PathBuf> {
     v
 }
 
+/// OpenCode's data folder: `$XDG_DATA_HOME/opencode`, else `~/.local/share/opencode` on every
+/// system (it does not use the Windows folders). An app started from the Dock or Start menu may
+/// not see the shell's `XDG_DATA_HOME`, so the default folder is always checked too.
+pub fn opencode_dirs(env: &Env) -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(x) = env.xdg_data_home.as_deref().filter(|x| Path::new(x).is_absolute()) {
+        v.push(Path::new(x).join("opencode"));
+    }
+    if let Some(h) = &env.home {
+        let p = h.join(".local").join("share").join("opencode");
+        if !v.contains(&p) {
+            v.push(p);
+        }
+    }
+    v
+}
+
+/// `opencode.db`, plus `opencode-<channel>.db` of other release channels and `OPENCODE_DB`
+/// (absolute, or relative to the data folder).
+fn opencode_dbs(env: &Env) -> Vec<PathBuf> {
+    let dirs = opencode_dirs(env);
+    let mut v = Vec::new();
+    for d in &dirs {
+        for p in files_with_ext(d, "db") {
+            let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            if name == "opencode.db" || name.starts_with("opencode-") {
+                v.push(p);
+            }
+        }
+    }
+    if let Some(db) = env.opencode_db.as_deref().filter(|d| *d != ":memory:") {
+        let given = Path::new(db);
+        let found = if given.is_absolute() { vec![given.to_path_buf()] } else { dirs.iter().map(|d| d.join(given)).collect() };
+        v.extend(found.into_iter().filter(|p| p.is_file()));
+    }
+    v
+}
+
 fn files_with_ext(dir: &Path, ext: &str) -> Vec<PathBuf> {
     let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
     let mut v: Vec<PathBuf> =
@@ -274,6 +320,12 @@ pub fn enumerate_files(env: &Env, extra: &ExtraPaths, enabled: &HashSet<SourceId
         }
     }
 
+    if enabled.contains(&SourceId::OpenCode) {
+        for p in opencode_dbs(env) {
+            candidates.push((p, ParserKind::OpenCodeDb, SourceId::OpenCode));
+        }
+    }
+
     let mut seen = HashSet::new();
     let mut out = Vec::with_capacity(candidates.len());
     for (path, parser, source) in candidates {
@@ -311,6 +363,7 @@ pub fn detect(env: &Env, extra: &ExtraPaths) -> Vec<SourceStatus> {
                 SourceId::Codex => existing(codex_homes(env, extra)),
                 SourceId::ChatgptDesktop => existing(chatgpt_desktop_dirs(env)),
                 SourceId::Antigravity => existing(antigravity_dirs(env)),
+                SourceId::OpenCode => existing(opencode_dirs(env)),
             };
             let file_count = count(id);
             // A tool counts as found if its data directory exists, even with no usage yet.
@@ -343,7 +396,7 @@ mod tests {
 
     #[test]
     fn a_folder_listed_twice_is_one_root() {
-        let env = Env { home: Some(PathBuf::from("/home/u")), roaming: None, local: None, claude_config_dir: None, codex_home: None, antigravity_data_dir: None };
+        let env = Env { home: Some(PathBuf::from("/home/u")), roaming: None, local: None, claude_config_dir: None, codex_home: None, antigravity_data_dir: None, xdg_data_home: None, opencode_db: None };
         let extra = ExtraPaths { claude_config_dirs: vec![PathBuf::from("/home/u/.claude/"), PathBuf::from("/x")], codex_homes: vec![PathBuf::from("/home/u/.codex")] };
         assert_eq!(claude_config_roots(&env, &extra), [PathBuf::from("/home/u/.claude"), PathBuf::from("/home/u/.config/claude"), PathBuf::from("/x")]);
         assert_eq!(codex_homes(&env, &extra), [PathBuf::from("/home/u/.codex")]);

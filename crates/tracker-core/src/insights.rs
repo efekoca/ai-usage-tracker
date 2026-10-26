@@ -403,7 +403,8 @@ pub fn plan_value<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, t
     let idx: HashMap<NaiveDate, usize> = dates.iter().enumerate().map(|(i, d)| (*d, i)).collect();
     let mut acc: BTreeMap<Provider, (Totals, Vec<f64>)> = BTreeMap::new();
     for e in store.events_between(range.from_ms, range.to_ms)? {
-        let p = e.tool.provider();
+        // a plan's value counts only usage known to go through that plan
+        let Some(p) = e.tool.provider() else { continue };
         let entry = acc.entry(p).or_insert_with(|| (Totals::default(), vec![0.0; dates.len()]));
         add(&mut entry.0, book, &e);
         let date = local_date(tz, e.ts_ms);

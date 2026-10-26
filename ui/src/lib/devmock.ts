@@ -11,6 +11,8 @@ let agyOut = scenario.get('agy') === 'nologin'
 let agyMissing = scenario.get('agy') === 'missing'
 // every limit read fresh and in range, as on a typical day (README screenshots)
 const showcase = scenario.get('showcase') === '1'
+// ?opencode=missing: OpenCode not installed
+const ocMissing = scenario.get('opencode') === 'missing'
 
 let seed = 7
 const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
@@ -19,8 +21,8 @@ const settings: Settings = {
   onboarded: new URLSearchParams(location.search).get('onboarding') !== '1',
   language: (new URLSearchParams(location.search).get('lang') as 'tr' | 'en') ?? 'system',
   theme: (new URLSearchParams(location.search).get('theme') as 'light' | 'dark') ?? 'system',
-  enabled_sources: ['claude_code', 'cowork', 'claude_desktop', 'codex', 'antigravity'],
-  known_sources: ['claude_code', 'cowork', 'claude_desktop', 'codex', 'chatgpt_desktop', 'antigravity'],
+  enabled_sources: ['claude_code', 'cowork', 'claude_desktop', 'codex', 'antigravity', ...(ocMissing ? [] : ['opencode' as const])],
+  known_sources: ['claude_code', 'cowork', 'claude_desktop', 'codex', 'chatgpt_desktop', 'antigravity', 'opencode'],
   extra_paths: { claude_config_dirs: [], codex_homes: [] },
   plans: { anthropic: 'max5x', openai: 'plus', google: 'pro' },
   thresholds: [],
@@ -52,13 +54,15 @@ const settings: Settings = {
 
 const day = 864e5
 const models = [
-  ['claude-opus-5', 'claude_code', 0.5, 5, 25, 0.5],
+  ['claude-opus-5', 'claude_code', 0.48, 5, 25, 0.5],
   ['gpt-5.6-sol', 'codex', 0.2, 4, 20, 0.4],
   ['claude-sonnet-5', 'claude_code', 0.12, 2, 10, 0.2],
   ['claude-opus-5-5', 'claude_code', 0.08, 4, 20, 0.2],
   ['gpt-5.6-terra', 'codex', 0.04, 2, 12, 0.2],
   ['codex-auto-review', 'codex', 0.01, 0, 0, 0],
   ['gemini-3.8-flash', 'antigravity', 0.05, 0.75, 3.75, 0.075],
+  ['claude-sonnet-4-5', 'opencode', 0.015, 3, 15, 0.3],
+  ['big-pickle', 'opencode', 0.005, 0, 0, 0],
 ] as const
 const projects = ['demo-app', 'website', 'notes', 'data-pipeline', 'mobile-client']
 
@@ -97,14 +101,15 @@ function report(p: Period): Report {
     const cc = active ? Math.round(2e6 + rnd() * 30e6) : 0
     const cx = active && rnd() > 0.5 ? Math.round(rnd() * 8e6) : 0
     const ag = active && i % 3 === 0 ? Math.round(1e6 + rnd() * 3e6) : 0
-    const all = cc + cx + ag
+    const oc = !ocMissing && active && i % 4 === 1 ? Math.round(5e5 + rnd() * 2e6) : 0
+    const all = cc + cx + ag + oc
     daily.push({
       date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
       tokens: all,
-      cost_usd: cc * 0.75e-6 + cx * 0.6e-6 + ag * 0.15e-6,
+      cost_usd: cc * 0.75e-6 + cx * 0.6e-6 + ag * 0.15e-6 + oc * 0.5e-6,
       events: Math.round(all / 120000),
-      by_tool: { ...(cc ? { claude_code: cc } : {}), ...(cx ? { codex: cx } : {}), ...(ag ? { antigravity: ag } : {}) },
-      cost_by_tool: { ...(cc ? { claude_code: cc * 0.75e-6 } : {}), ...(cx ? { codex: cx * 0.6e-6 } : {}), ...(ag ? { antigravity: ag * 0.15e-6 } : {}) },
+      by_tool: { ...(cc ? { claude_code: cc } : {}), ...(cx ? { codex: cx } : {}), ...(ag ? { antigravity: ag } : {}), ...(oc ? { opencode: oc } : {}) },
+      cost_by_tool: { ...(cc ? { claude_code: cc * 0.75e-6 } : {}), ...(cx ? { codex: cx * 0.6e-6 } : {}), ...(ag ? { antigravity: ag * 0.15e-6 } : {}), ...(oc ? { opencode: oc * 0.5e-6 } : {}) },
       prompt_tokens: Math.round(all * 0.99),
       cache_read: Math.round(all * (0.85 + rnd() * 0.12)),
       cache_write: Math.round((cc + cx) * 0.04),
@@ -115,15 +120,16 @@ function report(p: Period): Report {
   const cost = daily.reduce((a, d) => a + d.cost_usd, 0)
   const cc = daily.reduce((a, d) => a + (d.by_tool.claude_code ?? 0), 0)
   const ag = daily.reduce((a, d) => a + (d.by_tool.antigravity ?? 0), 0)
+  const oc = daily.reduce((a, d) => a + (d.by_tool.opencode ?? 0), 0)
   const g = (key: string, label: string, share: number, unpriced = false): Group => ({ key, label, hidden: false, totals: totals(Math.round(total * share), cost * share, unpriced) })
   const heat = Array.from({ length: 7 }, (_, d) => Array.from({ length: 24 }, (_, h) => (h > 8 && h < 23 ? Math.round(rnd() * 4e6 * (d < 5 ? 1 : 0.4)) : 0)))
   return {
     range: { from_ms: end.getTime() - (n - 1) * day, to_ms: end.getTime() + day },
     totals: { ...totals(total, cost), unpriced_events: 3, unpriced_tokens: Math.round(total * 0.01) },
     previous: totals(Math.round(total * 0.82), cost * 0.85),
-    by_tool: [g('claude_code', 'claude_code', cc / total), g('codex', 'codex', 1 - (cc + ag) / total), ...(ag ? [g('antigravity', 'antigravity', ag / total)] : [])],
-    by_client: [g('claude_code:claude-desktop', 'claude-desktop', 0.57), g('claude_code:cowork', 'cowork', 0.14), g('codex:Codex Desktop', 'Codex Desktop', 0.23), g('antigravity:antigravity_ide', 'antigravity_ide', 0.04), g('antigravity:antigravity_cli', 'antigravity_cli', 0.02)],
-    by_model: models.map(([m, , s]) => g(m, m, s, m === 'codex-auto-review')),
+    by_tool: [g('claude_code', 'claude_code', cc / total), g('codex', 'codex', 1 - (cc + ag + oc) / total), ...(ag ? [g('antigravity', 'antigravity', ag / total)] : []), ...(oc ? [g('opencode', 'opencode', oc / total)] : [])],
+    by_client: [g('claude_code:claude-desktop', 'claude-desktop', 0.57), g('claude_code:cowork', 'cowork', 0.14), g('codex:Codex Desktop', 'Codex Desktop', 0.21), g('antigravity:antigravity_ide', 'antigravity_ide', 0.04), g('antigravity:antigravity_cli', 'antigravity_cli', 0.02), ...(ocMissing ? [] : [g('opencode:openrouter', 'openrouter', 0.008), g('opencode:github-copilot', 'github-copilot', 0.005), g('opencode:opencode', 'opencode', 0.004, true), g('opencode:anthropic', 'anthropic', 0.002), g('opencode:amazon-bedrock', 'amazon-bedrock', 0.001)])],
+    by_model: models.filter(([, t]) => !(ocMissing && t === 'opencode')).map(([m, , s]) => g(m, m, s, m === 'codex-auto-review' || m === 'big-pickle')),
     by_project: projects.map((p, i) => ({ ...g(String(i + 1), p, [0.4, 0.25, 0.15, 0.12, 0.08][i]), hidden: i === 4 })),
     daily,
     heatmap: heat,
@@ -134,7 +140,7 @@ function report(p: Period): Report {
     active_days: daily.filter((d) => d.events > 0).length,
     avg_daily_tokens: total / n,
     avg_daily_cost: cost / n,
-    unpriced_models: ['codex-auto-review'],
+    unpriced_models: ocMissing ? ['codex-auto-review'] : ['codex-auto-review', 'big-pickle'],
     by_accuracy: { exact: 1200 },
   }
 }
@@ -168,19 +174,22 @@ function allLimits(): LimitView[] {
 
 function mockSessions() {
   const now = Date.now()
-  const models = [['claude-opus-5-5', 'claude_code'], ['claude-sonnet-5', 'claude_code'], ['gpt-5.6-terra', 'codex']] as const
+  const models = [['claude-opus-5-5', 'claude_code'], ['claude-sonnet-5', 'claude_code'], ['gpt-5.6-terra', 'codex'], ['claude-sonnet-4-5', 'opencode']] as const
+  const ocClients = ['openrouter', 'github-copilot', 'opencode', 'anthropic']
   const sessions = Array.from({ length: 24 }, (_, i) => {
-    const [model, tool] = models[i % 3]
+    const [model, tool] = models[ocMissing ? i % 3 : i % 4]
     const tok = Math.round(2e6 + ((i * 7919) % 13) * 3.1e6)
     const cost = tok / 1e6 * (tool === 'codex' ? 0.6 : 0.9)
     const start = now - i * 5.3 * 3600e3
     return {
       session_id: `${(0x1a2b3c4d + i * 7777).toString(16)}-4e5f-6789-abcd-${(i * 99991).toString(16).padStart(12, '0')}`,
-      tool, client: tool === 'codex' ? 'Codex Desktop' : 'claude-desktop',
+      tool, client: tool === 'codex' ? 'Codex Desktop' : tool === 'opencode' ? ocClients[(i >> 2) % 4] : 'claude-desktop',
       project_id: (i % 5) + 1, project: projects[i % 5], hidden: i % 5 === 4,
       started_ms: start, ended_ms: start + (12 + (i * 37) % 160) * 60000,
       totals: { ...totals(tok, cost), events: 20 + (i * 13) % 140 },
-      models: [{ model, events: 20 + (i * 13) % 140, total_tokens: tok, cost_usd: cost, unpriced: false }],
+      models: tool === 'opencode' && ocClients[(i >> 2) % 4] === 'opencode'
+        ? [{ model: 'big-pickle', events: 20 + (i * 13) % 140, total_tokens: tok, cost_usd: 0, unpriced: true }]
+        : [{ model, events: 20 + (i * 13) % 140, total_tokens: tok, cost_usd: cost, unpriced: false }],
       max_context: 40_000 + ((i * 7) % 11) * 31_000, avg_context: 30_000 + ((i * 5) % 9) * 14_000,
     }
   })
@@ -265,6 +274,12 @@ function mockAgentsTools() {
       { tool: 'codex', agent: null, totals: totals(52_000_000, 13.3), runs: 0, sessions: 12 },
       { tool: 'codex', agent: 'guardian', totals: { ...totals(1_200_000, 0, true), events: 40, unpriced_events: 40 }, runs: 5, sessions: 3 },
       { tool: 'antigravity', agent: null, totals: totals(21_000_000, 3.2), runs: 0, sessions: 5 },
+      ...(ocMissing ? [] : [
+        { tool: 'opencode', agent: null, totals: totals(6_400_000, 4.1), runs: 0, sessions: 6 },
+        { tool: 'opencode', agent: 'general', totals: totals(1_300_000, 0.9), runs: 4, sessions: 2 },
+        { tool: 'opencode', agent: 'explore', totals: totals(600_000, 0.3), runs: 2, sessions: 1 },
+        { tool: 'opencode', agent: 'compact', totals: totals(240_000, 0.2), runs: 0, sessions: 1 },
+      ]),
     ],
     tools: [
       t('claude_code', 'Bash', 1180, 1176, 41, 160), t('claude_code', 'Edit', 402, 402, 3, 0), t('claude_code', 'Read', 360, 358, 6, 120),
@@ -272,6 +287,7 @@ function mockAgentsTools() {
       t('codex', 'apply_patch', 88, 88, 1, 0), t('claude_code', 'Grep', 64, 64, 1, 30), t('claude_code', 'WebSearch', 37, 37, 0, 21),
       t('codex', 'mcp__node_repl__js', 33, 33, 4, 0), t('codex', 'web_search', 19, 0, 0, 0), t('claude_code', 'TaskUpdate', 17, 17, 0, 0),
       t('antigravity', 'view_file', 188, 188, 0, 0), t('antigravity', 'run_command', 54, 52, 6, 0),
+      ...(ocMissing ? [] : [t('opencode', 'bash', 140, 138, 7, 12), t('opencode', 'read', 96, 96, 0, 40), t('opencode', 'edit', 51, 51, 2, 0), t('opencode', 'task', 6, 6, 0, 0)]),
     ],
     tool_calls: 2747,
     filtered_by_session: false,
@@ -314,6 +330,11 @@ function mockSubagentCache() {
       { tool: 'claude_code', agent: 'Explore', totals: explore, runs: 9, first: share(9, 620_000, 0.79) },
       { tool: 'codex', agent: null, totals: tot(52_000_000, 13.3, 0.93, 0), runs: 0, first: share(0, 0, 0) },
       { tool: 'codex', agent: 'guardian', totals: guardian, runs: 5, first: share(5, 180_000, 0.7) },
+      ...(ocMissing ? [] : [
+        { tool: 'opencode' as const, agent: null, totals: tot(6_400_000, 4.1, 0.95, 0), runs: 0, first: share(0, 0, 0) },
+        { tool: 'opencode' as const, agent: 'general', totals: tot(1_300_000, 0.9, 0.84, 0), runs: 4, first: share(4, 160_000, 0.77) },
+        { tool: 'opencode' as const, agent: 'explore', totals: tot(600_000, 0.3, 0.8, 0), runs: 2, first: share(2, 70_000, 0.74) },
+      ]),
     ],
   }
 }
@@ -381,7 +402,8 @@ function mockDay(date: string) {
     const on = h >= 9 && h <= 23 && (h + seedDay) % 5 !== 0
     const cc = on ? Math.round((1 + ((h * 13 + seedDay) % 7)) * 1.9e6) : 0
     const cx = on && h % 3 === 0 ? Math.round(6e5 + (h % 4) * 2e5) : 0
-    return { hour: h, tokens: cc + cx, cost_usd: cc * 0.75e-6 + cx * 0.6e-6, events: Math.round((cc + cx) / 120000), by_tool: { ...(cc ? { claude_code: cc } : {}), ...(cx ? { codex: cx } : {}) } }
+    const oc = !ocMissing && on && h % 4 === 1 ? Math.round(3e5 + (h % 3) * 1e5) : 0
+    return { hour: h, tokens: cc + cx + oc, cost_usd: cc * 0.75e-6 + cx * 0.6e-6 + oc * 0.5e-6, events: Math.round((cc + cx + oc) / 120000), by_tool: { ...(cc ? { claude_code: cc } : {}), ...(cx ? { codex: cx } : {}), ...(oc ? { opencode: oc } : {}) } }
   })
   // match the day's total in the 30-day chart
   const target = report({ kind: 'month1' } as Period).daily.find((d) => d.date === date)?.tokens ?? 0
@@ -401,7 +423,7 @@ function mockDay(date: string) {
     date,
     totals: { ...totals(tok, cost), events: hourly.reduce((a, h) => a + h.events, 0) },
     hourly,
-    by_tool: [g('claude_code', 'claude_code', 0.86), g('codex', 'codex', 0.14)],
+    by_tool: [g('claude_code', 'claude_code', ocMissing ? 0.86 : 0.83), g('codex', 'codex', 0.14), ...(ocMissing ? [] : [g('opencode', 'opencode', 0.03)])],
     by_model: [g('claude-opus-5-5', 'claude-opus-5-5', 0.62), g('claude-sonnet-5', 'claude-sonnet-5', 0.24), g('gpt-5.6-terra', 'gpt-5.6-terra', 0.14)],
     by_project: [g('1', 'demo-app', 0.55), g('2', 'website', 0.3), g('5', '', 0.15, true)],
     sessions: 6,
@@ -454,7 +476,7 @@ export function installMock() {
         case 'get_limits':
           return limits()
         case 'get_widget_data': {
-          const per = (tok: number, cost: number) => ({ tokens: tok, cost_usd: cost, has_unpriced: false, tools: [{ tool: 'claude_code', tokens: tok * 0.75, cost_usd: cost * 0.83 }, { tool: 'codex', tokens: tok * 0.18, cost_usd: cost * 0.14 }, { tool: 'antigravity', tokens: tok * 0.07, cost_usd: cost * 0.03 }] })
+          const per = (tok: number, cost: number) => ({ tokens: tok, cost_usd: cost, has_unpriced: false, tools: [{ tool: 'claude_code', tokens: tok * 0.75, cost_usd: cost * 0.83 }, { tool: 'codex', tokens: tok * 0.15, cost_usd: cost * 0.12 }, { tool: 'antigravity', tokens: tok * 0.07, cost_usd: cost * 0.03 }, ...(ocMissing ? [] : [{ tool: 'opencode', tokens: tok * 0.03, cost_usd: cost * 0.02 }])] })
           return { today: per(18_400_000, 12.84), days7: per(96_000_000, 71.3), month1: per(402_000_000, 288.1), limits: limits().map((l) => ({ provider: l.provider, limit_id: l.limit_id, window: l.window, used_pct: l.used_pct, state: l.state, accuracy: l.accuracy, resets_at: l.resets_at, observed_ms: l.observed_ms })), providers: ['anthropic', 'openai', 'google'], updated_ms: Date.now() - 60000 }
         }
         case 'capture_status':
@@ -491,10 +513,13 @@ export function installMock() {
             { id: 'claude_desktop', found: true, supported: true, roots: ['C:\\Users\\you\\AppData\\Roaming\\Claude'], file_count: 1, cloud_only: false, enabled: true },
             { id: 'codex', found: true, supported: true, roots: ['C:\\Users\\you\\.codex'], file_count: 55, cloud_only: false, enabled: true },
             { id: 'antigravity', found: true, supported: true, roots: ['C:\\Users\\you\\.gemini\\antigravity', 'C:\\Users\\you\\.gemini\\antigravity-ide', 'C:\\Users\\you\\.gemini\\antigravity-cli'], file_count: 12, cloud_only: false, enabled: true },
+            ocMissing
+              ? { id: 'opencode', found: false, supported: true, roots: [], file_count: 0, cloud_only: false, enabled: false }
+              : { id: 'opencode', found: true, supported: true, roots: ['C:\\Users\\you\\.local\\share\\opencode'], file_count: 1, cloud_only: false, enabled: true },
             { id: 'chatgpt_desktop', found: false, supported: false, roots: [], file_count: 0, cloud_only: false, enabled: false },
           ]
         case 'parser_warnings':
-          return []
+          return ocMissing ? [] : [{ path: 'C:\\Users\\you\\.local\\share\\opencode\\opencode.db', parser: 'opencode_db', count: 1, last: '3 sessions from OpenCode before 1.3.16 are not counted' }]
         case 'list_projects':
         case 'list_projects_for_settings':
           return projects.map((p, i) => ({ id: i + 1, name: p, path: `C:\\Projects\\${p}`, hidden: i === 4 }))

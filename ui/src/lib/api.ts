@@ -2,18 +2,19 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
-export type Tool = 'claude_code' | 'codex' | 'claude_desktop' | 'antigravity'
+export type Tool = 'claude_code' | 'codex' | 'claude_desktop' | 'antigravity' | 'opencode'
 export type Provider = 'anthropic' | 'openai' | 'google'
 export type Accuracy = 'exact' | 'estimated' | 'captured'
-export type SourceId = 'claude_code' | 'cowork' | 'claude_desktop' | 'codex' | 'chatgpt_desktop' | 'antigravity'
+export type SourceId = 'claude_code' | 'cowork' | 'claude_desktop' | 'codex' | 'chatgpt_desktop' | 'antigravity' | 'opencode'
 
 export const PROVIDERS: Provider[] = ['anthropic', 'openai', 'google']
 
-/** Whose plan a source's usage counts toward; `null` for detection-only sources. */
+/** Whose plan a source's (or tool's) usage counts toward; `null` for detection-only sources and
+ * for OpenCode, whose records do not say how a request was paid. */
 export function providerOfSource(s: string): Provider | null {
   if (s === 'codex') return 'openai'
   if (s === 'antigravity') return 'google'
-  if (s === 'chatgpt_desktop') return null
+  if (s === 'chatgpt_desktop' || s === 'opencode') return null
   return 'anthropic'
 }
 
