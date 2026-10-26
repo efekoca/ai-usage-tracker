@@ -153,7 +153,6 @@
       {/if}
       <footer>
         <span class="when">{data ? t('widget.updated', { t: fmtClock(loadedAt) }) : ''}</span>
-        <button class="edit" onclick={() => act('edit')}>{t('panel.edit')}</button>
       </footer>
     </section>
   {/if}
@@ -273,21 +272,6 @@
     color: var(--ink-3);
     font-variant-numeric: tabular-nums;
   }
-  .edit {
-    height: 26px;
-    padding: 0 12px;
-    border: 0.5px solid var(--cc-edge);
-    border-radius: 999px;
-    background: var(--cc-tile);
-    color: var(--ink);
-    font: inherit;
-    font-size: 12px;
-    font-weight: 600;
-  }
-  .edit:hover {
-    background: var(--cc-tile-hover);
-  }
-  .edit:focus-visible,
   .update:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;

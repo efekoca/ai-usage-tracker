@@ -219,7 +219,6 @@ pub fn panel_action(app: AppHandle, window: WebviewWindow, action: String) -> Re
         }
         "open" => show_main_at(&app, None),
         "settings" => show_main_at(&app, Some("settings")),
-        "edit" => show_main_at(&app, Some("menubar")),
         "limits" => show_main_at(&app, Some("limits")),
         "update" => handle_menu(&app, "tray:update"),
         "close" => {}

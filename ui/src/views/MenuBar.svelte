@@ -402,7 +402,6 @@
         {/if}
         <div class="foot" aria-hidden="true">
           <span>{t('widget.updated', { t: clock })}</span>
-          <span class="pill">{t('panel.edit')}</span>
         </div>
       </div>
     </div>
@@ -754,14 +753,6 @@
     padding: 0 2px;
     font-size: 11px;
     color: var(--ink-3);
-  }
-  .pill {
-    padding: 4px 12px;
-    border-radius: 999px;
-    background: var(--cc-tile);
-    color: var(--ink);
-    font-size: 12px;
-    font-weight: 600;
   }
 
   .side {

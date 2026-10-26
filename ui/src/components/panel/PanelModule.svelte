@@ -16,7 +16,7 @@
 
 <script lang="ts">
   import type { Settings } from '../../lib/api'
-  import { fmtClock, fmtCompact, fmtMoney, fmtPct, fmtSpan, limitName, limitShown, t, windowLabel, type LimitMode } from '../../lib/i18n.svelte'
+  import { fmtClock, fmtCompact, fmtMoney, fmtPct, fmtSpan, fmtTime, limitName, limitShown, t, windowLabel, type LimitMode } from '../../lib/i18n.svelte'
   import BrandIcon from '../BrandIcon.svelte'
   import Icon from '../Icon.svelte'
   import Ring from './Ring.svelte'
@@ -35,7 +35,8 @@
   const highAt = $derived(settings.widget.high_at)
   const color = (used: number | null, p: string) =>
     used !== null && used >= highAt ? 'var(--critical)' : used !== null && used >= warnAt ? 'var(--serious)' : settings.provider_colors?.[p as Provider] || 'var(--accent)'
-  const name = $derived(limitName(m.provider, m.pool))
+  // Antigravity's pools by their short names, as on the widget; its logo stands beside them
+  const name = $derived(m.provider === 'google' ? t(`widget.pool.google.${m.pool === 'gemini' ? 'gemini' : '3p'}`) : limitName(m.provider, m.pool))
   const short = (w: string) => t(`panel.window.${w}`)
 
   type Shown = { value: number | null; used: number | null; text: string; sub: string; why: string; behind: boolean }
@@ -47,21 +48,27 @@
     const k = !l ? 'none' : l.state === 'reset' ? 'reset' : 'stale'
     return { value: null, used: null, text: '—', sub: t(`panel.why.${k}`), why: t(`panel.short.${k}`), behind: false }
   }
-  function resetIn(l: PanelLimit | null): string {
-    if (!live(l) || !l.resets_at) return ''
-    const ms = l.resets_at * 1000 - now
-    return ms > 0 ? t('panel.resetsIn', { span: fmtSpan(ms) }) : ''
+  // a time as what is left until it ("2h 14m"): short enough for a narrow tile in any language,
+  // where a clock time like "Wed 11:59 PM" does not fit
+  function until(atMs: number): string {
+    const total = Math.ceil((atMs - now) / 60000)
+    if (total <= 0) return ''
+    const [d, h, m] = [Math.floor(total / 1440), Math.floor((total % 1440) / 60), total % 60]
+    return d ? t('panel.left.dh', { d, h }) : h ? t('panel.left.hm', { h, m }) : t('panel.left.m', { m })
+  }
+  function resetLeft(l: PanelLimit | null): string {
+    return live(l) && l.resets_at ? until(l.resets_at * 1000) : ''
   }
   function resetAt(l: PanelLimit | null): string {
     if (!live(l) || !l.resets_at || l.resets_at * 1000 <= now) return ''
     const at = l.resets_at * 1000
-    return at - now < 86_400_000 ? fmtClock(at) : new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(at))
+    return at - now < 86_400_000 ? fmtClock(at) : fmtTime(at)
   }
-  function forecast(l: PanelLimit | null): { text: string; short: string; tone: 'bad' | 'ok' | 'none' } {
+  function forecast(l: PanelLimit | null): { text: string; at?: string; short: string; tone: 'bad' | 'ok' | 'none' } {
     const f = live(l) ? l.forecast : null
     if (f?.kind === 'fills' && f.fills_at_ms) {
-      const at = f.fills_at_ms - now < 86_400_000 ? fmtClock(f.fills_at_ms) : new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(f.fills_at_ms))
-      return { text: t('panel.forecast.fills', { t: at }), short: `⇡ ${at}`, tone: 'bad' }
+      const at = f.fills_at_ms - now < 86_400_000 ? fmtClock(f.fills_at_ms) : fmtTime(f.fills_at_ms)
+      return { text: t('panel.forecast.fills', { t: until(f.fills_at_ms) }), at: t('panel.forecast.fillsAt', { t: at }), short: `⇡ ${until(f.fills_at_ms)}`, tone: 'bad' }
     }
     if ((f?.kind === 'safe' || f?.kind === 'idle') && f.at_reset_pct !== null) {
       const pct = fmtPct(limitShown(f.at_reset_pct, mode))
@@ -124,14 +131,14 @@
         <span class="txt grow">
           <span class="row"><span class="lbl">{name}</span><b class="num val">{s.behind ? '≥' : ''}{s.text}</b></span>
           {@render bar(s, m.provider)}
-          <span class="sub" title={resetIn(one) || undefined}>{short(m.window)}{resetAt(one) ? ` · ↻ ${resetAt(one)}` : s.value === null ? ` · ${s.sub}` : ''}</span>
+          <span class="sub" title={resetAt(one) || s.sub}>{short(m.window)}{resetLeft(one) ? ` · ↻ ${resetLeft(one)}` : s.value === null ? ` · ${s.why}` : ''}</span>
         </span>
       {:else}
-        <Ring value={s.value} color={color(s.used, m.provider)} size={40} stroke={4}>{@render logo(14)}</Ring>
+        <Ring value={s.value} color={color(s.used, m.provider)} size={38} stroke={4}>{@render logo(13)}</Ring>
         <span class="txt">
           <span class="lbl">{name}</span>
-          <b class="num val">{s.behind ? '≥' : ''}{s.text}</b>
-          <span class="sub">{short(m.window)}{resetAt(one) ? ` · ↻ ${resetAt(one)}` : ''}</span>
+          <span class="row start"><b class="num val">{s.behind ? '≥' : ''}{s.text}</b><span class="unit">{short(m.window)}</span></span>
+          <span class="sub" title={resetAt(one) || s.sub}>{resetLeft(one) ? `↻ ${resetLeft(one)}` : s.value === null ? s.why : ' '}</span>
         </span>
       {/if}
     {:else}
@@ -140,7 +147,7 @@
       {#if m.style === 'bar'}
         <span class="big">
           <b class="num hero">{s.behind ? '≥' : ''}{s.text}</b>
-          <span class="sub">{s.sub} · {windowLabel(m.window)}</span>
+          <span class="sub" title={s.sub}>{s.value === null ? s.why : s.sub} · {short(m.window)}</span>
           {@render bar(s, m.provider)}
         </span>
       {:else}
@@ -152,8 +159,8 @@
         </span>
       {/if}
       <span class="foot">
-        <span class="sub">{resetAt(one) ? `↻ ${resetAt(one)}` : short(m.window)}</span>
-        {#if f.short}<span class="sub" class:bad={f.tone === 'bad'} title={f.text}>{f.short}</span>{/if}
+        <span class="sub" title={resetAt(one) || undefined}>{resetLeft(one) ? `↻ ${resetLeft(one)}` : short(m.window)}</span>
+        {#if f.short}<span class="sub" class:bad={f.tone === 'bad'} title={f.at ?? f.text}>{f.short}</span>{/if}
       </span>
     {/if}
   </div>
@@ -167,7 +174,7 @@
           <span class="cell">
             <Ring value={r.s.value} color={color(r.s.used, m.provider)} size={50} stroke={5}><b class="num small">{r.s.value === null ? '—' : fmtPct(r.s.value)}</b></Ring>
             <span class="tiny">{short(r.w)}</span>
-            <span class="tiny dim" title={r.s.value === null ? r.s.sub : undefined}>{resetAt(r.l) ? `↻ ${resetAt(r.l)}` : r.s.why || ' '}</span>
+            <span class="tiny dim fit" title={r.s.value === null ? r.s.sub : resetAt(r.l) || undefined}>{resetLeft(r.l) ? `↻ ${resetLeft(r.l)}` : r.s.why || ' '}</span>
           </span>
         {/each}
       </span>
@@ -179,7 +186,7 @@
             <span class="tiny key">{short(r.w)}</span>
             {@render bar(r.s, m.provider)}
             <b class="num tiny val">{r.s.behind ? '≥' : ''}{r.s.text}</b>
-            {#if m.size !== 'w'}<span class="tiny dim when">{resetAt(r.l) ? `↻ ${resetAt(r.l)}` : ''}</span>{/if}
+            {#if m.size !== 'w'}<span class="tiny dim when fit" title={resetAt(r.l) || undefined}>{resetLeft(r.l) ? `↻ ${resetLeft(r.l)}` : r.s.why}</span>{/if}
           </span>
         {/each}
       </span>
@@ -192,10 +199,10 @@
     {#if m.size === 'l'}<span class="disc" class:bad={f.tone === 'bad'} class:ok={f.tone === 'ok'}><Icon name="clock" size={16} /></span>{/if}
     <span class="txt grow">
       <span class="head">
-        {#if m.size !== 'l'}<span class="mark" class:bad={f.tone === 'bad'} class:ok={f.tone === 'ok'}><Icon name="clock" size={12} /></span>{/if}
-        <span class="lbl">{name} · {short(m.window)}</span>
+        {#if m.size !== 'l'}{@render logo(13)}{/if}
+        <span class="lbl">{m.size === 'l' ? `${name} · ${short(m.window)}` : name}</span>
       </span>
-      <span class="sub strong" class:bad={f.tone === 'bad'}>{f.text}</span>
+      <span class="sub strong" class:bad={f.tone === 'bad'} title={f.at ?? f.text}>{m.size === 'l' ? f.text : `${short(m.window)}: ${f.text}`}</span>
       {#if m.size === 'l' && s.value !== null}{@render bar(s, m.provider)}{/if}
     </span>
   </div>
@@ -213,13 +220,13 @@
       <span class="txt grow">
         <span class="lbl">{period}</span>
         <span class="row"><b class="num val">{fmtCompact(usage.tokens)}</b><span class="unit">{t('panel.tokens')}</span></span>
-        <span class="sub">{fmtMoney(usage.cost_usd)} {t('panel.cost')}</span>
+        <span class="sub" title={t('panel.cost')}>{fmtMoney(usage.cost_usd, { compact: true })}</span>
       </span>
     {:else}
       <span class="head"><span class="lbl">{period}</span></span>
       <span class="stats">
         <span><span class="tiny dim">{t('panel.tokens')}</span><b class="num">{fmtCompact(usage.tokens)}</b></span>
-        <span><span class="tiny dim">{t('panel.cost')}</span><b class="num">{fmtMoney(usage.cost_usd)}</b></span>
+        <span title={t('panel.cost')}><span class="tiny dim">{t('panel.costShort')}</span><b class="num">{fmtMoney(usage.cost_usd, { compact: true })}</b></span>
         <span><span class="tiny dim">{t('panel.sessionsLabel')}</span><b class="num">{usage.sessions}</b></span>
         <span><span class="tiny dim">{t('panel.cache')}</span><b class="num">{hit === null ? '—' : fmtPct(hit)}</b></span>
       </span>
@@ -294,6 +301,25 @@
   .foot {
     justify-content: space-between;
   }
+  .row.start {
+    justify-content: flex-start;
+    align-items: baseline;
+    gap: 4px;
+  }
+  /* nothing in a tile may grow past it: one line, cut with an ellipsis */
+  .row > *,
+  .foot > *,
+  .head > *,
+  .stats > span > * {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .row > .num,
+  .foot > .sub:last-child {
+    flex: none;
+  }
   .push {
     margin-left: auto;
   }
@@ -313,6 +339,11 @@
     text-overflow: ellipsis;
   }
   .sub.strong {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
     color: var(--ink);
     white-space: normal;
     line-height: 1.25;
@@ -345,15 +376,6 @@
   .hero {
     font-size: 26px;
     line-height: 1;
-  }
-  .mark {
-    display: inline-grid;
-    place-items: center;
-    flex: none;
-    color: var(--ink-2);
-  }
-  .mark.ok {
-    color: var(--good-ink);
   }
   .unit {
     margin-right: auto;
@@ -415,6 +437,25 @@
   }
   .action.on .disc {
     color: var(--accent-ink);
+  }
+  .limit.w {
+    gap: 8px;
+    padding: 9px 10px;
+  }
+  .limit.w .lbl,
+  .forecast.w .lbl {
+    font-size: 11.5px;
+  }
+  .action.w {
+    gap: 7px;
+    padding: 9px 10px;
+  }
+  .action.w .disc {
+    width: 26px;
+    height: 26px;
+  }
+  .action.w .lbl {
+    font-size: 11.5px;
   }
   .action.w.on .disc {
     background: color-mix(in srgb, var(--accent-ink) 20%, transparent);
@@ -486,6 +527,13 @@
     flex-direction: column;
     align-items: center;
     gap: 3px;
+    min-width: 0;
+    max-width: 50%;
+  }
+  .fit {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .bars {
     display: flex;
@@ -538,9 +586,13 @@
     display: flex;
     flex-direction: column;
     gap: 1px;
+    min-width: 0;
+  }
+  .stats {
+    gap: 6px 8px;
   }
   .stats .num {
-    font-size: 14px;
+    font-size: 13px;
   }
   @media (prefers-reduced-motion: reduce) {
     .fill,
