@@ -256,6 +256,9 @@ pub struct WidgetLimit {
     accuracy: Accuracy,
     resets_at: Option<i64>,
     observed_ms: Option<i64>,
+    /// The Codex account, while there are several.
+    account: Option<String>,
+    active: bool,
 }
 
 #[derive(Serialize, Default)]
@@ -275,6 +278,8 @@ pub struct WidgetData {
     providers: Vec<Provider>,
     /// OpenCode's source is on and it was used in the last 30 days.
     opencode: bool,
+    /// Known Codex accounts in order of first use, which numbers the unnamed ones.
+    accounts: Vec<String>,
     updated_ms: i64,
 }
 
@@ -323,7 +328,7 @@ pub async fn get_widget_data(state: State<'_, AppState>) -> Res<WidgetData> {
     let limits = analytics::limits_view(&store, &book, now, &settings.thresholds)
         .map_err(err)?
         .into_iter()
-        .filter(|l| l.active && providers.contains(&l.provider) && (l.window == "five_hour" || l.window == "seven_day"))
+        .filter(|l| (l.active || l.account.is_some()) && providers.contains(&l.provider) && (l.window == "five_hour" || l.window == "seven_day"))
         .map(|l| WidgetLimit {
             provider: l.provider,
             limit_id: l.limit_id,
@@ -333,8 +338,11 @@ pub async fn get_widget_data(state: State<'_, AppState>) -> Res<WidgetData> {
             accuracy: l.accuracy,
             resets_at: l.resets_at,
             observed_ms: l.observed_ms,
+            account: l.account,
+            active: l.active,
         })
         .collect();
+    let accounts = tracker_core::accounts::accounts(&store).map_err(err)?.into_iter().filter_map(|a| a.id).collect();
     let opencode = settings.enabled_sources.contains(&SourceId::OpenCode);
     let shown = |t: Tool| t.provider().map_or(opencode, |p| providers.contains(&p));
     let mut provs: Vec<Provider> = providers.iter().copied().collect();
@@ -347,6 +355,7 @@ pub async fn get_widget_data(state: State<'_, AppState>) -> Res<WidgetData> {
         month1,
         limits,
         providers: provs,
+        accounts,
         updated_ms: state.status.lock().unwrap().last_scan_ms.unwrap_or(now),
     })
 }

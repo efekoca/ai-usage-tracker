@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount, untrack } from 'svelte'
-  import { app, latest, saveSettings } from '../lib/store.svelte'
+  import { accountName, app, latest, saveSettings } from '../lib/store.svelte'
   import { api, PROVIDERS, type AntigravityPool, type Provider, type WidgetData, type WidgetItemKind, type WidgetSettings } from '../lib/api'
   import { fmtPct, searchKey, t } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
@@ -111,6 +111,10 @@
     commit('provider_order')
   }
   const providerOn = (p: Provider) => ws.providers.length === 0 || ws.providers.includes(p)
+  const codexAccounts = $derived(app.accounts.filter((a) => a.id !== null))
+  function toggleAccount(id: string, v: boolean) {
+    set('codex_accounts', v ? [...ws.codex_accounts, id] : ws.codex_accounts.filter((x) => x !== id))
+  }
   const lastOn = (p: Provider) => {
     const all = (data?.providers ?? providers) as Provider[]
     return all.includes(p) && providerOn(p) && all.filter(providerOn).length === 1
@@ -120,7 +124,7 @@
       visible: ws.visible, opacity: 0.85, size: 'm', scale: 1, x: ws.x, y: ws.y, anchor: 'bottom-right', auto_hide_fullscreen: true,
       layout: 'horizontal',
       items: (['primary', 'cost', 'limit_five_hour', 'limit_seven_day', 'opencode', 'tools', 'week_tokens', 'week_cost', 'month_cost', 'updated'] as WidgetItemKind[]).map((k, i) => ({ kind: k, enabled: i < 5 })),
-      providers: [], provider_order: ['anthropic', 'google', 'openai'], antigravity_pool: 'fullest', primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '',
+      providers: [], provider_order: ['anthropic', 'google', 'openai'], antigravity_pool: 'fullest', codex_accounts: [], primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '',
       corner_radius: 14, border: true, shadow: false, show_labels: true, show_icons: false, show_reset_time: false, warn_at: 70, high_at: 90,
       always_on_top: true, lock_position: false, click_action: 'open_dashboard',
       font_family: '', text_scale: 1, number_scale: 1, number_weight: 700, tabular_nums: true,
@@ -150,7 +154,7 @@
     <div class="stage {backdrop}" data-theme={ws.theme === 'system' ? undefined : ws.theme} bind:clientWidth={stageW}>
       <div class="fit" style:width={natW ? `${natW * fit}px` : undefined} style:height={natH ? `${natH * fit}px` : undefined}>
         <div class="natural" bind:offsetWidth={natW} bind:offsetHeight={natH} style:transform="scale({fit})">
-          <WidgetView {data} {ws} mode={app.settings?.limit_display ?? 'used'} colors={app.settings?.provider_colors} tintIcons={app.settings?.tint_icons} />
+          <WidgetView {data} {ws} mode={app.settings?.limit_display ?? 'used'} colors={app.settings?.provider_colors} tintIcons={app.settings?.tint_icons} accountNames={app.settings?.account_names} />
         </div>
       </div>
     </div>
@@ -207,6 +211,21 @@
             options={(['fullest', 'gemini', '3p', 'all'] as AntigravityPool[]).map((v) => ({ value: v, label: t(`ws.agPool.${v}`) }))}
             onchange={(v) => set('antigravity_pool', v as AntigravityPool)}
           />
+        </div>
+      {/if}
+      {#if providerOn('openai') && codexAccounts.length > 1}
+        <div class="item stack">
+          <span>{t('ws.codexAccounts')}<span class="subtle small block">{t('ws.codexAccounts.help')}</span></span>
+          <ul class="items" aria-label={t('ws.codexAccounts')}>
+            {#each codexAccounts as a (a.id)}
+              {@const id = a.id as string}
+              <li class:off={!a.active && !ws.codex_accounts.includes(id)}>
+                <Toggle checked={ws.codex_accounts.includes(id)} label={accountName(id)} onchange={(v) => toggleAccount(id, v)} />
+                <span class="iname">{accountName(id)}</span>
+                {#if a.active}<span class="subtle small">{t('accounts.inUse')}</span>{/if}
+              </li>
+            {/each}
+          </ul>
         </div>
       {/if}
     </section>

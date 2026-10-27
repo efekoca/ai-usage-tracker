@@ -2,14 +2,16 @@
   import type { PanelData, PanelLimit, PanelModule, Provider } from '../../lib/api'
 
   /** The module's limit window; Antigravity's other pool is any pool that is not Gemini. */
-  export function findLimit(data: PanelData | null, provider: string, pool: string, window: string): PanelLimit | null {
-    const all = (data?.limits ?? []).filter((l) => l.provider === provider && l.window === window && (provider !== 'google' || (pool === 'gemini') === (l.limit_id === 'gemini')))
+  /** A module without an account follows the account in use. */
+  export function findLimit(data: PanelData | null, provider: string, pool: string, window: string, account = ''): PanelLimit | null {
+    const mine = (l: PanelLimit) => (account ? l.account === account : l.active)
+    const all = (data?.limits ?? []).filter((l) => l.provider === provider && l.window === window && mine(l) && (provider !== 'google' || (pool === 'gemini') === (l.limit_id === 'gemini')))
     return all.sort((a, b) => (b.used_pct ?? -1) - (a.used_pct ?? -1))[0] ?? null
   }
 
   export const live = (l: PanelLimit | null): l is PanelLimit & { used_pct: number } => !!l && l.used_pct !== null && (l.state === 'fresh' || l.state === 'behind')
 
-  export const moduleKey = (m: PanelModule) => `${m.kind}:${m.provider}:${m.pool}:${m.window}:${m.period}:${m.action}`
+  export const moduleKey = (m: PanelModule) => `${m.kind}:${m.provider}:${m.pool}:${m.window}:${m.period}:${m.action}:${m.account}`
 
   export const providerOf = (m: PanelModule) => m.provider as Provider
 </script>
@@ -17,6 +19,7 @@
 <script lang="ts">
   import type { Settings } from '../../lib/api'
   import { fmtClock, fmtCompact, fmtMoney, fmtPct, fmtSpan, fmtTime, limitName, limitShown, t, toolLabel, windowLabel, type LimitMode } from '../../lib/i18n.svelte'
+  import { nameAccount } from '../../lib/store.svelte'
   import BrandIcon from '../BrandIcon.svelte'
   import Icon from '../Icon.svelte'
   import Ring from './Ring.svelte'
@@ -35,8 +38,20 @@
   const highAt = $derived(settings.widget.high_at)
   const color = (used: number | null, p: string) =>
     used !== null && used >= highAt ? 'var(--critical)' : used !== null && used >= warnAt ? 'var(--serious)' : settings.provider_colors?.[p as Provider] || 'var(--accent)'
-  // Antigravity's pools by their short names, as on the widget; its logo stands beside them
-  const name = $derived(m.provider === 'google' ? t(`widget.pool.google.${m.pool === 'gemini' ? 'gemini' : '3p'}`) : limitName(m.provider, m.pool))
+  // another Codex account's tile names it, and then the account in use is named too
+  const account = $derived.by(() => {
+    if (m.provider !== 'openai') return null
+    if (m.account) return m.account
+    return settings.panel.modules.some((x) => x.account) ? (data?.limits.find((l) => l.provider === 'openai' && l.active)?.account ?? null) : null
+  })
+  // Antigravity's pools and Codex accounts by their short names, as on the widget; the logo stands beside them
+  const name = $derived(
+    m.provider === 'google'
+      ? t(`widget.pool.google.${m.pool === 'gemini' ? 'gemini' : '3p'}`)
+      : account
+        ? nameAccount(account, data?.accounts ?? [], settings.account_names, true)
+        : limitName(m.provider, m.pool),
+  )
   const short = (w: string) => t(`panel.window.${w}`)
 
   type Shown = { value: number | null; used: number | null; text: string; sub: string; why: string; behind: boolean }
@@ -77,8 +92,8 @@
     return { text: t('panel.forecast.none'), short: '', tone: 'none' }
   }
 
-  const one = $derived(m.kind === 'limit' || m.kind === 'forecast' ? findLimit(data, m.provider, m.pool, m.window) : null)
-  const both = $derived(m.kind === 'provider' ? (['five_hour', 'seven_day'] as const).map((w) => ({ w, l: findLimit(data, m.provider, m.pool, w) })) : [])
+  const one = $derived(m.kind === 'limit' || m.kind === 'forecast' ? findLimit(data, m.provider, m.pool, m.window, m.account) : null)
+  const both = $derived(m.kind === 'provider' ? (['five_hour', 'seven_day'] as const).map((w) => ({ w, l: findLimit(data, m.provider, m.pool, w, m.account) })) : [])
   const oc = $derived(m.kind === 'usage' && m.provider === 'opencode')
   const usage = $derived.by(() => {
     const set = m.kind !== 'usage' ? null : oc ? data?.opencode : data?.usage

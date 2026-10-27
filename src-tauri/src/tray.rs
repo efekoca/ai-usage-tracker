@@ -127,8 +127,8 @@ pub struct Current {
     pub behind: bool,
 }
 
-/// Every pool's current window; `None` when limits cannot be read right now, so the tray keeps
-/// what it shows.
+/// Every pool's current window, of each known Codex account too; `None` when limits cannot be read
+/// right now, so the tray keeps what it shows.
 pub(crate) fn readings(app: &AppHandle, s: &Settings) -> Option<Vec<Reading>> {
     let state = app.state::<AppState>();
     let providers = crate::commands::enabled_providers(s);
@@ -140,7 +140,7 @@ pub(crate) fn readings(app: &AppHandle, s: &Settings) -> Option<Vec<Reading>> {
     Some(
         views
             .into_iter()
-            .filter(|v| v.active && providers.contains(&v.provider) && (v.window == "five_hour" || v.window == "seven_day"))
+            .filter(|v| (v.active || v.account.is_some()) && providers.contains(&v.provider) && (v.window == "five_hour" || v.window == "seven_day"))
             .filter(|v| matches!(v.state, LimitState::Fresh | LimitState::Behind))
             .filter_map(|v| {
                 let (fills_at_ms, at_reset) = match &v.forecast {
@@ -157,16 +157,18 @@ pub(crate) fn readings(app: &AppHandle, s: &Settings) -> Option<Vec<Reading>> {
                     resets_at: v.resets_at,
                     fills_at_ms,
                     at_reset,
+                    account: v.account,
+                    active: v.active,
                 })
             })
             .collect(),
     )
 }
 
-/// The fullest pool of each provider's window, for the icon and the tooltip.
+/// The fullest pool of each provider's window in use, for the icon and the tooltip.
 fn current_limits(readings: &[Reading]) -> Vec<Current> {
     let mut out: Vec<Current> = Vec::new();
-    for r in readings {
+    for r in readings.iter().filter(|r| r.active) {
         let c = Current { provider: r.provider, window: r.window.clone(), used: r.used, behind: r.behind };
         match out.iter_mut().find(|x| x.provider == c.provider && x.window == c.window) {
             Some(x) if x.used >= c.used => {}
@@ -230,7 +232,22 @@ fn add(u: &mut Usage, sessions: &mut std::collections::HashSet<String>, e: &Even
 pub(crate) fn data(app: &AppHandle, s: &Settings, cfg: &TraySettings, readings: Vec<Reading>) -> Data {
     let (usage, opencode) = if needs_usage(cfg) { usage(app, s).map_or((None, None), |(u, o)| (Some(u), o)) } else { (None, None) };
     let scan_ms = app.state::<AppState>().status.lock().unwrap().last_scan_ms;
-    Data { readings, usage, opencode, scan_ms }
+    let accounts = if cfg.items.iter().any(|i| !i.account.is_empty()) { account_tags(app, s) } else { Default::default() };
+    Data { readings, usage, opencode, scan_ms, accounts }
+}
+
+/// Each Codex account's short name: the user's, else its number in order of first use, as the
+/// Limits page numbers it.
+fn account_tags(app: &AppHandle, s: &Settings) -> std::collections::HashMap<String, String> {
+    let list = tracker_core::accounts::accounts(&app.state::<AppState>().db()).unwrap_or_default();
+    list.into_iter()
+        .filter_map(|a| a.id)
+        .enumerate()
+        .map(|(i, id)| {
+            let tag = s.account_names.get(&id).cloned().unwrap_or_else(|| (i + 1).to_string());
+            (id, tag)
+        })
+        .collect()
 }
 
 pub(crate) fn format<'a>(s: &'a Settings, cfg: &'a TraySettings) -> Format<'a, chrono::Local> {

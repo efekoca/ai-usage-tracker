@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, untrack } from 'svelte'
-  import { app, latest, saveSettings } from '../lib/store.svelte'
+  import { app, latest, nameAccount, saveSettings } from '../lib/store.svelte'
   import { api, type PanelData, type PanelModule, type PanelSize, type Provider, type TrayItem, type TrayPreview, type TraySettings } from '../lib/api'
   import { fmtClock, fmtPct, limitName, t, toolLabel, windowLabel } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
@@ -87,8 +87,14 @@
   const SIZES: Record<string, PanelSize[]> = { limit: ['w', 's', 'm'], provider: ['m', 'w', 'l'], usage: ['w', 's', 'm'], forecast: ['w', 'l'], scan: ['w'], action: ['s', 'w'] }
   const ORDER: PanelSize[] = ['s', 'w', 'm', 'l']
   const POOLS = [['anthropic', ''], ['openai', ''], ['google', 'gemini'], ['google', '3p']] as const
-  const mk = (m: Partial<PanelModule> & { kind: PanelModule['kind'] }): PanelModule => ({ provider: '', pool: '', window: '', period: '', action: '', size: SIZES[m.kind][0], style: '', ...m })
-  const catalog: PanelModule[] = [
+  const mk = (m: Partial<PanelModule> & { kind: PanelModule['kind'] }): PanelModule => ({ provider: '', pool: '', window: '', period: '', action: '', size: SIZES[m.kind][0], style: '', account: '', ...m })
+  // each Codex limit for the account in use, followed by the same limit of every known account
+  const accountIds = $derived(app.accounts.flatMap((a) => (a.id ? [a.id] : [])))
+  const withAccounts = <T extends { kind: string; provider: string; account: string }>(list: T[]): T[] =>
+    list.flatMap((x) => (x.provider === 'openai' && ['limit', 'provider', 'forecast'].includes(x.kind) ? [x, ...accountIds.map((account) => ({ ...x, account }))] : [x]))
+  const who = (provider: string, pool: string, account: string) =>
+    provider !== 'openai' || !accountIds.length ? limitName(provider, pool) : `${t('provider.openai')} · ${account ? nameAccount(account, accountIds, app.settings?.account_names, true) : t('menubar.inUse')}`
+  const baseCatalog: PanelModule[] = [
     ...POOLS.map(([provider, pool]) => mk({ kind: 'provider', provider, pool, style: 'ring' })),
     ...POOLS.flatMap(([provider, pool]) => ['five_hour', 'seven_day'].map((window) => mk({ kind: 'limit', provider, pool, window, style: 'ring' }))),
     ...POOLS.flatMap(([provider, pool]) => ['five_hour', 'seven_day'].map((window) => mk({ kind: 'forecast', provider, pool, window }))),
@@ -96,8 +102,9 @@
     mk({ kind: 'scan' }),
     ...['open', 'widget', 'rescan', 'settings'].map((action) => mk({ kind: 'action', action })),
   ]
+  const catalog = $derived(withAccounts(baseCatalog))
   const defaults = (): PanelModule[] => {
-    const find = (f: (m: PanelModule) => boolean) => ({ ...catalog.find(f)! })
+    const find = (f: (m: PanelModule) => boolean) => ({ ...baseCatalog.find(f)! })
     return [
       find((m) => m.kind === 'provider' && m.provider === 'anthropic'),
       find((m) => m.kind === 'provider' && m.provider === 'openai'),
@@ -108,14 +115,14 @@
   }
   const category = (m: PanelModule) => (m.kind === 'provider' || m.kind === 'limit' ? 'limits' : m.kind === 'scan' || m.kind === 'action' ? 'controls' : m.kind)
   const modName = (m: PanelModule) => {
-    const who = limitName(m.provider, m.pool)
+    const name = who(m.provider, m.pool, m.account)
     switch (m.kind) {
       case 'provider':
-        return `${who} · ${t('menubar.mod.both')}`
+        return `${name} · ${t('menubar.mod.both')}`
       case 'limit':
-        return `${who} · ${windowLabel(m.window)}`
+        return `${name} · ${windowLabel(m.window)}`
       case 'forecast':
-        return t('menubar.mod.forecast', { name: `${who} · ${windowLabel(m.window)}` })
+        return t('menubar.mod.forecast', { name: `${name} · ${windowLabel(m.window)}` })
       case 'usage':
         return `${m.provider === 'opencode' ? toolLabel('opencode') : t('menubar.mod.usage')} · ${t(`widget.period.${m.period}`)}`
       case 'scan':
@@ -309,14 +316,16 @@
   const openHint = $derived(t(mac ? 'menubar.panel.open.mac' : windows ? 'menubar.panel.open.windows' : 'menubar.panel.open.linux'))
 
   // text next to the icon
-  const textCatalog: TrayItem[] = [
-    ...(['limit', 'forecast'] as const).flatMap((kind) => POOLS.flatMap(([provider, pool]) => ['five_hour', 'seven_day'].map((window) => ({ kind, provider, pool, window, period: '' })))),
-    ...['', 'opencode'].flatMap((provider) => (['tokens', 'cost', 'sessions', 'cache'] as const).flatMap((kind) => ['today', 'days7', 'month1'].map((period) => ({ kind, provider, pool: '', window: '', period })))),
-    { kind: 'scan', provider: '', pool: '', window: '', period: '' },
-  ]
-  const itemKey = (it: TrayItem) => `${it.kind}:${it.provider}:${it.window}:${it.pool}:${it.period}`
+  const textCatalog: TrayItem[] = $derived(
+    withAccounts([
+      ...(['limit', 'forecast'] as const).flatMap((kind) => POOLS.flatMap(([provider, pool]) => ['five_hour', 'seven_day'].map((window) => ({ kind, provider, pool, window, period: '', account: '' })))),
+      ...['', 'opencode'].flatMap((provider) => (['tokens', 'cost', 'sessions', 'cache'] as const).flatMap((kind) => ['today', 'days7', 'month1'].map((period) => ({ kind, provider, pool: '', window: '', period, account: '' })))),
+      { kind: 'scan', provider: '', pool: '', window: '', period: '', account: '' },
+    ]),
+  )
+  const itemKey = (it: TrayItem) => `${it.kind}:${it.provider}:${it.window}:${it.pool}:${it.period}:${it.account}`
   const itemName = (it: TrayItem) => {
-    const lim = `${limitName(it.provider, it.pool)} · ${windowLabel(it.window)}`
+    const lim = `${who(it.provider, it.pool, it.account)} · ${windowLabel(it.window)}`
     if (it.kind === 'limit') return lim
     if (it.kind === 'forecast') return t('menubar.item.forecast', { name: lim })
     if (it.kind === 'scan') return t('menubar.item.scan')

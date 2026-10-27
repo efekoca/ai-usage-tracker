@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Provider, WidgetData, WidgetItemKind, WidgetPeriod, WidgetSettings } from '../lib/api'
   import { fmtCompact, fmtDec, fmtDuration, fmtMoney, fmtPct, fmtTime, has, limitShown, lower, t, toolLabel, type LimitMode } from '../lib/i18n.svelte'
-  import { toolColor } from '../lib/store.svelte'
+  import { nameAccount, toolColor } from '../lib/store.svelte'
   import BrandIcon from './BrandIcon.svelte'
 
   let {
@@ -10,8 +10,17 @@
     mode = 'used',
     colors = {},
     tintIcons = false,
+    accountNames = {},
     root = $bindable(),
-  }: { data: WidgetData | null; ws: WidgetSettings; mode?: LimitMode; colors?: Partial<Record<Provider, string>>; tintIcons?: boolean; root?: HTMLElement } = $props()
+  }: {
+    data: WidgetData | null
+    ws: WidgetSettings
+    mode?: LimitMode
+    colors?: Partial<Record<Provider, string>>
+    tintIcons?: boolean
+    accountNames?: Record<string, string>
+    root?: HTMLElement
+  } = $props()
 
   const on = (k: WidgetItemKind) => ws.items.some((i) => i.kind === k && i.enabled)
   const order = $derived(ws.items.filter((i) => i.enabled).map((i) => i.kind))
@@ -29,23 +38,30 @@
   const providers = $derived(
     (data?.providers ?? []).filter((p) => ws.providers.length === 0 || ws.providers.includes(p)).sort((a, b) => rankOf(a) - rankOf(b)) as Provider[],
   )
+  // the account in use, then the other Codex accounts the user chose
+  const inUse = $derived(data?.limits.find((l) => l.provider === 'openai' && l.active)?.account ?? null)
+  const others = $derived((ws.codex_accounts ?? []).filter((id) => id !== inUse && data?.accounts.includes(id)))
+  const accountTag = (id: string | null) => (id === null || !others.length ? '' : nameAccount(id, data?.accounts ?? [], accountNames, true))
   // a provider with several pools (Antigravity) gets a row per pool when all are shown
   const entries = $derived(
     providers.flatMap((p) => {
-      if (p !== 'google' || ws.antigravity_pool === 'fullest' || !ws.antigravity_pool) return [{ p, pool: null as string | null }]
-      if (ws.antigravity_pool !== 'all') return [{ p, pool: ws.antigravity_pool as string }]
+      const one = (pool: string | null, account: string | null = null) => ({ p, pool, account })
+      if (p === 'openai') return [one(null), ...others.map((id) => one(null, id))]
+      if (p !== 'google' || ws.antigravity_pool === 'fullest' || !ws.antigravity_pool) return [one(null)]
+      if (ws.antigravity_pool !== 'all') return [one(ws.antigravity_pool)]
       const pools = [...new Set((data?.limits ?? []).filter((l) => l.provider === p && l.limit_id).map((l) => l.limit_id))]
-      if (!pools.length) return [{ p, pool: null as string | null }]
-      return pools.sort((a, b) => (a === 'gemini' ? -1 : b === 'gemini' ? 1 : a.localeCompare(b))).map((pool) => ({ p, pool: pool as string | null }))
+      if (!pools.length) return [one(null)]
+      return pools.sort((a, b) => (a === 'gemini' ? -1 : b === 'gemini' ? 1 : a.localeCompare(b))).map((pool) => one(pool))
     }),
   )
   const periodLabel = $derived(t(`widget.period.${ws.primary_period}`))
 
-  function limit(p: Provider, kind: WidgetItemKind, pool: string | null) {
+  function limit(p: Provider, kind: WidgetItemKind, pool: string | null, account: string | null) {
     const w = kind === 'limit_five_hour' ? 'five_hour' : 'seven_day'
     // with several pools (Antigravity) the fullest current one is shown, as in the tray
     const rank = (x: { state: string; used_pct: number | null }) => (x.state === 'fresh' ? 1000 : 0) + (x.used_pct ?? -1)
-    const l = (data?.limits ?? []).filter((x) => x.provider === p && x.window === w && (pool === null || x.limit_id === pool)).sort((a, b) => rank(b) - rank(a))[0]
+    const mine = (x: { active: boolean; account: string | null }) => (account === null ? x.active : x.account === account)
+    const l = (data?.limits ?? []).filter((x) => x.provider === p && x.window === w && (pool === null || x.limit_id === pool) && mine(x)).sort((a, b) => rank(b) - rank(a))[0]
     if (!l) return null
     const known = l.state === 'fresh' && l.used_pct !== null
     // 'behind': the current value is unknown, so only the last reading is shown
@@ -104,9 +120,10 @@
   {/if}
 {/snippet}
 
-{#snippet name(p: Provider, pool: string | null)}
-  {@const short = pool && has(`widget.pool.${p}.${pool}`) ? t(`widget.pool.${p}.${pool}`) : ''}
-  {@const title = short ? `${t(`provider.${p}`)} · ${t(`limits.pool.${p}.${pool}`)}` : t(`provider.${p}`)}
+{#snippet name(p: Provider, pool: string | null, account: string | null)}
+  {@const tag = p === 'openai' ? accountTag(account ?? inUse) : ''}
+  {@const short = tag || (pool && has(`widget.pool.${p}.${pool}`) ? t(`widget.pool.${p}.${pool}`) : '')}
+  {@const title = tag ? `${t(`provider.${p}`)} · ${tag}` : short ? `${t(`provider.${p}`)} · ${t(`limits.pool.${p}.${pool}`)}` : t(`provider.${p}`)}
   {#if ws.show_labels}
     <!-- a pool row names its pool where the others name the mode, so it is no wider -->
     <span class="pn" title={short ? title : undefined}>{#if ws.show_icons}<BrandIcon provider={p} color={tintIcons ? colors?.[p] : null} always />{/if}{t(`provider.${p}`)} <span class="mode">{short || t(`widget.mode.${mode}`)}</span></span>
@@ -158,16 +175,17 @@
   {#if kind === 'opencode'}
     {@render opencodeRow()}
   {:else}
-    {#each entries as e (e.p + e.pool)}{@render providerLimits(e.p, e.pool, limitOrder)}{/each}
+    {#each entries as e (`${e.p}:${e.pool}:${e.account}`)}{@render providerLimits(e.p, e.pool, e.account, limitOrder)}{/each}
   {/if}
 {/snippet}
 
-{#snippet providerLimits(p: Provider, pool: string | null, kinds: WidgetItemKind[])}
-  {@const rows = kinds.map((k) => ({ k, l: limit(p, k, pool) })).filter((x) => x.l !== null) as { k: WidgetItemKind; l: NonNullable<ReturnType<typeof limit>> }[]}
+{#snippet providerLimits(p: Provider, pool: string | null, account: string | null, kinds: WidgetItemKind[])}
+  {@const rows = kinds.map((k) => ({ k, l: limit(p, k, pool, account) })).filter((x) => x.l !== null) as { k: WidgetItemKind; l: NonNullable<ReturnType<typeof limit>> }[]}
+  {@const tag = p === 'openai' ? accountTag(account ?? inUse) : ''}
   {#if rows.length}
     {@const lead = rows[0]}
     {#if ws.limit_style === 'ring'}
-      <div class="ring" role="img" aria-label="{t(`provider.${p}`)}{pool && has(`widget.pool.${p}.${pool}`) ? ` ${t(`widget.pool.${p}.${pool}`)}` : ''} {rows.map((r) => `${winShort(r.k)} ${r.l.val !== null ? fmtPct(r.l.val) : r.l.last ? t('widget.lastReading', { pct: fmtPct(r.l.last.pct), t: r.l.last.ago }) : '—'}`).join(', ')}">
+      <div class="ring" role="img" aria-label="{t(`provider.${p}`)}{tag ? ` ${tag}` : pool && has(`widget.pool.${p}.${pool}`) ? ` ${t(`widget.pool.${p}.${pool}`)}` : ''} {rows.map((r) => `${winShort(r.k)} ${r.l.val !== null ? fmtPct(r.l.val) : r.l.last ? t('widget.lastReading', { pct: fmtPct(r.l.last.pct), t: r.l.last.ago }) : '—'}`).join(', ')}">
         <svg viewBox="0 0 40 40" aria-hidden="true">
           <circle cx="20" cy="20" r={R} class="track" />
           {#if lead.l.pct !== null}
@@ -176,7 +194,7 @@
           <text x="20" y="20" dy="0.35em" text-anchor="middle">{lead.l.val !== null ? fmtDec(lead.l.val) : lead.l.last ? '?' : '–'}</text>
         </svg>
         <div class="rl">
-          {@render name(p, pool)}
+          {@render name(p, pool, account)}
           <span class="sub">
             {winShort(lead.k)}{lead.l.estimated ? ' ≈' : ''}{lead.l.last ? ` · ${t('widget.lastShort', { pct: fmtPct(lead.l.last.pct) })}` : ws.show_reset_time && lead.l.resets ? ` · ${fmtDuration(lead.l.resets * 1000 - now)}` : ''}
             {#each rows.slice(1) as r (r.k)}
@@ -187,7 +205,7 @@
       </div>
     {:else if ws.limit_style === 'bar'}
       <div class="barrow">
-        {@render name(p, pool)}
+        {@render name(p, pool, account)}
         {#each rows as r (r.k)}
           <div class="bh">
             <span class="sub">{winShort(r.k)}{ws.show_reset_time && r.l.resets ? ` · ${fmtDuration(r.l.resets * 1000 - now)}` : ''}</span>
@@ -198,7 +216,7 @@
       </div>
     {:else}
       <span class="textlimit">
-        {@render name(p, pool)}
+        {@render name(p, pool, account)}
         {#each rows as r, i (r.k)}
           {#if i > 0}<span class="sub">·</span>{/if}
           <span class="sub">{winShort(r.k)}</span>

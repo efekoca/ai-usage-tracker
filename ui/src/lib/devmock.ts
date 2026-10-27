@@ -38,7 +38,7 @@ const settings: Settings = {
   widget: {
     visible: true, opacity: showcase ? 1 : 0.85, size: 'm', scale: 1, x: null, y: null, anchor: 'bottom-right', auto_hide_fullscreen: true, layout: 'horizontal',
     items: (['primary', 'cost', 'limit_five_hour', 'limit_seven_day', 'opencode', 'tools', 'week_tokens', 'week_cost', 'month_cost', 'updated'] as const).map((k, i) => ({ kind: k, enabled: i < 5 })),
-    providers: [], provider_order: ['anthropic', 'google', 'openai'], antigravity_pool: 'fullest', primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '', corner_radius: 14,
+    providers: [], provider_order: ['anthropic', 'google', 'openai'], antigravity_pool: 'fullest', codex_accounts: twoAccounts ? [ACCOUNT_A] : [], primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '', corner_radius: 14,
     border: true, shadow: false, show_labels: true, show_icons: false, show_reset_time: false, warn_at: 70, high_at: 90, always_on_top: true, lock_position: false, click_action: 'open_dashboard',
     font_family: '', text_scale: 1, number_scale: 1, number_weight: 700, tabular_nums: true, hotkey: 'Ctrl+Alt+Shift+W',
   },
@@ -500,11 +500,11 @@ function mockDay(date: string) {
 }
 
 function trayDefaults(): TrayItem[] {
-  return (['anthropic', 'openai'] as const).flatMap((provider) => ['five_hour', 'seven_day'].map((window): TrayItem => ({ kind: 'limit', provider, window, pool: '', period: '' })))
+  return (['anthropic', 'openai'] as const).flatMap((provider) => ['five_hour', 'seven_day'].map((window): TrayItem => ({ kind: 'limit', provider, window, pool: '', period: '', account: '' })))
 }
 
 function pm(m: Partial<PanelModule>): PanelModule {
-  return { kind: 'limit', provider: '', pool: '', window: '', period: '', action: '', size: 's', style: '', ...m }
+  return { kind: 'limit', provider: '', pool: '', window: '', period: '', action: '', size: 's', style: '', account: '', ...m }
 }
 
 /** A rough stand-in for the Rust formatter (`tray_text.rs`), enough to try the Menu bar page. */
@@ -512,7 +512,8 @@ function mockTrayPreview(tray: TraySettings) {
   const tr = settings.language === 'system' ? navigator.language.startsWith('tr') : settings.language === 'tr'
   const remaining = tray.value === 'remaining' || (tray.value === 'app' && settings.limit_display === 'remaining')
   const found = (it: TrayItem) => {
-    const l = limits().find((l) => l.provider === it.provider && l.window === it.window && (it.provider !== 'google' || (it.pool === 'gemini') === (l.limit_id === 'gemini')))
+    const mine = (l: LimitView) => (it.account ? l.account === it.account : l.active)
+    const l = limits().find((l) => l.provider === it.provider && l.window === it.window && mine(l) && (it.provider !== 'google' || (it.pool === 'gemini') === (l.limit_id === 'gemini')))
     return l && l.used_pct !== null && (l.state === 'fresh' || l.state === 'behind') ? l : null
   }
   const pct = (v: number | string) => (tr ? `%${v}` : `${v}%`)
@@ -530,7 +531,8 @@ function mockTrayPreview(tray: TraySettings) {
     if (it.period && it.provider === 'opencode') return cfg.label === 'short' ? `OC ${periods[it.period][0]} ` : `OpenCode ${periods[it.period][1].toLocaleLowerCase(tr ? 'tr' : 'en')} `
     if (it.period) return `${periods[it.period][cfg.label === 'short' ? 0 : 1]} `
     const w5 = it.window === 'five_hour'
-    return cfg.label === 'name' ? `${name(it)} ${w5 ? (tr ? '5 sa' : '5h') : tr ? 'hafta' : 'week'} ` : `${short[it.provider === 'google' ? it.pool : it.provider]} ${w5 ? (tr ? '5s' : '5h') : tr ? 'H' : 'W'} `
+    const acct = it.account ? ` ${settings.account_names[it.account] ?? mockAccounts().filter((a) => a.id).findIndex((a) => a.id === it.account) + 1}` : ''
+    return cfg.label === 'name' ? `${name(it)}${acct} ${w5 ? (tr ? '5 sa' : '5h') : tr ? 'hafta' : 'week'} ` : `${short[it.provider === 'google' ? it.pool : it.provider]}${acct} ${w5 ? (tr ? '5s' : '5h') : tr ? 'H' : 'W'} `
   }
   const part = (it: TrayItem, cfg: TraySettings) => {
     if (it.kind === 'scan') return `${label(it, cfg)}${clock(Date.now() - 42000)}`
@@ -566,7 +568,7 @@ function mockTrayPreview(tray: TraySettings) {
 }
 
 function trayCatalog(): TrayItem[] {
-  const blank = { provider: '', window: '', pool: '', period: '' }
+  const blank = { provider: '', window: '', pool: '', period: '', account: '' }
   return [
     ...(['limit', 'forecast'] as const).flatMap((kind) =>
       [['anthropic', ''], ['openai', ''], ['google', 'gemini'], ['google', '3p']].flatMap(([provider, pool]) => ['five_hour', 'seven_day'].map((window) => ({ ...blank, kind, provider, pool, window }))),
@@ -581,7 +583,7 @@ let mockScanning = false
 function mockPanelData() {
   const usage = (tokens: number, cost: number, sessions: number, hit: number) => ({ tokens, cost_usd: cost, sessions, prompt: 1_000_000, cache_read: hit * 10_000 })
   return {
-    limits: limits().map((l) => ({ provider: l.provider, limit_id: l.limit_id, window: l.window, used_pct: l.used_pct, state: l.state, resets_at: l.resets_at, forecast: l.forecast })),
+    limits: limits().map((l) => ({ provider: l.provider, limit_id: l.limit_id, window: l.window, used_pct: l.used_pct, state: l.state, resets_at: l.resets_at, forecast: l.forecast, account: l.account, active: l.active })),
     usage: [usage(18_400_000, 12.84, 4, 81), usage(412_000_000, 286.1, 23, 84), usage(1_900_000_000, 1204, 96, 86)],
     opencode: ocMissing ? null : [usage(552_000, 0.26, 1, 64), usage(2_900_000, 1.43, 3, 71), usage(12_000_000, 5.76, 9, 73)],
     last_scan_ms: Date.now() - 42_000,
@@ -590,6 +592,7 @@ function mockPanelData() {
     update: scenario.get('update') === '1' ? '0.6.1' : null,
     providers: ['anthropic', 'google', 'openai'],
     signed_out: scenario.get('claude') === 'nologin' ? ['anthropic'] : [],
+    accounts: mockAccounts().flatMap((a) => (a.id ? [a.id] : [])),
   }
 }
 
@@ -647,7 +650,7 @@ export function installMock() {
           return null
         case 'get_widget_data': {
           const per = (tok: number, cost: number) => ({ tokens: tok, cost_usd: cost, has_unpriced: false, tools: [{ tool: 'claude_code', tokens: tok * 0.75, cost_usd: cost * 0.83 }, { tool: 'codex', tokens: tok * 0.15, cost_usd: cost * 0.12 }, { tool: 'antigravity', tokens: tok * 0.07, cost_usd: cost * 0.03 }, ...(ocMissing ? [] : [{ tool: 'opencode', tokens: tok * 0.03, cost_usd: cost * 0.02 }])] })
-          return { today: per(18_400_000, 12.84), days7: per(96_000_000, 71.3), month1: per(402_000_000, 288.1), limits: limits().map((l) => ({ provider: l.provider, limit_id: l.limit_id, window: l.window, used_pct: l.used_pct, state: l.state, accuracy: l.accuracy, resets_at: l.resets_at, observed_ms: l.observed_ms })), providers: ['anthropic', 'openai', 'google'], opencode: !ocMissing, updated_ms: Date.now() - 60000 }
+          return { today: per(18_400_000, 12.84), days7: per(96_000_000, 71.3), month1: per(402_000_000, 288.1), limits: limits().map((l) => ({ provider: l.provider, limit_id: l.limit_id, window: l.window, used_pct: l.used_pct, state: l.state, accuracy: l.accuracy, resets_at: l.resets_at, observed_ms: l.observed_ms, account: l.account, active: l.active })), providers: ['anthropic', 'openai', 'google'], opencode: !ocMissing, accounts: mockAccounts().flatMap((a) => (a.id ? [a.id] : [])), updated_ms: Date.now() - 60000 }
         }
         case 'capture_status':
           return { claude_poll: settings.capture.claude_poll, claude: { binary: claudeMode === 'missing' ? null : 'C:/claude.exe', last_ok_ms: claudeMode ? null : Date.now() - 40000, last_error: claudeMode === 'nologin' ? 'claude_no_plan_limits' : claudeMode === 'missing' ? 'claude_not_found' : null }, claude_candidates_found: claudeMode !== 'missing', codex_poll: settings.capture.codex_poll, codex: { binary: codexMissing ? null : 'C:/codex.exe', last_ok_ms: codexMissing ? null : Date.now() - 120000, last_error: codexMissing ? 'codex_not_found' : codexOut ? 'codex_not_signed_in' : null }, codex_candidates_found: !codexMissing, antigravity_poll: settings.capture.antigravity_poll, antigravity: { binary: agyMissing ? null : 'C:/Users/you/AppData/Local/agy/bin/agy.exe', last_ok_ms: agyMissing ? null : Date.now() - 90000, last_error: agyMissing ? 'agy_not_found' : agyOut ? 'agy_not_signed_in' : null }, antigravity_candidates_found: !agyMissing, statusline: settings.capture.statusline, statusline_file: 'C:\\Users\\you\\.claude\\settings.json', statusline_chained: false, statusline_last_ms: Date.now() - 30000, otel: settings.capture.otel, otel_port: 43180, otel_listening: settings.capture.otel, otel_events: 42, otel_last_ms: Date.now() - 5000, otel_error: null, settings_file: 'C:\\Users\\you\\.claude\\settings.json' }
