@@ -222,6 +222,70 @@ fn archiving_a_codex_rollout_does_not_double_count() {
     assert_eq!(sums(&store, "codex"), before); // … but nothing is added
 }
 
+/// Replaces a rollout with the `.jsonl.zst` copy newer Codex leaves behind; returns its path.
+fn compress(path: &std::path::Path) -> std::path::PathBuf {
+    let packed = path.with_extension("jsonl.zst");
+    fs::write(&packed, zstd::encode_all(&fs::read(path).unwrap()[..], 3).unwrap()).unwrap();
+    fs::remove_file(path).unwrap();
+    packed
+}
+
+fn counts(store: &Store) -> (i64, i64) {
+    let n = |t: &str| store.conn().query_row(&format!("SELECT COUNT(*) FROM {t} WHERE tool = 'codex'"), [], |r| r.get(0)).unwrap();
+    (n("limit_snapshot"), n("tool_call"))
+}
+
+#[test]
+fn compressed_codex_rollouts_are_read_like_plain_ones() {
+    let plain = machine();
+    let mut a = Store::open_in_memory().unwrap();
+    run(&mut a, &plain.env);
+
+    let m = machine();
+    compress(&m.home.join(".codex/sessions/2026/09/01").join(CODEX_MAIN));
+    compress(&m.home.join(".codex/archived_sessions/2026/09/01").join(CODEX_SUB));
+    let mut b = Store::open_in_memory().unwrap();
+    let rep = run(&mut b, &m.env);
+    assert!(rep.errors.is_empty(), "{:?}", rep.errors);
+    assert!(!rep.warnings.iter().any(|(p, _)| p.contains(".codex")), "{:?}", rep.warnings);
+    assert_eq!(sums(&b, "codex"), sums(&a, "codex"));
+    assert_eq!(counts(&b), counts(&a));
+    assert_eq!(run(&mut b, &m.env).files_read, 0, "an unchanged compressed file is skipped");
+}
+
+#[test]
+fn compressing_a_rollout_already_read_adds_nothing() {
+    let m = machine();
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &m.env);
+    let before = (sums(&store, "codex"), counts(&store));
+    compress(&m.home.join(".codex/sessions/2026/09/01").join(CODEX_MAIN));
+    let rep = run(&mut store, &m.env);
+    assert_eq!(rep.files_read, 1);
+    assert_eq!((sums(&store, "codex"), counts(&store)), before);
+}
+
+#[test]
+fn a_rollout_being_compressed_is_read_once_it_is_whole() {
+    let m = machine();
+    let file = m.home.join(".codex/sessions/2026/09/01").join(CODEX_MAIN);
+    let whole = zstd::encode_all(&fs::read(&file).unwrap()[..], 3).unwrap();
+    let packed = file.with_extension("jsonl.zst");
+    fs::write(&packed, &whole[..whole.len() / 2]).unwrap();
+    let files = enumerate_files(&m.env, &ExtraPaths::default(), &all_sources());
+    assert!(!files.iter().any(|f| f.path == packed), "the plain copy is still there");
+
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &m.env);
+    let expected = sums(&store, "codex");
+    fs::remove_file(&file).unwrap();
+    let rep = run(&mut store, &m.env);
+    assert!(rep.errors.is_empty(), "{:?}", rep.errors);
+    fs::write(&packed, &whole).unwrap();
+    run(&mut store, &m.env);
+    assert_eq!(sums(&store, "codex"), expected);
+}
+
 #[test]
 fn deleted_source_logs_stay_in_the_archive() {
     let m = machine();
