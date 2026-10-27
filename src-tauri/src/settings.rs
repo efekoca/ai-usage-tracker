@@ -9,7 +9,7 @@ const KEY: &str = "settings.v1";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WidgetItem {
-    /// `primary` (big number), `cost`, `limit_five_hour`, `limit_seven_day`, `tools`,
+    /// `primary` (big number), `cost`, `limit_five_hour`, `limit_seven_day`, `opencode`, `tools`,
     /// `week_cost`, `month_cost`, `week_tokens`, `updated`
     pub kind: String,
     pub enabled: bool,
@@ -21,6 +21,7 @@ fn default_items() -> Vec<WidgetItem> {
         ("cost", true),
         ("limit_five_hour", true),
         ("limit_seven_day", true),
+        ("opencode", true),
         ("tools", false),
         ("week_tokens", false),
         ("week_cost", false),
@@ -131,9 +132,12 @@ impl Default for WidgetSettings {
 
 impl WidgetSettings {
     pub fn normalize(&mut self) {
-        for d in default_items() {
+        // an item added in a later version takes its default place and state
+        let defaults = default_items();
+        for (n, d) in defaults.iter().enumerate() {
             if !self.items.iter().any(|i| i.kind == d.kind) {
-                self.items.push(WidgetItem { enabled: false, ..d });
+                let at = defaults[..n].iter().rev().find_map(|p| self.items.iter().position(|i| i.kind == p.kind)).map_or(0, |i| i + 1);
+                self.items.insert(at, d.clone());
             }
         }
         self.items.retain(|i| default_items().iter().any(|d| d.kind == i.kind));
@@ -219,6 +223,7 @@ pub struct TraySettings {
 #[serde(default)]
 pub struct TrayItem {
     pub kind: String,
+    /// For usage kinds: empty for every tool, `opencode` for OpenCode alone.
     pub provider: String,
     /// "five_hour" or "seven_day".
     pub window: String,
@@ -248,9 +253,11 @@ pub fn tray_catalog() -> Vec<TrayItem> {
             }
         }
     }
-    for kind in ["tokens", "cost", "sessions", "cache"] {
-        for period in PERIODS {
-            out.push(TrayItem { kind: kind.into(), period: period.into(), ..TrayItem::default() });
+    for provider in ["", "opencode"] {
+        for kind in ["tokens", "cost", "sessions", "cache"] {
+            for period in PERIODS {
+                out.push(TrayItem { kind: kind.into(), provider: provider.into(), period: period.into(), ..TrayItem::default() });
+            }
         }
     }
     out.push(TrayItem { kind: "scan".into(), ..TrayItem::default() });
@@ -327,7 +334,8 @@ pub struct PanelSettings {
     pub value: String,
 }
 
-/// `kind`: "limit" (one window), "provider" (both windows of a pool), "usage" (a period),
+/// `kind`: "limit" (one window), "provider" (both windows of a pool), "usage" (a period, of every
+/// tool or with `provider` "opencode" of OpenCode alone),
 /// "forecast", "scan" or "action" (`action`: "open", "widget", "rescan", "settings").
 /// `size`: "s" 1×1, "w" 2×1, "m" 2×2 or "l" 4×1 cells. `style`: "ring" or "bar" for limits.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -381,8 +389,10 @@ pub fn panel_catalog() -> Vec<PanelModule> {
             out.push(PanelModule { provider: provider.into(), pool: pool.into(), window: window.into(), ..m("forecast") });
         }
     }
-    for period in PERIODS {
-        out.push(PanelModule { period: period.into(), ..m("usage") });
+    for provider in ["", "opencode"] {
+        for period in PERIODS {
+            out.push(PanelModule { provider: provider.into(), period: period.into(), ..m("usage") });
+        }
     }
     out.push(m("scan"));
     for action in ["open", "widget", "rescan", "settings"] {
@@ -757,6 +767,17 @@ mod tests {
         assert_eq!(s.enabled_sources, [SourceId::ClaudeCode]);
         assert_eq!(s.known_sources, [SourceId::ClaudeCode]);
         assert_eq!(s.thresholds.len(), 1);
+    }
+
+    #[test]
+    fn the_opencode_widget_item_joins_after_the_limits() {
+        let store = Store::open_in_memory().unwrap();
+        let saved = r#"{"widget":{"items":[{"kind":"limit_seven_day","enabled":false},{"kind":"primary","enabled":true},{"kind":"cost","enabled":false},{"kind":"limit_five_hour","enabled":true},{"kind":"tools","enabled":true},{"kind":"week_tokens","enabled":false},{"kind":"week_cost","enabled":false},{"kind":"month_cost","enabled":false},{"kind":"updated","enabled":false}]}}"#;
+        store.set_setting(KEY, saved).unwrap();
+        let s = Settings::load(&store);
+        let kinds: Vec<_> = s.widget.items.iter().map(|i| (i.kind.as_str(), i.enabled)).collect();
+        assert_eq!(&kinds[..3], [("limit_seven_day", false), ("opencode", true), ("primary", true)], "the user's order is kept");
+        assert_eq!(kinds.len(), default_items().len());
     }
 
     #[test]

@@ -165,8 +165,9 @@
     background: transparent !important;
     overflow: hidden;
     height: auto;
-    user-select: none;
     -webkit-user-select: none;
+    user-select: none;
+    cursor: default;
   }
   .host {
     display: inline-block;

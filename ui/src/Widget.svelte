@@ -111,6 +111,8 @@
     background: transparent !important;
     overflow: hidden;
     height: auto;
+    -webkit-user-select: none;
+    user-select: none;
   }
   .host {
     display: inline-block;

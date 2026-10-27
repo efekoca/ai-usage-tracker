@@ -119,7 +119,7 @@
     const d: WidgetSettings = {
       visible: ws.visible, opacity: 0.85, size: 'm', scale: 1, x: ws.x, y: ws.y, anchor: 'bottom-right', auto_hide_fullscreen: true,
       layout: 'horizontal',
-      items: (['primary', 'cost', 'limit_five_hour', 'limit_seven_day', 'tools', 'week_tokens', 'week_cost', 'month_cost', 'updated'] as WidgetItemKind[]).map((k, i) => ({ kind: k, enabled: i < 4 })),
+      items: (['primary', 'cost', 'limit_five_hour', 'limit_seven_day', 'opencode', 'tools', 'week_tokens', 'week_cost', 'month_cost', 'updated'] as WidgetItemKind[]).map((k, i) => ({ kind: k, enabled: i < 5 })),
       providers: [], provider_order: ['anthropic', 'google', 'openai'], antigravity_pool: 'fullest', primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '',
       corner_radius: 14, border: true, shadow: false, show_labels: true, show_icons: false, show_reset_time: false, warn_at: 70, high_at: 90,
       always_on_top: true, lock_position: false, click_action: 'open_dashboard',

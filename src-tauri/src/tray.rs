@@ -12,7 +12,8 @@ use tauri::{AppHandle, Manager};
 use tracker_core::analytics::{self, LimitState, Period};
 use tracker_core::discovery::SourceId;
 use tracker_core::insights::ForecastKind;
-use tracker_core::model::Provider;
+use tracker_core::model::{Provider, Tool};
+use tracker_core::store::EventRow;
 
 const ID: &str = "main-tray";
 /// Reset times pass and readings age even when nothing new arrives.
@@ -176,8 +177,8 @@ fn current_limits(readings: &[Reading]) -> Vec<Current> {
     out
 }
 
-/// The shown tools' usage today, over 7 and over 30 days, read only when an item asks for it.
-pub(crate) fn usage(app: &AppHandle, s: &Settings) -> Option<[Usage; 3]> {
+/// The shown tools' usage today, over 7 and over 30 days, and OpenCode's alone while its source is on.
+pub(crate) fn usage(app: &AppHandle, s: &Settings) -> Option<([Usage; 3], Option<[Usage; 3]>)> {
     let state = app.state::<AppState>();
     let providers = crate::commands::enabled_providers(s);
     let opencode = s.enabled_sources.contains(&SourceId::OpenCode);
@@ -186,7 +187,9 @@ pub(crate) fn usage(app: &AppHandle, s: &Settings) -> Option<[Usage; 3]> {
     let now = chrono::Utc::now().timestamp_millis();
     let starts = [Period::Today, Period::Days7, Period::Month1].map(|p| analytics::period_range(p, &chrono::Local, now, None).from_ms);
     let mut out = [Usage::default(); 3];
+    let mut oc = [Usage::default(); 3];
     let mut sessions: [std::collections::HashSet<String>; 3] = Default::default();
+    let mut oc_sessions: [std::collections::HashSet<String>; 3] = Default::default();
     for e in store.events_between(starts[2], now + 1).ok()? {
         if !e.tool.provider().map_or(opencode, |p| providers.contains(&p)) {
             continue;
@@ -200,29 +203,34 @@ pub(crate) fn usage(app: &AppHandle, s: &Settings) -> Option<[Usage; 3]> {
             inference_geo: e.inference_geo.as_deref(),
             ts_ms: Some(e.ts_ms),
         });
-        for (i, u) in out.iter_mut().enumerate() {
-            if e.ts_ms < starts[i] {
-                continue;
-            }
-            u.tokens += e.tokens.total();
-            u.cost_usd += cost.as_ref().map_or(0.0, |c| c.total());
-            u.prompt += e.tokens.input + e.tokens.cache_read + e.tokens.cache_write;
-            u.cache_read += e.tokens.cache_read;
-            if let Some(id) = &e.session_id {
-                sessions[i].insert(format!("{}:{id}", e.tool.as_str()));
+        let c = cost.as_ref().map_or(0.0, |c| c.total());
+        for i in (0..3).filter(|&i| e.ts_ms >= starts[i]) {
+            add(&mut out[i], &mut sessions[i], &e, c);
+            if e.tool == Tool::OpenCode {
+                add(&mut oc[i], &mut oc_sessions[i], &e, c);
             }
         }
     }
-    for (u, ids) in out.iter_mut().zip(&sessions) {
+    for (u, ids) in out.iter_mut().zip(&sessions).chain(oc.iter_mut().zip(&oc_sessions)) {
         u.sessions = ids.len() as u64;
     }
-    Some(out)
+    Some((out, opencode.then_some(oc)))
+}
+
+fn add(u: &mut Usage, sessions: &mut std::collections::HashSet<String>, e: &EventRow, cost: f64) {
+    u.tokens += e.tokens.total();
+    u.cost_usd += cost;
+    u.prompt += e.tokens.input + e.tokens.cache_read + e.tokens.cache_write;
+    u.cache_read += e.tokens.cache_read;
+    if let Some(id) = &e.session_id {
+        sessions.insert(format!("{}:{id}", e.tool.as_str()));
+    }
 }
 
 pub(crate) fn data(app: &AppHandle, s: &Settings, cfg: &TraySettings, readings: Vec<Reading>) -> Data {
-    let usage = if needs_usage(cfg) { usage(app, s) } else { None };
+    let (usage, opencode) = if needs_usage(cfg) { usage(app, s).map_or((None, None), |(u, o)| (Some(u), o)) } else { (None, None) };
     let scan_ms = app.state::<AppState>().status.lock().unwrap().last_scan_ms;
-    Data { readings, usage, scan_ms }
+    Data { readings, usage, opencode, scan_ms }
 }
 
 pub(crate) fn format<'a>(s: &'a Settings, cfg: &'a TraySettings) -> Format<'a, chrono::Local> {

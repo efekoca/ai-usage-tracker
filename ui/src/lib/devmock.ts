@@ -33,7 +33,7 @@ const settings: Settings = {
   fx_rate: 1,
   widget: {
     visible: true, opacity: showcase ? 1 : 0.85, size: 'm', scale: 1, x: null, y: null, anchor: 'bottom-right', auto_hide_fullscreen: true, layout: 'horizontal',
-    items: (['primary', 'cost', 'limit_five_hour', 'limit_seven_day', 'tools', 'week_tokens', 'week_cost', 'month_cost', 'updated'] as const).map((k, i) => ({ kind: k, enabled: i < 4 })),
+    items: (['primary', 'cost', 'limit_five_hour', 'limit_seven_day', 'opencode', 'tools', 'week_tokens', 'week_cost', 'month_cost', 'updated'] as const).map((k, i) => ({ kind: k, enabled: i < 5 })),
     providers: [], provider_order: ['anthropic', 'google', 'openai'], antigravity_pool: 'fullest', primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '', corner_radius: 14,
     border: true, shadow: false, show_labels: true, show_icons: false, show_reset_time: false, warn_at: 70, high_at: 90, always_on_top: true, lock_position: false, click_action: 'open_dashboard',
     font_family: '', text_scale: 1, number_scale: 1, number_weight: 700, tabular_nums: true, hotkey: 'Ctrl+Alt+Shift+W',
@@ -487,10 +487,12 @@ function mockTrayPreview(tray: TraySettings) {
   const short: Record<string, string> = { anthropic: 'Cl', openai: 'Cx', gemini: 'Gm', '3p': 'AG' }
   const name = (it: TrayItem) => (it.provider === 'google' ? (it.pool === 'gemini' ? 'Antigravity Gemini' : tr ? 'Antigravity Claude ve GPT' : 'Antigravity Claude and GPT') : it.provider === 'anthropic' ? 'Claude' : 'Codex')
   const usage: Record<string, [string, string, number, number]> = { today: ['18,4 Mn', '$12,84', 4, 81], days7: ['412 Mn', '$286,10', 23, 84], month1: ['1,9 Mr', '$1.204', 96, 86] }
+  const ocUsage: Record<string, [string, string, number, number]> = { today: ['552 B', '$0,26', 1, 64], days7: ['2,9 Mn', '$1,43', 3, 71], month1: ['12 Mn', '$5,76', 9, 73] }
   const periods: Record<string, [string, string]> = { today: [tr ? 'Bugün' : 'Today', tr ? 'Bugün' : 'Today'], days7: [tr ? '7g' : '7d', tr ? '7 gün' : '7 days'], month1: [tr ? '30g' : '30d', tr ? '30 gün' : '30 days'] }
   const label = (it: TrayItem, cfg: TraySettings) => {
     if (cfg.label === 'none') return ''
     if (it.kind === 'scan') return tr ? 'Tarama ' : 'Scan '
+    if (it.period && it.provider === 'opencode') return cfg.label === 'short' ? `OC ${periods[it.period][0]} ` : `OpenCode ${periods[it.period][1].toLocaleLowerCase(tr ? 'tr' : 'en')} `
     if (it.period) return `${periods[it.period][cfg.label === 'short' ? 0 : 1]} `
     const w5 = it.window === 'five_hour'
     return cfg.label === 'name' ? `${name(it)} ${w5 ? (tr ? '5 sa' : '5h') : tr ? 'hafta' : 'week'} ` : `${short[it.provider === 'google' ? it.pool : it.provider]} ${w5 ? (tr ? '5s' : '5h') : tr ? 'H' : 'W'} `
@@ -498,7 +500,8 @@ function mockTrayPreview(tray: TraySettings) {
   const part = (it: TrayItem, cfg: TraySettings) => {
     if (it.kind === 'scan') return `${label(it, cfg)}${clock(Date.now() - 42000)}`
     if (it.kind !== 'limit' && it.kind !== 'forecast') {
-      const [tok, cost, sess, hit] = usage[it.period]
+      if (it.provider === 'opencode' && ocMissing) return ''
+      const [tok, cost, sess, hit] = (it.provider === 'opencode' ? ocUsage : usage)[it.period]
       const v = it.kind === 'tokens' ? tok : it.kind === 'cost' ? cost : it.kind === 'sessions' ? (tr ? `${sess} oturum` : `${sess} sessions`) : tr ? `önbellek ${pct(hit)}` : `cache ${pct(hit)}`
       return `${label(it, cfg)}${v}`
     }
@@ -533,7 +536,7 @@ function trayCatalog(): TrayItem[] {
     ...(['limit', 'forecast'] as const).flatMap((kind) =>
       [['anthropic', ''], ['openai', ''], ['google', 'gemini'], ['google', '3p']].flatMap(([provider, pool]) => ['five_hour', 'seven_day'].map((window) => ({ ...blank, kind, provider, pool, window }))),
     ),
-    ...(['tokens', 'cost', 'sessions', 'cache'] as const).flatMap((kind) => ['today', 'days7', 'month1'].map((period) => ({ ...blank, kind, period }))),
+    ...['', 'opencode'].flatMap((provider) => (['tokens', 'cost', 'sessions', 'cache'] as const).flatMap((kind) => ['today', 'days7', 'month1'].map((period) => ({ ...blank, kind, provider, period })))),
     { ...blank, kind: 'scan' as const },
   ]
 }
@@ -545,6 +548,7 @@ function mockPanelData() {
   return {
     limits: limits().map((l) => ({ provider: l.provider, limit_id: l.limit_id, window: l.window, used_pct: l.used_pct, state: l.state, resets_at: l.resets_at, forecast: l.forecast })),
     usage: [usage(18_400_000, 12.84, 4, 81), usage(412_000_000, 286.1, 23, 84), usage(1_900_000_000, 1204, 96, 86)],
+    opencode: ocMissing ? null : [usage(552_000, 0.26, 1, 64), usage(2_900_000, 1.43, 3, 71), usage(12_000_000, 5.76, 9, 73)],
     last_scan_ms: Date.now() - 42_000,
     scanning: mockScanning,
     widget_visible: settings.widget.visible,
@@ -606,7 +610,7 @@ export function installMock() {
           return null
         case 'get_widget_data': {
           const per = (tok: number, cost: number) => ({ tokens: tok, cost_usd: cost, has_unpriced: false, tools: [{ tool: 'claude_code', tokens: tok * 0.75, cost_usd: cost * 0.83 }, { tool: 'codex', tokens: tok * 0.15, cost_usd: cost * 0.12 }, { tool: 'antigravity', tokens: tok * 0.07, cost_usd: cost * 0.03 }, ...(ocMissing ? [] : [{ tool: 'opencode', tokens: tok * 0.03, cost_usd: cost * 0.02 }])] })
-          return { today: per(18_400_000, 12.84), days7: per(96_000_000, 71.3), month1: per(402_000_000, 288.1), limits: limits().map((l) => ({ provider: l.provider, limit_id: l.limit_id, window: l.window, used_pct: l.used_pct, state: l.state, accuracy: l.accuracy, resets_at: l.resets_at, observed_ms: l.observed_ms })), providers: ['anthropic', 'openai', 'google'], updated_ms: Date.now() - 60000 }
+          return { today: per(18_400_000, 12.84), days7: per(96_000_000, 71.3), month1: per(402_000_000, 288.1), limits: limits().map((l) => ({ provider: l.provider, limit_id: l.limit_id, window: l.window, used_pct: l.used_pct, state: l.state, accuracy: l.accuracy, resets_at: l.resets_at, observed_ms: l.observed_ms })), providers: ['anthropic', 'openai', 'google'], opencode: !ocMissing, updated_ms: Date.now() - 60000 }
         }
         case 'capture_status':
           return { claude_poll: settings.capture.claude_poll, claude: { binary: claudeMode === 'missing' ? null : 'C:/claude.exe', last_ok_ms: claudeMode ? null : Date.now() - 40000, last_error: claudeMode === 'nologin' ? 'claude_no_plan_limits' : claudeMode === 'missing' ? 'claude_not_found' : null }, claude_candidates_found: claudeMode !== 'missing', codex_poll: settings.capture.codex_poll, codex: { binary: codexMissing ? null : 'C:/codex.exe', last_ok_ms: codexMissing ? null : Date.now() - 120000, last_error: codexMissing ? 'codex_not_found' : codexOut ? 'codex_not_signed_in' : null }, codex_candidates_found: !codexMissing, antigravity_poll: settings.capture.antigravity_poll, antigravity: { binary: agyMissing ? null : 'C:/Users/you/AppData/Local/agy/bin/agy.exe', last_ok_ms: agyMissing ? null : Date.now() - 90000, last_error: agyMissing ? 'agy_not_found' : agyOut ? 'agy_not_signed_in' : null }, antigravity_candidates_found: !agyMissing, statusline: settings.capture.statusline, statusline_file: 'C:\\Users\\you\\.claude\\settings.json', statusline_chained: false, statusline_last_ms: Date.now() - 30000, otel: settings.capture.otel, otel_port: 43180, otel_listening: settings.capture.otel, otel_events: 42, otel_last_ms: Date.now() - 5000, otel_error: null, settings_file: 'C:\\Users\\you\\.claude\\settings.json' }

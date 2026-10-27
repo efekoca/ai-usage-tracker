@@ -16,8 +16,10 @@
   const on = (k: WidgetItemKind) => ws.items.some((i) => i.kind === k && i.enabled)
   const order = $derived(ws.items.filter((i) => i.enabled).map((i) => i.kind))
   const limitKinds: WidgetItemKind[] = ['limit_five_hour', 'limit_seven_day']
-  const statKinds = $derived(order.filter((k) => !limitKinds.includes(k)))
+  const showOpencode = $derived(on('opencode') && !!data?.opencode)
+  const statKinds = $derived(order.filter((k) => !limitKinds.includes(k) && k !== 'opencode'))
   const limitOrder = $derived(order.filter((k) => limitKinds.includes(k)))
+  const rowKinds = $derived(order.filter((k) => (k === limitOrder[0] && (on('limit_five_hour') || on('limit_seven_day'))) || (k === 'opencode' && showOpencode)))
 
   const period = $derived(data ? data[ws.primary_period] : null)
   const rankOf = (p: Provider) => {
@@ -67,6 +69,13 @@
   const money = (p: WidgetPeriod, usd: number) => (p.has_unpriced ? `≥ ${fmtMoney(usd)}` : fmtMoney(usd))
   const partial = (p: WidgetPeriod | null) => (p?.has_unpriced ? t('widget.unpriced') : undefined)
   const primaryValue = $derived(period ? (ws.primary_metric === 'tokens' ? fmtCompact(period.tokens) : money(period, period.cost_usd)) : '–')
+  const opencode = $derived.by(() => {
+    const u = period?.tools.find((x) => x.tool === 'opencode')
+    if (!period) return null
+    const tokens = fmtCompact(u?.tokens ?? 0)
+    const cost = money(period, u?.cost_usd ?? 0)
+    return ws.primary_metric === 'tokens' ? { main: tokens, rest: cost } : { main: cost, rest: `${tokens} ${lower(t('metric.tokens'))}` }
+  })
   const secondaryValue = $derived(period ? (ws.primary_metric === 'tokens' ? money(period, period.cost_usd) : fmtCompact(period.tokens) + ' ' + lower(t('metric.tokens'))) : '')
 </script>
 
@@ -103,6 +112,53 @@
     <span class="pn" title={short ? title : undefined}>{#if ws.show_icons}<BrandIcon provider={p} color={tintIcons ? colors?.[p] : null} always />{/if}{t(`provider.${p}`)} <span class="mode">{short || t(`widget.mode.${mode}`)}</span></span>
   {:else if ws.show_icons}
     <span class="pn"><BrandIcon provider={p} color={tintIcons ? colors?.[p] : null} label={title} always /></span>
+  {/if}
+{/snippet}
+
+{#snippet opencodeRow()}
+  {@const name = toolLabel('opencode')}
+  {#if opencode}
+    {#if ws.limit_style === 'ring'}
+      <div class="ring" role="img" aria-label="{name} {periodLabel}: {opencode.main}, {opencode.rest}">
+        <span class="mark">
+          <svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r={R} class="track" /></svg>
+          <BrandIcon provider="opencode" size={13} always />
+        </span>
+        <div class="rl">
+          {#if ws.show_labels}<span class="pn">{name} <span class="mode">{lower(periodLabel)}</span></span>{/if}
+          <span class="sub"><b class="num strong">{opencode.main}</b> · {opencode.rest}</span>
+        </div>
+      </div>
+    {:else if ws.limit_style === 'bar'}
+      <div class="barrow">
+        {#if ws.show_labels}
+          <span class="pn">{#if ws.show_icons}<BrandIcon provider="opencode" always />{/if}{name} <span class="mode">{lower(periodLabel)}</span></span>
+        {:else if ws.show_icons}
+          <span class="pn"><BrandIcon provider="opencode" label={name} always /></span>
+        {/if}
+        <div class="bh">
+          <span class="sub">{opencode.rest}</span>
+          <span class="pv num">{opencode.main}</span>
+        </div>
+      </div>
+    {:else}
+      <span class="textlimit">
+        {#if ws.show_labels}
+          <span class="pn">{#if ws.show_icons}<BrandIcon provider="opencode" always />{/if}{name}</span>
+        {:else if ws.show_icons}
+          <span class="pn"><BrandIcon provider="opencode" label={name} always /></span>
+        {/if}
+        <b class="num">{opencode.main}</b>
+      </span>
+    {/if}
+  {/if}
+{/snippet}
+
+{#snippet rows(kind: WidgetItemKind)}
+  {#if kind === 'opencode'}
+    {@render opencodeRow()}
+  {:else}
+    {#each entries as e (e.p + e.pool)}{@render providerLimits(e.p, e.pool, limitOrder)}{/each}
   {/if}
 {/snippet}
 
@@ -163,13 +219,13 @@
 >
   {#if !data}
     <span class="sub">…</span>
-  {:else if providers.length === 0}
+  {:else if providers.length === 0 && !showOpencode}
     <span class="sub">{t('widget.noSources')}</span>
   {:else if ws.layout === 'line'}
     {#each order as kind (kind)}
-      {#if kind === limitOrder[0]}
-        {#each entries as e (e.p + e.pool)}{@render providerLimits(e.p, e.pool, limitOrder)}{/each}
-      {:else if !limitKinds.includes(kind)}
+      {#if rowKinds.includes(kind)}
+        {@render rows(kind)}
+      {:else if !limitKinds.includes(kind) && kind !== 'opencode'}
         {@render stat(kind)}
       {/if}
     {/each}
@@ -179,9 +235,9 @@
         {#each statKinds as kind (kind)}{@render stat(kind)}{/each}
       </div>
     {/if}
-    {#if limitOrder.length && (on('limit_five_hour') || on('limit_seven_day'))}
+    {#if rowKinds.length}
       <div class="col limits" class:barstyle={ws.limit_style === 'bar'}>
-        {#each entries as e (e.p + e.pool)}{@render providerLimits(e.p, e.pool, limitOrder)}{/each}
+        {#each rowKinds as kind (kind)}{@render rows(kind)}{/each}
       </div>
     {/if}
   {/if}
@@ -197,6 +253,7 @@
     background: color-mix(in srgb, var(--surface) var(--alpha), transparent);
     color: var(--ink);
     font-family: var(--wfont, var(--font));
+    -webkit-user-select: none;
     user-select: none;
     box-sizing: border-box;
     white-space: nowrap;
@@ -326,6 +383,30 @@
     font-size: 10.5px;
     font-weight: var(--nw);
     fill: var(--ink);
+  }
+  .mark {
+    position: relative;
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: calc(34px * var(--ts));
+    height: calc(34px * var(--ts));
+    color: var(--ink-2);
+  }
+  .mark svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+  .mark :global(.brand) {
+    position: relative;
+    width: calc(13px * var(--ts));
+    height: calc(13px * var(--ts));
+  }
+  .strong {
+    color: var(--ink);
+    font-weight: var(--nw);
   }
   .rl {
     display: flex;

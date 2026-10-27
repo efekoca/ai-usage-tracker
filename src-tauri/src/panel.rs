@@ -152,6 +152,8 @@ pub struct PanelData {
     limits: Vec<PanelLimit>,
     /// Today, the last 7 and the last 30 days.
     usage: Option<[Usage; 3]>,
+    /// The same periods for OpenCode alone; `None` while its source is off.
+    opencode: Option<[Usage; 3]>,
     last_scan_ms: Option<i64>,
     scanning: bool,
     widget_visible: bool,
@@ -194,9 +196,11 @@ pub async fn panel_data(app: AppHandle) -> Result<PanelData, String> {
     };
     let mut order: Vec<Provider> = providers.into_iter().collect();
     order.sort_by_key(|p| p.as_str());
+    let (usage, opencode) = crate::tray::usage(&app, &s).map_or((None, None), |(u, o)| (Some(u), o));
     Ok(PanelData {
         limits,
-        usage: crate::tray::usage(&app, &s),
+        usage,
+        opencode,
         last_scan_ms,
         scanning,
         widget_visible: s.widget.visible,
