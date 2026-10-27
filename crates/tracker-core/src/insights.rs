@@ -878,26 +878,49 @@ pub enum ForecastKind {
 #[derive(Debug, Clone, Serialize)]
 pub struct Forecast {
     pub kind: ForecastKind,
-    /// Percentage points per hour: the window's average pace since it started.
+    /// Percentage points per hour: the window's average pace since it started (or since use
+    /// started again from zero inside it, see [`restarted`]).
     pub rate_per_hour: Option<f64>,
     /// When the window would reach 100 % (`Fills` only).
     pub fills_at_ms: Option<i64>,
     /// Where the window would stand at its reset (`Safe` / `Idle`).
     pub at_reset_pct: Option<f64>,
-    /// How long the window has been running (the basis of the pace).
+    /// How long the window has been running, or the use since it restarted (the basis of the pace).
     pub basis_minutes: i64,
+}
+
+/// A fall below what a reading delayed by its request explains.
+const FALL_PCT: f64 = 10.0;
+/// How old a reading may be: a request still running reports the limit as it was when it began.
+const STALE_MS: i64 = 10 * 60_000;
+
+/// When use started again from zero inside a window, if it did: the provider granted a reset
+/// without moving the window's end. It is the last reading before a fall that every later
+/// reading confirms, for longer than a delayed reading could explain. `reads` are (time, %) of
+/// one window, oldest first.
+pub fn restarted(reads: &[(i64, f64)]) -> Option<i64> {
+    let newest = reads.last()?.0;
+    let mut after = f64::MIN;
+    for j in (1..reads.len()).rev() {
+        after = after.max(reads[j].1);
+        if reads[j - 1].1 - after > FALL_PCT && newest - reads[j].0 >= STALE_MS {
+            return Some(reads[j - 1].0);
+        }
+    }
+    None
 }
 
 /// Linear forecast at the window's average pace so far. Every window starts at 0 % when it
 /// resets, so `current ÷ time since the window started` is a known average that includes idle
 /// hours (nights, breaks); a burst of recent work is not extrapolated as if it never stopped.
-/// Before a tenth of the window has passed the pace is not trusted.
-pub fn forecast(now_ms: i64, current: f64, resets_at_ms: i64, window_ms: i64) -> Forecast {
+/// Before a tenth of the window has passed the pace is not trusted. A reset the provider grants
+/// inside the window (`restarted_ms`, see [`restarted`]) starts the pace again from there.
+pub fn forecast(now_ms: i64, current: f64, resets_at_ms: i64, window_ms: i64, restarted_ms: Option<i64>) -> Forecast {
     let base = Forecast { kind: ForecastKind::Insufficient, rate_per_hour: None, fills_at_ms: None, at_reset_pct: None, basis_minutes: 0 };
     if window_ms <= 0 || !current.is_finite() {
         return base;
     }
-    let started = resets_at_ms.saturating_sub(window_ms);
+    let started = resets_at_ms.saturating_sub(window_ms).max(restarted_ms.unwrap_or(i64::MIN));
     let elapsed = now_ms.saturating_sub(started).clamp(0, window_ms);
     let left_ms = resets_at_ms.saturating_sub(now_ms).max(0);
     let current = current.clamp(0.0, 100.0);

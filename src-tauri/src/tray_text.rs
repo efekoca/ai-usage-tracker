@@ -176,8 +176,8 @@ impl<Tz: TimeZone> Format<'_, Tz> {
     fn value(&self, r: &Reading, style: &str) -> String {
         let remaining = self.remaining();
         let v = shown_value(r.used, remaining);
-        // "at least" used means "at most" left
-        let sign = if r.behind { if remaining { "≤" } else { "≥" } } else { "" };
+        // the last reading: use since then raises it, a reset the provider grants lowers it
+        let sign = if r.behind { "~" } else { "" };
         let warn = if self.warned(r) { "⚠︎" } else { "" };
         let pct = format!("{sign}{}", self.pct(&v.to_string()));
         match style {
@@ -388,7 +388,7 @@ mod tests {
         });
         let mut d = data();
         d.readings[0].behind = true;
-        assert_eq!(fmt(&c, true, &tz).title(&d), "[Claude 5 sa ≤%58 | Antigravity Gemini 5 sa %82]");
+        assert_eq!(fmt(&c, true, &tz).title(&d), "[Claude 5 sa ~%58 | Antigravity Gemini 5 sa %82]");
         assert_eq!(fmt(&c, true, &tz).title(&Data::default()), "", "no brackets around nothing");
     }
 

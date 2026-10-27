@@ -133,7 +133,7 @@
     {:else if m.size === 'w'}
       {#if m.style === 'bar'}
         <span class="txt grow">
-          <span class="row"><span class="lbl">{name}</span><b class="num val">{s.behind ? '≥' : ''}{s.text}</b></span>
+          <span class="row"><span class="lbl">{name}</span><b class="num val">{s.behind ? '~' : ''}{s.text}</b></span>
           {@render bar(s, m.provider)}
           <span class="sub" title={resetAt(one) || s.sub}>{short(m.window)}{resetLeft(one) ? ` · ↻ ${resetLeft(one)}` : s.value === null ? ` · ${s.why}` : ''}</span>
         </span>
@@ -141,7 +141,7 @@
         <Ring value={s.value} color={color(s.used, m.provider)} size={38} stroke={4}>{@render logo(13)}</Ring>
         <span class="txt">
           <span class="lbl">{name}</span>
-          <span class="row start"><b class="num val">{s.behind ? '≥' : ''}{s.text}</b><span class="unit">{short(m.window)}</span></span>
+          <span class="row start"><b class="num val">{s.behind ? '~' : ''}{s.text}</b><span class="unit">{short(m.window)}</span></span>
           <span class="sub" title={resetAt(one) || s.sub}>{resetLeft(one) ? `↻ ${resetLeft(one)}` : s.value === null ? s.why : ' '}</span>
         </span>
       {/if}
@@ -150,14 +150,14 @@
       <span class="head">{@render logo(14)}<span class="lbl">{name}</span></span>
       {#if m.style === 'bar'}
         <span class="big">
-          <b class="num hero">{s.behind ? '≥' : ''}{s.text}</b>
+          <b class="num hero">{s.behind ? '~' : ''}{s.text}</b>
           <span class="sub" title={s.sub}>{s.value === null ? s.why : s.sub} · {short(m.window)}</span>
           {@render bar(s, m.provider)}
         </span>
       {:else}
         <span class="center">
           <Ring value={s.value} color={color(s.used, m.provider)} size={70} stroke={6.5}>
-            <b class="num mid">{s.behind ? '≥' : ''}{s.text}</b>
+            <b class="num mid">{s.behind ? '~' : ''}{s.text}</b>
             <span class="tiny">{s.value === null ? '' : s.sub}</span>
           </Ring>
         </span>
@@ -189,7 +189,7 @@
           <span class="brow">
             <span class="tiny key">{short(r.w)}</span>
             {@render bar(r.s, m.provider)}
-            <b class="num tiny val">{r.s.behind ? '≥' : ''}{r.s.text}</b>
+            <b class="num tiny val">{r.s.behind ? '~' : ''}{r.s.text}</b>
             {#if m.size !== 'w'}<span class="tiny dim when fit" title={resetAt(r.l) || undefined}>{resetLeft(r.l) ? `↻ ${resetLeft(r.l)}` : r.s.why}</span>{/if}
           </span>
         {/each}

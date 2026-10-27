@@ -360,7 +360,8 @@ pub enum LimitState {
     Reset,
     /// No reset time known and the observation is older than one window.
     Stale,
-    /// Used after the reading, or the reading is over a day old: the real value is at least the reading.
+    /// Used after the reading, or the reading is over a day old. The real value is most likely
+    /// higher, but lower when the provider granted a reset in between.
     Behind,
 }
 
@@ -561,7 +562,10 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
         // project shares of a limit only make sense against a current reading
         let used = if state == LimitState::Fresh { s.used_pct } else { None };
         let forecast = match (state, reset_ms, dur_ms, s.used_pct) {
-            (LimitState::Fresh, Some(r), Some(d), Some(cur)) => Some(crate::insights::forecast(now_ms, cur, r, d)),
+            (LimitState::Fresh, Some(r), Some(d), Some(cur)) => {
+                let reads = store.pool_readings(s.provider, &s.limit_id, &s.window, account, r - d, now_ms)?;
+                Some(crate::insights::forecast(now_ms, cur, r, d, crate::insights::restarted(&reads)))
+            }
             _ => None,
         };
         let (usage, shares) = match start {

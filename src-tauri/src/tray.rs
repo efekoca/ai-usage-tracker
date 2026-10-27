@@ -281,8 +281,8 @@ fn tooltip(limits: &[Current], s: &Settings, update: Option<&str>) -> String {
         for (w, en, tr_) in [("five_hour", "5h", "5 sa"), ("seven_day", "week", "haftalık")] {
             let Some(c) = limits.iter().find(|c| c.provider == p && c.window == w) else { continue };
             let v = shown_value(c.used, remaining);
-            // "at least" used means "at most" left
-            let sign = if c.behind { if remaining { "≤" } else { "≥" } } else { "" };
+            // the last reading: use since then raises it, a reset the provider grants lowers it
+            let sign = if c.behind { "~" } else { "" };
             let pct = if tr { format!("{sign}%{v}") } else { format!("{sign}{v}%") };
             let left = if remaining { if tr { " kaldı" } else { " left" } } else { "" };
             parts.push(format!("{} {pct}{left}", if tr { tr_ } else { en }));
@@ -519,10 +519,10 @@ mod tests {
             Current { provider: Provider::Anthropic, window: "seven_day".into(), used: 43.0, behind: true },
             Current { provider: Provider::OpenAI, window: "five_hour".into(), used: 7.0, behind: false },
         ];
-        assert_eq!(tooltip(&l, &s, Some("0.3.0")), "AI Usage Tracker\nClaude · 5 sa %41 · haftalık ≥%43\nCodex · 5 sa %7\nGüncelleme hazır: v0.3.0");
+        assert_eq!(tooltip(&l, &s, Some("0.3.0")), "AI Usage Tracker\nClaude · 5 sa %41 · haftalık ~%43\nCodex · 5 sa %7\nGüncelleme hazır: v0.3.0");
         s.language = "en".into();
         s.limit_display = "remaining".into();
-        assert_eq!(tooltip(&l, &s, None), "AI Usage Tracker\nClaude · 5h 59% left · week ≤57% left\nCodex · 5h 93% left");
+        assert_eq!(tooltip(&l, &s, None), "AI Usage Tracker\nClaude · 5h 59% left · week ~57% left\nCodex · 5h 93% left");
         assert!(tooltip(&[], &s, None).ends_with("No current limit reading"));
     }
 }
