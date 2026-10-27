@@ -170,10 +170,15 @@ export function accountOf(v: { provider: Provider; account: string | null }): st
 /** The user's name for a Codex account, else its number in order of first use. */
 export function accountName(id: string | null): string {
   if (id === null) return t('accounts.unknown')
-  const own = app.settings?.account_names?.[id]
+  return nameAccount(id, app.accounts.flatMap((a) => (a.id === null ? [] : [a.id])), app.settings?.account_names)
+}
+
+/** `accountName` for windows without the account list: `ids` are the accounts in order of first use. */
+export function nameAccount(id: string, ids: string[], names: Record<string, string> | undefined, short = false): string {
+  const own = names?.[id]
   if (own) return own
-  const n = app.accounts.filter((a) => a.id !== null).findIndex((a) => a.id === id)
-  return t('accounts.numbered', { n: n < 0 ? '?' : n + 1 })
+  const n = ids.indexOf(id)
+  return t(short ? 'accounts.short' : 'accounts.numbered', { n: n < 0 ? '?' : n + 1 })
 }
 
 /** Series color per tool — follows the entity, never its rank. */

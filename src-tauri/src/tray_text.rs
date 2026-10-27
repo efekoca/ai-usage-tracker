@@ -21,6 +21,10 @@ pub struct Reading {
     pub fills_at_ms: Option<i64>,
     /// Where it would stand at the reset when it does not fill.
     pub at_reset: Option<f64>,
+    /// The Codex account it belongs to, while there are several.
+    pub account: Option<String>,
+    /// The provider's account in use.
+    pub active: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize)]
@@ -43,6 +47,8 @@ pub struct Data {
     /// OpenCode alone, for items whose `provider` is `opencode`; `None` while its source is off.
     pub opencode: Option<[Usage; 3]>,
     pub scan_ms: Option<i64>,
+    /// Each Codex account's short name, by digest, for items of an account.
+    pub accounts: std::collections::HashMap<String, String>,
 }
 
 pub fn needs_usage(cfg: &TraySettings) -> bool {
@@ -101,7 +107,7 @@ impl<Tz: TimeZone> Format<'_, Tz> {
             "scan" => self.clock(data.scan_ms? / 1000)?,
             _ => self.usage(item, data)?,
         };
-        let label = self.label(item);
+        let label = self.label(item, data);
         Some(if label.is_empty() { body } else { format!("{label} {body}") })
     }
 
@@ -127,9 +133,13 @@ impl<Tz: TimeZone> Format<'_, Tz> {
         })
     }
 
-    fn label(&self, item: &TrayItem) -> String {
+    fn label(&self, item: &TrayItem, data: &Data) -> String {
         let tr = self.tr;
         let short = self.cfg.label == "short";
+        let account = |who: String| match item.account.as_str() {
+            "" => who,
+            id => format!("{who} {}", data.accounts.get(id).map_or("?", String::as_str)),
+        };
         match (self.cfg.label.as_str(), item.kind.as_str()) {
             ("none", _) => String::new(),
             (_, "scan") => if tr { "Tarama" } else { "Scan" }.into(),
@@ -145,7 +155,7 @@ impl<Tz: TimeZone> Format<'_, Tz> {
                     (_, true) => "hafta",
                     (_, false) => "week",
                 };
-                format!("{} {window}", name(provider(&item.provider), &item.pool, tr))
+                format!("{} {window}", account(name(provider(&item.provider), &item.pool, tr)))
             }
             _ => {
                 let window = match (item.window.as_str(), tr) {
@@ -160,7 +170,7 @@ impl<Tz: TimeZone> Format<'_, Tz> {
                     (_, "gemini") => "Gm",
                     _ => "AG",
                 };
-                format!("{who} {window}")
+                format!("{} {window}", account(who.into()))
             }
         }
     }
@@ -311,12 +321,14 @@ fn name(p: Provider, pool: &str, tr: bool) -> String {
     }
 }
 
-/// The item's reading; Antigravity's other pool is any pool that is not Gemini.
+/// The item's reading; Antigravity's other pool is any pool that is not Gemini. An item without an
+/// account follows the account in use.
 fn find<'a>(readings: &'a [Reading], item: &TrayItem) -> Option<&'a Reading> {
     let p = Provider::parse(&item.provider)?;
     readings
         .iter()
         .filter(|r| r.provider == p && r.window == item.window)
+        .filter(|r| if item.account.is_empty() { r.active } else { r.account.as_deref() == Some(item.account.as_str()) })
         .filter(|r| p != Provider::Google || (item.pool == "gemini") == (r.pool == "gemini"))
         .max_by(|a, b| a.used.total_cmp(&b.used))
 }
@@ -334,7 +346,7 @@ mod tests {
     const NOW: i64 = 1_793_000_000_000; // a Monday, 07:33 UTC
 
     fn read(p: Provider, pool: &str, window: &str, used: f64, in_secs: i64) -> Reading {
-        Reading { provider: p, pool: pool.into(), window: window.into(), used, behind: false, resets_at: Some(NOW / 1000 + in_secs), fills_at_ms: None, at_reset: None }
+        Reading { provider: p, pool: pool.into(), window: window.into(), used, behind: false, resets_at: Some(NOW / 1000 + in_secs), fills_at_ms: None, at_reset: None, account: None, active: true }
     }
 
     fn data() -> Data {
@@ -411,6 +423,21 @@ mod tests {
         let c = cfg(vec![limit("google", "five_hour", "3p"), limit("openai", "seven_day", ""), limit("openai", "five_hour", "")], |_| {});
         assert_eq!(fmt(&c, false, &tz).title(&data()), "AG 5h 7% · Cx 5h 12%");
         assert_eq!(fmt(&cfg(vec![], |_| {}), false, &tz).title(&data()), "");
+    }
+
+    #[test]
+    fn another_codex_account_by_its_name_beside_the_account_in_use() {
+        let tz = FixedOffset::east_opt(0).unwrap();
+        let (work, home) = ("3f9c1a7e52b0d846", "b71e04c9a3d25f18");
+        let mut d = data();
+        d.readings[2].account = Some(home.into());
+        d.readings.push(Reading { used: 100.0, account: Some(work.into()), active: false, ..d.readings[2].clone() });
+        d.accounts = [(work.to_owned(), "İş".to_owned()), (home.to_owned(), "2".to_owned())].into();
+        let of = |id: &str| TrayItem { account: id.into(), ..limit("openai", "five_hour", "") };
+        let c = cfg(vec![of(""), of(work), of("0123456789abcdef")], |_| {});
+        assert_eq!(fmt(&c, false, &tz).title(&d), "Cx 5h 12% · Cx İş 5h ⚠︎100%", "an account without a reading shows nothing");
+        let c = cfg(vec![of(work)], |c| c.label = "name".into());
+        assert_eq!(fmt(&c, true, &tz).title(&d), "Codex İş 5 sa ⚠︎%100");
     }
 
     #[test]

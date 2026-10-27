@@ -55,6 +55,8 @@ pub struct WidgetSettings {
     pub provider_order: Vec<String>,
     /// Antigravity pool shown: "fullest" | "gemini" | "3p" | "all".
     pub antigravity_pool: String,
+    /// Other Codex accounts shown beside the one in use, by digest.
+    pub codex_accounts: Vec<String>,
     /// "today" | "days7" | "month1"
     pub primary_period: String,
     /// "tokens" | "cost"
@@ -104,6 +106,7 @@ impl Default for WidgetSettings {
             providers: Vec::new(),
             provider_order: PROVIDER_ORDER.iter().map(|p| p.to_string()).collect(),
             antigravity_pool: "fullest".into(),
+            codex_accounts: Vec::new(),
             primary_period: "today".into(),
             primary_metric: "tokens".into(),
             limit_style: "ring".into(),
@@ -161,6 +164,7 @@ impl WidgetSettings {
         if !["fullest", "gemini", "3p", "all"].contains(&self.antigravity_pool.as_str()) {
             self.antigravity_pool = "fullest".into();
         }
+        known_once(&mut self.codex_accounts, MAX_SHOWN_ACCOUNTS, |a| is_digest(a), |a, b| a == b);
         self.opacity = self.opacity.clamp(0.3, 1.0);
         self.scale = if self.scale.is_finite() { self.scale.clamp(0.6, 2.0) } else { 1.0 };
         self.corner_radius = self.corner_radius.clamp(0.0, 28.0);
@@ -185,6 +189,20 @@ impl WidgetSettings {
 
 /// The widget's order before it could be changed.
 const PROVIDER_ORDER: [&str; 3] = ["anthropic", "google", "openai"];
+
+const MAX_SHOWN_ACCOUNTS: usize = 8;
+
+/// A Codex account's id: 16 hex digits of its digest.
+fn is_digest(id: &str) -> bool {
+    id.len() == 16 && id.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// An account is kept only on a Codex limit; elsewhere it is cleared.
+fn keep_account(account: &mut String, provider: &str, limit_kind: bool) {
+    if !(provider == "openai" && limit_kind && is_digest(account)) {
+        account.clear();
+    }
+}
 
 /// Four keys, so it avoids combinations other programs or AltGr (Ctrl+Alt on many layouts) need.
 pub const DEFAULT_HOTKEY: &str = "Ctrl+Alt+Shift+W";
@@ -231,9 +249,12 @@ pub struct TrayItem {
     pub pool: String,
     /// "today", "days7" or "month1" for usage kinds.
     pub period: String,
+    /// A Codex limit of this account (its digest); empty for the account in use.
+    pub account: String,
 }
 
 impl TrayItem {
+    /// Its place in the catalog, which lists the account in use only.
     pub fn key(&self) -> (&str, &str, &str, &str, &str) {
         (&self.kind, &self.provider, &self.window, &self.pool, &self.period)
     }
@@ -306,7 +327,10 @@ fn known_once<T>(list: &mut Vec<T>, max: usize, known: impl Fn(&T) -> bool, same
 impl TraySettings {
     pub fn normalize(&mut self) {
         let catalog = tray_catalog();
-        known_once(&mut self.items, MAX_TRAY_ITEMS, |i| catalog.iter().any(|k| k.key() == i.key()), |a, b| a.key() == b.key());
+        for i in &mut self.items {
+            keep_account(&mut i.account, &i.provider, matches!(i.kind.as_str(), "limit" | "forecast"));
+        }
+        known_once(&mut self.items, MAX_TRAY_ITEMS, |i| catalog.iter().any(|k| k.key() == i.key()), |a, b| a == b);
         let pick = |v: &mut String, allowed: &[&str], fallback: &str| {
             if !allowed.contains(&v.as_str()) {
                 *v = fallback.into();
@@ -349,9 +373,12 @@ pub struct PanelModule {
     pub action: String,
     pub size: String,
     pub style: String,
+    /// A Codex limit of this account (its digest); empty for the account in use.
+    pub account: String,
 }
 
 impl PanelModule {
+    /// Its place in the catalog, which lists the account in use only.
     fn key(&self) -> (&str, &str, &str, &str, &str, &str) {
         (&self.kind, &self.provider, &self.pool, &self.window, &self.period, &self.action)
     }
@@ -426,7 +453,10 @@ impl PanelSettings {
             self.value = "app".into();
         }
         let catalog = panel_catalog();
-        known_once(&mut self.modules, MAX_PANEL_MODULES, |m| catalog.iter().any(|k| k.key() == m.key()), |a, b| a.key() == b.key());
+        for m in &mut self.modules {
+            keep_account(&mut m.account, &m.provider, matches!(m.kind.as_str(), "limit" | "provider" | "forecast"));
+        }
+        known_once(&mut self.modules, MAX_PANEL_MODULES, |m| catalog.iter().any(|k| k.key() == m.key()), |a, b| a.key() == b.key() && a.account == b.account);
         for m in &mut self.modules {
             let sizes = PanelModule::sizes(&m.kind);
             if !sizes.contains(&m.size.as_str()) {
@@ -632,7 +662,7 @@ impl Settings {
         }
         // the value is placed into CSS, so only a plain hex color is kept
         self.provider_colors.retain(|p, c| ["anthropic", "openai", "google"].contains(&p.as_str()) && is_hex_color(c));
-        self.account_names.retain(|id, _| id.len() == 16 && id.bytes().all(|b| b.is_ascii_hexdigit()));
+        self.account_names.retain(|id, _| is_digest(id));
         for name in self.account_names.values_mut() {
             *name = name.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(MAX_ACCOUNT_NAME).collect();
         }
@@ -678,6 +708,33 @@ mod tests {
         assert_eq!(s.account_names.get("3f9c1a7e52b0d846").map(String::as_str), Some("İş hesabı"));
         assert_eq!(s.account_names.get("0123456789abcdef").map(|n| n.chars().count()), Some(MAX_ACCOUNT_NAME));
         assert_eq!(s.account_names.len(), 2);
+    }
+
+    #[test]
+    fn another_account_is_kept_only_on_codex_limits() {
+        let mut s: Settings = serde_json::from_str(
+            r#"{
+                "widget": {"codex_accounts": ["3f9c1a7e52b0d846", "x", "3f9c1a7e52b0d846", "b71e04c9a3d25f18"]},
+                "tray": {"items": [
+                    {"kind": "limit", "provider": "openai", "window": "five_hour"},
+                    {"kind": "limit", "provider": "openai", "window": "five_hour", "account": "3f9c1a7e52b0d846"},
+                    {"kind": "forecast", "provider": "openai", "window": "seven_day", "account": "not-a-digest"},
+                    {"kind": "limit", "provider": "anthropic", "window": "five_hour", "account": "3f9c1a7e52b0d846"}
+                ]},
+                "panel": {"modules": [
+                    {"kind": "provider", "provider": "openai", "account": "3f9c1a7e52b0d846", "size": "m"},
+                    {"kind": "provider", "provider": "openai", "account": "3f9c1a7e52b0d846", "size": "w"},
+                    {"kind": "usage", "period": "today", "account": "3f9c1a7e52b0d846"}
+                ]}
+            }"#,
+        )
+        .unwrap();
+        s.normalize();
+        assert_eq!(s.widget.codex_accounts, ["3f9c1a7e52b0d846", "b71e04c9a3d25f18"]);
+        let accounts: Vec<&str> = s.tray.items.iter().map(|i| i.account.as_str()).collect();
+        assert_eq!(accounts, ["", "3f9c1a7e52b0d846", "", ""]);
+        let modules: Vec<(&str, &str)> = s.panel.modules.iter().map(|m| (m.kind.as_str(), m.account.as_str())).collect();
+        assert_eq!(modules, [("provider", "3f9c1a7e52b0d846"), ("usage", "")], "the same account's module once");
     }
 
     #[test]
