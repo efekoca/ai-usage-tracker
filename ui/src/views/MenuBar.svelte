@@ -2,7 +2,7 @@
   import { onDestroy, untrack } from 'svelte'
   import { app, latest, saveSettings } from '../lib/store.svelte'
   import { api, type PanelData, type PanelModule, type PanelSize, type Provider, type TrayItem, type TrayPreview, type TraySettings } from '../lib/api'
-  import { fmtClock, fmtPct, limitName, t, windowLabel } from '../lib/i18n.svelte'
+  import { fmtClock, fmtPct, limitName, t, toolLabel, windowLabel } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
   import Select from '../components/Select.svelte'
   import Toggle from '../components/Toggle.svelte'
@@ -92,7 +92,7 @@
     ...POOLS.map(([provider, pool]) => mk({ kind: 'provider', provider, pool, style: 'ring' })),
     ...POOLS.flatMap(([provider, pool]) => ['five_hour', 'seven_day'].map((window) => mk({ kind: 'limit', provider, pool, window, style: 'ring' }))),
     ...POOLS.flatMap(([provider, pool]) => ['five_hour', 'seven_day'].map((window) => mk({ kind: 'forecast', provider, pool, window }))),
-    ...['today', 'days7', 'month1'].map((period) => mk({ kind: 'usage', period })),
+    ...['', 'opencode'].flatMap((provider) => ['today', 'days7', 'month1'].map((period) => mk({ kind: 'usage', provider, period }))),
     mk({ kind: 'scan' }),
     ...['open', 'widget', 'rescan', 'settings'].map((action) => mk({ kind: 'action', action })),
   ]
@@ -117,7 +117,7 @@
       case 'forecast':
         return t('menubar.mod.forecast', { name: `${who} · ${windowLabel(m.window)}` })
       case 'usage':
-        return `${t('menubar.mod.usage')} · ${t(`widget.period.${m.period}`)}`
+        return `${m.provider === 'opencode' ? toolLabel('opencode') : t('menubar.mod.usage')} · ${t(`widget.period.${m.period}`)}`
       case 'scan':
         return t('panel.scan')
       default:
@@ -311,7 +311,7 @@
   // text next to the icon
   const textCatalog: TrayItem[] = [
     ...(['limit', 'forecast'] as const).flatMap((kind) => POOLS.flatMap(([provider, pool]) => ['five_hour', 'seven_day'].map((window) => ({ kind, provider, pool, window, period: '' })))),
-    ...(['tokens', 'cost', 'sessions', 'cache'] as const).flatMap((kind) => ['today', 'days7', 'month1'].map((period) => ({ kind, provider: '', pool: '', window: '', period }))),
+    ...['', 'opencode'].flatMap((provider) => (['tokens', 'cost', 'sessions', 'cache'] as const).flatMap((kind) => ['today', 'days7', 'month1'].map((period) => ({ kind, provider, pool: '', window: '', period })))),
     { kind: 'scan', provider: '', pool: '', window: '', period: '' },
   ]
   const itemKey = (it: TrayItem) => `${it.kind}:${it.provider}:${it.window}:${it.pool}:${it.period}`
@@ -320,7 +320,7 @@
     if (it.kind === 'limit') return lim
     if (it.kind === 'forecast') return t('menubar.item.forecast', { name: lim })
     if (it.kind === 'scan') return t('menubar.item.scan')
-    return `${t(`menubar.item.${it.kind}`)} · ${t(`widget.period.${it.period}`)}`
+    return `${it.provider === 'opencode' ? `${toolLabel('opencode')} · ` : ''}${t(`menubar.item.${it.kind}`)} · ${t(`widget.period.${it.period}`)}`
   }
   const addable = $derived(textCatalog.filter((it) => !tray.items.some((x) => itemKey(x) === itemKey(it))))
   function moveItem(i: number, d: -1 | 1) {
@@ -349,6 +349,8 @@
     <BrandIcon provider={m.provider as Provider} size={16} always />
   {:else if m.kind === 'forecast'}
     <Icon name="clock" size={16} />
+  {:else if m.kind === 'usage' && m.provider === 'opencode'}
+    <BrandIcon provider="opencode" size={16} always />
   {:else if m.kind === 'usage'}
     <Icon name="chart" size={16} />
   {:else if m.kind === 'scan'}
@@ -669,6 +671,8 @@
     flex-direction: column;
     align-items: flex-end;
     min-width: 0;
+    -webkit-user-select: none;
+    user-select: none;
     padding-bottom: 32px;
     border-radius: 16px;
     overflow: hidden;
@@ -949,6 +953,7 @@
     border-radius: 10px;
     cursor: grab;
     touch-action: none;
+    -webkit-user-select: none;
     user-select: none;
     transition: background var(--dur) var(--ease);
   }
@@ -1114,6 +1119,7 @@
   :global(html.dragging-tile),
   :global(html.dragging-tile *) {
     cursor: grabbing !important;
+    -webkit-user-select: none !important;
     user-select: none !important;
   }
   .controls {

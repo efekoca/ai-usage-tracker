@@ -267,6 +267,8 @@ pub struct WidgetData {
     month1: WidgetPeriod,
     limits: Vec<WidgetLimit>,
     providers: Vec<Provider>,
+    /// OpenCode's source is on and it was used in the last 30 days.
+    opencode: bool,
     updated_ms: i64,
 }
 
@@ -331,10 +333,12 @@ pub async fn get_widget_data(state: State<'_, AppState>) -> Res<WidgetData> {
     let shown = |t: Tool| t.provider().map_or(opencode, |p| providers.contains(&p));
     let mut provs: Vec<Provider> = providers.iter().copied().collect();
     provs.sort_by_key(|p| p.as_str());
+    let month1 = widget_period(&store, &book, Period::Month1, now, &shown)?;
     Ok(WidgetData {
         today: widget_period(&store, &book, Period::Today, now, &shown)?,
         days7: widget_period(&store, &book, Period::Days7, now, &shown)?,
-        month1: widget_period(&store, &book, Period::Month1, now, &shown)?,
+        opencode: month1.tools.iter().any(|t| t.tool == Tool::OpenCode && t.tokens > 0),
+        month1,
         limits,
         providers: provs,
         updated_ms: state.status.lock().unwrap().last_scan_ms.unwrap_or(now),
@@ -586,7 +590,7 @@ pub async fn tray_preview(app: AppHandle, tray: crate::settings::TraySettings) -
     let mut data = crate::tray::data(&app, &s, &tray, readings);
     // the catalog shows every kind's value
     if data.usage.is_none() {
-        data.usage = crate::tray::usage(&app, &s);
+        (data.usage, data.opencode) = crate::tray::usage(&app, &s).map_or((None, None), |(u, o)| (Some(u), o));
     }
     let f = crate::tray::format(&s, &tray);
     // catalog chips carry their own names

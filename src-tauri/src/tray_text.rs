@@ -40,6 +40,8 @@ pub const PERIODS: [&str; 3] = ["today", "days7", "month1"];
 pub struct Data {
     pub readings: Vec<Reading>,
     pub usage: Option<[Usage; 3]>,
+    /// OpenCode alone, for items whose `provider` is `opencode`; `None` while its source is off.
+    pub opencode: Option<[Usage; 3]>,
     pub scan_ms: Option<i64>,
 }
 
@@ -109,7 +111,8 @@ impl<Tz: TimeZone> Format<'_, Tz> {
 
     fn usage(&self, item: &TrayItem, data: &Data) -> Option<String> {
         let tr = self.tr;
-        let u = data.usage?[PERIODS.iter().position(|p| *p == item.period)?];
+        let set = if item.provider == "opencode" { data.opencode } else { data.usage };
+        let u = set?[PERIODS.iter().position(|p| *p == item.period)?];
         Some(match item.kind.as_str() {
             "tokens" => self.tokens(u.tokens),
             "cost" => self.money(u.cost_usd),
@@ -130,19 +133,11 @@ impl<Tz: TimeZone> Format<'_, Tz> {
         match (self.cfg.label.as_str(), item.kind.as_str()) {
             ("none", _) => String::new(),
             (_, "scan") => if tr { "Tarama" } else { "Scan" }.into(),
-            (_, "tokens" | "cost" | "sessions" | "cache") => match (item.period.as_str(), tr, short) {
-                ("today", true, _) => "Bugün",
-                ("today", false, _) => "Today",
-                ("days7", true, true) => "7g",
-                ("days7", true, false) => "7 gün",
-                ("days7", false, true) => "7d",
-                ("days7", false, false) => "7 days",
-                (_, true, true) => "30g",
-                (_, true, false) => "30 gün",
-                (_, false, true) => "30d",
-                (_, false, false) => "30 days",
+            (_, "tokens" | "cost" | "sessions" | "cache") if item.provider == "opencode" => {
+                let period = period_label(&item.period, tr, short);
+                if short { format!("OC {period}") } else { format!("OpenCode {}", period.to_lowercase()) }
             }
-            .into(),
+            (_, "tokens" | "cost" | "sessions" | "cache") => period_label(&item.period, tr, short).into(),
             ("name", _) => {
                 let window = match (item.window.as_str(), tr) {
                     ("five_hour", true) => "5 sa",
@@ -288,6 +283,21 @@ fn group(n: u64, sep: char) -> String {
     out
 }
 
+fn period_label(period: &str, tr: bool, short: bool) -> &'static str {
+    match (period, tr, short) {
+        ("today", true, _) => "Bugün",
+        ("today", false, _) => "Today",
+        ("days7", true, true) => "7g",
+        ("days7", true, false) => "7 gün",
+        ("days7", false, true) => "7d",
+        ("days7", false, false) => "7 days",
+        (_, true, true) => "30g",
+        (_, true, false) => "30 gün",
+        (_, false, true) => "30d",
+        (_, false, false) => "30 days",
+    }
+}
+
 fn provider(s: &str) -> Provider {
     Provider::parse(s).unwrap_or(Provider::Anthropic)
 }
@@ -335,7 +345,7 @@ mod tests {
             read(Provider::Google, "gemini", "five_hour", 18.0, 3600),
             read(Provider::Google, "3p", "five_hour", 7.0, 3600),
         ];
-        Data { readings, usage: None, scan_ms: None }
+        Data { readings, ..Data::default() }
     }
 
     fn limit(provider: &str, window: &str, pool: &str) -> TrayItem {
@@ -432,6 +442,21 @@ mod tests {
         let d = Data { usage: Some([Usage { tokens: 950, cost_usd: 30.0, ..Usage::default() }; 3]), ..Data::default() };
         assert_eq!(f.title(&d), "Bugün 950 · Bugün ₺1.245 · 7g 0 oturum", "no hit rate without prompts");
         assert_eq!(f.title(&Data::default()), "", "usage is shown only when it was read");
+    }
+
+    #[test]
+    fn opencode_usage_on_its_own() {
+        let tz = FixedOffset::east_opt(0).unwrap();
+        let oc = |kind: &str, period: &str| TrayItem { provider: "opencode".into(), ..usage(kind, period) };
+        let mut c = cfg(vec![usage("tokens", "today"), oc("tokens", "today"), oc("cost", "days7")], |_| {});
+        let all = Usage { tokens: 5_000_000, cost_usd: 9.0, ..Usage::default() };
+        let mine = Usage { tokens: 1_200_000, cost_usd: 2.5, ..Usage::default() };
+        let d = Data { usage: Some([all; 3]), opencode: Some([mine; 3]), ..Data::default() };
+        assert_eq!(fmt(&c, false, &tz).title(&d), "Today 5M · OC Today 1.2M · OC 7d $2.50");
+        c.label = "name".into();
+        assert_eq!(fmt(&c, true, &tz).title(&d), "Bugün 5 Mn · OpenCode bugün 1,2 Mn · OpenCode 7 gün $2,50");
+        let off = Data { opencode: None, ..d };
+        assert_eq!(fmt(&c, false, &tz).title(&off), "Today 5M", "nothing while OpenCode is off");
     }
 
     #[test]

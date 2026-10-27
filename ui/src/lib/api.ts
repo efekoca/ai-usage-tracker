@@ -30,6 +30,7 @@ export function providersOf(sources: Iterable<string>): Provider[] {
 /** A limit window (`kind` "limit") or today's usage (`today_tokens`, `today_cost`). */
 export interface TrayItem {
   kind: 'limit' | 'forecast' | 'tokens' | 'cost' | 'sessions' | 'cache' | 'scan'
+  /** For usage kinds: empty for every tool, "opencode" for OpenCode alone. */
   provider: string
   window: string
   /** Antigravity's pool ("gemini" | "3p"); empty elsewhere. */
@@ -97,6 +98,8 @@ export interface PanelData {
   limits: PanelLimit[]
   /** Today, the last 7 and the last 30 days. */
   usage: [PanelUsage, PanelUsage, PanelUsage] | null
+  /** The same periods for OpenCode alone; null while its source is off. */
+  opencode: [PanelUsage, PanelUsage, PanelUsage] | null
   last_scan_ms: number | null
   scanning: boolean
   widget_visible: boolean
@@ -240,6 +243,8 @@ export interface WidgetData {
   month1: WidgetPeriod
   limits: { provider: Provider; limit_id: string; window: string; used_pct: number | null; state: LimitState; accuracy: Accuracy; resets_at: number | null; observed_ms: number | null }[]
   providers: Provider[]
+  /** OpenCode's source is on and it was used in the last 30 days. */
+  opencode: boolean
   updated_ms: number
 }
 
@@ -250,7 +255,7 @@ export interface Threshold {
   cost_usd?: number | null
 }
 
-export type WidgetItemKind = 'primary' | 'cost' | 'limit_five_hour' | 'limit_seven_day' | 'tools' | 'week_tokens' | 'week_cost' | 'month_cost' | 'updated'
+export type WidgetItemKind = 'primary' | 'cost' | 'limit_five_hour' | 'limit_seven_day' | 'opencode' | 'tools' | 'week_tokens' | 'week_cost' | 'month_cost' | 'updated'
 
 export type AntigravityPool = 'fullest' | 'gemini' | '3p' | 'all'
 

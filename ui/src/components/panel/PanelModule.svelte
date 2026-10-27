@@ -16,7 +16,7 @@
 
 <script lang="ts">
   import type { Settings } from '../../lib/api'
-  import { fmtClock, fmtCompact, fmtMoney, fmtPct, fmtSpan, fmtTime, limitName, limitShown, t, windowLabel, type LimitMode } from '../../lib/i18n.svelte'
+  import { fmtClock, fmtCompact, fmtMoney, fmtPct, fmtSpan, fmtTime, limitName, limitShown, t, toolLabel, windowLabel, type LimitMode } from '../../lib/i18n.svelte'
   import BrandIcon from '../BrandIcon.svelte'
   import Icon from '../Icon.svelte'
   import Ring from './Ring.svelte'
@@ -79,7 +79,11 @@
 
   const one = $derived(m.kind === 'limit' || m.kind === 'forecast' ? findLimit(data, m.provider, m.pool, m.window) : null)
   const both = $derived(m.kind === 'provider' ? (['five_hour', 'seven_day'] as const).map((w) => ({ w, l: findLimit(data, m.provider, m.pool, w) })) : [])
-  const usage = $derived(m.kind === 'usage' && data?.usage ? data.usage[['today', 'days7', 'month1'].indexOf(m.period)] : null)
+  const oc = $derived(m.kind === 'usage' && m.provider === 'opencode')
+  const usage = $derived.by(() => {
+    const set = m.kind !== 'usage' ? null : oc ? data?.opencode : data?.usage
+    return set ? set[['today', 'days7', 'month1'].indexOf(m.period)] : null
+  })
   const hit = $derived(usage && usage.prompt > 0 ? (usage.cache_read / usage.prompt) * 100 : null)
 
   const actionIcon: Record<string, string> = { open: 'overview', widget: 'widget', rescan: 'refresh', settings: 'settings' }
@@ -208,22 +212,27 @@
   </div>
 {:else if m.kind === 'usage'}
   {@const period = t(`widget.period.${m.period}`)}
-  <div class="mod usage {m.size}" role="group" aria-label={period}>
+  {@const label = oc ? toolLabel('opencode') : period}
+  <div class="mod usage {m.size}" role="group" aria-label={oc ? `${label} · ${period}` : period}>
     {#if !usage}
-      <span class="txt"><span class="lbl">{period}</span><span class="sub">{t('panel.why.none')}</span></span>
+      <span class="txt"><span class="head">{#if oc}{@render logo(13)}{/if}<span class="lbl">{label}</span></span><span class="sub">{oc && !data?.opencode ? t('panel.why.off') : t('panel.why.none')}</span></span>
     {:else if m.size === 's'}
       <span class="stack">
         <b class="num">{fmtCompact(usage.tokens)}</b>
-        <span class="tiny">{t(`panel.period.${m.period}`)}</span>
+        <span class="tiny head">{#if oc}{@render logo(10)}{/if}{t(`panel.period.${m.period}`)}</span>
       </span>
     {:else if m.size === 'w'}
       <span class="txt grow">
-        <span class="lbl">{period}</span>
+        <span class="head">{#if oc}{@render logo(13)}{/if}<span class="lbl">{label}</span></span>
         <span class="row"><b class="num val">{fmtCompact(usage.tokens)}</b><span class="unit">{t('panel.tokens')}</span></span>
-        <span class="sub" title={t('panel.cost')}>{fmtMoney(usage.cost_usd, { compact: true })}</span>
+        <span class="sub" title={t('panel.cost')}>{oc ? `${t(`panel.period.${m.period}`)} · ` : ''}{fmtMoney(usage.cost_usd, { compact: true })}</span>
       </span>
     {:else}
-      <span class="head"><span class="lbl">{period}</span></span>
+      {#if oc}
+        <span class="txt"><span class="head">{@render logo(14)}<span class="lbl">{label}</span></span><span class="sub">{period}</span></span>
+      {:else}
+        <span class="head"><span class="lbl">{period}</span></span>
+      {/if}
       <span class="stats">
         <span><span class="tiny dim">{t('panel.tokens')}</span><b class="num">{fmtCompact(usage.tokens)}</b></span>
         <span title={t('panel.cost')}><span class="tiny dim">{t('panel.costShort')}</span><b class="num">{fmtMoney(usage.cost_usd, { compact: true })}</b></span>
@@ -441,6 +450,10 @@
   .limit.w {
     gap: 8px;
     padding: 9px 10px;
+  }
+  .usage.w {
+    padding: 0 13px;
+    line-height: 1.15;
   }
   .limit.w .lbl,
   .forecast.w .lbl {

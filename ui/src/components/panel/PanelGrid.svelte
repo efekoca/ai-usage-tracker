@@ -69,6 +69,8 @@
     grid-auto-rows: var(--cell);
     grid-auto-flow: row dense;
     gap: 8px;
+    -webkit-user-select: none;
+    user-select: none;
   }
   .cell {
     position: relative;
