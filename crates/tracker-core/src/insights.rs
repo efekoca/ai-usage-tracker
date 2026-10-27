@@ -892,7 +892,7 @@ pub struct Forecast {
 /// A fall below what a reading delayed by its request explains.
 const FALL_PCT: f64 = 10.0;
 /// How old a reading may be: a request still running reports the limit as it was when it began.
-const STALE_MS: i64 = 10 * 60_000;
+pub(crate) const STALE_MS: i64 = 10 * 60_000;
 
 /// When use started again from zero inside a window, if it did: the provider granted a reset
 /// without moving the window's end. It is the last reading before a fall that every later

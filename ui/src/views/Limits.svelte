@@ -167,7 +167,7 @@
           <b class="num">{fmtMoney(l.window_usage.cost_usd)}</b><span class="muted small">{t('metric.cost')}</span>
         </div>
       </div>
-      {#if l.projects.length}
+      {#if l.projects.length || l.unlogged_pct !== null}
         <div class="projects">
           <div class="row small muted" title={t('limits.byProject.help')}>
             {t('limits.byProject')}
@@ -181,6 +181,13 @@
                 <span class="num small">{p.estimated_pct !== null ? `≈ ${fmtPct(p.estimated_pct, 1)}` : `${fmtPct(p.share * 100)}`}</span>
               </li>
             {/each}
+            {#if l.unlogged_pct !== null && l.used_pct}
+              <li title={t('limits.unlogged.help')}>
+                <span class="pname muted">{t('limits.unlogged')}</span>
+                <span class="bar" aria-hidden="true"><span style="width:{(l.unlogged_pct / l.used_pct) * 100}%"></span></span>
+                <span class="num small">≈ {fmtPct(l.unlogged_pct, 1)}</span>
+              </li>
+            {/if}
           </ul>
         </div>
       {/if}

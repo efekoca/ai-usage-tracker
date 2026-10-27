@@ -328,7 +328,8 @@ mod tests {
             bin
         };
         let old = make(home.path().join(".local/bin"), "0.131.0-alpha.9");
-        let new = make(home.path().join(".codex/.sandbox-bin"), "0.164.0");
+        // above any real install, since the apps in /Applications are candidates too
+        let new = make(home.path().join(".codex/.sandbox-bin"), "999.0.0");
         assert_eq!(find_codex(&env, None), Some(new));
         assert_eq!(find_codex(&env, Some(&old)), Some(old.clone()), "a path the user set always wins");
     }

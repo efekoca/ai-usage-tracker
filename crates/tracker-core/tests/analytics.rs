@@ -210,14 +210,20 @@ fn limit_views_pick_the_newest_reading_and_split_it_across_projects() {
     assert_eq!(cx.state, LimitState::Fresh);
     assert_eq!(cx.window_start_ms, Some(now - 3 * 3_600_000));
     assert_eq!(cx.window_usage.events, 2);
+    // the first 20 % rose before any request from here; A and B share the next 20 % by cost
     assert_eq!(cx.projects.len(), 2);
-    assert!((cx.projects[0].share - 0.75).abs() < 1e-9);
-    assert!((cx.projects[0].estimated_pct.unwrap() - 30.0).abs() < 1e-9);
+    assert!(close(cx.projects[0].share, 0.375));
+    assert!(close(cx.projects[0].estimated_pct.unwrap(), 15.0));
+    assert!(close(cx.projects[1].estimated_pct.unwrap(), 5.0));
+    assert!(close(cx.unlogged_pct.unwrap(), 20.0));
     assert!(find(Provider::OpenAI, "thirty_day").is_none());
 
+    // without a reset time the window's start is unknown: shares of the local cost
     let cl = find(Provider::Anthropic, "five_hour").unwrap();
     assert_eq!((cl.used_pct, cl.source.as_str()), (Some(6.0), "claude_plan_history"));
     assert_eq!(cl.window_usage.events, 1);
+    assert!(close(cl.projects[0].estimated_pct.unwrap(), 6.0));
+    assert_eq!(cl.unlogged_pct, None);
 
     let wk = find(Provider::Anthropic, "seven_day").unwrap();
     assert_eq!(wk.state, LimitState::Reset);

@@ -387,7 +387,8 @@ pub struct ProjectShare {
     pub name: String,
     pub hidden: bool,
     pub totals: Totals,
-    /// Fraction (0–1) of the window's usage, by cost (by tokens if any request is unpriced).
+    /// Fraction (0–1) of the window's usage: of the reading's rises when there are any (see
+    /// [`split_rises`]), else of the local cost (by tokens if any request is unpriced).
     pub share: f64,
     /// `share × used_pct` — always an estimate.
     pub estimated_pct: Option<f64>,
@@ -421,6 +422,9 @@ pub struct LimitView {
     /// Pace of the current window from its recent readings (current readings only).
     pub forecast: Option<crate::insights::Forecast>,
     pub projects: Vec<ProjectShare>,
+    /// Estimated part of `used_pct` that rose while this computer sent no request (the web, a
+    /// phone, cloud tasks, another computer); current readings only, `None` when none did.
+    pub unlogged_pct: Option<f64>,
 }
 
 pub fn window_minutes(window: &str) -> Option<i64> {
@@ -561,16 +565,17 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
         });
         // project shares of a limit only make sense against a current reading
         let used = if state == LimitState::Fresh { s.used_pct } else { None };
+        let reads = match (state, reset_ms, dur_ms) {
+            (LimitState::Fresh, Some(r), Some(d)) => store.pool_readings(s.provider, &s.limit_id, &s.window, account, r - d, now_ms)?,
+            _ => Vec::new(),
+        };
         let forecast = match (state, reset_ms, dur_ms, s.used_pct) {
-            (LimitState::Fresh, Some(r), Some(d), Some(cur)) => {
-                let reads = store.pool_readings(s.provider, &s.limit_id, &s.window, account, r - d, now_ms)?;
-                Some(crate::insights::forecast(now_ms, cur, r, d, crate::insights::restarted(&reads)))
-            }
+            (LimitState::Fresh, Some(r), Some(d), Some(cur)) => Some(crate::insights::forecast(now_ms, cur, r, d, crate::insights::restarted(&reads))),
             _ => None,
         };
-        let (usage, shares) = match start {
-            Some(st) => window_usage(store, book, &projects, s.provider, &s.limit_id, &s.window, account, st, now_ms, used)?,
-            None => (Totals::default(), Vec::new()),
+        let (usage, shares, unlogged) = match start {
+            Some(st) => window_usage(store, book, &projects, s.provider, &s.limit_id, &s.window, account, st, now_ms, used, &reads)?,
+            None => (Totals::default(), Vec::new(), None),
         };
         out.push(LimitView {
             provider: s.provider,
@@ -592,6 +597,7 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
             usage_since,
             forecast,
             projects: shares,
+            unlogged_pct: unlogged,
         });
     }
 
@@ -602,7 +608,7 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
         }
         let Some(minutes) = window_minutes(&t.window) else { continue };
         let start = now_ms - minutes * 60_000;
-        let (usage, mut shares) = window_usage(store, book, &projects, t.provider, "", &t.window, None, start, now_ms, None)?;
+        let (usage, mut shares, _) = window_usage(store, book, &projects, t.provider, "", &t.window, None, start, now_ms, None, &[])?;
         let pct = match (t.cost_usd, t.tokens) {
             (Some(c), _) if c > 0.0 => Some(usage.cost_usd / c * 100.0),
             (_, Some(n)) if n > 0 => Some(usage.total_tokens as f64 / n as f64 * 100.0),
@@ -631,6 +637,7 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
             window_start_ms: Some(start),
             window_usage: usage,
             projects: shares,
+            unlogged_pct: None,
         });
     }
     // the account in use first, an unknown account last
@@ -664,20 +671,27 @@ fn window_usage(
     from_ms: i64,
     to_ms: i64,
     used_pct: Option<f64>,
-) -> Result<(Totals, Vec<ProjectShare>)> {
+    reads: &[(i64, f64)],
+) -> Result<(Totals, Vec<ProjectShare>, Option<f64>)> {
     let mut total = Totals::default();
     let mut per: HashMap<Option<i64>, Totals> = HashMap::new();
+    let mut requests = Vec::new();
     for e in store.events_between(from_ms, to_ms + 1)?.iter().filter(|e| counts_toward(provider, limit_id, window, e) && of_account(e, account)) {
         let c = cost_of(book, e);
         let sv = savings_of(book, e);
         total.add(e, c.as_ref(), sv);
         per.entry(e.project_id).or_default().add(e, c.as_ref(), sv);
+        requests.push((e.ts_ms, e.project_id, c.map_or(0.0, |c| c.total()), e.tokens.total()));
     }
     let by_cost = total.cost_usd > 0.0 && total.unpriced_events == 0;
+    let requests: Vec<_> = requests.into_iter().map(|(ts, pid, cost, tokens)| (ts, pid, if by_cost { cost } else { tokens as f64 })).collect();
+    let rises = used_pct.filter(|&u| u > 0.0).and_then(|_| split_rises(&requests, reads, from_ms));
     let mut shares: Vec<ProjectShare> = per
         .into_iter()
         .map(|(pid, t)| {
-            let share = if by_cost {
+            let share = if let Some((parts, _)) = &rises {
+                parts.get(&pid).copied().unwrap_or(0.0)
+            } else if by_cost {
                 t.cost_usd / total.cost_usd
             } else if total.total_tokens > 0 {
                 t.total_tokens as f64 / total.total_tokens as f64
@@ -696,7 +710,44 @@ fn window_usage(
         })
         .collect();
     shares.sort_by(|a, b| b.share.total_cmp(&a.share));
-    Ok((total, shares))
+    let unlogged = rises.map(|(_, rest)| rest).filter(|&rest| rest > 0.0).and_then(|rest| used_pct.map(|u| u * rest));
+    Ok((total, shares, unlogged))
+}
+
+/// Splits a window's use (fractions 0–1) through the rises between its readings (`reads`, oldest
+/// first). A rise goes, by weight, to the requests sent since the previous rise, and to those of the
+/// minutes before it, since a reading can show a request's use only that much later. A rise with no
+/// request in that span is use the local logs do not show (the web, a phone, cloud tasks, another
+/// computer): the second value. Counting starts again after a reset granted inside the window, and
+/// a dip between readings is ignored. `requests` are (time, project, weight), oldest first.
+fn split_rises(requests: &[(i64, Option<i64>, f64)], reads: &[(i64, f64)], from_ms: i64) -> Option<(HashMap<Option<i64>, f64>, f64)> {
+    let restart = crate::insights::restarted(reads);
+    let first = restart.map_or(0, |t| reads.partition_point(|r| r.0 <= t));
+    let mut since = restart.unwrap_or(from_ms);
+    let (mut level, mut unlogged) = (0.0, 0.0);
+    let mut per: HashMap<Option<i64>, f64> = HashMap::new();
+    for &(ts, pct) in &reads[first..] {
+        if pct <= level {
+            continue;
+        }
+        let rise = pct - level;
+        let lo = requests.partition_point(|r| r.0 <= since.min(ts - crate::insights::STALE_MS));
+        let span = &requests[lo..requests.partition_point(|r| r.0 <= ts)];
+        let weight: f64 = span.iter().map(|r| r.2).sum();
+        if span.is_empty() {
+            unlogged += rise;
+        }
+        for r in span {
+            let part = if weight > 0.0 { r.2 / weight } else { 1.0 / span.len() as f64 };
+            *per.entry(r.1).or_default() += rise * part;
+        }
+        (level, since) = (pct, ts);
+    }
+    if level <= 0.0 {
+        return None;
+    }
+    per.values_mut().for_each(|v| *v /= level);
+    Some((per, unlogged / level))
 }
 
 pub fn today<Tz: TimeZone>(tz: &Tz, now_ms: i64) -> Range {
@@ -753,5 +804,44 @@ mod tests {
         assert_eq!(window_minutes("-1m"), None);
         assert_eq!(window_minutes("0m"), None);
         assert_eq!(window_minutes(&format!("{}m", i64::MAX)), None);
+    }
+
+    const MIN: i64 = 60_000;
+
+    fn close(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-9
+    }
+
+    #[test]
+    fn rises_go_to_the_requests_behind_them_and_the_rest_outside_the_logs() {
+        // two projects bring 0 → 8 %; half an hour later 8 → 20 % with no request from here
+        let requests = [(10 * MIN, Some(1), 3.0), (12 * MIN, Some(2), 1.0)];
+        let reads = [(5 * MIN, 0.0), (15 * MIN, 8.0), (50 * MIN, 9.0), (55 * MIN, 20.0)];
+        let (parts, rest) = split_rises(&requests, &reads, 0).unwrap();
+        assert!(close(parts[&Some(1)], 0.3) && close(parts[&Some(2)], 0.1));
+        assert!(close(rest, 0.6));
+        assert!(split_rises(&requests, &[(5 * MIN, 0.0)], 0).is_none());
+        assert!(split_rises(&requests, &[], 0).is_none());
+    }
+
+    #[test]
+    fn a_rise_read_minutes_late_still_goes_to_its_request() {
+        let requests = [(10 * MIN, Some(1), 1.0)];
+        let (parts, rest) = split_rises(&requests, &[(11 * MIN, 4.0), (18 * MIN, 6.0)], 0).unwrap();
+        assert!(close(parts[&Some(1)], 1.0) && close(rest, 0.0));
+        let (parts, rest) = split_rises(&requests, &[(11 * MIN, 4.0), (30 * MIN, 6.0)], 0).unwrap();
+        assert!(close(parts[&Some(1)], 4.0 / 6.0) && close(rest, 2.0 / 6.0));
+    }
+
+    #[test]
+    fn a_dip_is_ignored_and_a_granted_reset_counts_again_from_zero() {
+        let requests = [(MIN, Some(1), 1.0), (20 * MIN, Some(2), 1.0)];
+        let (parts, _) = split_rises(&requests, &[(2 * MIN, 10.0), (15 * MIN, 9.0), (21 * MIN, 12.0)], 0).unwrap();
+        assert!(close(parts[&Some(1)], 10.0 / 12.0) && close(parts[&Some(2)], 2.0 / 12.0));
+
+        let requests = [(5 * MIN, Some(1), 1.0), (18 * MIN, Some(2), 1.0), (35 * MIN, Some(2), 1.0)];
+        let (parts, rest) = split_rises(&requests, &[(10 * MIN, 40.0), (20 * MIN, 2.0), (40 * MIN, 5.0)], 0).unwrap();
+        assert!(!parts.contains_key(&Some(1)), "its use was reset");
+        assert!(close(parts[&Some(2)], 1.0) && close(rest, 0.0));
     }
 }
