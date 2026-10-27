@@ -4,7 +4,7 @@
 //! and user-added paths. MSIX packages expose the same
 //! folder under two paths, so files are de-duplicated by their NTFS file id.
 
-use crate::sources::ParserKind;
+use crate::sources::{is_compressed, ParserKind};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -265,6 +265,21 @@ fn jsonl_under(dir: &Path) -> impl Iterator<Item = PathBuf> {
         .map(|e| e.into_path())
 }
 
+/// Codex rollouts, plain or compressed. While Codex compresses one, both copies exist and the
+/// plain one, which is complete, is read.
+fn rollouts_under(dir: &Path) -> Vec<PathBuf> {
+    let files: Vec<PathBuf> = WalkDir::new(dir)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.into_path())
+        .filter(|p| p.extension().is_some_and(|x| x == "jsonl") || (is_compressed(p) && p.with_extension("").extension().is_some_and(|x| x == "jsonl")))
+        .collect();
+    let plain: HashSet<PathBuf> = files.iter().filter(|p| !is_compressed(p)).cloned().collect();
+    files.into_iter().filter(|p| !is_compressed(p) || !plain.contains(&p.with_extension(""))).collect()
+}
+
 /// Lists every file to ingest for the enabled sources, de-duplicated by physical file identity.
 pub fn enumerate_files(env: &Env, extra: &ExtraPaths, enabled: &HashSet<SourceId>) -> Vec<DiscoveredFile> {
     let mut candidates: Vec<(PathBuf, ParserKind, SourceId)> = Vec::new();
@@ -303,7 +318,7 @@ pub fn enumerate_files(env: &Env, extra: &ExtraPaths, enabled: &HashSet<SourceId
     if enabled.contains(&SourceId::Codex) {
         for home in codex_homes(env, extra) {
             for sub in ["sessions", "archived_sessions"] {
-                for p in jsonl_under(&home.join(sub)) {
+                for p in rollouts_under(&home.join(sub)) {
                     candidates.push((p, ParserKind::CodexRollout, SourceId::Codex));
                 }
             }

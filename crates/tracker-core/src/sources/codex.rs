@@ -1,5 +1,6 @@
 //! Codex rollout parser (`<CODEX_HOME>/{sessions,archived_sessions}/YYYY/MM/DD/rollout-*.jsonl`).
-//! Used by both the Codex CLI and the Codex desktop app.
+//! Used by both the Codex CLI and the Codex desktop app. Newer Codex compresses a finished
+//! rollout into `rollout-*.jsonl.zst`; its lines and keys are the same.
 //!
 //! Format notes:
 //! * `session_meta.payload`: `id`, `cwd`, `originator`, `git.branch`, `source`, `parent_thread_id`,
@@ -135,7 +136,7 @@ impl State {
 pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<ParseOutput> {
     let mut st: State = serde_json::from_value(state.clone()).unwrap_or_default();
     if st.legacy.is_none() {
-        st.legacy = session_id_from_filename(path).or_else(|| path.file_stem().map(|s| s.to_string_lossy().into_owned()));
+        st.legacy = session_id_from_filename(path).or_else(|| rollout_stem(path).map(str::to_owned));
     }
     let replay = offset == 0 || st.replaying;
     let mut lines = JsonlReader::open(path, offset)?;
@@ -410,10 +411,16 @@ fn rate_limits(rl: &Value, ts_ms: i64, out: &mut Vec<LimitSnapshot>) {
     }
 }
 
+/// The file name without `.jsonl` or `.jsonl.zst`.
+fn rollout_stem(path: &Path) -> Option<&str> {
+    let name = path.file_name()?.to_str()?;
+    let name = name.strip_suffix(".zst").unwrap_or(name);
+    Some(name.strip_suffix(".jsonl").unwrap_or(name))
+}
+
 /// `rollout-2026-06-21T11-36-07-<uuid>.jsonl` → `<uuid>` (fallback before `session_meta` is seen).
 fn session_id_from_filename(path: &Path) -> Option<String> {
-    let stem = path.file_stem()?.to_str()?;
-    let rest = stem.strip_prefix("rollout-")?;
+    let rest = rollout_stem(path)?.strip_prefix("rollout-")?;
     // timestamp is 19 chars: YYYY-MM-DDTHH-MM-SS
     rest.get(20..).filter(|s| s.len() >= 32).map(str::to_owned)
 }
@@ -426,6 +433,8 @@ mod tests {
     fn session_id_is_taken_from_rollout_filename() {
         let p = Path::new("rollout-2026-06-21T11-36-07-019ee952-a384-76a3-bc8c-63d9865696b7.jsonl");
         assert_eq!(session_id_from_filename(p).as_deref(), Some("019ee952-a384-76a3-bc8c-63d9865696b7"));
+        let packed = Path::new("rollout-2026-06-21T11-36-07-019ee952-a384-76a3-bc8c-63d9865696b7.jsonl.zst");
+        assert_eq!(session_id_from_filename(packed).as_deref(), Some("019ee952-a384-76a3-bc8c-63d9865696b7"));
         assert_eq!(session_id_from_filename(Path::new("other.jsonl")), None);
     }
 }

@@ -4,7 +4,7 @@
 
 use crate::discovery::DiscoveredFile;
 use crate::capture::statusline;
-use crate::sources::{antigravity, claude_code, claude_plan, codex, cowork_audit, opencode, ParseOutput, ParserKind, MAX_WARNING_DETAILS};
+use crate::sources::{antigravity, claude_code, claude_plan, codex, cowork_audit, is_compressed, opencode, ParseOutput, ParserKind, MAX_WARNING_DETAILS};
 use crate::store::Store;
 use serde::Serialize;
 use std::time::UNIX_EPOCH;
@@ -103,10 +103,13 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<FileR
     }
     let key = f.path.to_string_lossy().into_owned();
     let cp = store.checkpoint(&key).map_err(|e| e.to_string())?;
+    // offsets count decompressed bytes, which the file size cannot be compared with; a changed
+    // compressed file is read again from its start, and its keys merge with what was stored
+    let packed = is_compressed(&f.path);
 
     let (mut offset, mut state) = match &cp {
         Some(c) if c.file_id == f.file_id && c.size == size && c.mtime_ms == mtime_ms => return Ok(None),
-        Some(c) if f.parser.is_incremental() && c.file_id == f.file_id && size >= c.offset => (c.offset, c.state.clone()),
+        Some(c) if f.parser.is_incremental() && !packed && c.file_id == f.file_id && size >= c.offset => (c.offset, c.state.clone()),
         Some(c) if f.parser.keeps_state() && c.file_id == f.file_id => (0, c.state.clone()),
         _ => (0, serde_json::Value::Null), // new, replaced, truncated or whole-document file
     };
@@ -114,7 +117,7 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<FileR
     let mut read = FileRead::default();
     loop {
         let mut out = parse(f, offset, &state).map_err(|e| e.to_string())?;
-        let more = f.parser.is_incremental() && out.round_full() && out.next_offset > offset && out.next_offset < size;
+        let more = f.parser.is_incremental() && out.round_full() && out.next_offset > offset && (packed || out.next_offset < size);
 
         let mut tx = store.transaction().map_err(|e| e.to_string())?;
         tx.drop_stale(&out.stale_events, &out.stale_tool_calls, &out.stale_limits).map_err(|e| e.to_string())?;
@@ -139,7 +142,12 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<FileR
             &f.file_id,
             f.parser.as_str(),
             // store the consumed size so a pending partial line or the next round is read next time
-            if out.next_offset < size && f.parser.is_incremental() { out.next_offset } else { size },
+            match (packed, more) {
+                (true, true) => 0,
+                (true, false) => size,
+                _ if out.next_offset < size && f.parser.is_incremental() => out.next_offset,
+                _ => size,
+            },
             mtime_ms,
             out.next_offset,
             &out.state,

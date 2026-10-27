@@ -11,7 +11,7 @@ pub mod opencode;
 use crate::model::{LimitSnapshot, ToolCall, UsageEvent};
 use serde_json::Value;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -122,10 +122,16 @@ impl ParseOutput {
     }
 }
 
+/// Codex compresses a finished rollout into `<name>.jsonl.zst`.
+pub fn is_compressed(path: &Path) -> bool {
+    path.extension().is_some_and(|x| x == "zst")
+}
+
 /// Reads a JSONL file from a byte offset one line at a time, so only one line is in memory.
 /// A trailing line without `\n` may still be being written, unless it is already whole JSON.
+/// A compressed file is read through its decompressed bytes, which the offsets count.
 pub struct JsonlReader {
-    r: BufReader<File>,
+    r: Box<dyn BufRead>,
     pos: u64,
     buf: Vec<u8>,
     error: Option<std::io::Error>,
@@ -135,8 +141,15 @@ pub struct JsonlReader {
 impl JsonlReader {
     pub fn open(path: &Path, offset: u64) -> std::io::Result<JsonlReader> {
         let mut f = File::open(path)?;
-        f.seek(SeekFrom::Start(offset))?;
-        Ok(JsonlReader { r: BufReader::with_capacity(1 << 16, f), pos: offset, buf: Vec::with_capacity(4096), error: None, done: false })
+        let r: Box<dyn BufRead> = if is_compressed(path) {
+            let mut r = BufReader::with_capacity(1 << 16, Unfinished(zstd::stream::read::Decoder::new(f)?));
+            std::io::copy(&mut r.by_ref().take(offset), &mut std::io::sink())?;
+            Box::new(r)
+        } else {
+            f.seek(SeekFrom::Start(offset))?;
+            Box::new(BufReader::with_capacity(1 << 16, f))
+        };
+        Ok(JsonlReader { r, pos: offset, buf: Vec::with_capacity(4096), error: None, done: false })
     }
 
     /// The offset up to which the file has been consumed, or the read error that stopped it.
@@ -211,6 +224,18 @@ impl Iterator for JsonlReader {
     }
 }
 
+/// A compressed file still being written ends inside a frame: what it holds so far is read.
+struct Unfinished<R>(R);
+
+impl<R: Read> Read for Unfinished<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self.0.read(buf) {
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => Ok(0),
+            r => r,
+        }
+    }
+}
+
 fn trim_ascii(mut s: &[u8]) -> &[u8] {
     while let [first, rest @ ..] = s {
         if first.is_ascii_whitespace() { s = rest } else { break }
@@ -259,5 +284,33 @@ mod tests {
         assert_eq!(lines[2].offset as usize, text.rfind("{\"b\"").unwrap());
         // the unfinished last line is left for the next read
         assert_eq!(r.finish().unwrap() as usize, text.rfind("{\"c\"").unwrap());
+    }
+
+    #[test]
+    fn a_compressed_file_is_read_by_its_decompressed_offsets() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("r.jsonl.zst");
+        // written in two frames, as a writer that appends compresses each part on its own
+        let mut packed = zstd::encode_all(&b"{\"a\":1}\n{\"b\":2}\n"[..], 3).unwrap();
+        packed.extend(zstd::encode_all(&b"{\"c\":3}\n"[..], 3).unwrap());
+        std::fs::write(&p, &packed).unwrap();
+        let mut r = JsonlReader::open(&p, 8).unwrap();
+        let lines: Vec<(u64, Option<Value>)> = r.by_ref().map(|l| (l.offset, l.value)).collect();
+        assert_eq!(lines, [(8, Some(serde_json::json!({"b": 2}))), (16, Some(serde_json::json!({"c": 3})))]);
+        assert_eq!(r.finish().unwrap(), 24);
+    }
+
+    #[test]
+    fn a_compressed_file_still_being_written_gives_what_it_holds() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("r.jsonl.zst");
+        let mut packed = zstd::encode_all(&b"{\"a\":1}\n"[..], 3).unwrap();
+        let second = zstd::encode_all(&b"{\"b\":2}\n"[..], 3).unwrap();
+        packed.extend_from_slice(&second[..second.len() / 2]);
+        std::fs::write(&p, &packed).unwrap();
+        let mut r = JsonlReader::open(&p, 0).unwrap();
+        let values: Vec<Option<Value>> = r.by_ref().map(|l| l.value).collect();
+        assert_eq!(values, [Some(serde_json::json!({"a": 1}))]);
+        assert_eq!(r.finish().unwrap(), 8);
     }
 }

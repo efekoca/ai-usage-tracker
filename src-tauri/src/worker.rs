@@ -219,7 +219,7 @@ fn crate_data_dir() -> PathBuf {
 }
 
 fn is_relevant(p: &Path) -> bool {
-    p.extension().is_some_and(|e| e == "jsonl" || e == "db" || e == "db-wal")
+    p.extension().is_some_and(|e| e == "jsonl" || e == "zst" || e == "db" || e == "db-wal")
         || p.file_name().is_some_and(|n| n == "plan-usage-history.json")
 }
 
