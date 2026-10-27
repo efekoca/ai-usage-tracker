@@ -1,5 +1,5 @@
-import { api, on, type AppInfo, type Filter, type LimitView, type Period, type Provider, type Report, type ScanStatus, type Settings, type UpdateStatus } from './api'
-import { i18n, resolveLang } from './i18n.svelte'
+import { api, on, type Account, type AppInfo, type Filter, type LimitView, type Period, type Provider, type Report, type ScanStatus, type Settings, type UpdateStatus } from './api'
+import { i18n, resolveLang, t } from './i18n.svelte'
 
 const VIEWS = ['overview', 'tips', 'daily', 'breakdown', 'sessions', 'cache', 'context', 'limits', 'projects', 'sources', 'widget', 'menubar', 'settings'] as const
 export type View = (typeof VIEWS)[number]
@@ -13,6 +13,8 @@ export const app = $state({
   filter: {} as Filter,
   report: null as Report | null,
   limits: [] as LimitView[],
+  /** Codex accounts; empty while there is only one, and then nothing about accounts shows. */
+  accounts: [] as Account[],
   loading: false,
   error: '',
   scan: null as ScanStatus | null,
@@ -56,10 +58,11 @@ export async function refresh() {
   const gen = ++refreshGen
   app.loading = true
   try {
-    const [report, limits] = await Promise.all([api.report($state.snapshot(app.period), $state.snapshot(app.filter)), api.limits()])
+    const [report, limits, accounts] = await Promise.all([api.report($state.snapshot(app.period), $state.snapshot(app.filter)), api.limits(), api.accounts()])
     if (gen !== refreshGen) return
     app.report = report
     app.limits = limits
+    app.accounts = accounts
     app.error = ''
   } catch (e) {
     if (gen === refreshGen) app.error = String(e)
@@ -157,6 +160,20 @@ export function setPeriod(p: Period) {
 export function setFilter(f: Filter) {
   app.filter = f
   refresh()
+}
+
+/** The account a provider's limit or series belongs to, named; empty while there is one account. */
+export function accountOf(v: { provider: Provider; account: string | null }): string {
+  return app.accounts.length && v.provider === 'openai' ? accountName(v.account) : ''
+}
+
+/** The user's name for a Codex account, else its number in order of first use. */
+export function accountName(id: string | null): string {
+  if (id === null) return t('accounts.unknown')
+  const own = app.settings?.account_names?.[id]
+  if (own) return own
+  const n = app.accounts.filter((a) => a.id !== null).findIndex((a) => a.id === id)
+  return t('accounts.numbered', { n: n < 0 ? '?' : n + 1 })
 }
 
 /** Series color per tool — follows the entity, never its rank. */

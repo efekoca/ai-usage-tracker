@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api, providersOf, type LimitHistoryView, type Provider, type WindowRecord } from '../lib/api'
-  import { app, latest, markTint } from '../lib/store.svelte'
+  import { accountName, accountOf, app, latest, markTint } from '../lib/store.svelte'
   import { fmtCompact, fmtDateTime, fmtDuration, fmtInt, fmtMoney, fmtPct, i18n, limitName, t, windowLabel } from '../lib/i18n.svelte'
   import Segmented from './Segmented.svelte'
   import Select from './Select.svelte'
@@ -13,6 +13,8 @@
 
   const DAY = 864e5
   let provider: 'all' | Provider = $state('all')
+  /** 'all', a Codex account id, or '' for windows of no known account */
+  let acct = $state('all')
   let win: 'five_hour' | 'seven_day' = $state('five_hour')
   let range = $state(28)
   let status: 'all' | 'full' | 'high' | 'complete' = $state('all')
@@ -40,11 +42,15 @@
 
   const enabled = $derived(providersOf(app.settings?.enabled_sources ?? []).filter((p) => (view?.advice ?? []).some((a) => a.provider === p) || (view?.history.series ?? []).some((x) => x.provider === p)))
   const providers = $derived(provider === 'all' ? enabled : [provider])
-  const series = $derived((view?.history.series ?? []).filter((s) => s.window === win && providers.includes(s.provider)))
-  type Row = WindowRecord & { provider: Provider; limit_id: string }
+  const series = $derived(
+    (view?.history.series ?? []).filter((s) => s.window === win && providers.includes(s.provider) && (acct === 'all' || (s.provider === 'openai' && (s.account ?? '') === acct))),
+  )
+  const accountsShown = $derived(new Set(series.map((s) => accountOf(s))).size > 1)
+  const nameOf = (s: { provider: Provider; limit_id: string; account: string | null }) => [limitName(s.provider, s.limit_id), accountOf(s)].filter(Boolean).join(' · ')
+  type Row = WindowRecord & { provider: Provider; limit_id: string; account: string | null }
   const startOf = (w: WindowRecord) => w.start_ms ?? w.first_ms
   const toFull = (w: WindowRecord) => (w.full_at_ms !== null && w.start_ms !== null ? w.full_at_ms - w.start_ms : null)
-  const all = $derived<Row[]>(series.flatMap((s) => s.windows.map((w) => ({ ...w, provider: s.provider, limit_id: s.limit_id }))))
+  const all = $derived<Row[]>(series.flatMap((s) => s.windows.map((w) => ({ ...w, provider: s.provider, limit_id: s.limit_id, account: s.account }))))
   const rows = $derived.by(() => {
     const kept = all.filter((w) =>
       status === 'full' ? w.full : status === 'high' ? w.peak_pct >= 80 : status === 'complete' ? w.complete && !w.in_progress : true,
@@ -53,8 +59,8 @@
     return kept.sort((a, b) => (sortDesc ? key(b) - key(a) : key(a) - key(b)))
   })
   const visible = $derived(showAll ? rows : rows.slice(0, 30))
-  const keyOf = (p: Provider, id: string, w: WindowRecord) => `${p}:${id}:${w.first_ms}:${w.resets_at_ms ?? 0}`
-  const kept = $derived(new Set(rows.map((w) => keyOf(w.provider, w.limit_id, w))))
+  const keyOf = (s: { provider: Provider; limit_id: string; account: string | null }, w: WindowRecord) => `${s.provider}:${s.account ?? ''}:${s.limit_id}:${w.first_ms}:${w.resets_at_ms ?? 0}`
+  const kept = $derived(new Set(rows.map((w) => keyOf(w, w))))
   // range >= 3650 means "all": start at the first window shown
   const chartFrom = $derived(
     range >= 3650 && all.length ? Math.min(...all.map(startOf)) : (view?.history.to_ms ?? Date.now()) - range * DAY,
@@ -107,6 +113,18 @@
       <Segmented label={t('history.filter.provider')} bind:value={provider} options={[{ value: 'all', label: t('history.filter.all') }, ...enabled.map((p) => ({ value: p, label: t(`provider.${p}`) }))]} />
     </div>
   {/if}
+  {#if app.accounts.length && enabled.includes('openai')}
+    <div class="f">
+      <span class="small muted">{t('accounts.filter')}</span>
+      <Select
+        label={t('accounts.filter')}
+        value={acct}
+        minWidth={170}
+        options={[{ value: 'all', label: t('history.filter.all') }, ...app.accounts.map((a) => ({ value: a.id ?? '', label: accountName(a.id) }))]}
+        onchange={(v) => (acct = v)}
+      />
+    </div>
+  {/if}
   <div class="f">
     <span class="small muted">{t('history.filter.window')}</span>
     <Segmented label={t('history.filter.window')} bind:value={win} options={[{ value: 'five_hour', label: windowLabel('five_hour') }, { value: 'seven_day', label: windowLabel('seven_day') }]} />
@@ -144,10 +162,10 @@
 
   {#if series.some((s) => s.capacity)}
     <section class="card capacity">
-      {#each series.filter((s) => s.capacity) as s (s.provider + s.limit_id)}
+      {#each series.filter((s) => s.capacity) as s (s.provider + (s.account ?? '') + s.limit_id)}
         {@const c = s.capacity!}
         <div class="cap" title={t('history.stat.capacityHelp')}>
-          <div class="small muted">{t('history.stat.capacity', { p: limitName(s.provider, s.limit_id) })} · {windowLabel(s.window)}</div>
+          <div class="small muted">{t('history.stat.capacity', { p: nameOf(s) })} · {windowLabel(s.window)}</div>
           <div class="capv">≈ {fmtMoney(c.median_usd)} <AccuracyBadge kind="estimated" compact /></div>
           <div class="subtle small">{t('history.stat.capacitySub', { n: c.windows, min: fmtMoney(c.min_usd), max: fmtMoney(c.max_usd) })}</div>
         </div>
@@ -167,16 +185,16 @@
       {#if series.length === 0}
         <p class="muted empty">{t('history.empty')}</p>
       {/if}
-      {#each series as s (s.provider + s.limit_id)}
-        {@const shownW = s.windows.filter((w) => kept.has(keyOf(s.provider, s.limit_id, w)))}
+      {#each series as s (s.provider + (s.account ?? '') + s.limit_id)}
+        {@const shownW = s.windows.filter((w) => kept.has(keyOf(s, w)))}
         <div class="chart">
-          {#if series.length > 1}<h3 class="brandname"><BrandIcon provider={s.provider} color={markTint(s.provider)} />{limitName(s.provider, s.limit_id)}</h3>{/if}
+          {#if series.length > 1}<h3 class="brandname"><BrandIcon provider={s.provider} color={markTint(s.provider)} />{nameOf(s)}</h3>{/if}
           <WindowHistory
             windows={shownW}
             fromMs={chartFrom}
             toMs={view.history.to_ms}
             height={190}
-            ariaLabel="{limitName(s.provider, s.limit_id)} · {windowLabel(win)}"
+            ariaLabel="{nameOf(s)} · {windowLabel(win)}"
           />
         </div>
       {/each}
@@ -203,7 +221,7 @@
       <table>
         <thead>
           <tr>
-            {#if providers.length > 1}<th scope="col">{t('history.col.provider')}</th>{/if}
+            {#if providers.length > 1 || accountsShown}<th scope="col">{t('history.col.provider')}</th>{/if}
             <th scope="col"><button class="sort" onclick={() => sortBy('start')}>{t('history.col.start')}{sortKey === 'start' ? (sortDesc ? ' ↓' : ' ↑') : ''}</button></th>
             <th scope="col">{t('history.col.end')}</th>
             <th scope="col" class="num"><button class="sort" onclick={() => sortBy('peak')}>{t('history.col.peak')}{sortKey === 'peak' ? (sortDesc ? ' ↓' : ' ↑') : ''}</button></th>
@@ -215,10 +233,10 @@
           </tr>
         </thead>
         <tbody>
-          {#each visible as w (keyOf(w.provider, w.limit_id, w))}
+          {#each visible as w (keyOf(w, w))}
             {@const st = stateOf(w)}
             <tr>
-              {#if providers.length > 1}<td><span class="brandname"><BrandIcon provider={w.provider} size={13} color={markTint(w.provider)} />{limitName(w.provider, w.limit_id)}</span></td>{/if}
+              {#if providers.length > 1 || accountsShown}<td><span class="brandname"><BrandIcon provider={w.provider} size={13} color={markTint(w.provider)} />{nameOf(w)}</span></td>{/if}
               <td>{fmtDateTime(startOf(w))}</td>
               <td>
                 {fmtDateTime(w.end_ms ?? w.resets_at_ms ?? w.last_ms)}

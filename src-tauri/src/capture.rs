@@ -746,7 +746,14 @@ fn store_limits(state: &AppState, epoch: u64, snaps: &[tracker_core::model::Limi
     let mut store = Store::open(&state.db_path).map_err(|e| e.to_string())?;
     let mut tx = store.transaction().map_err(|e| e.to_string())?;
     tx.insert_limits(snaps).map_err(|e| e.to_string())?;
-    tx.commit().map_err(|e| e.to_string())
+    tx.commit().map_err(|e| e.to_string())?;
+    // a Codex read may name the signed-in account, which settles whose windows are whose
+    if snaps.iter().any(|s| s.tool == tracker_core::model::Tool::Codex)
+        && let Err(e) = tracker_core::accounts::resolve(&mut store)
+    {
+        log::warn!("codex accounts not resolved: {e}");
+    }
+    Ok(())
 }
 
 /// A telemetry install whose settings could not take a token: the receiver stays off, since

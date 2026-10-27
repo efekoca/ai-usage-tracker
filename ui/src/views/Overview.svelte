@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, saveSettings, toolColor } from '../lib/store.svelte'
+  import { accountOf, app, saveSettings, toolColor } from '../lib/store.svelte'
   import type { Accuracy } from '../lib/api'
   import { fmtCompact, fmtDate, fmtHour, fmtMoney, fmtPct, limitName, t, toolLabel, weekdayNames } from '../lib/i18n.svelte'
   import StatTile from '../components/StatTile.svelte'
@@ -20,7 +20,7 @@
   const values = $derived((r?.daily ?? []).map((d) => (metric === 'tokens' ? d.by_tool : d.cost_by_tool)))
   const fmt = $derived(metric === 'tokens' ? fmtCompact : (v: number) => fmtMoney(v, { compact: true }))
   const headline = $derived(
-    app.limits.filter((l) => l.window === 'five_hour' || l.window === 'seven_day' || l.source === 'user_threshold'),
+    app.limits.filter((l) => l.active && (l.window === 'five_hour' || l.window === 'seven_day' || l.source === 'user_threshold')),
   )
   // the by-tool card joins the column that leaves the smaller difference at the bottom
   let hComposition = $state(0)
@@ -151,7 +151,7 @@
             {#each headline as l (l.provider + l.limit_id + l.window)}
               <LimitMeter
                 compact
-                title="{limitName(l.provider, l.limit_id)} · {t(`limits.window.${l.window}`)}"
+                title={[limitName(l.provider, l.limit_id), accountOf(l), t(`limits.window.${l.window}`)].filter(Boolean).join(' · ')}
                 brand={l.provider}
                 window={l.window}
                 used={l.used_pct}

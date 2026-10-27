@@ -85,7 +85,7 @@
   const providers = $derived(
     providersOf((r?.by_tool ?? []).map((g) => g.key)),
   )
-  const currentLimits = $derived(limits.filter((l) => l.window === 'five_hour' || l.window === 'seven_day'))
+  const currentLimits = $derived(limits.filter((l) => l.active && (l.window === 'five_hour' || l.window === 'seven_day')))
 </script>
 
 <main class="page">

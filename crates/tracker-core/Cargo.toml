@@ -11,6 +11,7 @@ log = "0.4.34"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["preserve_order"] }
+sha2 = "0.10.9"
 tempfile = "3.27.0"
 thiserror = "2.0.21"
 tiny_http = "0.12.0"

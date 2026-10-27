@@ -124,6 +124,19 @@ export interface Filter {
   clients?: string[]
   models?: string[]
   projects?: number[]
+  /** Codex account ids; '' stands for requests no evidence ties to an account. */
+  accounts?: string[]
+}
+
+/** A Codex account. The list is empty while the archive holds at most one. */
+export interface Account {
+  provider: Provider
+  /** Digest of the account id; `null` for requests no evidence ties to an account. */
+  id: string | null
+  first_ms: number
+  last_ms: number
+  requests: number
+  active: boolean
 }
 
 export interface Tokens {
@@ -212,6 +225,10 @@ export interface ProjectShare {
 
 export interface LimitView {
   provider: Provider
+  /** Codex account, only while the archive holds more than one (`null` there: an unknown account). */
+  account: string | null
+  /** The provider's account in use; other accounts' views show only on the Limits page. */
+  active: boolean
   limit_id: string
   window: string
   window_minutes: number | null
@@ -366,6 +383,8 @@ export interface Settings {
   provider_colors: Partial<Record<Provider, string>>
   tint_icons: boolean
   show_icons: boolean
+  /** Codex account id → the name the user gave it. */
+  account_names: Record<string, string>
 }
 
 export interface SourceInfo {
@@ -666,6 +685,8 @@ export interface WindowRecord {
 }
 export interface WindowSeries {
   provider: Provider
+  account: string | null
+  active: boolean
   limit_id: string
   window: string
   window_minutes: number
@@ -751,6 +772,7 @@ export const api = {
   parserWarnings: () => invoke<ParserWarning[]>('parser_warnings'),
   report: (period: Period, filter?: Filter) => invoke<Report>('get_report', { period, filter }),
   limits: () => invoke<LimitView[]>('get_limits'),
+  accounts: () => invoke<Account[]>('get_accounts'),
   sessions: (period: Period, filter?: Filter) => invoke<Sessions>('get_sessions', { period, filter }),
   compareModels: (period: Period, filter?: Filter) => invoke<ModelCompare>('compare_models', { period, filter }),
   contextStats: (period: Period, filter?: Filter) => invoke<ContextStats>('context_stats', { period, filter }),

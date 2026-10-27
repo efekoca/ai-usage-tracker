@@ -4,9 +4,10 @@
 //! Protocol (JSONL over stdio, `"jsonrpc"` omitted): `initialize` → `initialized` notification →
 //! `account/rateLimits/read`, whose result holds `rateLimits` and `rateLimitsByLimitId` with
 //! `primary`/`secondary` `{usedPercent, windowDurationMins, resetsAt (epoch s)}` and `planType`.
+//! Codex ≥ 0.163 also names the signed-in `accountId`; only its digest is kept.
 
 use crate::discovery::{codex_homes, Env, ExtraPaths};
-use crate::model::{window_name, Accuracy, LimitSnapshot, Provider, Tool};
+use crate::model::{account_digest, window_name, Accuracy, LimitSnapshot, Provider, Tool};
 use crate::sources::{f64_at, i64_at, str_at};
 use serde_json::{json, Value};
 use std::io::Write;
@@ -37,10 +38,11 @@ pub fn candidates(env: &Env, configured: Option<&Path>) -> Vec<PathBuf> {
     }
     #[cfg(target_os = "macos")]
     {
-        // the Codex desktop app bundles the CLI
-        let bundled = "Codex.app/Contents/Resources/codex";
-        v.push(Path::new("/Applications").join(bundled));
-        v.extend(env.home.iter().map(|h| h.join("Applications").join(bundled)));
+        // the Codex desktop app bundles the CLI, and so does the ChatGPT app that hosts Codex
+        for bundled in ["Codex.app/Contents/Resources/codex", "ChatGPT.app/Contents/Resources/codex-cli/bin/codex"] {
+            v.push(Path::new("/Applications").join(bundled));
+            v.extend(env.home.iter().map(|h| h.join("Applications").join(bundled)));
+        }
     }
     for root in super::npm_roots(env) {
         v.push(root.join("@openai/codex/vendor").join(CODEX_TARGET).join("codex").join(&codex));
@@ -61,12 +63,76 @@ const CODEX_TARGET: &str = if cfg!(windows) {
     "x86_64-unknown-linux-musl"
 };
 
+/// The CLI the user set, else the newest one installed: an app's bundled copy can lag behind
+/// another install, and only a recent Codex names the signed-in account.
 pub fn find_codex(env: &Env, configured: Option<&Path>) -> Option<PathBuf> {
-    candidates(env, configured).into_iter().find(|p| p.is_file())
+    if let Some(c) = configured.filter(|c| c.is_file()) {
+        return Some(c.to_owned());
+    }
+    let found: Vec<PathBuf> = candidates(env, None).into_iter().filter(|p| p.is_file()).collect();
+    // the first of the newest, so the usual order still decides between equal versions
+    let newest = found.iter().filter_map(|p| version(p)).max();
+    found.iter().find(|p| newest.is_none() || version(p) == newest).cloned()
+}
+
+type Version = (u64, u64, u64);
+/// A file by path, size and change time.
+type FileKey = (PathBuf, u64, Option<std::time::SystemTime>);
+
+/// `codex --version` → `codex-cli 0.164.0-alpha.11.1`. Remembered per file, so a poll does not
+/// start every install again.
+fn version(bin: &Path) -> Option<Version> {
+    use std::collections::HashMap;
+    use std::sync::{LazyLock, Mutex};
+    static SEEN: LazyLock<Mutex<HashMap<FileKey, Option<Version>>>> = LazyLock::new(Default::default);
+    let meta = std::fs::metadata(bin).ok()?;
+    let key = (bin.to_owned(), meta.len(), meta.modified().ok());
+    if let Some(v) = SEEN.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        return *v;
+    }
+    let v = run_version(bin).as_deref().and_then(parse_version);
+    SEEN.lock().unwrap_or_else(|e| e.into_inner()).insert(key, v);
+    v
+}
+
+fn parse_version(out: &str) -> Option<Version> {
+    let word = out.split_whitespace().find(|w| w.starts_with(|c: char| c.is_ascii_digit()))?;
+    let mut parts = word.split(|c: char| !c.is_ascii_digit()).map(|p| p.parse::<u64>().ok());
+    Some((parts.next()??, parts.next()??, parts.next().flatten().unwrap_or(0)))
+}
+
+fn run_version(bin: &Path) -> Option<String> {
+    let mut cmd = Command::new(bin);
+    cmd.arg("--version").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    super::set_child_path(&mut cmd, bin);
+    let mut child = cmd.spawn().ok()?;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+    let mut out = String::new();
+    std::io::Read::read_to_string(&mut child.stdout.take()?, &mut out).ok()?;
+    Some(out)
 }
 
 pub fn parse_result(result: &Value, now_ms: i64) -> Vec<LimitSnapshot> {
     let mut snaps = Vec::new();
+    let account = str_at(result, "accountId").filter(|a| !a.is_empty()).map(account_digest);
     let buckets: Vec<(Option<&str>, &Value)> = match result.get("rateLimitsByLimitId").and_then(Value::as_object) {
         Some(m) if !m.is_empty() => m.iter().map(|(k, b)| (Some(k.as_str()), b)).collect(),
         _ => result.get("rateLimits").map(|b| (None, b)).into_iter().collect(),
@@ -82,7 +148,7 @@ pub fn parse_result(result: &Value, now_ms: i64) -> Vec<LimitSnapshot> {
                 ts_ms: now_ms,
                 provider: Provider::OpenAI,
                 tool: Tool::Codex,
-                account: None,
+                account: account.clone(),
                 limit_id: limit_id.clone(),
                 window,
                 used_pct: f64_at(w, "usedPercent"),
@@ -171,6 +237,15 @@ mod tests {
         assert_eq!((s[0].window.as_str(), s[0].used_pct, s[0].resets_at), ("five_hour", Some(12.0), Some(1790973694)));
         assert_eq!(s[1].window, "seven_day");
         assert!(s.iter().all(|x| x.plan.as_deref() == Some("plus") && x.accuracy == Accuracy::Captured && x.ts_ms == 5));
+        assert!(s.iter().all(|x| x.account.is_none()), "Codex before 0.163 names no account");
+    }
+
+    #[test]
+    fn the_signed_in_account_is_kept_only_as_a_digest() {
+        let r = json!({"accountId": "acc-123", "rateLimits": {"primary": {"usedPercent": 3, "windowDurationMins": 10080, "resetsAt": 1791386558}}});
+        let s = parse_result(&r, 1);
+        assert_eq!(s[0].account.as_deref(), Some(account_digest("acc-123").as_str()));
+        assert!(!s[0].account.as_deref().unwrap().contains("acc-123"));
     }
 
     #[test]
@@ -229,6 +304,33 @@ mod tests {
         )
         .unwrap();
         assert_eq!(query(&bin, Duration::from_secs(5), 0), Err(NOT_SIGNED_IN.to_owned()), "an expired sign-in");
+    }
+
+    #[test]
+    fn versions_are_read_from_the_cli_banner() {
+        assert_eq!(parse_version("codex-cli 0.164.0-alpha.11.1\n"), Some((0, 164, 0)));
+        assert_eq!(parse_version("codex-cli 0.131.0"), Some((0, 131, 0)));
+        assert_eq!(parse_version("codex 1.2"), Some((1, 2, 0)));
+        assert_eq!(parse_version("codex"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_newest_installed_codex_is_used() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = tempfile::tempdir().unwrap();
+        let env = Env { home: Some(home.path().to_owned()), ..Default::default() };
+        let make = |dir: PathBuf, v: &str| {
+            std::fs::create_dir_all(&dir).unwrap();
+            let bin = dir.join("codex");
+            std::fs::write(&bin, format!("#!/bin/sh\necho 'codex-cli {v}'\n")).unwrap();
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+            bin
+        };
+        let old = make(home.path().join(".local/bin"), "0.131.0-alpha.9");
+        let new = make(home.path().join(".codex/.sandbox-bin"), "0.164.0");
+        assert_eq!(find_codex(&env, None), Some(new));
+        assert_eq!(find_codex(&env, Some(&old)), Some(old.clone()), "a path the user set always wins");
     }
 
     #[test]

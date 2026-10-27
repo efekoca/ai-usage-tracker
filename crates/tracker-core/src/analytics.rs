@@ -90,6 +90,10 @@ pub struct Filter {
     pub models: Vec<String>,
     #[serde(default)]
     pub projects: Vec<i64>,
+    /// Codex accounts by [`crate::accounts::Account::id`]; an empty string stands for requests
+    /// no evidence ties to an account. Other tools have no accounts and never match.
+    #[serde(default)]
+    pub accounts: Vec<String>,
 }
 
 impl Filter {
@@ -98,6 +102,7 @@ impl Filter {
             && (self.clients.is_empty() || e.client.as_ref().is_some_and(|c| self.clients.contains(c)))
             && (self.models.is_empty() || self.models.contains(&e.model))
             && (self.projects.is_empty() || e.project_id.is_some_and(|p| self.projects.contains(&p)))
+            && (self.accounts.is_empty() || (e.tool == Tool::Codex && self.accounts.contains(&e.account.clone().unwrap_or_default())))
     }
 }
 
@@ -390,6 +395,12 @@ pub struct ProjectShare {
 #[derive(Debug, Clone, Serialize)]
 pub struct LimitView {
     pub provider: Provider,
+    /// Codex account the view belongs to, when the archive holds more than one (see
+    /// [`crate::accounts::accounts`]); `None` there for an account no evidence names.
+    pub account: Option<String>,
+    /// The provider's account in use: the one its newest reading belongs to. Always true for a
+    /// provider without accounts. Views of other accounts show only on the Limits page.
+    pub active: bool,
     pub limit_id: String,
     pub window: String,
     pub window_minutes: Option<i64>,
@@ -447,13 +458,24 @@ pub(crate) fn counts_toward(provider: Provider, limit_id: &str, window: &str, e:
     provider_tools(provider).contains(&e.tool) && pool && family.is_none_or(|f| model.contains(f))
 }
 
+/// Another account's limits stay on the Limits page this long after its last reading: by then
+/// every window it had has reset.
+pub const OTHER_ACCOUNT_MS: i64 = 14 * 86_400_000;
+
 pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[Threshold]) -> Result<Vec<LimitView>> {
-    // newest reading per (provider, limit_id, window) across all sources: Claude's desktop
-    // history, Cowork and Claude Code readings describe the same account-wide pool
-    let mut newest: BTreeMap<(String, String, String), LimitSnapshot> = BTreeMap::new();
-    let mut known_reset: HashMap<(String, String, String), i64> = HashMap::new();
-    for s in store.latest_limits()? {
-        let k = (s.provider.as_str().to_owned(), s.limit_id.clone(), s.window.clone());
+    // Codex readings are told apart by account only when the archive holds more than one
+    let several = !crate::accounts::accounts(store)?.is_empty();
+    // newest reading per (provider, account, limit_id, window) across all sources: Claude's
+    // desktop history, Cowork and Claude Code readings describe the same account-wide pool
+    type Key = (String, Option<String>, String, String);
+    let mut newest: BTreeMap<Key, LimitSnapshot> = BTreeMap::new();
+    let mut known_reset: HashMap<Key, i64> = HashMap::new();
+    for (s, owner) in store.latest_owned_limits()? {
+        let owner = owner.filter(|_| several && s.tool == Tool::Codex);
+        if owner.as_deref() == Some(crate::accounts::NAMELESS) {
+            continue;
+        }
+        let k = (s.provider.as_str().to_owned(), owner, s.limit_id.clone(), s.window.clone());
         if let Some(r) = s.resets_at {
             let e = known_reset.entry(k.clone()).or_insert(r);
             *e = (*e).max(r);
@@ -475,27 +497,40 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
             s.resets_at = Some(r);
         }
     }
-    // drop windows that belong to a plan the user no longer has (e.g. a monthly window on an old plan)
-    let mut current_plan: HashMap<Provider, (i64, String)> = HashMap::new();
-    for s in newest.values() {
+    // each provider's account in use is the one read last
+    let mut active: HashMap<Provider, (i64, Option<String>)> = HashMap::new();
+    for ((_, owner, _, _), s) in &newest {
+        let e = active.entry(s.provider).or_insert((s.ts_ms, owner.clone()));
+        if s.ts_ms > e.0 {
+            *e = (s.ts_ms, owner.clone());
+        }
+    }
+    // drop windows that belong to a plan the account no longer has (e.g. a monthly window on an old plan)
+    let mut current_plan: HashMap<(Provider, Option<String>), (i64, String)> = HashMap::new();
+    for ((_, owner, _, _), s) in &newest {
         if let Some(plan) = &s.plan {
-            let e = current_plan.entry(s.provider).or_insert((s.ts_ms, plan.clone()));
+            let e = current_plan.entry((s.provider, owner.clone())).or_insert((s.ts_ms, plan.clone()));
             if s.ts_ms > e.0 {
                 *e = (s.ts_ms, plan.clone());
             }
         }
     }
-    let snaps: Vec<LimitSnapshot> = newest
-        .into_values()
-        .filter(|s| match (&s.plan, current_plan.get(&s.provider)) {
+    let snaps: Vec<(Option<String>, LimitSnapshot)> = newest
+        .into_iter()
+        .filter(|((_, owner, _, _), s)| match (&s.plan, current_plan.get(&(s.provider, owner.clone()))) {
             (Some(p), Some((_, cur))) => p == cur,
             _ => true,
         })
+        .map(|((_, owner, _, _), s)| (owner, s))
         .collect();
 
     let projects: HashMap<i64, ProjectRow> = store.projects()?.into_iter().map(|p| (p.id, p)).collect();
     let mut out = Vec::new();
-    for s in &snaps {
+    for (owner, s) in &snaps {
+        let is_active = active.get(&s.provider).is_none_or(|(_, a)| a == owner);
+        // another account's view counts only that account's requests; a provider without
+        // accounts counts all of its own
+        let account = (several && s.tool == Tool::Codex).then_some(owner.as_deref());
         let minutes = window_minutes(&s.window);
         let dur_ms = minutes.map(|m| m * 60_000);
         let reset_ms = s.resets_at_ms();
@@ -504,11 +539,14 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
             (None, Some(d)) if now_ms.saturating_sub(s.ts_ms) > d => LimitState::Stale,
             _ => LimitState::Fresh,
         };
+        if !is_active && (now_ms - s.ts_ms > OTHER_ACCOUNT_MS || (owner.is_none() && matches!(state, LimitState::Reset | LimitState::Stale))) {
+            continue;
+        }
         let mut usage_since = Totals::default();
         if state == LimitState::Fresh {
             let age = now_ms.saturating_sub(s.ts_ms);
             if age >= BEHIND_GRACE_MS {
-                for e in store.events_between(s.ts_ms + 1, now_ms + 1)?.iter().filter(|e| counts_toward(s.provider, &s.limit_id, &s.window, e)) {
+                for e in store.events_between(s.ts_ms + 1, now_ms + 1)?.iter().filter(|e| counts_toward(s.provider, &s.limit_id, &s.window, e) && of_account(e, account)) {
                     usage_since.add(e, cost_of(book, e).as_ref(), savings_of(book, e));
                 }
             }
@@ -527,11 +565,13 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
             _ => None,
         };
         let (usage, shares) = match start {
-            Some(st) => window_usage(store, book, &projects, s.provider, &s.limit_id, &s.window, st, now_ms, used)?,
+            Some(st) => window_usage(store, book, &projects, s.provider, &s.limit_id, &s.window, account, st, now_ms, used)?,
             None => (Totals::default(), Vec::new()),
         };
         out.push(LimitView {
             provider: s.provider,
+            account: account.flatten().map(str::to_owned),
+            active: is_active,
             limit_id: s.limit_id.clone(),
             window: s.window.clone(),
             window_minutes: minutes,
@@ -558,7 +598,7 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
         }
         let Some(minutes) = window_minutes(&t.window) else { continue };
         let start = now_ms - minutes * 60_000;
-        let (usage, mut shares) = window_usage(store, book, &projects, t.provider, "", &t.window, start, now_ms, None)?;
+        let (usage, mut shares) = window_usage(store, book, &projects, t.provider, "", &t.window, None, start, now_ms, None)?;
         let pct = match (t.cost_usd, t.tokens) {
             (Some(c), _) if c > 0.0 => Some(usage.cost_usd / c * 100.0),
             (_, Some(n)) if n > 0 => Some(usage.total_tokens as f64 / n as f64 * 100.0),
@@ -569,6 +609,8 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
         }
         out.push(LimitView {
             provider: t.provider,
+            account: None,
+            active: true,
             limit_id: String::new(),
             window: t.window.clone(),
             window_minutes: Some(minutes),
@@ -587,14 +629,23 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
             projects: shares,
         });
     }
+    // the account in use first, an unknown account last
     out.sort_by(|a, b| {
-        (a.provider.as_str(), a.window_minutes.unwrap_or(i64::MAX), &a.limit_id).cmp(&(
+        (a.provider.as_str(), !a.active, a.account.is_none(), &a.account, a.window_minutes.unwrap_or(i64::MAX), &a.limit_id).cmp(&(
             b.provider.as_str(),
+            !b.active,
+            b.account.is_none(),
+            &b.account,
             b.window_minutes.unwrap_or(i64::MAX),
             &b.limit_id,
         ))
     });
     Ok(out)
+}
+
+/// `account`: `Some` keeps only that account's requests (`Some(None)`: those of no known account).
+pub(crate) fn of_account(e: &EventRow, account: Option<Option<&str>>) -> bool {
+    account.is_none_or(|a| e.account.as_deref() == a)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -605,13 +656,14 @@ fn window_usage(
     provider: Provider,
     limit_id: &str,
     window: &str,
+    account: Option<Option<&str>>,
     from_ms: i64,
     to_ms: i64,
     used_pct: Option<f64>,
 ) -> Result<(Totals, Vec<ProjectShare>)> {
     let mut total = Totals::default();
     let mut per: HashMap<Option<i64>, Totals> = HashMap::new();
-    for e in store.events_between(from_ms, to_ms + 1)?.iter().filter(|e| counts_toward(provider, limit_id, window, e)) {
+    for e in store.events_between(from_ms, to_ms + 1)?.iter().filter(|e| counts_toward(provider, limit_id, window, e) && of_account(e, account)) {
         let c = cost_of(book, e);
         let sv = savings_of(book, e);
         total.add(e, c.as_ref(), sv);

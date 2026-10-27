@@ -207,6 +207,8 @@ fn read_session(conn: &Connection, sessions: &HashMap<String, Session>, id: &str
                     branch: None,
                     agent,
                     thread_id: child.then(|| id.to_owned()),
+                    limit_reset: None,
+                    creator: None,
                 });
             }
             Some("tool") => {

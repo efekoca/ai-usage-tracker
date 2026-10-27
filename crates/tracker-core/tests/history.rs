@@ -291,6 +291,8 @@ fn usage(key: &str, ts: i64, input: u64) -> UsageEvent {
         branch: None,
         agent: None,
         thread_id: None,
+        limit_reset: None,
+        creator: None,
     }
 }
 

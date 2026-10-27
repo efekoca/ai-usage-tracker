@@ -215,6 +215,8 @@ pub(crate) fn usage_events(v: &Value, ctx: &ClaudeCtx) -> Vec<UsageEvent> {
             branch: branch(v),
             agent: agent.clone(),
             thread_id: thread_id.clone(),
+            limit_reset: None,
+            creator: None,
         }
     };
     let searches = usage.get("server_tool_use").map(|s| u64_at(s, "web_search_requests")).unwrap_or(0);

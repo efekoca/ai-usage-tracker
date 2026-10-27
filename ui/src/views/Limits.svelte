@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { app, saveSettings, markTint } from '../lib/store.svelte'
+  import { accountName, accountOf, app, saveSettings, markTint } from '../lib/store.svelte'
   import { api, providersOf, type PlansFile, type Provider, type Threshold } from '../lib/api'
-  import { fmtCompact, fmtInput, fmtMoney, fmtPct, i18n, limitName, parseNumber, t, windowLabel } from '../lib/i18n.svelte'
+  import { fmtCompact, fmtDate, fmtInput, fmtMoney, fmtPct, i18n, limitName, parseNumber, t, windowLabel } from '../lib/i18n.svelte'
   import LimitMeter from '../components/LimitMeter.svelte'
   import AccuracyBadge from '../components/AccuracyBadge.svelte'
   import Icon from '../components/Icon.svelte'
@@ -43,6 +43,14 @@
   }
   function removeThreshold(th: Threshold) {
     saveSettings((c) => ({ thresholds: c.thresholds.filter((x) => !(x.provider === th.provider && x.window === th.window)) })).then(reloadLimits)
+  }
+  function rename(id: string, name: string) {
+    saveSettings((c) => {
+      const next = { ...c.account_names }
+      if (name.trim()) next[id] = name.trim()
+      else delete next[id]
+      return { account_names: next }
+    })
   }
   const planNote = (p: Provider) => plans?.providers[p]?.plans.find((x) => x.id === app.settings?.plans[p])
   function setPrice(p: Provider, raw: string): boolean {
@@ -105,6 +113,34 @@
   </section>
 {/if}
 
+{#if app.accounts.length}
+  <section class="card accounts">
+    <h2><BrandIcon provider="openai" color={markTint('openai')} />{t('accounts.title')}</h2>
+    <p class="subtle small help">{t('accounts.help')}</p>
+    {#each app.accounts as a (a.id ?? '')}
+      <div class="acct-row">
+        {#if a.id !== null}
+          {@const id = a.id}
+          <input
+            class="field"
+            maxlength="32"
+            value={app.settings?.account_names?.[id] ?? ''}
+            placeholder={accountName(id)}
+            aria-label="{t('accounts.name')}: {accountName(id)}"
+            onchange={(e) => rename(id, e.currentTarget.value)}
+          />
+        {:else}
+          <span class="unknown" title={t('accounts.unknown.help')}>{accountName(null)}</span>
+        {/if}
+        {#if a.active}<span class="pill in-use">{t('accounts.inUse')}</span>{/if}
+        <span class="spacer"></span>
+        <span class="subtle small">{t('accounts.seen', { from: fmtDate(a.first_ms, 'short'), to: fmtDate(a.last_ms, 'short') })}</span>
+        <span class="num small">{fmtCompact(a.requests)} {t('accounts.requests')}</span>
+      </div>
+    {/each}
+  </section>
+{/if}
+
 <LimitNotices />
 
 {#if app.limits.length === 0}
@@ -112,12 +148,15 @@
 {/if}
 
 <div class="cards">
-  {#each app.limits as l (l.provider + l.limit_id + l.window + l.source)}
+  {#each app.limits as l (l.provider + (l.account ?? '') + l.limit_id + l.window + l.source)}
+    {@const acct = accountOf(l)}
     <section class="card limit">
       <div class="who">
         <!-- brand names: uppercase with English rules so Antigravity does not become ANTİGRAVİTY in Turkish -->
         <span class="prov" lang="en"><BrandIcon provider={l.provider} size={13} color={markTint(l.provider)} />{limitName(l.provider, l.limit_id)}</span>
+        {#if acct}<span class="acct" title={acct}>{acct}</span>{/if}
         {#if l.plan}<span class="pill">{l.plan}</span>{/if}
+        {#if acct && l.active}<span class="pill in-use">{t('accounts.inUse')}</span>{/if}
       </div>
       <LimitMeter window={l.window} used={l.used_pct} state={l.state} accuracy={l.accuracy} resetsAt={l.resets_at} observedMs={l.observed_ms} source={l.source} sinceTokens={l.usage_since.total_tokens} provider={l.provider} forecast={l.forecast} />
       <div class="usage">
@@ -281,6 +320,39 @@
     background: var(--surface-hover);
     color: var(--ink-2);
     text-transform: capitalize;
+  }
+  .acct {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .pill.in-use {
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    color: var(--ink);
+    text-transform: none;
+  }
+  .accounts h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .acct-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    padding: 6px 0;
+    border-top: 0.5px solid var(--hairline);
+  }
+  .acct-row .field {
+    width: 220px;
+  }
+  .unknown {
+    font-weight: 600;
+    color: var(--ink-2);
   }
   .usage {
     border-top: 0.5px solid var(--hairline);
