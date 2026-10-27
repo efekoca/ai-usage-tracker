@@ -50,6 +50,25 @@ fn a_window_not_read_near_its_end_is_incomplete_and_a_full_one_is_always_complet
 }
 
 #[test]
+fn a_reset_granted_inside_a_full_window_ends_its_full_time() {
+    let b = NOW - 2 * HOUR;
+    let w = build_windows(
+        &[
+            r(b - 4 * HOUR, 100.0, Some(b)),
+            r(b - 3 * HOUR, 100.0, Some(b)),
+            // the provider reset it without moving its end; later readings confirm it
+            r(b - 3 * HOUR + 10 * MIN, 1.0, Some(b)),
+            r(b - 2 * HOUR, 8.0, Some(b)),
+        ],
+        FIVE,
+        NOW,
+    );
+    assert_eq!(w.len(), 1);
+    assert!(w[0].full);
+    assert_eq!(w[0].full_minutes, Some(60), "full until the last reading before the reset, not until the window's end");
+}
+
+#[test]
 fn a_window_reset_early_ends_where_the_next_one_begins() {
     // Codex named a new five-hour window an hour into the old one: the old one was reset then
     let a = NOW - 10 * HOUR;

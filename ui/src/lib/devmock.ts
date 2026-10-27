@@ -550,7 +550,7 @@ function mockTrayPreview(tray: TraySettings) {
     const used = Math.round(l.used_pct!)
     const v = remaining ? 100 - used : used
     const warn = cfg.warn_mark && used >= settings.widget.warn_at ? '⚠︎' : ''
-    const sign = l.state === 'behind' ? (remaining ? '≤' : '≥') : ''
+    const sign = l.state === 'behind' ? '~' : ''
     const value = cfg.style === 'bar' ? bar(v) : cfg.style === 'bar_percent' ? `${bar(v)} ${sign}${pct(v)}` : cfg.style === 'dot' ? dot(v) : `${sign}${pct(v)}`
     const at = l.resets_at ? l.resets_at * 1000 : 0
     const left = at ? Math.max(1, Math.round((at - Date.now()) / 60000)) : 0

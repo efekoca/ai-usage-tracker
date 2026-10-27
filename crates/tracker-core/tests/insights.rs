@@ -1,6 +1,6 @@
 use chrono::{FixedOffset, TimeZone};
 use tracker_core::analytics::{Filter, Range};
-use tracker_core::insights::{agents_tools, branches, compare_models, context_stats, day_detail, forecast, plan_value, sessions, subagent_cache, ForecastKind, PromptShare};
+use tracker_core::insights::{agents_tools, branches, compare_models, context_stats, day_detail, forecast, plan_value, restarted, sessions, subagent_cache, ForecastKind, PromptShare};
 use tracker_core::tips::{cache_rebuilds, tips, Tip, Tips};
 use tracker_core::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
 use tracker_core::pricing::{CostInput, PriceBook};
@@ -107,7 +107,7 @@ fn close(a: f64, b: f64) -> bool {
 fn a_fast_window_fills_before_the_reset() {
     let now = ms(2026, 10, 2, 12, 0);
     // 5-hour window, 2 h in, 60 % used = 30 %/h; 40 points left = 80 min < 3 h to the reset
-    let f = forecast(now, 60.0, now + 3 * HOUR, 5 * HOUR);
+    let f = forecast(now, 60.0, now + 3 * HOUR, 5 * HOUR, None);
     assert_eq!(f.kind, ForecastKind::Fills);
     assert!(close(f.rate_per_hour.unwrap(), 30.0));
     assert_eq!(f.fills_at_ms, Some(now + 80 * MIN));
@@ -118,7 +118,7 @@ fn a_fast_window_fills_before_the_reset() {
 fn a_slow_window_is_safe_and_says_where_it_ends() {
     let now = ms(2026, 10, 2, 12, 0);
     // 2 h in, 20 % = 10 %/h; 3 h left → 50 % at the reset
-    let f = forecast(now, 20.0, now + 3 * HOUR, 5 * HOUR);
+    let f = forecast(now, 20.0, now + 3 * HOUR, 5 * HOUR, None);
     assert_eq!(f.kind, ForecastKind::Safe);
     assert!(close(f.at_reset_pct.unwrap(), 50.0));
 }
@@ -129,7 +129,7 @@ fn the_weekly_pace_includes_idle_hours() {
     let week = 7 * 24 * HOUR;
     // 4 days in, 37 % used: 9.25 %/day, 3 days left → 64.75 % at the reset (a burst today does
     // not make it fill tomorrow)
-    let f = forecast(now, 37.0, now + 3 * 24 * HOUR, week);
+    let f = forecast(now, 37.0, now + 3 * 24 * HOUR, week, None);
     assert_eq!(f.kind, ForecastKind::Safe);
     assert!(close(f.at_reset_pct.unwrap(), 37.0 + 37.0 / 4.0 * 3.0));
 }
@@ -138,10 +138,37 @@ fn the_weekly_pace_includes_idle_hours() {
 fn an_early_or_unused_window_is_not_extrapolated() {
     let now = ms(2026, 10, 2, 12, 0);
     // 20 minutes into a 5-hour window: under a tenth of it
-    assert_eq!(forecast(now, 15.0, now + 4 * HOUR + 40 * MIN, 5 * HOUR).kind, ForecastKind::Insufficient);
-    let idle = forecast(now, 0.0, now + 2 * HOUR, 5 * HOUR);
+    assert_eq!(forecast(now, 15.0, now + 4 * HOUR + 40 * MIN, 5 * HOUR, None).kind, ForecastKind::Insufficient);
+    let idle = forecast(now, 0.0, now + 2 * HOUR, 5 * HOUR, None);
     assert_eq!(idle.kind, ForecastKind::Idle);
     assert!(close(idle.at_reset_pct.unwrap(), 0.0));
+}
+
+#[test]
+fn a_reset_the_provider_grants_inside_a_window_restarts_the_pace() {
+    let t = ms(2026, 10, 2, 9, 0);
+    // 40 % and 45 %, then a reset to 2 % that every later reading confirms
+    let reads = [(t, 40.0), (t + 30 * MIN, 45.0), (t + 40 * MIN, 2.0), (t + 55 * MIN, 5.0), (t + 70 * MIN, 6.0)];
+    assert_eq!(restarted(&reads), Some(t + 30 * MIN));
+    let now = t + 2 * HOUR + 30 * MIN;
+    // 2 h since the last reading before the reset, 12 % used: 6 %/h; without it the window's
+    // 5 h start would give 2.4 %/h
+    let f = forecast(now, 12.0, t + 3 * HOUR, 5 * HOUR, restarted(&reads));
+    assert!(close(f.rate_per_hour.unwrap(), 6.0));
+    assert_eq!(f.basis_minutes, 120);
+    // a pace measured over too short a time since the reset is not trusted either
+    assert_eq!(forecast(t + 50 * MIN, 3.0, t + 3 * HOUR, 5 * HOUR, Some(t + 30 * MIN)).kind, ForecastKind::Insufficient);
+}
+
+#[test]
+fn a_delayed_reading_is_not_a_reset() {
+    let t = ms(2026, 10, 2, 9, 0);
+    // a request that ran for a while reports the limit as it was when it began
+    assert_eq!(restarted(&[(t, 40.0), (t + 5 * MIN, 52.0), (t + 6 * MIN, 38.0), (t + 7 * MIN, 53.0), (t + 30 * MIN, 58.0)]), None);
+    // a fall seen only in the newest few minutes waits for confirmation
+    assert_eq!(restarted(&[(t, 40.0), (t + 30 * MIN, 45.0), (t + 32 * MIN, 1.0), (t + 35 * MIN, 2.0)]), None);
+    assert_eq!(restarted(&[(t, 10.0), (t + HOUR, 30.0)]), None);
+    assert_eq!(restarted(&[]), None);
 }
 
 #[test]

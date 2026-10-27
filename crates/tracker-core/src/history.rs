@@ -245,6 +245,10 @@ fn record(items: &[&Reading], reset: Option<(i64, i64)>, dur_ms: i64, now_ms: i6
     let peak = items.iter().map(|r| r.used).fold(0.0, f64::max);
     let peak_ms = items.iter().filter(|r| r.used >= peak).map(|r| r.ts_ms).min().unwrap_or(first);
     let full_at = items.iter().filter(|r| r.used >= FULL_PCT).map(|r| r.ts_ms).min();
+    // a reset the provider granted inside the window ends its full stretch
+    let mut reads: Vec<(i64, f64)> = items.iter().map(|r| (r.ts_ms, r.used)).collect();
+    reads.sort_by_key(|r| r.0);
+    let full_until = crate::insights::restarted(&reads).filter(|t| full_at.is_some_and(|f| *t >= f));
     let in_progress = match reset {
         Some((_, end)) => end > now_ms,
         None => next_first.is_none() && now_ms - first < dur_ms,
@@ -275,7 +279,7 @@ fn record(items: &[&Reading], reset: Option<(i64, i64)>, dur_ms: i64, now_ms: i6
         full: full_at.is_some(),
         full_at_ms: full_at,
         full_minutes: match (full_at, reset) {
-            (Some(f), Some((_, end))) => Some((end.min(now_ms) - f).max(0) / MIN_MS),
+            (Some(f), Some((_, end))) => Some((full_until.unwrap_or(end).min(end).min(now_ms) - f).max(0) / MIN_MS),
             _ => None,
         },
         complete,

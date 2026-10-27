@@ -153,6 +153,24 @@ fn snap(ts: i64, provider: Provider, tool: Tool, window: &str, used: f64, resets
 }
 
 #[test]
+fn a_reset_granted_inside_the_window_restarts_the_forecast_pace() {
+    let mut store = Store::open_in_memory().unwrap();
+    let now = ms(2026, 10, 2, 12, 0);
+    let h = 3_600_000;
+    let resets = Some((now + 2 * h) / 1000);
+    let read = |ago: i64, used: f64| snap(now - ago, Provider::Anthropic, Tool::ClaudeCode, "five_hour", used, resets, None, "claude_usage");
+    let mut tx = store.transaction().unwrap();
+    // 40 % and 45 %, then a reset to 2 % that later readings confirm; 12 % now
+    tx.insert_limits(&[read(150 * 60_000, 40.0), read(2 * h, 45.0), read(110 * 60_000, 2.0), read(90 * 60_000, 5.0), read(60_000, 12.0)]).unwrap();
+    tx.commit().unwrap();
+    let book = PriceBook::default_book();
+    let views = limits_view(&store, &book, now, &[]).unwrap();
+    let f = views[0].forecast.as_ref().unwrap();
+    assert_eq!(f.basis_minutes, 120, "since the last reading before the reset, not the window's start");
+    assert!(close(f.rate_per_hour.unwrap(), 6.0));
+}
+
+#[test]
 fn limit_views_pick_the_newest_reading_and_split_it_across_projects() {
     let mut store = Store::open_in_memory().unwrap();
     let now = ms(2026, 10, 2, 12, 0);

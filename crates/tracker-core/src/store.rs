@@ -429,6 +429,18 @@ impl Store {
         rows.collect()
     }
 
+    /// One pool's percentages between two times, oldest first; `owner` keeps one account's.
+    pub fn pool_readings(&self, provider: Provider, limit_id: &str, window: &str, owner: Option<Option<&str>>, from_ms: i64, to_ms: i64) -> Result<Vec<(i64, f64)>> {
+        let mut st = self.conn.prepare_cached(
+            "SELECT ts_ms, used_pct FROM limit_snapshot
+             WHERE provider = ?1 AND limit_id = ?2 AND window = ?3 AND ts_ms BETWEEN ?4 AND ?5 AND used_pct IS NOT NULL
+               AND (?6 = 0 OR owner IS ?7)
+             ORDER BY ts_ms",
+        )?;
+        let rows = st.query_map(params![provider.as_str(), limit_id, window, from_ms, to_ms, owner.is_some(), owner.flatten()], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect()
+    }
+
     pub fn setting(&self, key: &str) -> Result<Option<String>> {
         self.conn.query_row("SELECT value FROM setting WHERE key = ?1", [key], |r| r.get(0)).optional()
     }

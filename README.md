@@ -43,7 +43,7 @@ The app reads the five-hour and weekly limit percentages through the tools' own 
 Providers publish how their limits work, not the numbers themselves. The app therefore follows these rules:
 
 - A real percentage appears only when a tool writes one locally or the app reads it live (see [Live capture](#live-capture)).
-- If the tool was used after the newest reading, the current value is unknown. It is shown as "?" with the last reading and its age, never as the current value.
+- If the tool was used after the newest reading, the current value is unknown. It is shown as "?" with the last reading and its age, never as the current value. The panel and the menu bar text mark that last reading with "~": it is usually lower than the current value, but higher if the provider reset your limit in between.
 - Percentages can read as **used** (as Claude shows them, "15 % used") or **left** (as Codex shows them, "85 % left"). Switch between them in **Settings**, on the **Limits** page, or in the **Widget studio**. Warning colors follow usage either way.
 - Without a real reading, you can set your own budget per window. The resulting percentage is labeled **Estimated**.
 - Limits are account-wide. A project's share is its fraction of the window's API-equivalent cost and is always **Estimated**.
@@ -51,7 +51,7 @@ Providers publish how their limits work, not the numbers themselves. The app the
 
 **More than one Codex account.** If you switch between Codex accounts, each account gets its own limits, history, and forecast. Codex does not record which account sent each request, so the app ties every request to its account by the limit window the request reports. It learns the account from what Codex does name: the account that started a session (for the requests sent right after) and the signed-in account in the Codex limit read (Codex 0.163 and later). Early resets, including resets the provider grants, are told apart from an account switch. If a reset for everyone makes two accounts' windows start together, that window is given to neither. Requests without such evidence are never guessed; they stay under **Unidentified account**. The widget, panel, and menu bar show the account in use. The **Limits** page shows every account, and you can name them there. Usage can also be filtered by account. With a single account, nothing changes.
 
-**Forecast.** Every current limit reading carries a forecast based on the window's **average pace since it started** (current % ÷ time since the window began). Every window starts at 0 % when it resets, so this pace is known and already includes idle hours: a burst of work is not extrapolated as if it never stopped. The app then says when the window would fill ("fills around Sun 21:12, 9 h before the reset") or where it would stand at the reset. No forecast is made in the first tenth of a window, and every forecast is labeled **Estimated**.
+**Forecast.** Every current limit reading carries a forecast based on the window's **average pace since it started** (current % ÷ time since the window began). Every window starts at 0 % when it resets, so this pace is known and already includes idle hours: a burst of work is not extrapolated as if it never stopped. The app then says when the window would fill ("fills around Sun 21:12, 9 h before the reset") or where it would stand at the reset. If the provider resets a window early without moving its end, the pace is measured from that reset. No forecast is made in the first tenth of a window, and every forecast is labeled **Estimated**.
 
 ### Limit history
 
