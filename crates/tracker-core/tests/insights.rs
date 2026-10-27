@@ -85,6 +85,8 @@ fn store_with(evs: &[Ev]) -> Store {
             branch: e.branch.map(Into::into),
             agent: e.agent.map(Into::into),
             thread_id: e.thread.map(Into::into),
+            limit_reset: None,
+            creator: None,
         })
         .collect();
     let mut tx = store.transaction().unwrap();

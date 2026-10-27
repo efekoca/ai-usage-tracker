@@ -140,7 +140,7 @@ pub(crate) fn readings(app: &AppHandle, s: &Settings) -> Option<Vec<Reading>> {
     Some(
         views
             .into_iter()
-            .filter(|v| providers.contains(&v.provider) && (v.window == "five_hour" || v.window == "seven_day"))
+            .filter(|v| v.active && providers.contains(&v.provider) && (v.window == "five_hour" || v.window == "seven_day"))
             .filter(|v| matches!(v.state, LimitState::Fresh | LimitState::Behind))
             .filter_map(|v| {
                 let (fills_at_ms, at_reset) = match &v.forecast {

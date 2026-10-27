@@ -18,9 +18,13 @@
 //!   keys as stale so they are replaced in the same transaction.
 //! * `rate_limits`: `primary`/`secondary` `{used_percent, window_minutes, resets_at}`,
 //!   `plan_type`, `limit_id`. Windows are classified by `window_minutes`, not by slot.
+//! * `session_meta.creator_account_id` (Codex ≥ 0.157) is the account selected when the thread
+//!   started. It is never updated: a resumed thread or a desktop account switch goes on under
+//!   another account, so it only vouches for the first requests (see `State::vouch_for`).
 
 use super::{f64_at, i64_at, str_at, u64_at, JsonlReader, ParseOutput};
-use crate::model::{parse_ts_ms, window_name, Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
+use crate::accounts::{MAIN_LIMIT, SAME_WINDOW_S};
+use crate::model::{account_digest, parse_ts_ms, window_name, Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -31,6 +35,9 @@ pub const SOURCE: &str = "codex_rollout";
 /// Copied history is written in one burst; a line this long after the previous one comes from
 /// the file's own thread.
 const COPY_BURST_MS: i64 = 1_000;
+/// A thread whose first request comes later than this after it started may have been resumed
+/// or switched to another account in between.
+const FRESH_MS: i64 = 15 * 60_000;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -50,6 +57,14 @@ struct State {
     unsourced: Option<String>,
     /// A read from the start stopped after a round; the next round still replays.
     replaying: bool,
+    /// Digest of the account that started the file's own thread, while its requests still
+    /// show they were sent by it.
+    vouch: Option<String>,
+    started_ms: Option<i64>,
+    /// The limit window of the first requests the creator vouches for.
+    vouch_reset: Option<i64>,
+    /// A request of the file's own thread was seen.
+    asked: bool,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -111,6 +126,33 @@ impl State {
             }
         }
         cur
+    }
+
+    /// The creator vouches only for requests sent soon after the thread started, while they
+    /// stay in the same limit window: a switch to another account changes it.
+    fn vouch_for(&mut self, ts_ms: i64, reset: Option<i64>) {
+        if self.vouch.is_none() {
+            return;
+        }
+        if !self.asked {
+            self.asked = true;
+            if self.started_ms.is_none_or(|s| ts_ms - s > FRESH_MS) {
+                self.vouch = None;
+                return;
+            }
+        }
+        match (reset, self.vouch_reset) {
+            (Some(r), None) => self.vouch_reset = Some(r),
+            (Some(r), Some(v)) if (r - v).abs() > SAME_WINDOW_S => self.vouch = None,
+            _ => {}
+        }
+    }
+
+    /// A request that reports no window is vouched for only while the thread is fresh: later
+    /// the account may have changed without a sign.
+    fn vouched(&self, ts_ms: i64, reset: Option<i64>) -> Option<String> {
+        let fresh = self.started_ms.is_some_and(|s| ts_ms - s <= FRESH_MS);
+        self.vouch.clone().filter(|_| reset.is_some() || fresh)
     }
 
     fn who(&self, path: &Path) -> Who {
@@ -176,6 +218,8 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
                     st.threads.entry(id.to_owned()).or_insert(t);
                     if st.own.is_none() {
                         st.own = Some(id.to_owned());
+                        st.vouch = str_at(p, "creator_account_id").filter(|a| !a.is_empty()).map(account_digest);
+                        st.started_ms = str_at(p, "timestamp").and_then(parse_ts_ms).or(ts_ms);
                     }
                     st.owner = Some(id.to_owned());
                     st.marked = false;
@@ -208,6 +252,12 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
                     out.stale_events.push(format!("cx:{}:{}", st.legacy.as_deref().unwrap_or_default(), line.offset));
                 }
                 let mut recognised = false;
+                let reset = p.get("rate_limits").and_then(longest_reset);
+                if let Some(ts_ms) = ts_ms
+                    && !st.in_copy(path)
+                {
+                    st.vouch_for(ts_ms, reset);
+                }
                 if let (Some(info), Some(ts_ms)) = (p.get("info").filter(|i| !i.is_null()), ts_ms) {
                     let total = info.get("total_token_usage").filter(|t| t.is_object()).map(totals_key);
                     if total.is_some() && total == st.last_total {
@@ -220,10 +270,16 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
                                 Some(t) => format!("cx:{}:t{t}", st.key_thread(&who.thread)),
                                 None => format!("cx:{}:o{}", who.thread, line.offset),
                             };
-                            if st.in_copy(path) {
+                            let creator = if st.in_copy(path) {
                                 out.copies.push((out.events.len(), st.legacy.clone().unwrap_or_default()));
-                            }
-                            out.events.push(event(&who, &st, key, ts_ms, last));
+                                None
+                            } else {
+                                st.vouched(ts_ms, reset)
+                            };
+                            let mut e = event(&who, &st, key, ts_ms, last);
+                            e.limit_reset = reset;
+                            e.creator = creator;
+                            out.events.push(e);
                         }
                         recognised = true;
                     }
@@ -332,6 +388,8 @@ fn event(who: &Who, st: &State, key: String, ts_ms: i64, last: &Value) -> UsageE
         branch: who.branch.clone(),
         agent: who.agent.clone(),
         thread_id: who.agent.is_some().then(|| who.thread.clone()),
+        limit_reset: None,
+        creator: None,
     }
 }
 
@@ -386,6 +444,19 @@ fn action(who: &Who, offset: u64, ts_ms: i64, item: &Value) -> Option<ToolCall> 
         name,
         failed,
     })
+}
+
+/// When the longest window of the main limit resets: the window a request counted toward.
+fn longest_reset(rl: &Value) -> Option<i64> {
+    if str_at(rl, "limit_id").is_some_and(|l| l != MAIN_LIMIT) {
+        return None;
+    }
+    ["primary", "secondary"]
+        .iter()
+        .filter_map(|slot| rl.get(*slot))
+        .filter_map(|w| Some((i64_at(w, "window_minutes")?, i64_at(w, "resets_at")?)))
+        .max_by_key(|(minutes, _)| *minutes)
+        .map(|(_, reset)| reset)
 }
 
 fn rate_limits(rl: &Value, ts_ms: i64, out: &mut Vec<LimitSnapshot>) {

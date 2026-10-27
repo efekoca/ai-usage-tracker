@@ -184,6 +184,12 @@ pub struct UsageEvent {
     /// The subagent's own conversation id. `session_id` is always the parent session, so a
     /// subagent's requests count toward the session that started it.
     pub thread_id: Option<String>,
+    /// Codex: when the longest limit window reported with this request resets (epoch seconds).
+    /// Every account has its own windows, so this tells accounts apart (see `accounts`).
+    pub limit_reset: Option<i64>,
+    /// Codex: [`account_digest`] of the account that started the session, set only on requests
+    /// sent right after it started and before its limit window changed.
+    pub creator: Option<String>,
 }
 
 /// One tool call or tool action, by name only (never its input or output).
@@ -222,6 +228,12 @@ pub struct LimitSnapshot {
     pub plan: Option<String>,
     pub source: String,
     pub accuracy: Accuracy,
+}
+
+/// Account ids are kept only as this one-way digest: enough to tell accounts apart.
+pub fn account_digest(id: &str) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(id.as_bytes()).iter().take(8).map(|b| format!("{b:02x}")).collect()
 }
 
 /// The latest time accepted from any source: the year 3000, in epoch seconds.

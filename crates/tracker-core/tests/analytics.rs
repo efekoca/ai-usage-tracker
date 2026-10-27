@@ -129,6 +129,8 @@ fn ev(key: &str, ts: i64, tool: Tool, model: &str, project: &str, input: u64, ou
         branch: None,
         agent: None,
         thread_id: None,
+        limit_reset: None,
+        creator: None,
     }
 }
 
@@ -441,7 +443,13 @@ fn a_web_search_count_past_u32_is_never_imported_or_kept() {
         let s = Store::open(&old).unwrap();
         event(s.conn(), "kept", 3);
         event(s.conn(), "wrapped", u32::MAX as i64 + 2);
-        s.conn().execute_batch("PRAGMA user_version = 10;").unwrap();
+        // the columns v12 adds did not exist yet
+        s.conn()
+            .execute_batch(
+                "ALTER TABLE usage_event DROP COLUMN limit_reset; ALTER TABLE usage_event DROP COLUMN creator;
+                 ALTER TABLE usage_event DROP COLUMN owner; ALTER TABLE limit_snapshot DROP COLUMN owner; PRAGMA user_version = 10;",
+            )
+            .unwrap();
     }
     let reopened = Store::open(&old).unwrap();
     let mut rows: Vec<(u32, u64)> = reopened.events_between(0, i64::MAX).unwrap().iter().map(|e| (e.web_search, e.tokens.input)).collect();

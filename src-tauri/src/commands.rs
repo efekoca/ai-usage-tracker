@@ -233,6 +233,12 @@ pub async fn get_limits(state: State<'_, AppState>) -> Res<Vec<LimitView>> {
     Ok(v)
 }
 
+/// Codex accounts, when the archive holds more than one; empty otherwise.
+#[tauri::command]
+pub async fn get_accounts(state: State<'_, AppState>) -> Res<Vec<tracker_core::accounts::Account>> {
+    tracker_core::accounts::accounts(&state.db()).map_err(err)
+}
+
 #[derive(Serialize)]
 pub struct WidgetTool {
     tool: Tool,
@@ -317,7 +323,7 @@ pub async fn get_widget_data(state: State<'_, AppState>) -> Res<WidgetData> {
     let limits = analytics::limits_view(&store, &book, now, &settings.thresholds)
         .map_err(err)?
         .into_iter()
-        .filter(|l| providers.contains(&l.provider) && (l.window == "five_hour" || l.window == "seven_day"))
+        .filter(|l| l.active && providers.contains(&l.provider) && (l.window == "five_hour" || l.window == "seven_day"))
         .map(|l| WidgetLimit {
             provider: l.provider,
             limit_id: l.limit_id,
@@ -472,11 +478,16 @@ pub struct ImportResult {
 #[tauri::command]
 pub async fn import_database(window: WebviewWindow, app: AppHandle, state: State<'_, AppState>, path: PathBuf) -> Res<ImportResult> {
     main_only(&window)?;
-    let (events, limits) = state.db().merge_from(&path).map_err(|e| match e {
+    let mut db = state.db();
+    let (events, limits) = db.merge_from(&path).map_err(|e| match e {
         tracker_core::rusqlite::Error::InvalidQuery => "not an AI Usage Tracker database".to_string(),
         tracker_core::rusqlite::Error::InvalidPath(_) => "cannot import the live database into itself".to_string(),
         e => e.to_string(),
     })?;
+    if let Err(e) = tracker_core::accounts::resolve(&mut db) {
+        log::warn!("codex accounts not resolved after import: {e}");
+    }
+    drop(db);
     let _ = app.emit("data-changed", ());
     Ok(ImportResult { events, limits })
 }

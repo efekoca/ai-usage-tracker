@@ -45,6 +45,7 @@ pub fn ingest(store: &mut Store, files: &[DiscoveredFile], mut on_progress: impl
         limits_before: store.limit_count().unwrap_or(0),
         ..Default::default()
     };
+    let mut codex_read = false;
     for (i, f) in files.iter().enumerate() {
         // one damaged file must not stop the scan; its open transaction rolls back on unwind
         let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ingest_file(store, f)))
@@ -52,6 +53,7 @@ pub fn ingest(store: &mut Store, files: &[DiscoveredFile], mut on_progress: impl
         match read {
             Ok(Some(read)) => {
                 rep.files_read += 1;
+                codex_read |= f.parser == ParserKind::CodexRollout;
                 rep.records_written += read.records;
                 rep.warning_count += read.warning_count;
                 let p = f.path.to_string_lossy().into_owned();
@@ -67,6 +69,9 @@ pub fn ingest(store: &mut Store, files: &[DiscoveredFile], mut on_progress: impl
     }
     if rep.files_read > 0 {
         let _ = store.prune_projects();
+    }
+    if codex_read && let Err(e) = crate::accounts::resolve(store) {
+        log::warn!("codex accounts not resolved: {e}");
     }
     rep.events_after = store.event_count().unwrap_or(0);
     rep.limits_after = store.limit_count().unwrap_or(0);

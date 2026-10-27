@@ -392,6 +392,8 @@ fn read(path: &Path) -> Result<ParseOutput, Box<dyn std::error::Error + Send + S
             branch: branch.clone(),
             agent: agent.clone(),
             thread_id: thread.clone(),
+            limit_reset: None,
+            creator: None,
         });
     }
 

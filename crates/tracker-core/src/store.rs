@@ -1,7 +1,7 @@
 //! Local SQLite archive (`%LOCALAPPDATA%\AIUsageTracker\tracker.db`). Records stay here even
 //! after the source tools delete or rotate their logs. No content columns exist by design.
 
-use crate::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent, MAX_CLOCK_SKEW_MS, MAX_WINDOW_MINUTES};
+use crate::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent, MAX_CLOCK_SKEW_MS, MAX_EPOCH_SECS, MAX_WINDOW_MINUTES};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::Serialize;
 use std::cell::RefCell;
@@ -137,6 +137,15 @@ const MIGRATIONS: &[&str] = &[
     // v11: an older import accepted web search counts past u32, which no real log holds; the
     // row may also carry a real log's tokens (merged by key), so only the count is dropped
     "UPDATE usage_event SET web_search = 0 WHERE web_search < 0 OR web_search > 4294967295;",
+    // v12: Codex accounts. Each request's limit window and vouched creator are read from the
+    // logs; `owner` is what `accounts::resolve` derives from them and is never imported.
+    r#"
+    ALTER TABLE usage_event ADD COLUMN limit_reset INTEGER;
+    ALTER TABLE usage_event ADD COLUMN creator TEXT;
+    ALTER TABLE usage_event ADD COLUMN owner TEXT;
+    ALTER TABLE limit_snapshot ADD COLUMN owner TEXT;
+    DELETE FROM file_checkpoint WHERE parser = 'codex_rollout';
+    "#,
 ];
 
 const MAX_IMPORTED_COUNT: i64 = 1_000_000_000_000;
@@ -154,7 +163,7 @@ const NOT_SUPERSEDED: &str = "NOT (u.accuracy = 'captured' AND u.request_id IS N
 
 const EVENT_COLUMNS: &str = "key, ts_ms, tool, client, model, project_id, session_id, input, cache_read, cache_write,
     cache_write_1h, output, reasoning, request_input, web_search, speed, service_tier, inference_geo, accuracy, source,
-    request_id, branch, agent, thread_id";
+    request_id, branch, agent, thread_id, limit_reset, creator";
 
 /// Merge rule for a repeated event key: field-wise maximum (streaming duplicates), earliest
 /// timestamp, pricing modifiers from whichever copy carries them (the first streaming copy of a
@@ -182,7 +191,9 @@ const UPSERT_EVENT_TAIL: &str = "ON CONFLICT(key) DO UPDATE SET
     branch = COALESCE(branch, excluded.branch),
     agent = COALESCE(agent, excluded.agent),
     session_id = CASE WHEN thread_id IS NULL AND excluded.thread_id IS NOT NULL THEN excluded.session_id ELSE session_id END,
-    thread_id = COALESCE(thread_id, excluded.thread_id)";
+    thread_id = COALESCE(thread_id, excluded.thread_id),
+    limit_reset = COALESCE(limit_reset, excluded.limit_reset),
+    creator = COALESCE(creator, excluded.creator)";
 
 pub struct Store {
     conn: Connection,
@@ -215,6 +226,8 @@ pub struct EventRow {
     pub branch: Option<String>,
     pub agent: Option<String>,
     pub thread_id: Option<String>,
+    /// Codex: the account [`crate::accounts::resolve`] assigned; `None` when it is not known.
+    pub account: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -307,7 +320,7 @@ impl Store {
             &format!(
                 "SELECT ts_ms, tool, client, model, project_id, session_id, input, cache_read, cache_write,
                         cache_write_1h, output, reasoning, request_input, web_search, speed, inference_geo, accuracy,
-                        branch, agent, thread_id
+                        branch, agent, thread_id, owner
                  FROM usage_event u WHERE ts_ms >= ?1 AND ts_ms < ?2 AND {NOT_SUPERSEDED} ORDER BY ts_ms"
             ),
         )?;
@@ -337,6 +350,7 @@ impl Store {
                 branch: r.get(17)?,
                 agent: r.get(18)?,
                 thread_id: r.get(19)?,
+                account: r.get(20)?,
             })
         })?;
         rows.collect()
@@ -380,30 +394,38 @@ impl Store {
         Ok(())
     }
 
-    /// Latest snapshot per (provider, tool, account, limit_id, window). A row dated before 1970 or
-    /// ahead of the clock, stored by an older version, is passed over so it cannot stand in for a
-    /// real reading.
     pub fn latest_limits(&self) -> Result<Vec<LimitSnapshot>> {
+        Ok(self.latest_owned_limits()?.into_iter().map(|(s, _)| s).collect())
+    }
+
+    /// Latest snapshot per (provider, tool, account, owner, limit_id, window), with its owner (see
+    /// [`EventRow::account`]). A row dated before 1970 or ahead of the clock, stored by an older
+    /// version, is passed over so it cannot stand in for a real reading.
+    pub fn latest_owned_limits(&self) -> Result<Vec<(LimitSnapshot, Option<String>)>> {
         let mut st = self.conn.prepare(
             "SELECT s.ts_ms, s.provider, s.tool, s.account, s.limit_id, s.window, s.used_pct, s.resets_at,
-                    s.status, s.plan, s.source, s.accuracy
+                    s.status, s.plan, s.source, s.accuracy, s.owner
              FROM limit_snapshot s
-             JOIN (SELECT provider, tool, account, limit_id, window, MAX(ts_ms) AS m
-                   FROM limit_snapshot WHERE ts_ms BETWEEN 0 AND ?1 GROUP BY provider, tool, account, limit_id, window) g
-               ON s.provider = g.provider AND s.tool = g.tool AND s.account = g.account
+             JOIN (SELECT provider, tool, account, owner, limit_id, window, MAX(ts_ms) AS m
+                   FROM limit_snapshot WHERE ts_ms BETWEEN 0 AND ?1 GROUP BY provider, tool, account, owner, limit_id, window) g
+               ON s.provider = g.provider AND s.tool = g.tool AND s.account = g.account AND s.owner IS g.owner
               AND s.limit_id = g.limit_id AND s.window = g.window AND s.ts_ms = g.m
              ORDER BY s.provider, s.window",
         )?;
-        let rows = st.query_map([latest_accepted_ms()], row_to_limit)?;
+        let rows = st.query_map([latest_accepted_ms()], |r| Ok((row_to_limit(r)?, r.get(12)?)))?;
         rows.collect()
     }
 
     pub fn limits_between(&self, from_ms: i64, to_ms: i64) -> Result<Vec<LimitSnapshot>> {
+        Ok(self.owned_limits_between(from_ms, to_ms)?.into_iter().map(|(s, _)| s).collect())
+    }
+
+    pub fn owned_limits_between(&self, from_ms: i64, to_ms: i64) -> Result<Vec<(LimitSnapshot, Option<String>)>> {
         let mut st = self.conn.prepare(
-            "SELECT ts_ms, provider, tool, account, limit_id, window, used_pct, resets_at, status, plan, source, accuracy
+            "SELECT ts_ms, provider, tool, account, limit_id, window, used_pct, resets_at, status, plan, source, accuracy, owner
              FROM limit_snapshot WHERE ts_ms >= ?1 AND ts_ms < ?2 ORDER BY ts_ms",
         )?;
-        let rows = st.query_map(params![from_ms, to_ms], row_to_limit)?;
+        let rows = st.query_map(params![from_ms, to_ms], |r| Ok((row_to_limit(r)?, r.get(12)?)))?;
         rows.collect()
     }
 
@@ -468,6 +490,7 @@ impl Store {
             // backups made before v2 have no request_id column, before v7 no branch/agent/thread
             let their_req = if theirs >= 2 { "e.request_id" } else { "NULL" };
             let their_v7 = if theirs >= 7 { "e.branch, e.agent, e.thread_id" } else { "NULL, NULL, NULL" };
+            let their_v12 = if theirs >= 12 { "e.limit_reset, e.creator" } else { "NULL, NULL" };
             // Codex rows from before v10 use other keys: take them only for sessions this database lacks
             self.conn.execute_batch(
                 "DROP TABLE IF EXISTS temp.codex_sessions;
@@ -481,6 +504,7 @@ impl Store {
                 }
             };
             let (old_events, old_calls) = (old_codex("e"), old_codex("c"));
+            let valid_reset = if theirs >= 12 { format!("AND (e.limit_reset IS NULL OR (typeof(e.limit_reset) = 'integer' AND e.limit_reset BETWEEN 0 AND {MAX_EPOCH_SECS}))") } else { String::new() };
             // a damaged or hand-made file must not bring negative or absurd counts
             let valid_counts: String = ["input", "cache_read", "cache_write", "cache_write_1h", "output", "reasoning", "request_input", "web_search"]
                 .iter()
@@ -497,6 +521,9 @@ impl Store {
             }
             if theirs >= 7 {
                 event_optional.extend(["branch", "agent", "thread_id"]);
+            }
+            if theirs >= 12 {
+                event_optional.push("creator");
             }
             let event_texts = texts("e.", &["key", "tool", "model", "accuracy", "source"], &event_optional);
             let project_texts = texts("", &["path", "name"], if theirs >= 3 { &["display_path"] } else { &[] });
@@ -522,11 +549,11 @@ impl Store {
                     "INSERT INTO usage_event({EVENT_COLUMNS})
                      SELECT e.key, e.ts_ms, e.tool, e.client, e.model, p.id, e.session_id, e.input, e.cache_read,
                             e.cache_write, e.cache_write_1h, e.output, e.reasoning, e.request_input, e.web_search,
-                            e.speed, e.service_tier, e.inference_geo, e.accuracy, e.source, {their_req}, {their_v7}
+                            e.speed, e.service_tier, e.inference_geo, e.accuracy, e.source, {their_req}, {their_v7}, {their_v12}
                      FROM other.usage_event e
                      LEFT JOIN other.project op ON op.id = e.project_id
                      LEFT JOIN main.project p ON p.path = op.path
-                     WHERE typeof(e.ts_ms) = 'integer' AND e.ts_ms BETWEEN 0 AND {latest} {valid_counts} {event_texts} {old_events}
+                     WHERE typeof(e.ts_ms) = 'integer' AND e.ts_ms BETWEEN 0 AND {latest} {valid_counts} {event_texts} {old_events} {valid_reset}
                      {tail}"
                 ),
                 [],
@@ -685,7 +712,7 @@ impl StoreTx<'_> {
             };
             let mut st = self.tx.prepare_cached(&format!(
                 "INSERT INTO usage_event({EVENT_COLUMNS})
-                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26)
                  {UPSERT_EVENT_TAIL}"
             ))?;
             st.execute(params![
@@ -713,6 +740,8 @@ impl StoreTx<'_> {
                 e.branch,
                 e.agent,
                 e.thread_id,
+                e.limit_reset.filter(|r| (0..=MAX_EPOCH_SECS).contains(r)),
+                e.creator,
             ])?;
         }
         Ok(())

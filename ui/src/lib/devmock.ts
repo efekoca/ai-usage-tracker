@@ -15,6 +15,10 @@ const showcase = scenario.get('showcase') === '1'
 const ocMissing = scenario.get('opencode') === 'missing'
 // ?platform=macos | linux: the pages as they look there
 const platform = scenario.get('platform') ?? 'windows'
+// ?accounts=2: two Codex accounts, the second one in use, plus requests of no known account
+const twoAccounts = scenario.get('accounts') === '2'
+const ACCOUNT_A = '3f9c1a7e52b0d846'
+const ACCOUNT_B = 'b71e04c9a3d25f18'
 
 let seed = 7
 const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
@@ -76,6 +80,7 @@ const settings: Settings = {
   provider_colors: {},
   tint_icons: false,
   show_icons: true,
+  account_names: twoAccounts ? { [ACCOUNT_A]: 'İş' } : {},
 }
 
 const day = 864e5
@@ -172,15 +177,39 @@ function report(p: Period): Report {
   }
 }
 
+function mockAccounts() {
+  if (!twoAccounts) return []
+  const now = Date.now()
+  const day = 864e5
+  return [
+    { provider: 'openai', id: ACCOUNT_A, first_ms: now - 40 * day, last_ms: now - 2 * 3600e3, requests: 4180, active: false },
+    { provider: 'openai', id: ACCOUNT_B, first_ms: now - 12 * day, last_ms: now - 20 * 60000, requests: 1260, active: true },
+    { provider: 'openai', id: null, first_ms: now - 52 * day, last_ms: now - 41 * day, requests: 312, active: false },
+  ]
+}
+
+/** With two accounts the one read last (B) leads; A, whose week is nearly used, follows. */
+function withAccounts(all: LimitView[]): LimitView[] {
+  if (!twoAccounts) return all
+  const now = Date.now()
+  const b = all.filter((l) => l.provider === 'openai').map((l) => ({ ...l, account: ACCOUNT_B }))
+  const a = b.map((l) =>
+    l.window === 'five_hour'
+      ? { ...l, account: ACCOUNT_A, active: false, used_pct: 100, state: 'reset' as const, resets_at: Math.round(now / 1000 - 1800), observed_ms: now - 2 * 3600e3, forecast: null, usage_since: totals(0, 0) }
+      : { ...l, account: ACCOUNT_A, active: false, used_pct: 96, state: 'fresh' as const, resets_at: Math.round(now / 1000 + 1.4 * 86400), observed_ms: now - 2 * 3600e3, window_start_ms: now - 5.6 * 86400e3, window_usage: totals(88e6, 41.2), forecast: null },
+  )
+  return [...all.filter((l) => l.provider !== 'openai'), ...b, ...a].sort((x, y) => (x.provider === y.provider ? 0 : x.provider < y.provider ? -1 : 1))
+}
+
 function limits(): LimitView[] {
-  const all = allLimits()
+  const all = withAccounts(allLimits())
   return all.filter((l) => !(claudeMode && l.provider === 'anthropic') && !((agyMissing || agyOut) && l.provider === 'google') && !(codexOut && l.provider === 'openai'))
 }
 
 function allLimits(): LimitView[] {
   const now = Date.now()
   const share = (p: string, s: number, used: number | null) => ({ project_id: projects.indexOf(p) + 1, name: p, hidden: false, totals: totals(Math.round(s * 5e7), s * 30), share: s, estimated_pct: used === null ? null : used * s })
-  const all: LimitView[] = [
+  const all: LimitView[] = ([
     { provider: 'anthropic', limit_id: '', window: 'five_hour', window_minutes: 300, used_pct: 46, resets_at: Math.round(now / 1000 + 2.3 * 3600), observed_ms: now - 192 * 60000, source: 'cowork_audit', status: 'allowed', plan: null, accuracy: 'exact', state: 'behind', window_start_ms: now - 2.7 * 3600e3, window_usage: totals(41e6, 31.2), usage_since: totals(190e6, 65.9), forecast: null, projects: [share('demo-app', 0.62, 46), share('notes', 0.38, 46)] },
     { provider: 'anthropic', limit_id: '', window: 'seven_day', window_minutes: 10080, used_pct: 73, resets_at: Math.round(now / 1000 + 2.6 * 86400), observed_ms: now - 4 * 60000, source: 'cowork_audit', status: 'allowed_warning', plan: null, accuracy: 'exact', state: 'fresh', window_start_ms: now - 4.4 * 86400e3, window_usage: totals(612e6, 402.5), usage_since: totals(0, 0), forecast: { kind: 'fills', rate_per_hour: 0.9, fills_at_ms: now + 30 * 3600e3, at_reset_pct: null, basis_minutes: 5760 }, projects: [share('demo-app', 0.5, 73), share('website', 0.3, 73), share('notes', 0.2, 73)] },
     { provider: 'openai', limit_id: 'codex', window: 'five_hour', window_minutes: 300, used_pct: 12, resets_at: Math.round(now / 1000 + 4 * 3600), observed_ms: now - 20 * 60000, source: 'codex_rollout', status: null, plan: 'plus', accuracy: 'exact', state: 'fresh', window_start_ms: now - 3600e3, window_usage: totals(5e6, 3.1), usage_since: totals(0, 0), forecast: { kind: 'safe', rate_per_hour: 4.2, fills_at_ms: null, at_reset_pct: 29, basis_minutes: 60 }, projects: [share('data-pipeline', 1, 12)] },
@@ -188,7 +217,7 @@ function allLimits(): LimitView[] {
     { provider: 'google', limit_id: 'gemini', window: 'five_hour', window_minutes: 300, used_pct: 18, resets_at: Math.round(now / 1000 + 3.1 * 3600), observed_ms: now - 90000, source: 'antigravity_cli_usage', status: null, plan: null, accuracy: 'captured', state: 'fresh', window_start_ms: now - 1.9 * 3600e3, window_usage: totals(2.4e6, 0.6), usage_since: totals(0, 0), forecast: { kind: 'safe', rate_per_hour: 6.1, fills_at_ms: null, at_reset_pct: 37, basis_minutes: 114 }, projects: [share('website', 1, 18)] },
     { provider: 'google', limit_id: 'gemini', window: 'seven_day', window_minutes: 10080, used_pct: 9, resets_at: Math.round(now / 1000 + 4.2 * 86400), observed_ms: now - 90000, source: 'antigravity_cli_usage', status: null, plan: null, accuracy: 'captured', state: 'fresh', window_start_ms: now - 2.8 * 86400e3, window_usage: totals(9e6, 2.1), usage_since: totals(0, 0), forecast: null, projects: [share('website', 1, 9)] },
     { provider: 'google', limit_id: '3p', window: 'five_hour', window_minutes: 300, used_pct: 0, resets_at: Math.round(now / 1000 + 5 * 3600), observed_ms: now - 90000, source: 'antigravity_cli_usage', status: null, plan: null, accuracy: 'captured', state: 'fresh', window_start_ms: now, window_usage: totals(0, 0), usage_since: totals(0, 0), forecast: null, projects: [] },
-  ]
+  ] as Omit<LimitView, 'account' | 'active'>[]).map((l) => ({ ...l, account: null, active: true }))
   if (!showcase) return all
   return all.map((l) => {
     if (l.provider === 'anthropic' && l.window === 'five_hour')
@@ -406,12 +435,18 @@ function mockHistory() {
       from_ms: now - 56 * day,
       to_ms: now,
       series: [
-        { provider: 'anthropic', limit_id: '', window: 'five_hour', window_minutes: 300, windows: withLocal(five, 0.21), capacity: { median_usd: 21.4, min_usd: 17.9, max_usd: 26.2, windows: 14 } },
-        { provider: 'anthropic', limit_id: '', window: 'seven_day', window_minutes: 10080, windows: withLocal(week, 1.6), capacity: { median_usd: 163, min_usd: 139, max_usd: 181, windows: 5 } },
-        { provider: 'openai', limit_id: 'codex', window: 'five_hour', window_minutes: 300, windows: withLocal(codexFive, 0.05), capacity: { median_usd: 4.9, min_usd: 3.8, max_usd: 6.1, windows: 6 } },
-        { provider: 'openai', limit_id: 'codex', window: 'seven_day', window_minutes: 10080, windows: withLocal(codexWeek, 0.3), capacity: null },
-        { provider: 'google', limit_id: 'gemini', window: 'five_hour', window_minutes: 300, windows: withLocal(geminiFive, 0.04), capacity: null },
-        { provider: 'google', limit_id: 'gemini', window: 'seven_day', window_minutes: 10080, windows: withLocal(geminiWeek, 0.2), capacity: null },
+        { provider: 'anthropic', account: null, active: true, limit_id: '', window: 'five_hour', window_minutes: 300, windows: withLocal(five, 0.21), capacity: { median_usd: 21.4, min_usd: 17.9, max_usd: 26.2, windows: 14 } },
+        { provider: 'anthropic', account: null, active: true, limit_id: '', window: 'seven_day', window_minutes: 10080, windows: withLocal(week, 1.6), capacity: { median_usd: 163, min_usd: 139, max_usd: 181, windows: 5 } },
+        { provider: 'openai', account: twoAccounts ? ACCOUNT_B : null, active: true, limit_id: 'codex', window: 'five_hour', window_minutes: 300, windows: withLocal(codexFive, 0.05), capacity: { median_usd: 4.9, min_usd: 3.8, max_usd: 6.1, windows: 6 } },
+        { provider: 'openai', account: twoAccounts ? ACCOUNT_B : null, active: true, limit_id: 'codex', window: 'seven_day', window_minutes: 10080, windows: withLocal(codexWeek, 0.3), capacity: null },
+        ...(twoAccounts
+          ? [
+              { provider: 'openai' as const, account: ACCOUNT_A, active: false, limit_id: 'codex', window: 'five_hour', window_minutes: 300, windows: withLocal(codexFive.slice(3, 9).map((w) => ({ ...w, peak_pct: Math.min(100, w.peak_pct * 2.4) })), 0.05), capacity: null },
+              { provider: 'openai' as const, account: ACCOUNT_A, active: false, limit_id: 'codex', window: 'seven_day', window_minutes: 10080, windows: withLocal(codexWeek.slice(4).map((w) => ({ ...w, peak_pct: Math.min(100, w.peak_pct * 2.2) })), 0.3), capacity: null },
+            ]
+          : []),
+        { provider: 'google', account: null, active: true, limit_id: 'gemini', window: 'five_hour', window_minutes: 300, windows: withLocal(geminiFive, 0.04), capacity: null },
+        { provider: 'google', account: null, active: true, limit_id: 'gemini', window: 'seven_day', window_minutes: 10080, windows: withLocal(geminiWeek, 0.2), capacity: null },
       ],
       observed_days: { anthropic: 26, openai: 14, google: 12 },
     },
@@ -596,6 +631,8 @@ export function installMock() {
           return mockPlanValue()
         case 'get_limits':
           return limits()
+        case 'get_accounts':
+          return mockAccounts()
         case 'tray_preview':
           return mockTrayPreview(a.tray as TraySettings)
         case 'panel_data':

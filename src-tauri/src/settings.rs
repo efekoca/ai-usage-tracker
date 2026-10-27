@@ -535,7 +535,12 @@ pub struct Settings {
     pub tint_icons: bool,
     /// Each tool's mark next to its name in the app; the widget has its own switch.
     pub show_icons: bool,
+    /// Codex account digest → the name the user gave it; an unnamed account is numbered.
+    pub account_names: std::collections::BTreeMap<String, String>,
 }
+
+/// Long enough for "Work (team)", short enough for a limit card's header.
+const MAX_ACCOUNT_NAME: usize = 32;
 
 impl Default for Settings {
     fn default() -> Self {
@@ -567,6 +572,7 @@ impl Default for Settings {
             provider_colors: Default::default(),
             tint_icons: false,
             show_icons: true,
+            account_names: Default::default(),
         }
     }
 }
@@ -626,6 +632,11 @@ impl Settings {
         }
         // the value is placed into CSS, so only a plain hex color is kept
         self.provider_colors.retain(|p, c| ["anthropic", "openai", "google"].contains(&p.as_str()) && is_hex_color(c));
+        self.account_names.retain(|id, _| id.len() == 16 && id.bytes().all(|b| b.is_ascii_hexdigit()));
+        for name in self.account_names.values_mut() {
+            *name = name.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(MAX_ACCOUNT_NAME).collect();
+        }
+        self.account_names.retain(|_, n| !n.is_empty());
     }
 
     /// Normalizes in place first, so what callers keep and publish is exactly what was stored.
@@ -655,6 +666,18 @@ mod tests {
         assert_eq!(s.limit_display, "used");
         assert!(s.tray.show_percent && s.update_check);
         assert_eq!(s.widget.hotkey, DEFAULT_HOTKEY);
+    }
+
+    #[test]
+    fn account_names_are_tidied_and_only_kept_for_account_digests() {
+        let mut s: Settings = serde_json::from_str(
+            r#"{"account_names":{"3f9c1a7e52b0d846":"  İş   hesabı ","b71e04c9a3d25f18":"   ","not-a-digest":"x","0123456789abcdef":"a very long name that goes on and on and on"}}"#,
+        )
+        .unwrap();
+        s.normalize();
+        assert_eq!(s.account_names.get("3f9c1a7e52b0d846").map(String::as_str), Some("İş hesabı"));
+        assert_eq!(s.account_names.get("0123456789abcdef").map(|n| n.chars().count()), Some(MAX_ACCOUNT_NAME));
+        assert_eq!(s.account_names.len(), 2);
     }
 
     #[test]

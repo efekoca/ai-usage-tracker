@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, latest, setFilter, setPeriod } from '../lib/store.svelte'
+  import { accountName, app, latest, setFilter, setPeriod } from '../lib/store.svelte'
   import { localDate, t, toolLabel } from '../lib/i18n.svelte'
   import { api, type Period, type Tool } from '../lib/api'
   import Segmented from './Segmented.svelte'
@@ -34,7 +34,10 @@
     if (customError) return
     setPeriod({ kind: 'custom', from, to })
   }
-  const activeFilters = $derived((app.filter.tools?.length ?? 0) + (app.filter.models?.length ?? 0) + (app.filter.projects?.length ?? 0))
+  const activeFilters = $derived((app.filter.tools?.length ?? 0) + (app.filter.models?.length ?? 0) + (app.filter.projects?.length ?? 0) + (app.filter.accounts?.length ?? 0))
+  // the list's empty value means "all", so requests of no known account go by '?'
+  const UNKNOWN = '?'
+  const pickedAccount = $derived(app.filter.accounts?.length ? app.filter.accounts[0] || UNKNOWN : '')
   const tools: Tool[] = ['claude_code', 'codex', 'antigravity', 'opencode']
 </script>
 
@@ -75,6 +78,18 @@
         onchange={(v) => setFilter({ ...app.filter, projects: v ? [Number(v)] : [] })}
       />
     </label>
+    {#if app.accounts.length}
+      <label>
+        {t('accounts.filter')}
+        <Select
+          label={t('accounts.filter')}
+          value={pickedAccount}
+          minWidth={170}
+          options={[{ value: '', label: t('common.all') }, ...app.accounts.map((a) => ({ value: a.id ?? UNKNOWN, label: accountName(a.id) }))]}
+          onchange={(v) => setFilter({ ...app.filter, accounts: v ? [v === UNKNOWN ? '' : v] : [] })}
+        />
+      </label>
+    {/if}
     {#if activeFilters}
       <button class="btn ghost" onclick={() => setFilter({})}>{t('common.clear')}</button>
     {/if}

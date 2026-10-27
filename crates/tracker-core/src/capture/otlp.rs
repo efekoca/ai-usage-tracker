@@ -131,6 +131,8 @@ pub fn parse_logs(body: &Value) -> Vec<UsageEvent> {
                     branch: None,
                     agent: None,
                     thread_id: None,
+                    limit_reset: None,
+                    creator: None,
                 });
             }
         }

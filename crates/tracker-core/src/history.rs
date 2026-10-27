@@ -2,8 +2,8 @@
 //! becomes one record (how full it got, whether it filled, whether it was watched to its end),
 //! and the plan advice is built only on those records and the ratios providers publish.
 
-use crate::analytics::{counts_toward, window_minutes};
-use crate::model::{LimitSnapshot, Provider};
+use crate::analytics::{counts_toward, of_account, window_minutes};
+use crate::model::{LimitSnapshot, Provider, Tool};
 use crate::plans::PlansFile;
 use crate::pricing::{CostInput, PriceBook};
 use crate::store::Store;
@@ -73,6 +73,13 @@ pub struct Capacity {
 #[derive(Debug, Clone, Serialize)]
 pub struct WindowSeries {
     pub provider: Provider,
+    /// Codex account, when the archive holds more than one (see [`crate::analytics::LimitView`]).
+    pub account: Option<String>,
+    /// The provider's account in use; plan advice is built on its windows only.
+    pub active: bool,
+    /// Accounts are told apart: only `account`'s requests count toward its windows.
+    #[serde(skip)]
+    pub by_account: bool,
     pub limit_id: String,
     pub window: String,
     pub window_minutes: i64,
@@ -115,29 +122,42 @@ fn tail_ms(dur_ms: i64) -> i64 {
 pub fn limit_history(store: &Store, now_ms: i64, days: i64) -> Result<LimitHistory> {
     let from_ms = now_ms - days * DAY_MS;
     // a weekly window that ends inside the range started up to a week before it
-    let snaps = store.limits_between(from_ms - 7 * DAY_MS, now_ms + 1)?;
-    let mut groups: BTreeMap<(Provider, String, String), Vec<Reading>> = BTreeMap::new();
+    let snaps = store.owned_limits_between(from_ms - 7 * DAY_MS, now_ms + 1)?;
+    // two accounts' windows in one series would read as early resets
+    let several = !crate::accounts::accounts(store)?.is_empty();
+    let mut groups: BTreeMap<(Provider, Option<String>, String, String), Vec<Reading>> = BTreeMap::new();
     let mut days_seen: HashMap<Provider, BTreeSet<i64>> = HashMap::new();
-    for s in &snaps {
+    let mut newest: HashMap<Provider, (i64, Option<String>)> = HashMap::new();
+    for (s, owner) in &snaps {
+        let owner = owner.clone().filter(|_| several && s.tool == Tool::Codex);
+        if owner.as_deref() == Some(crate::accounts::NAMELESS) {
+            continue;
+        }
         if s.ts_ms >= now_ms - ADVICE_DAYS * DAY_MS {
             days_seen.entry(s.provider).or_default().insert(s.ts_ms.div_euclid(DAY_MS));
+        }
+        let n = newest.entry(s.provider).or_insert((s.ts_ms, owner.clone()));
+        if s.ts_ms > n.0 {
+            *n = (s.ts_ms, owner.clone());
         }
         if s.window != "five_hour" && s.window != "seven_day" {
             continue;
         }
         if let Some(r) = Reading::of(s) {
-            groups.entry((s.provider, s.limit_id.clone(), s.window.clone())).or_default().push(r);
+            groups.entry((s.provider, owner, s.limit_id.clone(), s.window.clone())).or_default().push(r);
         }
     }
     let series = groups
         .into_iter()
-        .filter_map(|((provider, limit_id, window), readings)| {
+        .filter_map(|((provider, account, limit_id, window), readings)| {
             let minutes = window_minutes(&window)?;
             let windows: Vec<WindowRecord> = build_windows(&readings, minutes * MIN_MS, now_ms)
                 .into_iter()
                 .filter(|w| w.resets_at_ms.unwrap_or(w.last_ms) >= from_ms)
                 .collect();
-            (!windows.is_empty()).then_some(WindowSeries { provider, limit_id, window, window_minutes: minutes, windows, capacity: None })
+            let active = newest.get(&provider).is_none_or(|(_, a)| *a == account);
+            let by_account = several && provider == Provider::OpenAI;
+            (!windows.is_empty()).then_some(WindowSeries { provider, account, active, by_account, limit_id, window, window_minutes: minutes, windows, capacity: None })
         })
         .collect();
     let observed_days = days_seen.into_iter().map(|(p, d)| (p, d.len() as u32)).collect();
@@ -276,7 +296,9 @@ pub fn add_local_usage(h: &mut LimitHistory, store: &Store, book: &PriceBook) ->
     for s in &mut h.series {
         let span = |w: &WindowRecord| (w.start_ms.unwrap_or(w.first_ms), w.end_ms.unwrap_or(w.last_ms + 1));
         let (Some(from), Some(to)) = (s.windows.iter().map(|w| span(w).0).min(), s.windows.iter().map(|w| span(w).1).max()) else { continue };
-        let events: Vec<_> = store.events_between(from, to)?.into_iter().filter(|e| counts_toward(s.provider, &s.limit_id, &s.window, e)).collect();
+        let account = s.by_account.then_some(s.account.as_deref());
+        let events: Vec<_> =
+            store.events_between(from, to)?.into_iter().filter(|e| counts_toward(s.provider, &s.limit_id, &s.window, e) && of_account(e, account)).collect();
         // the peak reading is compared with the use up to that reading, not with later use
         let mut at_peak: Vec<LocalUsage> = Vec::new();
         for w in &mut s.windows {
@@ -392,7 +414,7 @@ const DOWNGRADE_MAX_PCT: f64 = 80.0;
 
 fn stats(history: &LimitHistory, provider: Provider, window: &str, plan_filter: Option<&str>, since_ms: i64) -> WindowStats {
     let mut s = WindowStats::default();
-    for series in history.series.iter().filter(|x| x.provider == provider && x.window == window) {
+    for series in history.series.iter().filter(|x| x.provider == provider && x.window == window && x.active) {
         for w in &series.windows {
             if w.resets_at_ms.unwrap_or(w.last_ms) < since_ms {
                 continue;

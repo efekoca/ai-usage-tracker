@@ -172,7 +172,8 @@ pub async fn panel_data(app: AppHandle) -> Result<PanelData, String> {
     let limits = {
         let store = state.db();
         let book = state.book.read().unwrap();
-        analytics::limits_view(&store, &book, now_ms(), &s.thresholds).map_err(|e| e.to_string())?
+        // another Codex account's limits show only on the Limits page
+        analytics::limits_view(&store, &book, now_ms(), &s.thresholds).map_err(|e| e.to_string())?.into_iter().filter(|l| l.active).collect::<Vec<_>>()
     };
     let live = |p: Provider| limits.iter().any(|l| l.provider == p && l.used_pct.is_some() && matches!(l.state, LimitState::Fresh | LimitState::Behind));
     let cap = crate::capture::status(&app);
