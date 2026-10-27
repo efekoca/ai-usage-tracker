@@ -245,6 +245,8 @@ export interface LimitView {
   usage_since: Totals
   forecast: Forecast | null
   projects: ProjectShare[]
+  /** Estimated part of `used_pct` that rose while this computer sent no request; current readings only. */
+  unlogged_pct: number | null
 }
 
 export interface WidgetPeriod {
