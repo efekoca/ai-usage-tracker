@@ -55,8 +55,9 @@ pub struct WidgetSettings {
     pub provider_order: Vec<String>,
     /// Antigravity pool shown: "fullest" | "gemini" | "3p" | "all".
     pub antigravity_pool: String,
-    /// Other Codex accounts shown beside the one in use, by digest.
-    pub codex_accounts: Vec<String>,
+    /// Other Codex and Claude accounts shown beside each one's account in use, by digest.
+    #[serde(alias = "codex_accounts")]
+    pub accounts: Vec<String>,
     /// "today" | "days7" | "month1"
     pub primary_period: String,
     /// "tokens" | "cost"
@@ -106,7 +107,7 @@ impl Default for WidgetSettings {
             providers: Vec::new(),
             provider_order: PROVIDER_ORDER.iter().map(|p| p.to_string()).collect(),
             antigravity_pool: "fullest".into(),
-            codex_accounts: Vec::new(),
+            accounts: Vec::new(),
             primary_period: "today".into(),
             primary_metric: "tokens".into(),
             limit_style: "ring".into(),
@@ -164,7 +165,7 @@ impl WidgetSettings {
         if !["fullest", "gemini", "3p", "all"].contains(&self.antigravity_pool.as_str()) {
             self.antigravity_pool = "fullest".into();
         }
-        known_once(&mut self.codex_accounts, MAX_SHOWN_ACCOUNTS, |a| is_digest(a), |a, b| a == b);
+        known_once(&mut self.accounts, MAX_SHOWN_ACCOUNTS, |a| is_digest(a), |a, b| a == b);
         self.opacity = self.opacity.clamp(0.3, 1.0);
         self.scale = if self.scale.is_finite() { self.scale.clamp(0.6, 2.0) } else { 1.0 };
         self.corner_radius = self.corner_radius.clamp(0.0, 28.0);
@@ -197,9 +198,9 @@ fn is_digest(id: &str) -> bool {
     id.len() == 16 && id.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-/// An account is kept only on a Codex limit; elsewhere it is cleared.
+/// An account is kept only on a Codex or Claude limit; elsewhere it is cleared.
 fn keep_account(account: &mut String, provider: &str, limit_kind: bool) {
-    if !(provider == "openai" && limit_kind && is_digest(account)) {
+    if !(matches!(provider, "openai" | "anthropic") && limit_kind && is_digest(account)) {
         account.clear();
     }
 }
@@ -249,7 +250,7 @@ pub struct TrayItem {
     pub pool: String,
     /// "today", "days7" or "month1" for usage kinds.
     pub period: String,
-    /// A Codex limit of this account (its digest); empty for the account in use.
+    /// A Codex or Claude limit of this account (its digest); empty for the account in use.
     pub account: String,
 }
 
@@ -373,7 +374,7 @@ pub struct PanelModule {
     pub action: String,
     pub size: String,
     pub style: String,
-    /// A Codex limit of this account (its digest); empty for the account in use.
+    /// A Codex or Claude limit of this account (its digest); empty for the account in use.
     pub account: String,
 }
 
@@ -711,7 +712,7 @@ mod tests {
     }
 
     #[test]
-    fn another_account_is_kept_only_on_codex_limits() {
+    fn another_account_is_kept_only_on_codex_and_claude_limits() {
         let mut s: Settings = serde_json::from_str(
             r#"{
                 "widget": {"codex_accounts": ["3f9c1a7e52b0d846", "x", "3f9c1a7e52b0d846", "b71e04c9a3d25f18"]},
@@ -719,7 +720,8 @@ mod tests {
                     {"kind": "limit", "provider": "openai", "window": "five_hour"},
                     {"kind": "limit", "provider": "openai", "window": "five_hour", "account": "3f9c1a7e52b0d846"},
                     {"kind": "forecast", "provider": "openai", "window": "seven_day", "account": "not-a-digest"},
-                    {"kind": "limit", "provider": "anthropic", "window": "five_hour", "account": "3f9c1a7e52b0d846"}
+                    {"kind": "limit", "provider": "anthropic", "window": "five_hour", "account": "3f9c1a7e52b0d846"},
+                    {"kind": "tokens", "period": "today", "account": "3f9c1a7e52b0d846"}
                 ]},
                 "panel": {"modules": [
                     {"kind": "provider", "provider": "openai", "account": "3f9c1a7e52b0d846", "size": "m"},
@@ -730,9 +732,9 @@ mod tests {
         )
         .unwrap();
         s.normalize();
-        assert_eq!(s.widget.codex_accounts, ["3f9c1a7e52b0d846", "b71e04c9a3d25f18"]);
+        assert_eq!(s.widget.accounts, ["3f9c1a7e52b0d846", "b71e04c9a3d25f18"], "the 0.8 pre-release name is read too");
         let accounts: Vec<&str> = s.tray.items.iter().map(|i| i.account.as_str()).collect();
-        assert_eq!(accounts, ["", "3f9c1a7e52b0d846", "", ""]);
+        assert_eq!(accounts, ["", "3f9c1a7e52b0d846", "", "3f9c1a7e52b0d846", ""]);
         let modules: Vec<(&str, &str)> = s.panel.modules.iter().map(|m| (m.kind.as_str(), m.account.as_str())).collect();
         assert_eq!(modules, [("provider", "3f9c1a7e52b0d846"), ("usage", "")], "the same account's module once");
     }

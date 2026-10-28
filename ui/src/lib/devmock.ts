@@ -15,10 +15,12 @@ const showcase = scenario.get('showcase') === '1'
 const ocMissing = scenario.get('opencode') === 'missing'
 // ?platform=macos | linux: the pages as they look there
 const platform = scenario.get('platform') ?? 'windows'
-// ?accounts=2: two Codex accounts, the second one in use, plus requests of no known account
+// ?accounts=2: two Codex and two Claude accounts, the second one in use, plus requests of no known account
 const twoAccounts = scenario.get('accounts') === '2'
 const ACCOUNT_A = '3f9c1a7e52b0d846'
 const ACCOUNT_B = 'b71e04c9a3d25f18'
+const CLAUDE_A = '5d2e8a14c07b9f63'
+const CLAUDE_B = 'e81b4f06a39c2d75'
 
 let seed = 7
 const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
@@ -38,7 +40,7 @@ const settings: Settings = {
   widget: {
     visible: true, opacity: showcase ? 1 : 0.85, size: 'm', scale: 1, x: null, y: null, anchor: 'bottom-right', auto_hide_fullscreen: true, layout: 'horizontal',
     items: (['primary', 'cost', 'limit_five_hour', 'limit_seven_day', 'opencode', 'tools', 'week_tokens', 'week_cost', 'month_cost', 'updated'] as const).map((k, i) => ({ kind: k, enabled: i < 5 })),
-    providers: [], provider_order: ['anthropic', 'google', 'openai'], antigravity_pool: 'fullest', codex_accounts: twoAccounts ? [ACCOUNT_A] : [], primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '', corner_radius: 14,
+    providers: [], provider_order: ['anthropic', 'google', 'openai'], antigravity_pool: 'fullest', accounts: twoAccounts ? [ACCOUNT_A, CLAUDE_A] : [], primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '', corner_radius: 14,
     border: true, shadow: false, show_labels: true, show_icons: false, show_reset_time: false, warn_at: 70, high_at: 90, always_on_top: true, lock_position: false, click_action: 'open_dashboard',
     font_family: '', text_scale: 1, number_scale: 1, number_weight: 700, tabular_nums: true, hotkey: 'Ctrl+Alt+Shift+W',
   },
@@ -182,23 +184,32 @@ function mockAccounts() {
   const now = Date.now()
   const day = 864e5
   return [
+    { provider: 'anthropic', id: CLAUDE_A, first_ms: now - 60 * day, last_ms: now - 3 * day, requests: 21400, active: false },
+    { provider: 'anthropic', id: CLAUDE_B, first_ms: now - 9 * day, last_ms: now - 5 * 60000, requests: 6830, active: true },
+    { provider: 'anthropic', id: null, first_ms: now - 70 * day, last_ms: now - 10 * day, requests: 920, active: false },
     { provider: 'openai', id: ACCOUNT_A, first_ms: now - 40 * day, last_ms: now - 2 * 3600e3, requests: 4180, active: false },
     { provider: 'openai', id: ACCOUNT_B, first_ms: now - 12 * day, last_ms: now - 20 * 60000, requests: 1260, active: true },
     { provider: 'openai', id: null, first_ms: now - 52 * day, last_ms: now - 41 * day, requests: 312, active: false },
   ]
 }
 
+const knownAccounts = () => mockAccounts().flatMap((a) => (a.id ? [{ provider: a.provider, id: a.id }] : []))
+
 /** With two accounts the one read last (B) leads; A, whose week is nearly used, follows. */
 function withAccounts(all: LimitView[]): LimitView[] {
   if (!twoAccounts) return all
   const now = Date.now()
-  const b = all.filter((l) => l.provider === 'openai').map((l) => ({ ...l, account: ACCOUNT_B }))
-  const a = b.map((l) =>
-    l.window === 'five_hour'
-      ? { ...l, account: ACCOUNT_A, active: false, used_pct: 100, state: 'reset' as const, resets_at: Math.round(now / 1000 - 1800), observed_ms: now - 2 * 3600e3, forecast: null, usage_since: totals(0, 0) }
-      : { ...l, account: ACCOUNT_A, active: false, used_pct: 96, state: 'fresh' as const, resets_at: Math.round(now / 1000 + 1.4 * 86400), observed_ms: now - 2 * 3600e3, window_start_ms: now - 5.6 * 86400e3, window_usage: totals(88e6, 41.2), forecast: null },
-  )
-  return [...all.filter((l) => l.provider !== 'openai'), ...b, ...a].sort((x, y) => (x.provider === y.provider ? 0 : x.provider < y.provider ? -1 : 1))
+  const split = (provider: 'openai' | 'anthropic', a: string, b: string) => {
+    const mine = all.filter((l) => l.provider === provider).map((l) => ({ ...l, account: b }))
+    const other = mine.map((l) =>
+      l.window === 'five_hour'
+        ? { ...l, account: a, active: false, used_pct: 100, state: 'reset' as const, resets_at: Math.round(now / 1000 - 1800), observed_ms: now - 2 * 3600e3, forecast: null, usage_since: totals(0, 0), unlogged_pct: null }
+        : { ...l, account: a, active: false, used_pct: 96, state: 'fresh' as const, resets_at: Math.round(now / 1000 + 1.4 * 86400), observed_ms: now - 2 * 3600e3, window_start_ms: now - 5.6 * 86400e3, window_usage: totals(88e6, 41.2), forecast: null, unlogged_pct: null },
+    )
+    return [...mine, ...other]
+  }
+  const order = (x: LimitView, y: LimitView) => (x.provider === y.provider ? 0 : x.provider < y.provider ? -1 : 1)
+  return [...all.filter((l) => l.provider !== 'openai' && l.provider !== 'anthropic'), ...split('openai', ACCOUNT_A, ACCOUNT_B), ...split('anthropic', CLAUDE_A, CLAUDE_B)].sort(order)
 }
 
 function limits(): LimitView[] {
@@ -435,8 +446,14 @@ function mockHistory() {
       from_ms: now - 56 * day,
       to_ms: now,
       series: [
-        { provider: 'anthropic', account: null, active: true, limit_id: '', window: 'five_hour', window_minutes: 300, windows: withLocal(five, 0.21), capacity: { median_usd: 21.4, min_usd: 17.9, max_usd: 26.2, windows: 14 } },
-        { provider: 'anthropic', account: null, active: true, limit_id: '', window: 'seven_day', window_minutes: 10080, windows: withLocal(week, 1.6), capacity: { median_usd: 163, min_usd: 139, max_usd: 181, windows: 5 } },
+        { provider: 'anthropic', account: twoAccounts ? CLAUDE_B : null, active: true, limit_id: '', window: 'five_hour', window_minutes: 300, windows: withLocal(five, 0.21), capacity: { median_usd: 21.4, min_usd: 17.9, max_usd: 26.2, windows: 14 } },
+        { provider: 'anthropic', account: twoAccounts ? CLAUDE_B : null, active: true, limit_id: '', window: 'seven_day', window_minutes: 10080, windows: withLocal(week, 1.6), capacity: { median_usd: 163, min_usd: 139, max_usd: 181, windows: 5 } },
+        ...(twoAccounts
+          ? [
+              { provider: 'anthropic' as const, account: CLAUDE_A, active: false, limit_id: '', window: 'five_hour', window_minutes: 300, windows: withLocal(five.slice(2, 10).map((w) => ({ ...w, peak_pct: Math.min(100, w.peak_pct * 1.4) })), 0.21), capacity: null },
+              { provider: 'anthropic' as const, account: CLAUDE_A, active: false, limit_id: '', window: 'seven_day', window_minutes: 10080, windows: withLocal(week.slice(2).map((w) => ({ ...w, peak_pct: Math.min(100, w.peak_pct * 1.3) })), 1.6), capacity: null },
+            ]
+          : []),
         { provider: 'openai', account: twoAccounts ? ACCOUNT_B : null, active: true, limit_id: 'codex', window: 'five_hour', window_minutes: 300, windows: withLocal(codexFive, 0.05), capacity: { median_usd: 4.9, min_usd: 3.8, max_usd: 6.1, windows: 6 } },
         { provider: 'openai', account: twoAccounts ? ACCOUNT_B : null, active: true, limit_id: 'codex', window: 'seven_day', window_minutes: 10080, windows: withLocal(codexWeek, 0.3), capacity: null },
         ...(twoAccounts
@@ -531,7 +548,7 @@ function mockTrayPreview(tray: TraySettings) {
     if (it.period && it.provider === 'opencode') return cfg.label === 'short' ? `OC ${periods[it.period][0]} ` : `OpenCode ${periods[it.period][1].toLocaleLowerCase(tr ? 'tr' : 'en')} `
     if (it.period) return `${periods[it.period][cfg.label === 'short' ? 0 : 1]} `
     const w5 = it.window === 'five_hour'
-    const acct = it.account ? ` ${settings.account_names[it.account] ?? mockAccounts().filter((a) => a.id).findIndex((a) => a.id === it.account) + 1}` : ''
+    const acct = it.account ? ` ${settings.account_names[it.account] ?? mockAccounts().filter((a) => a.id && a.provider === it.provider).findIndex((a) => a.id === it.account) + 1}` : ''
     return cfg.label === 'name' ? `${name(it)}${acct} ${w5 ? (tr ? '5 sa' : '5h') : tr ? 'hafta' : 'week'} ` : `${short[it.provider === 'google' ? it.pool : it.provider]}${acct} ${w5 ? (tr ? '5s' : '5h') : tr ? 'H' : 'W'} `
   }
   const part = (it: TrayItem, cfg: TraySettings) => {
@@ -592,7 +609,7 @@ function mockPanelData() {
     update: scenario.get('update') === '1' ? '0.6.1' : null,
     providers: ['anthropic', 'google', 'openai'],
     signed_out: scenario.get('claude') === 'nologin' ? ['anthropic'] : [],
-    accounts: mockAccounts().flatMap((a) => (a.id ? [a.id] : [])),
+    accounts: knownAccounts(),
   }
 }
 
@@ -650,7 +667,7 @@ export function installMock() {
           return null
         case 'get_widget_data': {
           const per = (tok: number, cost: number) => ({ tokens: tok, cost_usd: cost, has_unpriced: false, tools: [{ tool: 'claude_code', tokens: tok * 0.75, cost_usd: cost * 0.83 }, { tool: 'codex', tokens: tok * 0.15, cost_usd: cost * 0.12 }, { tool: 'antigravity', tokens: tok * 0.07, cost_usd: cost * 0.03 }, ...(ocMissing ? [] : [{ tool: 'opencode', tokens: tok * 0.03, cost_usd: cost * 0.02 }])] })
-          return { today: per(18_400_000, 12.84), days7: per(96_000_000, 71.3), month1: per(402_000_000, 288.1), limits: limits().map((l) => ({ provider: l.provider, limit_id: l.limit_id, window: l.window, used_pct: l.used_pct, state: l.state, accuracy: l.accuracy, resets_at: l.resets_at, observed_ms: l.observed_ms, account: l.account, active: l.active })), providers: ['anthropic', 'openai', 'google'], opencode: !ocMissing, accounts: mockAccounts().flatMap((a) => (a.id ? [a.id] : [])), updated_ms: Date.now() - 60000 }
+          return { today: per(18_400_000, 12.84), days7: per(96_000_000, 71.3), month1: per(402_000_000, 288.1), limits: limits().map((l) => ({ provider: l.provider, limit_id: l.limit_id, window: l.window, used_pct: l.used_pct, state: l.state, accuracy: l.accuracy, resets_at: l.resets_at, observed_ms: l.observed_ms, account: l.account, active: l.active })), providers: ['anthropic', 'openai', 'google'], opencode: !ocMissing, accounts: knownAccounts(), updated_ms: Date.now() - 60000 }
         }
         case 'capture_status':
           return { claude_poll: settings.capture.claude_poll, claude: { binary: claudeMode === 'missing' ? null : 'C:/claude.exe', last_ok_ms: claudeMode ? null : Date.now() - 40000, last_error: claudeMode === 'nologin' ? 'claude_no_plan_limits' : claudeMode === 'missing' ? 'claude_not_found' : null }, claude_candidates_found: claudeMode !== 'missing', codex_poll: settings.capture.codex_poll, codex: { binary: codexMissing ? null : 'C:/codex.exe', last_ok_ms: codexMissing ? null : Date.now() - 120000, last_error: codexMissing ? 'codex_not_found' : codexOut ? 'codex_not_signed_in' : null }, codex_candidates_found: !codexMissing, antigravity_poll: settings.capture.antigravity_poll, antigravity: { binary: agyMissing ? null : 'C:/Users/you/AppData/Local/agy/bin/agy.exe', last_ok_ms: agyMissing ? null : Date.now() - 90000, last_error: agyMissing ? 'agy_not_found' : agyOut ? 'agy_not_signed_in' : null }, antigravity_candidates_found: !agyMissing, statusline: settings.capture.statusline, statusline_file: 'C:\\Users\\you\\.claude\\settings.json', statusline_chained: false, statusline_last_ms: Date.now() - 30000, otel: settings.capture.otel, otel_port: 43180, otel_listening: settings.capture.otel, otel_events: 42, otel_last_ms: Date.now() - 5000, otel_error: null, settings_file: 'C:\\Users\\you\\.claude\\settings.json' }

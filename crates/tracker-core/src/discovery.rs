@@ -313,6 +313,13 @@ pub fn enumerate_files(env: &Env, extra: &ExtraPaths, enabled: &HashSet<SourceId
             if p.is_file() {
                 candidates.push((p, ParserKind::ClaudePlanHistory, SourceId::ClaudeDesktop));
             }
+            // <account>/<organisation>/local_<id>.json: which account ran each Code-tab session
+            for e in WalkDir::new(d.join("claude-code-sessions")).min_depth(3).max_depth(3).into_iter().filter_map(Result::ok) {
+                let name = e.file_name().to_string_lossy();
+                if e.file_type().is_file() && name.starts_with("local_") && name.ends_with(".json") {
+                    candidates.push((e.into_path(), ParserKind::ClaudeDesktopSession, SourceId::ClaudeDesktop));
+                }
+            }
         }
     }
     if enabled.contains(&SourceId::Codex) {

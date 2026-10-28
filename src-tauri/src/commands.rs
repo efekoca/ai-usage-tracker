@@ -233,10 +233,22 @@ pub async fn get_limits(state: State<'_, AppState>) -> Res<Vec<LimitView>> {
     Ok(v)
 }
 
-/// Codex accounts, when the archive holds more than one; empty otherwise.
+/// Codex and Claude accounts, each provider's only while it has more than one.
 #[tauri::command]
 pub async fn get_accounts(state: State<'_, AppState>) -> Res<Vec<tracker_core::accounts::Account>> {
     tracker_core::accounts::accounts(&state.db()).map_err(err)
+}
+
+/// A known account, by which the unnamed ones are numbered per provider.
+#[derive(Serialize)]
+pub struct KnownAccount {
+    provider: Provider,
+    id: String,
+}
+
+/// Every provider's known accounts in order of first use.
+pub(crate) fn known_accounts(store: &tracker_core::store::Store) -> Result<Vec<KnownAccount>, String> {
+    Ok(tracker_core::accounts::accounts(store).map_err(err)?.into_iter().filter_map(|a| Some(KnownAccount { provider: a.provider, id: a.id? })).collect())
 }
 
 #[derive(Serialize)]
@@ -278,8 +290,8 @@ pub struct WidgetData {
     providers: Vec<Provider>,
     /// OpenCode's source is on and it was used in the last 30 days.
     opencode: bool,
-    /// Known Codex accounts in order of first use, which numbers the unnamed ones.
-    accounts: Vec<String>,
+    /// Known accounts in order of first use, which numbers the unnamed ones.
+    accounts: Vec<KnownAccount>,
     updated_ms: i64,
 }
 
@@ -342,7 +354,7 @@ pub async fn get_widget_data(state: State<'_, AppState>) -> Res<WidgetData> {
             active: l.active,
         })
         .collect();
-    let accounts = tracker_core::accounts::accounts(&store).map_err(err)?.into_iter().filter_map(|a| a.id).collect();
+    let accounts = known_accounts(&store)?;
     let opencode = settings.enabled_sources.contains(&SourceId::OpenCode);
     let shown = |t: Tool| t.provider().map_or(opencode, |p| providers.contains(&p));
     let mut provs: Vec<Provider> = providers.iter().copied().collect();
@@ -494,7 +506,7 @@ pub async fn import_database(window: WebviewWindow, app: AppHandle, state: State
         e => e.to_string(),
     })?;
     if let Err(e) = tracker_core::accounts::resolve(&mut db) {
-        log::warn!("codex accounts not resolved after import: {e}");
+        log::warn!("accounts not resolved after import: {e}");
     }
     drop(db);
     let _ = app.emit("data-changed", ());

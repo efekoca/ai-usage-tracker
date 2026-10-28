@@ -3,6 +3,7 @@
 
 pub mod antigravity_limits;
 pub mod claude_settings;
+pub mod claude_signin;
 pub mod claude_usage;
 pub mod codex_limits;
 pub mod otlp;

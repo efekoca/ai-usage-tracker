@@ -1,7 +1,7 @@
 //! Local SQLite archive (`%LOCALAPPDATA%\AIUsageTracker\tracker.db`). Records stay here even
 //! after the source tools delete or rotate their logs. No content columns exist by design.
 
-use crate::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent, MAX_CLOCK_SKEW_MS, MAX_EPOCH_SECS, MAX_WINDOW_MINUTES};
+use crate::model::{Accuracy, LimitSnapshot, Provider, SessionAccount, Tokens, Tool, ToolCall, UsageEvent, MAX_CLOCK_SKEW_MS, MAX_EPOCH_SECS, MAX_WINDOW_MINUTES};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::Serialize;
 use std::cell::RefCell;
@@ -146,7 +146,60 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE limit_snapshot ADD COLUMN owner TEXT;
     DELETE FROM file_checkpoint WHERE parser = 'codex_rollout';
     "#,
+    // v13: Claude accounts. Claude's logs name no account, so the evidence is kept apart: the
+    // sessions the Claude desktop app lists under an account, which account a Claude config
+    // folder was signed in to while the app watched it, and the folder each session's log lies
+    // in. The desktop history's organisation ids become digests at start-up (`digest_desktop_orgs`).
+    r#"
+    CREATE TABLE IF NOT EXISTS account_session (
+        tool       TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        account    TEXT NOT NULL,
+        PRIMARY KEY (tool, session_id, account)
+    );
+    CREATE TABLE IF NOT EXISTS signin_span (
+        root    TEXT NOT NULL,
+        account TEXT,
+        from_ms INTEGER NOT NULL,
+        to_ms   INTEGER NOT NULL,
+        PRIMARY KEY (root, from_ms)
+    );
+    CREATE TABLE IF NOT EXISTS session_root (
+        tool       TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        root       TEXT NOT NULL,
+        PRIMARY KEY (tool, session_id)
+    );
+    CREATE INDEX IF NOT EXISTS usage_event_tool_owner ON usage_event(tool, owner);
+    "#,
 ];
+
+/// How long the sign-in of a Claude config folder may go unseen and still count as unchanged: the
+/// app looks every 30 seconds while it runs, so a longer gap means it was closed or asleep.
+pub const SIGNIN_GAP_MS: i64 = 10 * 60_000;
+
+/// Claude desktop's usage history names an organisation, kept as a digest like every account id;
+/// rows an older version stored or a backup brings with the raw id are converted.
+fn digest_desktop_orgs(conn: &Connection) -> Result<()> {
+    let mut raw: Vec<String> = Vec::new();
+    let mut st = conn.prepare("SELECT DISTINCT account FROM limit_snapshot WHERE source = 'claude_plan_history' AND account <> ''")?;
+    for a in st.query_map([], |r| r.get::<_, String>(0))? {
+        let a = a?;
+        if !crate::model::is_account_digest(&a) {
+            raw.push(a);
+        }
+    }
+    if raw.is_empty() {
+        return Ok(());
+    }
+    let tx = conn.unchecked_transaction()?;
+    for a in &raw {
+        // the same moment already stored with the digest wins
+        tx.execute("UPDATE OR IGNORE limit_snapshot SET account = ?2 WHERE source = 'claude_plan_history' AND account = ?1", params![a, crate::model::claude_account(a)])?;
+        tx.execute("DELETE FROM limit_snapshot WHERE source = 'claude_plan_history' AND account = ?1", [a])?;
+    }
+    tx.commit()
+}
 
 const MAX_IMPORTED_COUNT: i64 = 1_000_000_000_000;
 /// Imported times must fall between 1970 and 3000 (milliseconds; reset times are seconds).
@@ -158,7 +211,7 @@ fn latest_accepted_ms() -> i64 {
 }
 
 /// A captured row is hidden when the same request also exists as an exact (log) row.
-const NOT_SUPERSEDED: &str = "NOT (u.accuracy = 'captured' AND u.request_id IS NOT NULL AND EXISTS (
+pub(crate) const NOT_SUPERSEDED: &str = "NOT (u.accuracy = 'captured' AND u.request_id IS NOT NULL AND EXISTS (
         SELECT 1 FROM usage_event x WHERE x.request_id = u.request_id AND x.accuracy = 'exact'))";
 
 const EVENT_COLUMNS: &str = "key, ts_ms, tool, client, model, project_id, session_id, input, cache_read, cache_write,
@@ -275,6 +328,7 @@ impl Store {
         for (i, sql) in MIGRATIONS.iter().enumerate().skip(version as usize) {
             conn.execute_batch(&format!("BEGIN; {sql} PRAGMA user_version = {}; COMMIT;", i + 1))?;
         }
+        digest_desktop_orgs(&conn)?;
         Ok(Store { conn, project_cache: RefCell::default() })
     }
 
@@ -430,6 +484,33 @@ impl Store {
     }
 
     /// One pool's percentages between two times, oldest first; `owner` keeps one account's.
+    /// Notes which account (a digest; `None` when signed out or not on a plan) the Claude config
+    /// folder `root` is signed in to at `now_ms`: the span of the same sign-in grows, anything
+    /// else starts a new span. Returns whether a new span started.
+    pub fn note_signin(&mut self, root: &str, account: Option<&str>, now_ms: i64) -> Result<bool> {
+        let tx = self.conn.transaction()?;
+        let last: Option<(i64, Option<String>, i64)> = tx
+            .query_row("SELECT from_ms, account, to_ms FROM signin_span WHERE root = ?1 ORDER BY from_ms DESC LIMIT 1", [root], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .optional()?;
+        // a clock set back would make spans overlap: wait until it is past the last look again
+        if last.as_ref().is_some_and(|(_, _, to)| now_ms < *to) {
+            return Ok(false);
+        }
+        let grows = matches!(&last, Some((_, a, to)) if a.as_deref() == account && now_ms - to <= SIGNIN_GAP_MS);
+        match last {
+            Some((from, _, _)) if grows => {
+                tx.execute("UPDATE signin_span SET to_ms = ?3 WHERE root = ?1 AND from_ms = ?2", params![root, from, now_ms])?;
+            }
+            _ => {
+                tx.execute("INSERT OR IGNORE INTO signin_span(root, account, from_ms, to_ms) VALUES(?1, ?2, ?3, ?3)", params![root, account, now_ms])?;
+            }
+        }
+        tx.commit()?;
+        Ok(!grows)
+    }
+
     pub fn pool_readings(&self, provider: Provider, limit_id: &str, window: &str, owner: Option<Option<&str>>, from_ms: i64, to_ms: i64) -> Result<Vec<(i64, f64)>> {
         let mut st = self.conn.prepare_cached(
             "SELECT ts_ms, used_pct FROM limit_snapshot
@@ -482,7 +563,7 @@ impl Store {
         self.project_cache.borrow_mut().clear();
         self.conn.execute_batch(
             "BEGIN; DELETE FROM usage_event; DELETE FROM tool_call; DELETE FROM limit_snapshot; DELETE FROM file_checkpoint;
-             DELETE FROM project; COMMIT; VACUUM;",
+             DELETE FROM project; DELETE FROM account_session; DELETE FROM signin_span; DELETE FROM session_root; COMMIT; VACUUM;",
         )
     }
 
@@ -598,7 +679,18 @@ impl Store {
                     [],
                 )?;
             }
+            if theirs >= 13 {
+                // digests, as this version writes them. Sign-in spans stay behind: they describe
+                // a folder of the computer that made the backup, which may share this one's path
+                tx.execute(
+                    "INSERT OR IGNORE INTO account_session(tool, session_id, account)
+                     SELECT tool, session_id, account FROM other.account_session
+                     WHERE typeof(tool) = 'text' AND typeof(session_id) = 'text' AND typeof(account) = 'text' AND length(account) = 16",
+                    [],
+                )?;
+            }
             tx.commit()?;
+            digest_desktop_orgs(&self.conn)?;
             Ok((events, limits))
         })();
         self.conn.execute("DETACH DATABASE other", [])?;
@@ -827,6 +919,20 @@ impl StoreTx<'_> {
         let mut st = self.tx.prepare_cached("UPDATE tool_call SET failed = ?2 WHERE key = ?1")?;
         for (key, failed) in results {
             st.execute(params![key, i64::from(*failed)])?;
+        }
+        Ok(())
+    }
+
+    /// The Claude config folder a session's log lies in.
+    pub fn note_session_root(&mut self, tool: Tool, session_id: &str, root: &str) -> Result<()> {
+        self.tx.execute("INSERT OR IGNORE INTO session_root(tool, session_id, root) VALUES(?1, ?2, ?3)", params![tool.as_str(), session_id, root])?;
+        Ok(())
+    }
+
+    pub fn insert_session_accounts(&mut self, sessions: &[SessionAccount]) -> Result<()> {
+        let mut st = self.tx.prepare_cached("INSERT OR IGNORE INTO account_session(tool, session_id, account) VALUES(?1, ?2, ?3)")?;
+        for s in sessions {
+            st.execute(params![s.tool.as_str(), s.session_id, s.account])?;
         }
         Ok(())
     }

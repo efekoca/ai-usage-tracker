@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tracker_core::capture::claude_settings::{self as cs, RevertOutcome};
-use tracker_core::capture::{antigravity_limits, claude_usage, codex_limits, otlp, statusline, Cli};
+use tracker_core::capture::{antigravity_limits, claude_signin, claude_usage, codex_limits, otlp, statusline, Cli};
 use tracker_core::discovery::{self, Env, SourceId};
 use tracker_core::store::Store;
 
@@ -532,7 +532,62 @@ fn read_claude(state: &AppState, s: &Settings, bin: &Path) -> Result<Vec<tracker
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
     let env = Env::from_system();
     let cfg = claude_usage::config_dir(&env, &s.extra_paths);
-    claude_usage::query(bin, &work, cfg.as_deref(), Duration::from_secs(30), now_ms()).map_err(|e| e.to_string())
+    // the sign-in the CLI reads with, when it is the same before and after the read
+    let file = cfg.clone().or_else(|| env.home.as_ref().map(|h| h.join(".claude"))).map(|root| claude_signin::config_file(&env, &root));
+    let signed_in = || file.as_deref().and_then(|f| claude_signin::signed_in(f).ok().flatten());
+    let before = signed_in();
+    let mut snaps = claude_usage::query(bin, &work, cfg.as_deref(), Duration::from_secs(30), now_ms()).map_err(|e| e.to_string())?;
+    if before.is_some() && before == signed_in() {
+        snaps.iter_mut().for_each(|l| l.account = before.clone());
+    }
+    Ok(snaps)
+}
+
+/// A settings file's size and change time, and the account it named then.
+type SeenSignin = std::collections::HashMap<PathBuf, ((u64, Option<std::time::SystemTime>), Option<String>)>;
+
+/// Notes which account each Claude config folder is signed in to (see `tracker_core::accounts`).
+/// A settings file that has not changed since the last look is not read again. Returns whether a
+/// sign-in started or changed.
+fn note_claude_signins(state: &AppState, s: &Settings, seen: &mut SeenSignin) -> bool {
+    let _writing = state.writers.read().unwrap_or_else(|e| e.into_inner());
+    let env = Env::from_system();
+    let now = now_ms();
+    let mut store: Option<Store> = None;
+    let mut changed = false;
+    for (root, file) in claude_signin::roots(&env, &s.extra_paths) {
+        let Ok(meta) = std::fs::metadata(&file) else { continue };
+        let stamp = (meta.len(), meta.modified().ok());
+        let account = match seen.get(&file) {
+            Some((at, account)) if *at == stamp => account.clone(),
+            // a file caught while it is being written is read on the next look
+            _ => match claude_signin::signed_in(&file) {
+                Ok(account) => {
+                    seen.insert(file.clone(), (stamp, account.clone()));
+                    account
+                }
+                Err(_) => continue,
+            },
+        };
+        if store.is_none() {
+            match Store::open(&state.db_path) {
+                Ok(st) => store = Some(st),
+                Err(e) => {
+                    log::warn!("claude sign-in not noted: {e}");
+                    return false;
+                }
+            }
+        }
+        match store.as_mut().map(|st| st.note_signin(&root, account.as_deref(), now)) {
+            Some(Ok(new)) => changed |= new,
+            Some(Err(e)) => log::warn!("claude sign-in not noted: {e}"),
+            None => {}
+        }
+    }
+    if changed && let Some(st) = store.as_mut() && let Err(e) = tracker_core::accounts::resolve_claude(st) {
+        log::warn!("claude accounts not resolved: {e}");
+    }
+    changed
 }
 
 fn persist(app: &AppHandle, f: impl FnOnce(&mut Settings)) -> Result<Settings, String> {
@@ -747,11 +802,16 @@ fn store_limits(state: &AppState, epoch: u64, snaps: &[tracker_core::model::Limi
     let mut tx = store.transaction().map_err(|e| e.to_string())?;
     tx.insert_limits(snaps).map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
-    // a Codex read may name the signed-in account, which settles whose windows are whose
+    // a read may name the signed-in account, which settles whose windows are whose
     if snaps.iter().any(|s| s.tool == tracker_core::model::Tool::Codex)
-        && let Err(e) = tracker_core::accounts::resolve(&mut store)
+        && let Err(e) = tracker_core::accounts::resolve_codex(&mut store)
     {
         log::warn!("codex accounts not resolved: {e}");
+    }
+    if snaps.iter().any(|s| s.provider == tracker_core::model::Provider::Anthropic)
+        && let Err(e) = tracker_core::accounts::resolve_claude(&mut store)
+    {
+        log::warn!("claude accounts not resolved: {e}");
     }
     Ok(())
 }
@@ -941,6 +1001,7 @@ fn start_claude_poller(app: &AppHandle) {
         let mut failures: u32 = 0;
         let mut seen_event_ms: Option<i64> = None;
         let mut forced = false;
+        let mut signins = SeenSignin::new();
         loop {
             match rx.recv_timeout(if last_try_ms == 0 { FIRST_READ[2] } else { TICK }) {
                 Ok(()) => forced = true,
@@ -952,6 +1013,9 @@ fn start_claude_poller(app: &AppHandle) {
                 return;
             }
             let s = state.settings.read().unwrap().clone();
+            if reads_allowed(&s, &[SourceId::ClaudeCode]) && note_claude_signins(&state, &s, &mut signins) {
+                let _ = app.emit("data-changed", ());
+            }
             if !s.capture.claude_poll || !reads_allowed(&s, &[SourceId::ClaudeCode, SourceId::Cowork, SourceId::ClaudeDesktop]) {
                 forced = false;
                 continue;

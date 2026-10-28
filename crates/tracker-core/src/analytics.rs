@@ -90,10 +90,16 @@ pub struct Filter {
     pub models: Vec<String>,
     #[serde(default)]
     pub projects: Vec<i64>,
-    /// Codex accounts by [`crate::accounts::Account::id`]; an empty string stands for requests
-    /// no evidence ties to an account. Other tools have no accounts and never match.
+    /// Accounts as `provider:id` ([`crate::accounts::Account`]); an empty id (`openai:`) stands
+    /// for that provider's requests no evidence ties to an account. Tools without accounts never
+    /// match.
     #[serde(default)]
     pub accounts: Vec<String>,
+}
+
+/// How [`Filter::accounts`] names an account.
+pub fn account_key(provider: Provider, id: Option<&str>) -> String {
+    format!("{}:{}", provider.as_str(), id.unwrap_or_default())
 }
 
 impl Filter {
@@ -102,7 +108,7 @@ impl Filter {
             && (self.clients.is_empty() || e.client.as_ref().is_some_and(|c| self.clients.contains(c)))
             && (self.models.is_empty() || self.models.contains(&e.model))
             && (self.projects.is_empty() || e.project_id.is_some_and(|p| self.projects.contains(&p)))
-            && (self.accounts.is_empty() || (e.tool == Tool::Codex && self.accounts.contains(&e.account.clone().unwrap_or_default())))
+            && (self.accounts.is_empty() || e.tool.provider().is_some_and(|p| self.accounts.contains(&account_key(p, e.account.as_deref()))))
     }
 }
 
@@ -468,15 +474,15 @@ pub(crate) fn counts_toward(provider: Provider, limit_id: &str, window: &str, e:
 pub const OTHER_ACCOUNT_MS: i64 = 14 * 86_400_000;
 
 pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[Threshold]) -> Result<Vec<LimitView>> {
-    // Codex readings are told apart by account only when the archive holds more than one
-    let several = !crate::accounts::accounts(store)?.is_empty();
+    // a provider's readings are told apart by account only when the archive holds more than one
+    let several = crate::accounts::several(store)?;
     // newest reading per (provider, account, limit_id, window) across all sources: Claude's
     // desktop history, Cowork and Claude Code readings describe the same account-wide pool
     type Key = (String, Option<String>, String, String);
     let mut newest: BTreeMap<Key, LimitSnapshot> = BTreeMap::new();
     let mut known_reset: HashMap<Key, i64> = HashMap::new();
     for (s, owner) in store.latest_owned_limits()? {
-        let owner = owner.filter(|_| several && s.tool == Tool::Codex);
+        let owner = owner.filter(|_| several.contains(&s.provider));
         if owner.as_deref() == Some(crate::accounts::NAMELESS) {
             continue;
         }
@@ -502,12 +508,11 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
             s.resets_at = Some(r);
         }
     }
-    // each provider's account in use is the one read last
-    let mut active: HashMap<Provider, (i64, Option<String>)> = HashMap::new();
-    for ((_, owner, _, _), s) in &newest {
-        let e = active.entry(s.provider).or_insert((s.ts_ms, owner.clone()));
-        if s.ts_ms > e.0 {
-            *e = (s.ts_ms, owner.clone());
+    // a provider without accounts has one view per window, all in use
+    let mut active: HashMap<Provider, Option<String>> = HashMap::new();
+    for p in &several {
+        if let Some(o) = crate::accounts::in_use(store, *p, now_ms)? {
+            active.insert(*p, o);
         }
     }
     // drop windows that belong to a plan the account no longer has (e.g. a monthly window on an old plan)
@@ -532,10 +537,10 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
     let projects: HashMap<i64, ProjectRow> = store.projects()?.into_iter().map(|p| (p.id, p)).collect();
     let mut out = Vec::new();
     for (owner, s) in &snaps {
-        let is_active = active.get(&s.provider).is_none_or(|(_, a)| a == owner);
+        let is_active = active.get(&s.provider).is_none_or(|a| a == owner);
         // another account's view counts only that account's requests; a provider without
         // accounts counts all of its own
-        let account = (several && s.tool == Tool::Codex).then_some(owner.as_deref());
+        let account = several.contains(&s.provider).then_some(owner.as_deref());
         let minutes = window_minutes(&s.window);
         let dur_ms = minutes.map(|m| m * 60_000);
         let reset_ms = s.resets_at_ms();

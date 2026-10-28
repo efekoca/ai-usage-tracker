@@ -111,9 +111,10 @@
     commit('provider_order')
   }
   const providerOn = (p: Provider) => ws.providers.length === 0 || ws.providers.includes(p)
-  const codexAccounts = $derived(app.accounts.filter((a) => a.id !== null))
+  // each provider with more than one named account, in the widget's order
+  const accountGroups = $derived(ordered.map((p) => ({ p, list: app.accounts.filter((a) => a.provider === p && a.id !== null) })).filter((g) => g.list.length > 1))
   function toggleAccount(id: string, v: boolean) {
-    set('codex_accounts', v ? [...ws.codex_accounts, id] : ws.codex_accounts.filter((x) => x !== id))
+    set('accounts', v ? [...ws.accounts, id] : ws.accounts.filter((x) => x !== id))
   }
   const lastOn = (p: Provider) => {
     const all = (data?.providers ?? providers) as Provider[]
@@ -124,7 +125,7 @@
       visible: ws.visible, opacity: 0.85, size: 'm', scale: 1, x: ws.x, y: ws.y, anchor: 'bottom-right', auto_hide_fullscreen: true,
       layout: 'horizontal',
       items: (['primary', 'cost', 'limit_five_hour', 'limit_seven_day', 'opencode', 'tools', 'week_tokens', 'week_cost', 'month_cost', 'updated'] as WidgetItemKind[]).map((k, i) => ({ kind: k, enabled: i < 5 })),
-      providers: [], provider_order: ['anthropic', 'google', 'openai'], antigravity_pool: 'fullest', codex_accounts: [], primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '',
+      providers: [], provider_order: ['anthropic', 'google', 'openai'], antigravity_pool: 'fullest', accounts: [], primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '',
       corner_radius: 14, border: true, shadow: false, show_labels: true, show_icons: false, show_reset_time: false, warn_at: 70, high_at: 90,
       always_on_top: true, lock_position: false, click_action: 'open_dashboard',
       font_family: '', text_scale: 1, number_scale: 1, number_weight: 700, tabular_nums: true,
@@ -213,21 +214,21 @@
           />
         </div>
       {/if}
-      {#if providerOn('openai') && codexAccounts.length > 1}
+      {#each accountGroups.filter((g) => providerOn(g.p)) as g (g.p)}
         <div class="item stack">
-          <span>{t('ws.codexAccounts')}<span class="subtle small block">{t('ws.codexAccounts.help')}</span></span>
-          <ul class="items" aria-label={t('ws.codexAccounts')}>
-            {#each codexAccounts as a (a.id)}
+          <span>{t(`accounts.title.${g.p}`)}<span class="subtle small block">{t('ws.accounts.help')}</span></span>
+          <ul class="items" aria-label={t(`accounts.title.${g.p}`)}>
+            {#each g.list as a (a.id)}
               {@const id = a.id as string}
-              <li class:off={!a.active && !ws.codex_accounts.includes(id)}>
-                <Toggle checked={ws.codex_accounts.includes(id)} label={accountName(id)} onchange={(v) => toggleAccount(id, v)} />
-                <span class="iname">{accountName(id)}</span>
+              <li class:off={!a.active && !ws.accounts.includes(id)}>
+                <Toggle checked={ws.accounts.includes(id)} label={accountName(id, g.p)} onchange={(v) => toggleAccount(id, v)} />
+                <span class="iname">{accountName(id, g.p)}</span>
                 {#if a.active}<span class="subtle small">{t('accounts.inUse')}</span>{/if}
               </li>
             {/each}
           </ul>
         </div>
-      {/if}
+      {/each}
     </section>
 
     <section class="card group">

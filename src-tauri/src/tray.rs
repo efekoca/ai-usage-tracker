@@ -236,15 +236,17 @@ pub(crate) fn data(app: &AppHandle, s: &Settings, cfg: &TraySettings, readings: 
     Data { readings, usage, opencode, scan_ms, accounts }
 }
 
-/// Each Codex account's short name: the user's, else its number in order of first use, as the
-/// Limits page numbers it.
+/// Each account's short name: the user's, else its number among its provider's accounts in order
+/// of first use, as the Limits page numbers them.
 fn account_tags(app: &AppHandle, s: &Settings) -> std::collections::HashMap<String, String> {
     let list = tracker_core::accounts::accounts(&app.state::<AppState>().db()).unwrap_or_default();
+    let mut counts: std::collections::HashMap<Provider, usize> = std::collections::HashMap::new();
     list.into_iter()
-        .filter_map(|a| a.id)
-        .enumerate()
-        .map(|(i, id)| {
-            let tag = s.account_names.get(&id).cloned().unwrap_or_else(|| (i + 1).to_string());
+        .filter_map(|a| Some((a.provider, a.id?)))
+        .map(|(provider, id)| {
+            let n = counts.entry(provider).or_default();
+            *n += 1;
+            let tag = s.account_names.get(&id).cloned().unwrap_or_else(|| n.to_string());
             (id, tag)
         })
         .collect()

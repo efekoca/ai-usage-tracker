@@ -188,7 +188,8 @@ pub struct UsageEvent {
     /// Every account has its own windows, so this tells accounts apart (see `accounts`).
     pub limit_reset: Option<i64>,
     /// Codex: [`account_digest`] of the account that started the session, set only on requests
-    /// sent right after it started and before its limit window changed.
+    /// sent right after it started and before its limit window changed. Claude: the
+    /// [`claude_account`] its telemetry event names.
     pub creator: Option<String>,
 }
 
@@ -234,6 +235,32 @@ pub struct LimitSnapshot {
 pub fn account_digest(id: &str) -> String {
     use sha2::Digest;
     sha2::Sha256::digest(id.as_bytes()).iter().take(8).map(|b| format!("{b:02x}")).collect()
+}
+
+/// A Claude account: the digest of its plan's organisation id, which every Claude source names
+/// (in one spelling, so case and spaces do not split one account in two).
+pub fn claude_account(org: &str) -> String {
+    account_digest(&org.trim().to_ascii_lowercase())
+}
+
+/// A digest made by [`account_digest`].
+pub fn is_account_digest(s: &str) -> bool {
+    s.len() == 16 && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// The `8-4-4-4-12` hex form Anthropic gives account and organisation ids.
+pub fn is_uuid(s: &str) -> bool {
+    let parts: Vec<&str> = s.split('-').collect();
+    parts.len() == 5 && parts.iter().zip([8, 4, 4, 4, 12]).all(|(p, n)| p.len() == n && p.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// Evidence that a session ran on an account (a digest): the Claude desktop app lists each
+/// Code-tab session under the account it ran it with.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionAccount {
+    pub tool: Tool,
+    pub session_id: String,
+    pub account: String,
 }
 
 /// The latest time accepted from any source: the year 3000, in epoch seconds.

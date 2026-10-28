@@ -4,7 +4,7 @@
 
 use crate::discovery::DiscoveredFile;
 use crate::capture::statusline;
-use crate::sources::{antigravity, claude_code, claude_plan, codex, cowork_audit, is_compressed, opencode, ParseOutput, ParserKind, MAX_WARNING_DETAILS};
+use crate::sources::{antigravity, claude_code, claude_plan, claude_sessions, codex, cowork_audit, is_compressed, opencode, ParseOutput, ParserKind, MAX_WARNING_DETAILS};
 use crate::store::Store;
 use serde::Serialize;
 use std::time::UNIX_EPOCH;
@@ -45,7 +45,7 @@ pub fn ingest(store: &mut Store, files: &[DiscoveredFile], mut on_progress: impl
         limits_before: store.limit_count().unwrap_or(0),
         ..Default::default()
     };
-    let mut codex_read = false;
+    let (mut codex_read, mut claude_read) = (false, false);
     for (i, f) in files.iter().enumerate() {
         // one damaged file must not stop the scan; its open transaction rolls back on unwind
         let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ingest_file(store, f)))
@@ -54,6 +54,7 @@ pub fn ingest(store: &mut Store, files: &[DiscoveredFile], mut on_progress: impl
             Ok(Some(read)) => {
                 rep.files_read += 1;
                 codex_read |= f.parser == ParserKind::CodexRollout;
+                claude_read |= f.parser.is_claude();
                 rep.records_written += read.records;
                 rep.warning_count += read.warning_count;
                 let p = f.path.to_string_lossy().into_owned();
@@ -70,8 +71,11 @@ pub fn ingest(store: &mut Store, files: &[DiscoveredFile], mut on_progress: impl
     if rep.files_read > 0 {
         let _ = store.prune_projects();
     }
-    if codex_read && let Err(e) = crate::accounts::resolve(store) {
+    if codex_read && let Err(e) = crate::accounts::resolve_codex(store) {
         log::warn!("codex accounts not resolved: {e}");
+    }
+    if claude_read && let Err(e) = crate::accounts::resolve_claude(store) {
+        log::warn!("claude accounts not resolved: {e}");
     }
     rep.events_after = store.event_count().unwrap_or(0);
     rep.limits_after = store.limit_count().unwrap_or(0);
@@ -133,6 +137,12 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<FileR
         }
         tx.upsert_events(&out.events).map_err(|e| e.to_string())?;
         tx.insert_limits(&out.limits).map_err(|e| e.to_string())?;
+        tx.insert_session_accounts(&out.sessions).map_err(|e| e.to_string())?;
+        if f.parser == ParserKind::ClaudeCodeJsonl
+            && let Some((root, session)) = crate::accounts::claude_log_session(&f.path)
+        {
+            tx.note_session_root(crate::model::Tool::ClaudeCode, &session, &root).map_err(|e| e.to_string())?;
+        }
         tx.upsert_tool_calls(&out.tool_calls).map_err(|e| e.to_string())?;
         tx.apply_tool_results(&out.tool_results).map_err(|e| e.to_string())?;
         read.warning_count += out.warning_count;
@@ -161,7 +171,7 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<FileR
         )
         .map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())?;
-        read.records += out.events.len() + out.limits.len() + out.tool_calls.len() + out.tool_results.len();
+        read.records += out.events.len() + out.limits.len() + out.tool_calls.len() + out.tool_results.len() + out.sessions.len();
         if !more {
             return Ok(Some(read));
         }
@@ -186,6 +196,7 @@ fn parse(f: &DiscoveredFile, offset: u64, state: &serde_json::Value) -> std::io:
         ),
         ParserKind::CoworkAudit => cowork_audit::parse_file(&f.path, offset),
         ParserKind::ClaudePlanHistory => claude_plan::parse_file(&f.path),
+        ParserKind::ClaudeDesktopSession => claude_sessions::parse_file(&f.path),
         ParserKind::CodexRollout => codex::parse_file(&f.path, offset, state),
         ParserKind::StatuslineCapture => statusline::parse_file(&f.path, offset),
         ParserKind::AntigravityDb => antigravity::parse_file(&f.path),

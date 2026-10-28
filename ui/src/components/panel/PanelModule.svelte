@@ -38,18 +38,18 @@
   const highAt = $derived(settings.widget.high_at)
   const color = (used: number | null, p: string) =>
     used !== null && used >= highAt ? 'var(--critical)' : used !== null && used >= warnAt ? 'var(--serious)' : settings.provider_colors?.[p as Provider] || 'var(--accent)'
-  // another Codex account's tile names it, and then the account in use is named too
+  // another account's tile names it, and then the provider's account in use is named too
   const account = $derived.by(() => {
-    if (m.provider !== 'openai') return null
+    if (m.provider !== 'openai' && m.provider !== 'anthropic') return null
     if (m.account) return m.account
-    return settings.panel.modules.some((x) => x.account) ? (data?.limits.find((l) => l.provider === 'openai' && l.active)?.account ?? null) : null
+    return settings.panel.modules.some((x) => x.provider === m.provider && x.account) ? (data?.limits.find((l) => l.provider === m.provider && l.active)?.account ?? null) : null
   })
-  // Antigravity's pools and Codex accounts by their short names, as on the widget; the logo stands beside them
+  // Antigravity's pools and other accounts by their short names, as on the widget; the logo stands beside them
   const name = $derived(
     m.provider === 'google'
       ? t(`widget.pool.google.${m.pool === 'gemini' ? 'gemini' : '3p'}`)
       : account
-        ? nameAccount(account, data?.accounts ?? [], settings.account_names, true)
+        ? nameAccount(account, m.provider as Provider, data?.accounts ?? [], settings.account_names, true)
         : limitName(m.provider, m.pool),
   )
   const short = (w: string) => t(`panel.window.${w}`)

@@ -113,11 +113,11 @@
   </section>
 {/if}
 
-{#if app.accounts.length}
+{#each (['anthropic', 'openai'] as const).filter((p) => app.accounts.some((a) => a.provider === p)) as p (p)}
   <section class="card accounts">
-    <h2><BrandIcon provider="openai" color={markTint('openai')} />{t('accounts.title')}</h2>
-    <p class="subtle small help">{t('accounts.help')}</p>
-    {#each app.accounts as a (a.id ?? '')}
+    <h2><BrandIcon provider={p} color={markTint(p)} />{t(`accounts.title.${p}`)}</h2>
+    <p class="subtle small help">{t(`accounts.help.${p}`)}</p>
+    {#each app.accounts.filter((a) => a.provider === p) as a (a.id ?? '')}
       <div class="acct-row">
         {#if a.id !== null}
           {@const id = a.id}
@@ -125,12 +125,12 @@
             class="field"
             maxlength="32"
             value={app.settings?.account_names?.[id] ?? ''}
-            placeholder={accountName(id)}
-            aria-label="{t('accounts.name')}: {accountName(id)}"
+            placeholder={accountName(id, p)}
+            aria-label="{t('accounts.name')}: {accountName(id, p)}"
             onchange={(e) => rename(id, e.currentTarget.value)}
           />
         {:else}
-          <span class="unknown" title={t('accounts.unknown.help')}>{accountName(null)}</span>
+          <span class="unknown" title={t('accounts.unknown.help')}>{accountName(null, p)}</span>
         {/if}
         {#if a.active}<span class="pill in-use">{t('accounts.inUse')}</span>{/if}
         <span class="spacer"></span>
@@ -139,7 +139,7 @@
       </div>
     {/each}
   </section>
-{/if}
+{/each}
 
 <LimitNotices />
 

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api, providersOf, type LimitHistoryView, type Provider, type WindowRecord } from '../lib/api'
-  import { accountName, accountOf, app, latest, markTint } from '../lib/store.svelte'
+  import { accountKey, accountName, accountOf, app, latest, markTint, providerAccount } from '../lib/store.svelte'
   import { fmtCompact, fmtDateTime, fmtDuration, fmtInt, fmtMoney, fmtPct, i18n, limitName, t, windowLabel } from '../lib/i18n.svelte'
   import Segmented from './Segmented.svelte'
   import Select from './Select.svelte'
@@ -43,8 +43,13 @@
   const enabled = $derived(providersOf(app.settings?.enabled_sources ?? []).filter((p) => (view?.advice ?? []).some((a) => a.provider === p) || (view?.history.series ?? []).some((x) => x.provider === p)))
   const providers = $derived(provider === 'all' ? enabled : [provider])
   const series = $derived(
-    (view?.history.series ?? []).filter((s) => s.window === win && providers.includes(s.provider) && (acct === 'all' || (s.provider === 'openai' && (s.account ?? '') === acct))),
+    (view?.history.series ?? []).filter((s) => s.window === win && providers.includes(s.provider) && (acct === 'all' || accountKey(s.provider, s.account) === acct)),
   )
+  const accountChoices = $derived(app.accounts.filter((a) => providers.includes(a.provider)))
+  // an account of a provider no longer shown is no longer picked
+  $effect(() => {
+    if (acct !== 'all' && !accountChoices.some((a) => accountKey(a.provider, a.id) === acct)) acct = 'all'
+  })
   const accountsShown = $derived(new Set(series.map((s) => accountOf(s))).size > 1)
   const nameOf = (s: { provider: Provider; limit_id: string; account: string | null }) => [limitName(s.provider, s.limit_id), accountOf(s)].filter(Boolean).join(' · ')
   type Row = WindowRecord & { provider: Provider; limit_id: string; account: string | null }
@@ -113,14 +118,15 @@
       <Segmented label={t('history.filter.provider')} bind:value={provider} options={[{ value: 'all', label: t('history.filter.all') }, ...enabled.map((p) => ({ value: p, label: t(`provider.${p}`) }))]} />
     </div>
   {/if}
-  {#if app.accounts.length && enabled.includes('openai')}
+  {#if accountChoices.length}
+    {@const mixed = new Set(accountChoices.map((a) => a.provider)).size > 1}
     <div class="f">
       <span class="small muted">{t('accounts.filter')}</span>
       <Select
         label={t('accounts.filter')}
         value={acct}
         minWidth={170}
-        options={[{ value: 'all', label: t('history.filter.all') }, ...app.accounts.map((a) => ({ value: a.id ?? '', label: accountName(a.id) }))]}
+        options={[{ value: 'all', label: t('history.filter.all') }, ...accountChoices.map((a) => ({ value: accountKey(a.provider, a.id), label: mixed ? providerAccount(a.provider, a.id) : accountName(a.id, a.provider) }))]}
         onchange={(v) => (acct = v)}
       />
     </div>
