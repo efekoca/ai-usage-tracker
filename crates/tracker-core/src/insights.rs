@@ -588,9 +588,9 @@ pub fn agents_tools(store: &Store, book: &PriceBook, range: Range, filter: &Filt
             .then(b.totals.total_tokens.cmp(&a.totals.total_tokens))
     });
 
-    // tool calls carry no model or client: with such a filter, keep the calls of the sessions
-    // the filtered requests belong to
-    let by_session = !filter.models.is_empty() || !filter.clients.is_empty();
+    // tool calls carry no model, client or account: with such a filter, keep the calls of the
+    // sessions the filtered requests belong to
+    let by_session = !filter.models.is_empty() || !filter.clients.is_empty() || !filter.accounts.is_empty();
     let sessions: std::collections::HashSet<(&'static str, &str)> =
         events.iter().filter_map(|e| e.session_id.as_deref().map(|s| (e.tool.as_str(), s))).collect();
     let mut tools: BTreeMap<(&'static str, String), ToolRow> = BTreeMap::new();
@@ -894,20 +894,24 @@ const FALL_PCT: f64 = 10.0;
 /// How old a reading may be: a request still running reports the limit as it was when it began.
 pub(crate) const STALE_MS: i64 = 10 * 60_000;
 
-/// When use started again from zero inside a window, if it did: the provider granted a reset
-/// without moving the window's end. It is the last reading before a fall that every later
-/// reading confirms, for longer than a delayed reading could explain. `reads` are (time, %) of
-/// one window, oldest first.
+/// Each time use started again from zero inside a window: the provider granted a reset without
+/// moving the window's end. Each is the index of the last reading before a fall that the readings
+/// after it hold, with none back up in between, for longer than a delayed reading could explain;
+/// use may fill up again later. `reads` are (time, %) of one window, oldest first.
+pub(crate) fn restarts(reads: &[(i64, f64)]) -> Vec<usize> {
+    (1..reads.len())
+        .filter(|&j| {
+            let before = reads[j - 1].1;
+            let held = reads[j..].iter().take_while(|r| before - r.1 > FALL_PCT).last();
+            held.is_some_and(|r| r.0 - reads[j].0 >= STALE_MS)
+        })
+        .map(|j| j - 1)
+        .collect()
+}
+
+/// When use last started again from zero inside a window, if it did (see [`restarts`]).
 pub fn restarted(reads: &[(i64, f64)]) -> Option<i64> {
-    let newest = reads.last()?.0;
-    let mut after = f64::MIN;
-    for j in (1..reads.len()).rev() {
-        after = after.max(reads[j].1);
-        if reads[j - 1].1 - after > FALL_PCT && newest - reads[j].0 >= STALE_MS {
-            return Some(reads[j - 1].0);
-        }
-    }
-    None
+    restarts(reads).last().map(|&i| reads[i].0)
 }
 
 /// Linear forecast at the window's average pace so far. Every window starts at 0 % when it

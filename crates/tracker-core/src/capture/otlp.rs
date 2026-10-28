@@ -277,6 +277,13 @@ fn store_batch(store: &mut Store, body: &[u8], st: &ReceiverStats, on_events: &i
     });
     match stored {
         Ok(()) => {
+            // an event's organization names its request's account; nothing else would settle it
+            // if no log or limit read follows
+            if events.iter().any(|e| e.creator.is_some())
+                && let Err(e) = crate::accounts::resolve_claude(store)
+            {
+                log::warn!("claude accounts not resolved after telemetry: {e}");
+            }
             st.events.fetch_add(events.len() as u64, Ordering::Relaxed);
             st.last_event_ms.store(chrono::Utc::now().timestamp_millis(), Ordering::Relaxed);
             on_events(events.len());

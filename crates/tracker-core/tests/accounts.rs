@@ -384,8 +384,8 @@ fn a_window_two_accounts_share_after_a_reset_for_everyone_names_neither() {
     let mut old = Thread::new(3, BASE - 10 * DAY_S * 1000, None);
     old.ask_both(BASE + 70 * M, Some(Both(shared_week(), 6.5, five_a, 14.0)), "codex");
     x.add(&[&a1, &b1, &old]);
-    assert_eq!(x.owner_at(BASE + 2 * M), Some(a()), "a request its creator vouches for keeps it");
-    assert_eq!(x.owner_at(BASE + 12 * M), Some(b()));
+    assert_eq!(x.owner_at(BASE + 2 * M), None, "in a shared week a switch changes no window, so the creator proves nothing");
+    assert_eq!(x.owner_at(BASE + 12 * M), None);
     assert_eq!(x.owner_at(BASE + 70 * M), None, "the window is shared, so it names neither account");
     let wrong: i64 = x
         .store
@@ -410,7 +410,65 @@ fn a_shared_window_with_evidence_for_one_account_is_still_not_given_to_it() {
     x.add(&[&a1, &old, &a2]);
     assert_eq!(x.owner_at(BASE + 5 * M), None);
     assert_eq!(x.owner_at(BASE + 20 * M), None, "the window is shared, so A's evidence does not cover it");
-    assert_eq!(x.owner_at(BASE + M), Some(a()));
+    assert_eq!(x.owner_at(BASE + M), None);
+}
+
+#[test]
+fn in_a_week_two_accounts_share_the_creator_names_no_request() {
+    let five_a = BASE / 1000 + 5 * 3600;
+    // the thread goes on under B, after two hours or after five minutes; B's five-hour window
+    // differs from A's, or lines up with it as well
+    for (switch, five_b) in [(2 * H, BASE / 1000 + 4 * 3600), (2 * H, five_a), (5 * M, five_a)] {
+        let mut x = Archive::new();
+        let mut t = Thread::new(1, BASE, Some("acc-a"));
+        t.ask_both(BASE + M, Some(Both(shared_week(), 5.0, five_a, 10.0)), "codex");
+        t.ask_both(BASE + switch, Some(Both(shared_week(), 70.0, five_b, 80.0)), "codex");
+        x.add(&[&t]);
+        x.live(BASE + switch + M, Win(shared_week(), 70.0), Some("acc-b"));
+        assert_eq!(x.owner_at(BASE + switch), None, "the creator does not name the account after a switch");
+        assert_eq!(x.owner_at(BASE + M), None, "nor before it: nothing tells when the switch came");
+    }
+}
+
+#[test]
+fn a_creator_seen_on_another_window_at_the_time_names_none_of_its_threads_requests() {
+    let mut x = Archive::new();
+    x.live(BASE - 6 * DAY_S * 1000, Win(BASE / 1000 - DAY_S, 30.0), Some("acc-b"));
+    x.live(BASE - 5 * M, win_a(), Some("acc-a"));
+    // A starts the thread, B sends its requests: A was just read on its own window
+    let mut t = Thread::new(1, BASE, Some("acc-a"));
+    t.ask(BASE + 2 * M, None).ask(BASE + 5 * M, Some(win_b()));
+    x.add(&[&t]);
+    assert_eq!(x.owner_at(BASE + 5 * M), None);
+    assert_eq!(x.owner_at(BASE + 2 * M), None, "nor the request that reports no window");
+
+    x.live(BASE + 6 * M, win_b(), Some("acc-b"));
+    assert_eq!(x.owner_at(BASE + 5 * M), None, "the creator and the live read disagree on the window");
+}
+
+#[test]
+fn a_new_window_from_a_reset_the_provider_grants_keeps_its_creator() {
+    let mut x = Archive::new();
+    x.live(BASE - 6 * DAY_S * 1000, Win(BASE / 1000 - DAY_S, 30.0), Some("acc-b"));
+    let mut before = Thread::new(1, BASE, Some("acc-a"));
+    before.ask(BASE + M, Some(win_a())).ask(BASE + 30 * M, Some(Win(win_a().0, 45.0)));
+    // the reset starts A's next window at once, days before the old one would have ended
+    let mut after = Thread::new(2, BASE + H + M, Some("acc-a"));
+    after.ask(BASE + H + 2 * M, Some(Win((BASE + H + 2 * M) / 1000 + 7 * DAY_S, 2.0)));
+    x.add(&[&before, &after]);
+    assert_eq!(x.owner_at(BASE + 30 * M), Some(a()));
+    assert_eq!(x.owner_at(BASE + H + 2 * M), Some(a()));
+}
+
+#[test]
+fn two_accounts_read_at_the_same_moment_keep_their_own_readings() {
+    let mut x = Archive::new();
+    x.live(BASE, win_a(), Some("acc-a"));
+    x.live(BASE, win_b(), Some("acc-b"));
+    let wrong: i64 = x.store.conn().query_row("SELECT COUNT(*) FROM limit_snapshot WHERE owner IS NOT account", [], |r| r.get(0)).unwrap();
+    assert_eq!(wrong, 0);
+    let ids: HashSet<Option<String>> = accounts(&x.store).unwrap().into_iter().map(|a| a.id).collect();
+    assert_eq!(ids, HashSet::from([Some(a()), Some(b())]));
 }
 
 #[test]

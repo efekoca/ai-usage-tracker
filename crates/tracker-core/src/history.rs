@@ -94,7 +94,8 @@ pub struct LimitHistory {
     pub from_ms: i64,
     pub to_ms: i64,
     pub series: Vec<WindowSeries>,
-    /// Days (UTC) with at least one reading in the advice period, per provider.
+    /// Days (UTC) in the advice period with at least one reading of the provider's account in
+    /// use, the one the advice is built on.
     pub observed_days: BTreeMap<Provider, u32>,
 }
 
@@ -126,7 +127,7 @@ pub fn limit_history(store: &Store, now_ms: i64, days: i64) -> Result<LimitHisto
     // two accounts' windows in one series would read as early resets
     let several = crate::accounts::several(store)?;
     let mut groups: BTreeMap<(Provider, Option<String>, String, String), Vec<Reading>> = BTreeMap::new();
-    let mut days_seen: HashMap<Provider, BTreeSet<i64>> = HashMap::new();
+    let mut days_seen: HashMap<(Provider, Option<String>), BTreeSet<i64>> = HashMap::new();
     let mut newest: HashMap<Provider, (i64, Option<String>)> = HashMap::new();
     for (s, owner) in &snaps {
         let owner = owner.clone().filter(|_| several.contains(&s.provider));
@@ -134,7 +135,7 @@ pub fn limit_history(store: &Store, now_ms: i64, days: i64) -> Result<LimitHisto
             continue;
         }
         if s.ts_ms >= now_ms - ADVICE_DAYS * DAY_MS {
-            days_seen.entry(s.provider).or_default().insert(s.ts_ms.div_euclid(DAY_MS));
+            days_seen.entry((s.provider, owner.clone())).or_default().insert(s.ts_ms.div_euclid(DAY_MS));
         }
         let n = newest.entry(s.provider).or_insert((s.ts_ms, owner.clone()));
         if s.ts_ms > n.0 {
@@ -151,6 +152,10 @@ pub fn limit_history(store: &Store, now_ms: i64, days: i64) -> Result<LimitHisto
     for p in &several {
         in_use.insert(*p, crate::accounts::in_use(store, *p, now_ms)?);
     }
+    let current = |p: &Provider| match in_use.get(p) {
+        Some(o) => o.clone(),
+        None => newest.get(p).map(|n| n.1.clone()),
+    };
     let series = groups
         .into_iter()
         .filter_map(|((provider, account, limit_id, window), readings)| {
@@ -159,16 +164,12 @@ pub fn limit_history(store: &Store, now_ms: i64, days: i64) -> Result<LimitHisto
                 .into_iter()
                 .filter(|w| w.resets_at_ms.unwrap_or(w.last_ms) >= from_ms)
                 .collect();
-            let current = match in_use.get(&provider) {
-                Some(o) => o.clone(),
-                None => newest.get(&provider).map(|n| n.1.clone()),
-            };
-            let active = current.is_none_or(|a| a == account);
+            let active = current(&provider).is_none_or(|a| a == account);
             let by_account = several.contains(&provider);
             (!windows.is_empty()).then_some(WindowSeries { provider, account, active, by_account, limit_id, window, window_minutes: minutes, windows, capacity: None })
         })
         .collect();
-    let observed_days = days_seen.into_iter().map(|(p, d)| (p, d.len() as u32)).collect();
+    let observed_days = days_seen.iter().filter(|((p, a), _)| current(p).is_none_or(|c| c == *a)).map(|((p, _), d)| (*p, d.len() as u32)).collect();
     Ok(LimitHistory { from_ms, to_ms: now_ms, series, observed_days })
 }
 
@@ -253,10 +254,8 @@ fn record(items: &[&Reading], reset: Option<(i64, i64)>, dur_ms: i64, now_ms: i6
     let peak = items.iter().map(|r| r.used).fold(0.0, f64::max);
     let peak_ms = items.iter().filter(|r| r.used >= peak).map(|r| r.ts_ms).min().unwrap_or(first);
     let full_at = items.iter().filter(|r| r.used >= FULL_PCT).map(|r| r.ts_ms).min();
-    // a reset the provider granted inside the window ends its full stretch
     let mut reads: Vec<(i64, f64)> = items.iter().map(|r| (r.ts_ms, r.used)).collect();
     reads.sort_by_key(|r| r.0);
-    let full_until = crate::insights::restarted(&reads).filter(|t| full_at.is_some_and(|f| *t >= f));
     let in_progress = match reset {
         Some((_, end)) => end > now_ms,
         None => next_first.is_none() && now_ms - first < dur_ms,
@@ -287,7 +286,7 @@ fn record(items: &[&Reading], reset: Option<(i64, i64)>, dur_ms: i64, now_ms: i6
         full: full_at.is_some(),
         full_at_ms: full_at,
         full_minutes: match (full_at, reset) {
-            (Some(f), Some((_, end))) => Some((full_until.unwrap_or(end).min(end).min(now_ms) - f).max(0) / MIN_MS),
+            (Some(_), Some((_, end))) => Some(full_ms(&reads, end.min(now_ms)) / MIN_MS),
             _ => None,
         },
         complete,
@@ -295,6 +294,24 @@ fn record(items: &[&Reading], reset: Option<(i64, i64)>, dur_ms: i64, now_ms: i6
         plan,
         local: LocalUsage::default(),
     }
+}
+
+/// How long a window's readings (oldest first) stayed full until `end`: a reset the provider
+/// granted inside the window ends a full stretch, and use may fill the window again after it.
+fn full_ms(reads: &[(i64, f64)], end: i64) -> i64 {
+    let mut resets = crate::insights::restarts(reads).into_iter().peekable();
+    let (mut total, mut since) = (0, None);
+    for (i, &(ts, used)) in reads.iter().enumerate() {
+        if used >= FULL_PCT {
+            since.get_or_insert(ts);
+        }
+        if resets.next_if_eq(&i).is_some()
+            && let Some(f) = since.take()
+        {
+            total += (ts.min(end) - f).max(0);
+        }
+    }
+    total + since.map_or(0, |f| (end - f).max(0))
 }
 
 /// A window's capacity is estimated only from readings this high: providers report whole
