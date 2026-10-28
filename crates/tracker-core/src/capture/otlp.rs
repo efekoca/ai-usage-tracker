@@ -1,14 +1,14 @@
 //! Loopback OTLP/HTTP-JSON receiver for Claude Code log events (opt-in).
 //!
 //! Only `api_request` events are used, and from them only counts and ids: model, token
-//! counts, request/session ids, timestamp. Identity attributes that Claude Code also sends
-//! (e-mail, account and organisation ids) are never read into a record. The receiver binds to
-//! 127.0.0.1 only.
+//! counts, request/session ids, timestamp, and the organisation id as a one-way digest, which
+//! tells Claude accounts apart (see [`crate::accounts`]). The e-mail and the other identity
+//! attributes Claude Code also sends are never read. The receiver binds to 127.0.0.1 only.
 //!
 //! A captured request that also appears in a transcript (same `request_id`) is hidden at query
 //! time, so this source only *adds* calls the transcripts do not contain (helper models, etc.).
 
-use crate::model::{parse_ts_ms, Accuracy, Tokens, Tool, UsageEvent};
+use crate::model::{claude_account, parse_ts_ms, Accuracy, Tokens, Tool, UsageEvent};
 use crate::store::Store;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -132,7 +132,7 @@ pub fn parse_logs(body: &Value) -> Vec<UsageEvent> {
                     agent: None,
                     thread_id: None,
                     limit_reset: None,
-                    creator: None,
+                    creator: text(&a, "organization.id").map(claude_account),
                 });
             }
         }
@@ -312,6 +312,8 @@ mod tests {
             {"timeUnixNano": "1790961950000000000", "body": {"stringValue": "claude_code.api_request"},
              "attributes": [
                {"key": "user.email", "value": {"stringValue": "someone@example.com"}},
+               {"key": "user.account_uuid", "value": {"stringValue": "0b5e2c1d-3f4a-4b6c-8d9e-0f1a2b3c4d5e"}},
+               {"key": "organization.id", "value": {"stringValue": "7C8D9E0F-1A2B-4C3D-9E4F-5A6B7C8D9E0F"}},
                {"key": "session.id", "value": {"stringValue": "sess-1"}},
                {"key": "event.name", "value": {"stringValue": "api_request"}},
                {"key": "event.timestamp", "value": {"stringValue": "2026-10-02T17:25:50.000Z"}},
@@ -340,8 +342,9 @@ mod tests {
         assert_eq!(e.accuracy, Accuracy::Captured);
         assert_eq!(e.speed, None);
         assert_eq!(e.client.as_deref(), Some("otel:repl_main_thread"));
+        assert_eq!(e.creator, Some(crate::model::claude_account("7c8d9e0f-1a2b-4c3d-9e4f-5a6b7c8d9e0f")), "the organisation, as a digest");
         let dump = serde_json::to_string(e).unwrap();
-        assert!(!dump.contains("example.com"));
+        assert!(!dump.contains("example.com") && !dump.contains("0b5e2c1d") && !dump.to_lowercase().contains("7c8d9e0f-"));
         assert_eq!(e.ts_ms, crate::model::parse_ts_ms("2026-10-02T17:25:50.000Z").unwrap());
     }
 

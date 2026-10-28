@@ -2,10 +2,11 @@
 //!
 //! Observed shape (version 2): `{version, samples:[{t: epoch ms, org: id, u:{fh: %, sd: %}}]}`
 //! where `fh` = five-hour window and `sd` = seven-day window, both 0–100. Unknown keys in `u`
-//! are kept under their raw name so new windows appear without a code change.
+//! are kept under their raw name so new windows appear without a code change. The organisation
+//! (the desktop app's sign-in) is kept as a digest.
 
 use super::{i64_at, str_at, ParseOutput};
-use crate::model::{Accuracy, LimitSnapshot, Provider, Tool, MAX_CLOCK_SKEW_MS};
+use crate::model::{claude_account, Accuracy, LimitSnapshot, Provider, Tool, MAX_CLOCK_SKEW_MS};
 use serde_json::Value;
 use std::path::Path;
 
@@ -39,7 +40,7 @@ pub fn parse_file(path: &Path) -> std::io::Result<ParseOutput> {
             out.warn(format!("sample at {t} skipped: time before 1970 or ahead of the clock"));
             continue;
         }
-        let account = str_at(s, "org").map(str::to_owned);
+        let account = str_at(s, "org").filter(|o| !o.trim().is_empty()).map(claude_account);
         for (k, val) in u {
             let Some(pct) = val.as_f64() else { continue };
             let window = match k.as_str() {

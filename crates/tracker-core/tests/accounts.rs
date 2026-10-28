@@ -4,7 +4,7 @@ use common::use_test_round;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tracker_core::accounts::{accounts, resolve, NAMELESS};
-use tracker_core::analytics::{limits_view, Filter, LimitState};
+use tracker_core::analytics::{account_key, limits_view, Filter, LimitState};
 use tracker_core::discovery::{enumerate_files, Env, ExtraPaths, SourceId};
 use tracker_core::history::limit_history;
 use tracker_core::ingest::ingest;
@@ -335,9 +335,9 @@ fn history_series_and_the_usage_filter_follow_the_account() {
     assert_eq!(weekly, [(Some(a()), false, 1), (Some(b()), true, 1)]);
 
     let rows = x.store.events_between(0, i64::MAX).unwrap();
-    let only_b = Filter { accounts: vec![b()], ..Default::default() };
+    let only_b = Filter { accounts: vec![account_key(Provider::OpenAI, Some(&b()))], ..Default::default() };
     assert_eq!(rows.iter().filter(|e| only_b.matches(e)).count(), 1);
-    let unknown = Filter { accounts: vec![String::new()], ..Default::default() };
+    let unknown = Filter { accounts: vec![account_key(Provider::OpenAI, None)], ..Default::default() };
     assert_eq!(rows.iter().filter(|e| unknown.matches(e)).count(), 0);
     let states: Vec<LimitState> = limits_view(&x.store, &PriceBook::default_book(), BASE + 2 * H, &[]).unwrap().iter().map(|v| v.state).collect();
     assert!(states.iter().all(|s| *s != LimitState::Reset));

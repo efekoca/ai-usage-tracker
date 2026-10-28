@@ -88,12 +88,14 @@
   const ORDER: PanelSize[] = ['s', 'w', 'm', 'l']
   const POOLS = [['anthropic', ''], ['openai', ''], ['google', 'gemini'], ['google', '3p']] as const
   const mk = (m: Partial<PanelModule> & { kind: PanelModule['kind'] }): PanelModule => ({ provider: '', pool: '', window: '', period: '', action: '', size: SIZES[m.kind][0], style: '', account: '', ...m })
-  // each Codex limit for the account in use, followed by the same limit of every known account
-  const accountIds = $derived(app.accounts.flatMap((a) => (a.id ? [a.id] : [])))
+  // each Codex or Claude limit for the account in use, followed by the same limit of every known account
+  const idsOf = (provider: string) => app.accounts.flatMap((a) => (a.provider === provider && a.id ? [a.id] : []))
   const withAccounts = <T extends { kind: string; provider: string; account: string }>(list: T[]): T[] =>
-    list.flatMap((x) => (x.provider === 'openai' && ['limit', 'provider', 'forecast'].includes(x.kind) ? [x, ...accountIds.map((account) => ({ ...x, account }))] : [x]))
+    list.flatMap((x) => (['limit', 'provider', 'forecast'].includes(x.kind) ? [x, ...idsOf(x.provider).map((account) => ({ ...x, account }))] : [x]))
   const who = (provider: string, pool: string, account: string) =>
-    provider !== 'openai' || !accountIds.length ? limitName(provider, pool) : `${t('provider.openai')} · ${account ? nameAccount(account, accountIds, app.settings?.account_names, true) : t('menubar.inUse')}`
+    !idsOf(provider).length
+      ? limitName(provider, pool)
+      : `${t(`provider.${provider}`)} · ${account ? nameAccount(account, provider as Provider, app.accounts, app.settings?.account_names, true) : t('menubar.inUse')}`
   const baseCatalog: PanelModule[] = [
     ...POOLS.map(([provider, pool]) => mk({ kind: 'provider', provider, pool, style: 'ring' })),
     ...POOLS.flatMap(([provider, pool]) => ['five_hour', 'seven_day'].map((window) => mk({ kind: 'limit', provider, pool, window, style: 'ring' }))),

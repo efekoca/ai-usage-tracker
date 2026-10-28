@@ -164,8 +164,8 @@ pub struct PanelData {
     providers: Vec<Provider>,
     /// Signed out of the tool the limits are read through, with no current reading left.
     signed_out: Vec<Provider>,
-    /// Known Codex accounts in order of first use, which numbers the unnamed ones.
-    accounts: Vec<String>,
+    /// Known accounts in order of first use, which numbers the unnamed ones.
+    accounts: Vec<crate::commands::KnownAccount>,
 }
 
 /// Everything the panel's modules show; the Menu bar page's preview reads it too.
@@ -177,9 +177,9 @@ pub async fn panel_data(app: AppHandle) -> Result<PanelData, String> {
     let (limits, accounts) = {
         let store = state.db();
         let book = state.book.read().unwrap();
-        // another Codex account's limits show only in modules the user added for it
+        // another account's limits show only in modules the user added for it
         let limits = analytics::limits_view(&store, &book, now_ms(), &s.thresholds).map_err(|e| e.to_string())?.into_iter().filter(|l| l.active || l.account.is_some()).collect::<Vec<_>>();
-        (limits, tracker_core::accounts::accounts(&store).map_err(|e| e.to_string())?.into_iter().filter_map(|a| a.id).collect())
+        (limits, crate::commands::known_accounts(&store)?)
     };
     let live = |p: Provider| limits.iter().any(|l| l.active && l.provider == p && l.used_pct.is_some() && matches!(l.state, LimitState::Fresh | LimitState::Behind));
     let cap = crate::capture::status(&app);

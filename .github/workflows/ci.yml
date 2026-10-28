@@ -101,7 +101,7 @@ jobs:
 
       # every ingest scenario again with one record per read round
       - name: Tests in read rounds
-        run: cargo test -p tracker-core --locked --test ingest --test antigravity --test rounds --test opencode --test accounts
+        run: cargo test -p tracker-core --locked --test ingest --test antigravity --test rounds --test opencode --test accounts --test claude_accounts
         env:
           TRACKER_TEST_ROUND: "1"
 

@@ -4,11 +4,12 @@
 pub mod antigravity;
 pub mod claude_code;
 pub mod claude_plan;
+pub mod claude_sessions;
 pub mod codex;
 pub mod cowork_audit;
 pub mod opencode;
 
-use crate::model::{LimitSnapshot, ToolCall, UsageEvent};
+use crate::model::{LimitSnapshot, SessionAccount, ToolCall, UsageEvent};
 use serde_json::Value;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
@@ -20,6 +21,8 @@ pub enum ParserKind {
     CoworkJsonl,
     CoworkAudit,
     ClaudePlanHistory,
+    /// One Code-tab session in Claude desktop's session list.
+    ClaudeDesktopSession,
     CodexRollout,
     /// This app's own Claude Code status-line capture file.
     StatuslineCapture,
@@ -34,6 +37,7 @@ impl ParserKind {
             ParserKind::CoworkJsonl => "cowork_jsonl",
             ParserKind::CoworkAudit => "cowork_audit",
             ParserKind::ClaudePlanHistory => "claude_plan_history",
+            ParserKind::ClaudeDesktopSession => claude_sessions::SOURCE,
             ParserKind::CodexRollout => "codex_rollout",
             ParserKind::StatuslineCapture => "statusline_capture",
             ParserKind::AntigravityDb => antigravity::SOURCE,
@@ -43,11 +47,18 @@ impl ParserKind {
     /// Whole-file documents (JSON, SQLite) are re-read completely when they change;
     /// JSONL files are read incrementally from a byte offset.
     pub fn is_incremental(self) -> bool {
-        !matches!(self, ParserKind::ClaudePlanHistory | ParserKind::AntigravityDb | ParserKind::OpenCodeDb)
+        !matches!(self, ParserKind::ClaudePlanHistory | ParserKind::ClaudeDesktopSession | ParserKind::AntigravityDb | ParserKind::OpenCodeDb)
     }
     /// SQLite databases whose new rows land in a `-wal` file next to them first.
     pub fn has_wal(self) -> bool {
         matches!(self, ParserKind::AntigravityDb | ParserKind::OpenCodeDb)
+    }
+    /// Claude's logs, readings and session lists, whose accounts are resolved together.
+    pub fn is_claude(self) -> bool {
+        matches!(
+            self,
+            ParserKind::ClaudeCodeJsonl | ParserKind::CoworkJsonl | ParserKind::CoworkAudit | ParserKind::ClaudePlanHistory | ParserKind::ClaudeDesktopSession | ParserKind::StatuslineCapture
+        )
     }
     /// A whole-document parser that still carries its state to the next read of the same file.
     pub fn keeps_state(self) -> bool {
@@ -62,6 +73,8 @@ pub struct ParseOutput {
     pub tool_calls: Vec<ToolCall>,
     /// Outcomes that arrive after their call (`(call key, failed)`); applied to stored calls.
     pub tool_results: Vec<(String, bool)>,
+    /// Sessions the source ties to an account.
+    pub sessions: Vec<SessionAccount>,
     /// Human-readable, content-free warnings (line numbers / offsets only), at most
     /// `MAX_WARNING_DETAILS`; the last one is always the latest. Added with `warn`.
     pub warnings: Vec<String>,

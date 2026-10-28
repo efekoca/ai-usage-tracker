@@ -38,15 +38,16 @@
   const providers = $derived(
     (data?.providers ?? []).filter((p) => ws.providers.length === 0 || ws.providers.includes(p)).sort((a, b) => rankOf(a) - rankOf(b)) as Provider[],
   )
-  // the account in use, then the other Codex accounts the user chose
-  const inUse = $derived(data?.limits.find((l) => l.provider === 'openai' && l.active)?.account ?? null)
-  const others = $derived((ws.codex_accounts ?? []).filter((id) => id !== inUse && data?.accounts.includes(id)))
-  const accountTag = (id: string | null) => (id === null || !others.length ? '' : nameAccount(id, data?.accounts ?? [], accountNames, true))
+  // each provider's account in use, then its other accounts the user chose
+  const inUse = (p: Provider) => data?.limits.find((l) => l.provider === p && l.active)?.account ?? null
+  const othersOf = (p: Provider) => (ws.accounts ?? []).filter((id) => id !== inUse(p) && (data?.accounts ?? []).some((a) => a.provider === p && a.id === id))
+  // rows are named by account only where a provider shows more than one
+  const accountTag = (p: Provider, id: string | null) => (id === null || !othersOf(p).length ? '' : nameAccount(id, p, data?.accounts ?? [], accountNames, true))
   // a provider with several pools (Antigravity) gets a row per pool when all are shown
   const entries = $derived(
     providers.flatMap((p) => {
       const one = (pool: string | null, account: string | null = null) => ({ p, pool, account })
-      if (p === 'openai') return [one(null), ...others.map((id) => one(null, id))]
+      if (p === 'openai' || p === 'anthropic') return [one(null), ...othersOf(p).map((id) => one(null, id))]
       if (p !== 'google' || ws.antigravity_pool === 'fullest' || !ws.antigravity_pool) return [one(null)]
       if (ws.antigravity_pool !== 'all') return [one(ws.antigravity_pool)]
       const pools = [...new Set((data?.limits ?? []).filter((l) => l.provider === p && l.limit_id).map((l) => l.limit_id))]
@@ -121,7 +122,7 @@
 {/snippet}
 
 {#snippet name(p: Provider, pool: string | null, account: string | null)}
-  {@const tag = p === 'openai' ? accountTag(account ?? inUse) : ''}
+  {@const tag = accountTag(p, account ?? inUse(p))}
   {@const short = tag || (pool && has(`widget.pool.${p}.${pool}`) ? t(`widget.pool.${p}.${pool}`) : '')}
   {@const title = tag ? `${t(`provider.${p}`)} · ${tag}` : short ? `${t(`provider.${p}`)} · ${t(`limits.pool.${p}.${pool}`)}` : t(`provider.${p}`)}
   {#if ws.show_labels}
@@ -181,7 +182,7 @@
 
 {#snippet providerLimits(p: Provider, pool: string | null, account: string | null, kinds: WidgetItemKind[])}
   {@const rows = kinds.map((k) => ({ k, l: limit(p, k, pool, account) })).filter((x) => x.l !== null) as { k: WidgetItemKind; l: NonNullable<ReturnType<typeof limit>> }[]}
-  {@const tag = p === 'openai' ? accountTag(account ?? inUse) : ''}
+  {@const tag = accountTag(p, account ?? inUse(p))}
   {#if rows.length}
     {@const lead = rows[0]}
     {#if ws.limit_style === 'ring'}

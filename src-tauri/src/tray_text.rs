@@ -438,6 +438,14 @@ mod tests {
         assert_eq!(fmt(&c, false, &tz).title(&d), "Cx 5h 12% · Cx İş 5h ⚠︎100%", "an account without a reading shows nothing");
         let c = cfg(vec![of(work)], |c| c.label = "name".into());
         assert_eq!(fmt(&c, true, &tz).title(&d), "Codex İş 5 sa ⚠︎%100");
+
+        // Claude accounts the same way
+        let personal = "5d2e8a14c07b9f63";
+        d.readings.push(Reading { account: Some(personal.into()), active: false, used: 64.0, ..d.readings[0].clone() });
+        d.accounts.insert(personal.into(), "Kişisel".into());
+        let claude = |id: &str| TrayItem { account: id.into(), ..limit("anthropic", "five_hour", "") };
+        let c = cfg(vec![claude(""), claude(personal)], |_| {});
+        assert_eq!(fmt(&c, false, &tz).title(&d), "Cl 5h 42% · Cl Kişisel 5h 64%");
     }
 
     #[test]

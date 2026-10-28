@@ -162,24 +162,31 @@ export function setFilter(f: Filter) {
   refresh()
 }
 
-/** The account a provider's limit or series belongs to, named; empty while there is one account. */
+/** The account a provider's limit or series belongs to, named beside the provider; empty while that provider has one account. */
 export function accountOf(v: { provider: Provider; account: string | null }): string {
-  return app.accounts.length && v.provider === 'openai' ? accountName(v.account) : ''
+  if (!app.accounts.some((a) => a.provider === v.provider)) return ''
+  return v.account === null ? t('accounts.unknown') : nameAccount(v.account, v.provider, app.accounts, app.settings?.account_names, true)
 }
 
-/** The user's name for a Codex account, else its number in order of first use. */
-export function accountName(id: string | null): string {
+/** An account in a list of several providers' accounts: "Codex · İş", "Claude · Hesap 2". */
+export const providerAccount = (provider: Provider, id: string | null) => `${t(`provider.${provider}`)} · ${accountOf({ provider, account: id })}`
+
+/** The user's name for an account, else its number among its provider's accounts in order of first use. */
+export function accountName(id: string | null, provider: Provider): string {
   if (id === null) return t('accounts.unknown')
-  return nameAccount(id, app.accounts.flatMap((a) => (a.id === null ? [] : [a.id])), app.settings?.account_names)
+  return nameAccount(id, provider, app.accounts, app.settings?.account_names)
 }
 
-/** `accountName` for windows without the account list: `ids` are the accounts in order of first use. */
-export function nameAccount(id: string, ids: string[], names: Record<string, string> | undefined, short = false): string {
+/** `accountName` for windows without the account list: `known` holds the accounts in order of first use. */
+export function nameAccount(id: string, provider: Provider, known: { provider: Provider; id: string | null }[], names: Record<string, string> | undefined, short = false): string {
   const own = names?.[id]
   if (own) return own
-  const n = ids.indexOf(id)
-  return t(short ? 'accounts.short' : 'accounts.numbered', { n: n < 0 ? '?' : n + 1 })
+  const n = known.filter((a) => a.provider === provider && a.id !== null).findIndex((a) => a.id === id)
+  return t(short ? 'accounts.short' : 'accounts.numbered', { name: t(`provider.${provider}`), n: n < 0 ? '?' : n + 1 })
 }
+
+/** How the usage filter names an account (`Filter.accounts`). */
+export const accountKey = (provider: Provider, id: string | null) => `${provider}:${id ?? ''}`
 
 /** Series color per tool — follows the entity, never its rank. */
 export const toolColor: Record<string, string> = {

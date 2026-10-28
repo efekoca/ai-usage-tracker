@@ -3,7 +3,7 @@
 //! and the plan advice is built only on those records and the ratios providers publish.
 
 use crate::analytics::{counts_toward, of_account, window_minutes};
-use crate::model::{LimitSnapshot, Provider, Tool};
+use crate::model::{LimitSnapshot, Provider};
 use crate::plans::PlansFile;
 use crate::pricing::{CostInput, PriceBook};
 use crate::store::Store;
@@ -124,12 +124,12 @@ pub fn limit_history(store: &Store, now_ms: i64, days: i64) -> Result<LimitHisto
     // a weekly window that ends inside the range started up to a week before it
     let snaps = store.owned_limits_between(from_ms - 7 * DAY_MS, now_ms + 1)?;
     // two accounts' windows in one series would read as early resets
-    let several = !crate::accounts::accounts(store)?.is_empty();
+    let several = crate::accounts::several(store)?;
     let mut groups: BTreeMap<(Provider, Option<String>, String, String), Vec<Reading>> = BTreeMap::new();
     let mut days_seen: HashMap<Provider, BTreeSet<i64>> = HashMap::new();
     let mut newest: HashMap<Provider, (i64, Option<String>)> = HashMap::new();
     for (s, owner) in &snaps {
-        let owner = owner.clone().filter(|_| several && s.tool == Tool::Codex);
+        let owner = owner.clone().filter(|_| several.contains(&s.provider));
         if owner.as_deref() == Some(crate::accounts::NAMELESS) {
             continue;
         }
@@ -147,6 +147,10 @@ pub fn limit_history(store: &Store, now_ms: i64, days: i64) -> Result<LimitHisto
             groups.entry((s.provider, owner, s.limit_id.clone(), s.window.clone())).or_default().push(r);
         }
     }
+    let mut in_use: HashMap<Provider, Option<Option<String>>> = HashMap::new();
+    for p in &several {
+        in_use.insert(*p, crate::accounts::in_use(store, *p, now_ms)?);
+    }
     let series = groups
         .into_iter()
         .filter_map(|((provider, account, limit_id, window), readings)| {
@@ -155,8 +159,12 @@ pub fn limit_history(store: &Store, now_ms: i64, days: i64) -> Result<LimitHisto
                 .into_iter()
                 .filter(|w| w.resets_at_ms.unwrap_or(w.last_ms) >= from_ms)
                 .collect();
-            let active = newest.get(&provider).is_none_or(|(_, a)| *a == account);
-            let by_account = several && provider == Provider::OpenAI;
+            let current = match in_use.get(&provider) {
+                Some(o) => o.clone(),
+                None => newest.get(&provider).map(|n| n.1.clone()),
+            };
+            let active = current.is_none_or(|a| a == account);
+            let by_account = several.contains(&provider);
             (!windows.is_empty()).then_some(WindowSeries { provider, account, active, by_account, limit_id, window, window_minutes: minutes, windows, capacity: None })
         })
         .collect();

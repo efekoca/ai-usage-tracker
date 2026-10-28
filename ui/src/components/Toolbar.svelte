@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { accountName, app, latest, setFilter, setPeriod } from '../lib/store.svelte'
+  import { accountKey, app, latest, providerAccount, setFilter, setPeriod } from '../lib/store.svelte'
   import { localDate, t, toolLabel } from '../lib/i18n.svelte'
   import { api, type Period, type Tool } from '../lib/api'
   import Segmented from './Segmented.svelte'
@@ -35,9 +35,7 @@
     setPeriod({ kind: 'custom', from, to })
   }
   const activeFilters = $derived((app.filter.tools?.length ?? 0) + (app.filter.models?.length ?? 0) + (app.filter.projects?.length ?? 0) + (app.filter.accounts?.length ?? 0))
-  // the list's empty value means "all", so requests of no known account go by '?'
-  const UNKNOWN = '?'
-  const pickedAccount = $derived(app.filter.accounts?.length ? app.filter.accounts[0] || UNKNOWN : '')
+  const pickedAccount = $derived(app.filter.accounts?.[0] ?? '')
   const tools: Tool[] = ['claude_code', 'codex', 'antigravity', 'opencode']
 </script>
 
@@ -85,8 +83,8 @@
           label={t('accounts.filter')}
           value={pickedAccount}
           minWidth={170}
-          options={[{ value: '', label: t('common.all') }, ...app.accounts.map((a) => ({ value: a.id ?? UNKNOWN, label: accountName(a.id) }))]}
-          onchange={(v) => setFilter({ ...app.filter, accounts: v ? [v === UNKNOWN ? '' : v] : [] })}
+          options={[{ value: '', label: t('common.all') }, ...app.accounts.map((a) => ({ value: accountKey(a.provider, a.id), label: providerAccount(a.provider, a.id) }))]}
+          onchange={(v) => setFilter({ ...app.filter, accounts: v ? [v] : [] })}
         />
       </label>
     {/if}

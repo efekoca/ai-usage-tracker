@@ -114,8 +114,8 @@ export interface PanelData {
   providers: Provider[]
   /** Signed out of the tool the limits are read through, with no current reading left. */
   signed_out: Provider[]
-  /** Known Codex accounts in order of first use, which numbers the unnamed ones. */
-  accounts: string[]
+  /** Known accounts in order of first use, which numbers the unnamed ones. */
+  accounts: KnownAccount[]
 }
 
 export type Period =
@@ -133,11 +133,17 @@ export interface Filter {
   clients?: string[]
   models?: string[]
   projects?: number[]
-  /** Codex account ids; '' stands for requests no evidence ties to an account. */
+  /** Accounts as `provider:id` (`accountKey`); an empty id stands for that provider's requests no evidence ties to an account. */
   accounts?: string[]
 }
 
-/** A Codex account. The list is empty while the archive holds at most one. */
+/** An account the widget and the panel number the unnamed ones by. */
+export interface KnownAccount {
+  provider: Provider
+  id: string
+}
+
+/** A Codex or Claude account. A provider has none in the list while its archive holds at most one. */
 export interface Account {
   provider: Provider
   /** Digest of the account id; `null` for requests no evidence ties to an account. */
@@ -273,8 +279,8 @@ export interface WidgetData {
   providers: Provider[]
   /** OpenCode's source is on and it was used in the last 30 days. */
   opencode: boolean
-  /** Known Codex accounts in order of first use, which numbers the unnamed ones. */
-  accounts: string[]
+  /** Known accounts in order of first use, which numbers the unnamed ones. */
+  accounts: KnownAccount[]
   updated_ms: number
 }
 
@@ -303,8 +309,8 @@ export interface WidgetSettings {
   providers: Provider[]
   provider_order: Provider[]
   antigravity_pool: AntigravityPool
-  /** Other Codex accounts shown beside the one in use. */
-  codex_accounts: string[]
+  /** Other Codex and Claude accounts shown beside each one's account in use. */
+  accounts: string[]
   primary_period: 'today' | 'days7' | 'month1'
   primary_metric: 'tokens' | 'cost'
   limit_style: 'ring' | 'bar' | 'text'
