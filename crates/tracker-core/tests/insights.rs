@@ -161,6 +161,13 @@ fn a_reset_the_provider_grants_inside_a_window_restarts_the_pace() {
 }
 
 #[test]
+fn a_granted_reset_stays_a_reset_when_use_fills_the_window_again() {
+    let t = ms(2026, 10, 2, 9, 0);
+    let reads = [(t, 100.0), (t + 10 * MIN, 100.0), (t + 30 * MIN, 1.0), (t + 50 * MIN, 2.0), (t + 80 * MIN, 100.0)];
+    assert_eq!(restarted(&reads), Some(t + 10 * MIN));
+}
+
+#[test]
 fn a_delayed_reading_is_not_a_reset() {
     let t = ms(2026, 10, 2, 9, 0);
     // a request that ran for a while reports the limit as it was when it began

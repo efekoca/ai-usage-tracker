@@ -69,6 +69,16 @@ fn a_reset_granted_inside_a_full_window_ends_its_full_time() {
 }
 
 #[test]
+fn a_window_filled_again_after_a_granted_reset_counts_only_its_full_stretches() {
+    let b = NOW + 3 * HOUR;
+    let start = b - FIVE;
+    let reads: Vec<Reading> = [(10, 100.0), (20, 100.0), (40, 1.0), (60, 2.0), (90, 100.0), (100, 100.0)].iter().map(|&(m, used)| r(start + m * MIN, used, Some(b))).collect();
+    let w = build_windows(&reads, FIVE, start + 100 * MIN);
+    assert_eq!(w.len(), 1);
+    assert_eq!(w[0].full_minutes, Some(20), "the twenty minutes at 1-2 % between the two full stretches are not full time");
+}
+
+#[test]
 fn a_window_reset_early_ends_where_the_next_one_begins() {
     // Codex named a new five-hour window an hour into the old one: the old one was reset then
     let a = NOW - 10 * HOUR;

@@ -404,7 +404,7 @@ fn ids_kept_raw_by_an_older_version_become_digests_and_imports_keep_the_evidence
     fresh.merge_from(&old).unwrap();
     let count = |sql: &str| -> i64 { fresh.conn().query_row(sql, [], |r| r.get(0)).unwrap() };
     assert_eq!(count("SELECT COUNT(*) FROM account_session"), 1);
-    assert_eq!(count("SELECT COUNT(*) FROM signin_span"), 0, "a sign-in belongs to the computer that saw it");
+    assert_eq!(count("SELECT COUNT(*) FROM signin_span WHERE root NOT LIKE 'import:%'"), 0, "a sign-in belongs to the computer that saw it");
     assert_eq!(count("SELECT COUNT(*) FROM limit_snapshot WHERE length(account) = 16"), 2);
     resolve(&mut fresh).unwrap();
 }
@@ -461,6 +461,190 @@ fn logs_the_desktop_session_list_and_the_sign_in_tie_requests_end_to_end() {
     resolve_claude(&mut store).unwrap();
     let owner = |rid: &str| -> Option<String> { store.conn().query_row("SELECT owner FROM usage_event WHERE request_id = ?1", [rid], |r| r.get(0)).unwrap() };
     assert_eq!(owner("req_1"), Some(claude_account(org_a)));
+}
+
+#[test]
+fn telemetry_received_live_ties_its_request_before_the_app_is_told() {
+    use std::io::{Read, Write};
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("tracker.db");
+    let mut c = Claude { store: Store::open(&db).unwrap() };
+    let (a, b) = (org(1), org(2));
+    c.read(BASE, "claude_code_usage", Some(a), BASE / 1000 + 4 * 86_400, 10.0).read(BASE + M, "claude_code_usage", Some(b.clone()), BASE / 1000 + 6 * 86_400, 20.0);
+    c.ask("s1", "cli", BASE + 2 * M, "r-live").resolve();
+    assert_eq!(c.owner("r-live"), None);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let receiver = tracker_core::capture::otlp::Receiver::start(0, db, "token".into(), move |_| {
+        let _ = tx.send(());
+    })
+    .unwrap();
+    let body = serde_json::json!({"resourceLogs": [{"scopeLogs": [{"logRecords": [{
+        "timeUnixNano": ((BASE + 2 * M) * 1_000_000).to_string(),
+        "body": {"stringValue": "claude_code.api_request"},
+        "attributes": [
+            {"key": "request_id", "value": {"stringValue": "r-live"}},
+            {"key": "session.id", "value": {"stringValue": "s1"}},
+            {"key": "model", "value": {"stringValue": "claude-sonnet-5-5"}},
+            {"key": "organization.id", "value": {"stringValue": "00000002-0000-4000-8000-000000000002"}},
+            {"key": "input_tokens", "value": {"intValue": "10"}},
+            {"key": "output_tokens", "value": {"intValue": "5"}}
+        ]
+    }]}]}]})
+    .to_string();
+    let mut socket = std::net::TcpStream::connect(("127.0.0.1", receiver.port)).unwrap();
+    socket.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+    write!(socket, "POST /v1/logs HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nx-aiut-token: token\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+    let mut response = String::new();
+    socket.read_to_string(&mut response).unwrap();
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    assert_eq!(c.owner("r-live"), Some(b));
+}
+
+#[test]
+fn two_accounts_read_at_the_same_moment_keep_their_own_readings() {
+    let mut c = Claude::new();
+    let (a, b) = (org(1), org(2));
+    c.read(BASE, "claude_plan_history", Some(a.clone()), 0, 10.0).read(BASE, "claude_plan_history", Some(b.clone()), 0, 70.0).resolve();
+    let wrong: i64 = c.store.conn().query_row("SELECT COUNT(*) FROM limit_snapshot WHERE owner IS NOT account", [], |r| r.get(0)).unwrap();
+    assert_eq!(wrong, 0);
+    let ids: Vec<Option<String>> = accounts(&c.store).unwrap().into_iter().map(|x| x.id).collect();
+    assert!(ids.contains(&Some(a)) && ids.contains(&Some(b)));
+}
+
+#[test]
+fn a_backup_keeps_the_accounts_its_own_folders_named() {
+    let mut c = Claude::new();
+    let (a, b) = (org(1), org(2));
+    c.signed_in(Some(&a), BASE, BASE + H).signed_in_at(&other_root(), Some(&b), BASE, BASE + H);
+    c.ask("sa", "cli", BASE + M, "ra").ask_in(&other_root(), "sb", "cli", BASE + 2 * M, "rb").resolve();
+    assert_eq!((c.owner("ra"), c.owner("rb")), (Some(a.clone()), Some(b.clone())));
+    let dir = tempfile::tempdir().unwrap();
+    let backup = dir.path().join("backup.db");
+    c.store.backup_to(&backup).unwrap();
+
+    // another computer, whose folder of the same path is signed in to B
+    let mut other = Claude::new();
+    other.signed_in(Some(&b), BASE, BASE + H).ask("here", "cli", BASE + 3 * M, "rh");
+    other.read(BASE + H - 2 * M, "claude_code_usage", Some(b.clone()), BASE / 1000 + 6 * 86_400, 20.0);
+    other.read(BASE + H - M, "claude_code_usage", Some(a.clone()), BASE / 1000 + 4 * 86_400, 10.0);
+    other.store.merge_from(&backup).unwrap();
+    other.resolve();
+    assert_eq!((other.owner("ra"), other.owner("rb")), (Some(a.clone()), Some(b.clone())));
+    assert_eq!(other.owner("rh"), Some(b.clone()), "the backup's sign-ins say nothing about this computer's folders");
+    assert_eq!(in_use(&other.store, Provider::Anthropic, BASE + H).unwrap(), Some(Some(b.clone())), "nor about what it is signed in to now");
+    let spans = |st: &Store| -> i64 { st.conn().query_row("SELECT COUNT(*) FROM signin_span", [], |r| r.get(0)).unwrap() };
+    let before = spans(&other.store);
+    other.store.merge_from(&backup).unwrap();
+    assert_eq!(spans(&other.store), before, "importing it again adds nothing");
+
+    // the computer that made it, after its archive was lost and its logs were read again
+    let mut again = Claude::new();
+    again.ask("sa", "cli", BASE + M, "ra").ask_in(&other_root(), "sb", "cli", BASE + 2 * M, "rb");
+    again.signed_in(Some(&a), BASE + 2 * H, BASE + 2 * H);
+    again.store.merge_from(&backup).unwrap();
+    again.resolve();
+    assert_eq!((again.owner("ra"), again.owner("rb")), (Some(a), Some(b)));
+    let imported: i64 = again.store.conn().query_row("SELECT COUNT(*) FROM signin_span WHERE root LIKE 'import:%'", [], |r| r.get(0)).unwrap();
+    assert_eq!(imported, 0, "a session both archives read from one folder shows the backup was made here");
+}
+
+#[test]
+fn a_newer_backup_of_the_same_archive_brings_its_longer_sign_ins() {
+    let mut source = Claude::new();
+    let (a, b) = (org(1), org(2));
+    source.signed_in(Some(&a), BASE, BASE + 10 * M).signed_in_at(&other_root(), Some(&b), BASE, BASE + H);
+    source.ask("sa", "cli", BASE + M, "ra").ask_in(&other_root(), "sb", "cli", BASE + 2 * M, "rb").resolve();
+    let dir = tempfile::tempdir().unwrap();
+    let (early, later) = (dir.path().join("early.db"), dir.path().join("later.db"));
+    source.store.backup_to(&early).unwrap();
+    let mut target = Claude::new();
+    target.store.merge_from(&early).unwrap();
+    target.resolve();
+    assert_eq!(target.owner("ra"), Some(a.clone()));
+
+    source.signed_in(Some(&a), BASE + 10 * M + 30_000, BASE + H).ask("sa", "cli", BASE + 30 * M, "ra-later").resolve();
+    assert_eq!(source.owner("ra-later"), Some(a.clone()));
+    source.store.backup_to(&later).unwrap();
+    target.store.merge_from(&later).unwrap();
+    target.resolve();
+    assert_eq!(target.owner("ra-later"), Some(a));
+    // importing the earlier one again shortens nothing
+    target.store.merge_from(&early).unwrap();
+    target.resolve();
+    assert_eq!(target.owner("ra-later"), source.owner("ra-later"));
+}
+
+#[test]
+fn archives_that_name_two_accounts_for_one_moment_leave_the_folder_naming_neither() {
+    let (a, b) = (org(1), org(2));
+    let mut here = Claude::new();
+    here.signed_in(Some(&a), BASE, BASE + H).signed_in_at(&other_root(), Some(&b), BASE, BASE + H).ask("sa", "cli", BASE + M, "ra").resolve();
+    assert_eq!(here.owner("ra"), Some(a));
+    // a damaged or hand-made backup of this computer's archive with B at the same moment
+    let mut odd = Claude::new();
+    odd.signed_in(Some(&b), BASE, BASE + H).ask("sa", "cli", BASE + M, "ra");
+    let dir = tempfile::tempdir().unwrap();
+    let backup = dir.path().join("odd.db");
+    odd.store.backup_to(&backup).unwrap();
+    here.store.merge_from(&backup).unwrap();
+    here.resolve();
+    assert_eq!(here.owner("ra"), None);
+}
+
+#[test]
+fn a_look_that_covers_a_request_logged_before_it_ties_the_request() {
+    let mut c = Claude::new();
+    let (a, b) = (org(1), org(2));
+    c.signed_in(Some(&a), BASE, BASE).signed_in_at(&other_root(), Some(&b), BASE, BASE);
+    c.ask("s1", "cli", BASE + 10_000, "r1").resolve();
+    assert_eq!(c.owner("r1"), None, "no look has covered it yet");
+    assert!(c.store.note_signin(&root(), Some(&a), BASE + 30_000).unwrap(), "the look covers a request no account was found for");
+    c.resolve();
+    assert_eq!(c.owner("r1"), Some(a.clone()));
+    assert!(!c.store.note_signin(&root(), Some(&a), BASE + 60_000).unwrap(), "nothing is left to tie");
+}
+
+#[test]
+fn the_account_filter_keeps_only_that_accounts_tool_calls() {
+    use tracker_core::analytics::Range;
+    use tracker_core::model::ToolCall;
+    let mut c = Claude::new();
+    let (a, b) = (org(1), org(2));
+    c.ask("sa", "cli", BASE, "ra").told("sa", BASE, "ra", Some(a.clone()));
+    c.ask("sb", "cli", BASE + M, "rb").told("sb", BASE + M, "rb", Some(b)).resolve();
+    let call = |name: &str, session: &str| ToolCall {
+        key: name.into(),
+        ts_ms: BASE + 2 * M,
+        tool: Tool::ClaudeCode,
+        session_id: Some(session.into()),
+        project_path: None,
+        agent: None,
+        name: name.into(),
+        failed: Some(false),
+    };
+    let mut tx = c.store.transaction().unwrap();
+    tx.upsert_tool_calls(&[call("Read", "sa"), call("Write", "sb")]).unwrap();
+    tx.commit().unwrap();
+    let f = Filter { accounts: vec![account_key(Provider::Anthropic, Some(&a))], ..Default::default() };
+    let got = tracker_core::insights::agents_tools(&c.store, &PriceBook::default_book(), Range { from_ms: BASE, to_ms: BASE + H }, &f).unwrap();
+    assert_eq!(got.tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), ["Read"]);
+    assert!(got.filtered_by_session);
+}
+
+#[test]
+fn plan_advice_counts_the_days_of_the_account_in_use() {
+    use tracker_core::history::{limit_history, plan_advice, AdviceKind};
+    let mut c = Claude::new();
+    let (a, b) = (org(1), org(2));
+    for d in 0..7 {
+        c.read(BASE - (7 - d) * 86_400_000, "claude_code_usage", Some(a.clone()), BASE / 1000 + 86_400, 10.0);
+    }
+    c.read(BASE, "claude_code_usage", Some(b), BASE / 1000 + 5 * 86_400, 100.0).resolve();
+    let h = limit_history(&c.store, BASE + M, 28).unwrap();
+    assert_eq!(h.observed_days.get(&Provider::Anthropic), Some(&1), "B, in use, was read on one day");
+    let advice = plan_advice(&h, Provider::Anthropic, Some("max5x"), &tracker_core::plans::PlansFile::bundled(), BASE + M);
+    assert!(matches!(advice.kind, AdviceKind::Insufficient), "A's days do not make B's data enough: {advice:?}");
 }
 
 #[test]

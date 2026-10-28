@@ -210,6 +210,79 @@ fn latest_accepted_ms() -> i64 {
     chrono::Utc::now().timestamp_millis() + MAX_CLOCK_SKEW_MS
 }
 
+/// The Claude config folder of each session an archive's logs came from (`schema`: main or other).
+fn claude_session_roots(conn: &Connection, schema: &str) -> Result<HashMap<String, String>> {
+    let mut out = HashMap::new();
+    let mut st = conn.prepare(&format!("SELECT path FROM {schema}.file_checkpoint WHERE parser = 'claude_code_jsonl' AND typeof(path) = 'text'"))?;
+    for path in st.query_map([], |r| r.get::<_, String>(0))? {
+        if let Some((root, session)) = crate::accounts::claude_log_session(Path::new(&path?)) {
+            out.insert(session, root);
+        }
+    }
+    let mut st = conn.prepare(&format!(
+        "SELECT session_id, root FROM {schema}.session_root WHERE tool = 'claude_code' AND typeof(session_id) = 'text' AND typeof(root) = 'text'"
+    ))?;
+    for row in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+        let (session, root) = row?;
+        out.insert(session, root);
+    }
+    Ok(out)
+}
+
+/// A backup's sign-in spans describe folders of the computer that made it, which may share a
+/// path with one here. Each folder comes in under a name of its own, so its spans speak only for
+/// the sessions logged in it there; a session both archives read from the same folder shows the
+/// backup was made here, and that folder's spans join this one's.
+fn import_signins(conn: &Connection, now_ms: i64) -> Result<()> {
+    use crate::accounts::IMPORTED_ROOT;
+    let (ours, theirs) = (claude_session_roots(conn, "main")?, claude_session_roots(conn, "other")?);
+    let mut shared: HashMap<&str, std::collections::BTreeSet<&str>> = HashMap::new();
+    for (session, root) in &theirs {
+        if let Some(here) = ours.get(session) {
+            shared.entry(root.as_str()).or_default().insert(here.as_str());
+        }
+    }
+    let name = |root: &str| -> String {
+        let here = shared.get(root);
+        if here.is_some_and(|h| h.contains(root)) {
+            return root.to_owned();
+        }
+        // the name an earlier import of the same backup gave the folder
+        let earlier: Vec<&&str> = here.into_iter().flatten().filter(|h| h.starts_with(IMPORTED_ROOT) && h.ends_with(&format!(":{root}"))).collect();
+        match earlier[..] {
+            [one] => (*one).to_owned(),
+            _ => format!("{IMPORTED_ROOT}{now_ms}:{root}"),
+        }
+    };
+    let spans: Vec<(String, Option<String>, i64, i64)> = conn
+        .prepare(
+            "SELECT root, account, from_ms, to_ms FROM other.signin_span
+             WHERE typeof(root) = 'text' AND typeof(from_ms) = 'integer' AND typeof(to_ms) = 'integer' AND from_ms <= to_ms
+               AND (account IS NULL OR (typeof(account) = 'text' AND length(account) = 16))",
+        )?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+        .collect::<Result<_>>()?;
+    // a newer backup of the same folder carries the same spans grown longer
+    let mut grow = conn.prepare(
+        "INSERT INTO signin_span(root, account, from_ms, to_ms) VALUES(?1, ?2, ?3, ?4)
+         ON CONFLICT(root, from_ms) DO UPDATE SET to_ms = max(to_ms, excluded.to_ms) WHERE account IS excluded.account",
+    )?;
+    let mut other = conn.prepare("INSERT OR IGNORE INTO signin_span(root, account, from_ms, to_ms) VALUES(?1, ?2, ?3, ?3)")?;
+    for (root, account, from, to) in &spans {
+        let root = name(root);
+        // the archives name two accounts for one moment: a record of the other one, just before,
+        // leaves the folder seen with both, so it names neither
+        if grow.execute(params![root, account, from, to])? == 0 {
+            other.execute(params![root, account, from - 1])?;
+        }
+    }
+    let mut st = conn.prepare("INSERT OR IGNORE INTO session_root(tool, session_id, root) VALUES('claude_code', ?1, ?2)")?;
+    for (session, root) in &theirs {
+        st.execute(params![session, name(root)])?;
+    }
+    Ok(())
+}
+
 /// A captured row is hidden when the same request also exists as an exact (log) row.
 pub(crate) const NOT_SUPERSEDED: &str = "NOT (u.accuracy = 'captured' AND u.request_id IS NOT NULL AND EXISTS (
         SELECT 1 FROM usage_event x WHERE x.request_id = u.request_id AND x.accuracy = 'exact'))";
@@ -483,10 +556,10 @@ impl Store {
         rows.collect()
     }
 
-    /// One pool's percentages between two times, oldest first; `owner` keeps one account's.
     /// Notes which account (a digest; `None` when signed out or not on a plan) the Claude config
     /// folder `root` is signed in to at `now_ms`: the span of the same sign-in grows, anything
-    /// else starts a new span. Returns whether a new span started.
+    /// else starts a new span. Returns whether requests may now be tied differently: a new span
+    /// started, or the span grew over a request no account was found for yet.
     pub fn note_signin(&mut self, root: &str, account: Option<&str>, now_ms: i64) -> Result<bool> {
         let tx = self.conn.transaction()?;
         let last: Option<(i64, Option<String>, i64)> = tx
@@ -499,18 +572,26 @@ impl Store {
             return Ok(false);
         }
         let grows = matches!(&last, Some((_, a, to)) if a.as_deref() == account && now_ms - to <= SIGNIN_GAP_MS);
-        match last {
-            Some((from, _, _)) if grows => {
+        let changed = match last {
+            Some((from, _, to)) if grows => {
                 tx.execute("UPDATE signin_span SET to_ms = ?3 WHERE root = ?1 AND from_ms = ?2", params![root, from, now_ms])?;
+                // a request logged after the last look was resolved before this look covered it
+                tx.query_row(
+                    "SELECT EXISTS (SELECT 1 FROM usage_event WHERE ts_ms > ?1 AND ts_ms <= ?2 AND tool = 'claude_code' AND owner IS NULL)",
+                    params![to, now_ms],
+                    |r| r.get(0),
+                )?
             }
             _ => {
                 tx.execute("INSERT OR IGNORE INTO signin_span(root, account, from_ms, to_ms) VALUES(?1, ?2, ?3, ?3)", params![root, account, now_ms])?;
+                true
             }
-        }
+        };
         tx.commit()?;
-        Ok(!grows)
+        Ok(changed)
     }
 
+    /// One pool's percentages between two times, oldest first; `owner` keeps one account's.
     pub fn pool_readings(&self, provider: Provider, limit_id: &str, window: &str, owner: Option<Option<&str>>, from_ms: i64, to_ms: i64) -> Result<Vec<(i64, f64)>> {
         let mut st = self.conn.prepare_cached(
             "SELECT ts_ms, used_pct FROM limit_snapshot
@@ -680,14 +761,14 @@ impl Store {
                 )?;
             }
             if theirs >= 13 {
-                // digests, as this version writes them. Sign-in spans stay behind: they describe
-                // a folder of the computer that made the backup, which may share this one's path
+                // digests, as this version writes them
                 tx.execute(
                     "INSERT OR IGNORE INTO account_session(tool, session_id, account)
                      SELECT tool, session_id, account FROM other.account_session
                      WHERE typeof(tool) = 'text' AND typeof(session_id) = 'text' AND typeof(account) = 'text' AND length(account) = 16",
                     [],
                 )?;
+                import_signins(&tx, chrono::Utc::now().timestamp_millis())?;
             }
             tx.commit()?;
             digest_desktop_orgs(&self.conn)?;

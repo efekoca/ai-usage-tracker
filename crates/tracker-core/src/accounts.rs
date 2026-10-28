@@ -8,7 +8,10 @@
 //! its own limit windows, though, and each request reports the window it counted toward, so
 //! requests are grouped by window and windows are tied to accounts by evidence:
 //! * a live read through `codex app-server` (Codex ≥ 0.163), which names the signed-in account;
-//! * the account that started a thread, for the requests it sent right after starting.
+//! * the account that started a thread, for the requests it sent right after starting, and while
+//!   the thread stays in the same weekly window; not in a week two accounts share (a reset for
+//!   everyone can line them up), where a switch changes no window, nor when the evidence puts that
+//!   account on another window at the time (a switch before the thread's first request).
 //!
 //! A window no evidence names belongs to the only account seen, unless the windows show that
 //! more than one account was in use; then it stays unknown.
@@ -25,6 +28,8 @@
 //!   saw it without a break from the session's first request to this one. Claude Code keeps the
 //!   sign-in it loaded until it next renews it, and logs nothing when a session starts, so after a
 //!   change in the same folder no request of a session without telemetry is known for certain.
+//!   A backup's folders come in under names of their own, so their sign-ins speak only for the
+//!   sessions logged there.
 //!
 //! Readings: the app's own read names the sign-in it ran with, the desktop history its
 //! organisation; any other reading joins the weekly window it shares with a named one.
@@ -56,6 +61,9 @@ pub const MAIN_LIMIT: &str = "codex";
 /// Owner of a reading that names nothing to tell its account by: an unused window read with a
 /// Codex that does not name the account. Left out wherever accounts are told apart.
 pub const NAMELESS: &str = "?";
+
+/// Starts the name a folder of another computer gets when its sign-in records are imported.
+pub const IMPORTED_ROOT: &str = "import:";
 
 /// Codex reports an unused window as one starting at the moment of the reading, so its end moves
 /// with every reading until a request starts it.
@@ -153,9 +161,11 @@ pub fn in_use(store: &Store, provider: Provider, now_ms: i64) -> Result<Option<O
         let signed_in: Vec<String> = store
             .conn()
             .prepare(
-                "SELECT DISTINCT s.account FROM signin_span s
-                 WHERE s.account IS NOT NULL AND s.to_ms BETWEEN ?1 AND ?2
-                   AND s.from_ms = (SELECT max(from_ms) FROM signin_span t WHERE t.root = s.root)",
+                &format!(
+                    "SELECT DISTINCT s.account FROM signin_span s
+                     WHERE s.account IS NOT NULL AND s.to_ms BETWEEN ?1 AND ?2 AND s.root NOT LIKE '{IMPORTED_ROOT}%'
+                       AND s.from_ms = (SELECT max(from_ms) FROM signin_span t WHERE t.root = s.root)"
+                ),
             )?
             .query_map(params![now_ms - crate::store::SIGNIN_GAP_MS, now_ms], |r| r.get(0))?
             .collect::<Result<_>>()?;
@@ -195,14 +205,15 @@ struct Request {
 }
 
 /// One reading: the rows a source stored for one moment and limit. `mark` is when the longest
-/// window of the main limit resets, `pct` how full it is, `short` when its shorter window in use
-/// resets.
+/// window of the main limit resets and `began` when it started, `pct` how full it is, `short` when
+/// its shorter window in use resets.
 struct Reading {
     rowids: Vec<i64>,
     ts_ms: i64,
     source: String,
     main: bool,
     mark: Option<i64>,
+    began: Option<i64>,
     used: bool,
     pct: Option<f64>,
     short: Option<i64>,
@@ -214,9 +225,19 @@ struct Reading {
 struct Window {
     first_ms: i64,
     last_ms: i64,
+    began_ms: i64,
     /// Accounts named by live reads, and by thread creators.
     named: HashMap<String, u32>,
     vouched: HashMap<String, u32>,
+    /// When each of them last showed up here.
+    seen: HashMap<String, i64>,
+}
+
+impl Window {
+    fn saw(&mut self, account: &str, ts_ms: i64) {
+        let s = self.seen.entry(account.to_owned()).or_insert(ts_ms);
+        *s = (*s).max(ts_ms);
+    }
 }
 
 /// The one account the evidence names; `Err` when it names two, which only happens when two
@@ -298,6 +319,7 @@ pub fn resolve(store: &mut Store) -> Result<()> {
 
 /// Ties every Codex request and reading to its account and stores the result where it changed.
 pub fn resolve_codex(store: &mut Store) -> Result<()> {
+    let tx = settling(store)?;
     let (requests, readings) = (load_codex_requests(store)?, load_readings(store, "tool = 'codex'", |limit, _| limit == MAIN_LIMIT, 0)?);
 
     // a window is known from readings of it in use, as reset times chained within the tolerance;
@@ -310,13 +332,14 @@ pub fn resolve_codex(store: &mut Store) -> Result<()> {
     let req_win: Vec<Option<usize>> = requests.iter().map(|r| r.mark.and_then(find)).collect();
     let read_win: Vec<Option<usize>> = readings.iter().map(|r| r.mark.and_then(find)).collect();
 
-    let mut windows: Vec<Window> = bounds.iter().map(|_| Window { first_ms: i64::MAX, last_ms: i64::MIN, ..Default::default() }).collect();
+    let mut windows: Vec<Window> = bounds.iter().map(|_| Window { first_ms: i64::MAX, last_ms: i64::MIN, began_ms: i64::MAX, ..Default::default() }).collect();
     for (r, w) in requests.iter().zip(&req_win) {
         let Some(w) = *w else { continue };
         windows[w].first_ms = windows[w].first_ms.min(r.ts_ms);
         windows[w].last_ms = windows[w].last_ms.max(r.ts_ms);
         if let Some(c) = &r.creator {
             *windows[w].vouched.entry(c.clone()).or_default() += 1;
+            windows[w].saw(c, r.ts_ms);
         }
     }
     for (r, w) in readings.iter().zip(&read_win) {
@@ -325,6 +348,24 @@ pub fn resolve_codex(store: &mut Store) -> Result<()> {
         windows[w].last_ms = windows[w].last_ms.max(r.ts_ms);
         if let Some(a) = &r.account {
             *windows[w].named.entry(a.clone()).or_default() += 1;
+            windows[w].saw(a, r.ts_ms);
+        }
+        if let (true, Some(b)) = (r.used, r.began) {
+            windows[w].began_ms = windows[w].began_ms.min(b);
+        }
+    }
+    // one account's windows follow one another, each beginning after its last sign on the one
+    // before: a creator the evidence shows on another window at the time switched before its
+    // thread's first request, so its word for this one is set aside
+    let follow = |w: usize, o: usize, c: &str| {
+        windows[w].seen[c] < windows[o].began_ms.saturating_add(STALE_MS) || windows[o].seen[c] < windows[w].began_ms.saturating_add(STALE_MS)
+    };
+    let mut belied: HashSet<(usize, &str)> = HashSet::new();
+    for (w, win) in windows.iter().enumerate() {
+        for c in win.vouched.keys().filter(|c| !win.named.contains_key(*c)) {
+            if windows.iter().enumerate().any(|(o, other)| o != w && other.seen.contains_key(c) && !follow(w, o, c)) {
+                belied.insert((w, c.as_str()));
+            }
         }
     }
 
@@ -337,13 +378,20 @@ pub fn resolve_codex(store: &mut Store) -> Result<()> {
     // a window two accounts share names neither: only its own evidence ties a request or reading
     let mut several = overlap(windows.iter().map(|w| (w.first_ms, w.last_ms)).collect());
     let mut owner: Vec<Option<String>> = Vec::with_capacity(windows.len());
-    for (w, reads) in windows.iter().zip(reads.iter_mut()) {
+    let mut contested: Vec<bool> = Vec::with_capacity(windows.len());
+    for (i, (w, reads)) in windows.iter().zip(reads.iter_mut()).enumerate() {
         let named = if shared(reads) { Err(()) } else { sole(&w.named) };
         let own = match named {
-            Ok(None) => sole(&w.vouched),
+            Ok(None) => match sole(&w.vouched) {
+                Ok(Some(c)) if belied.contains(&(i, c.as_str())) => Ok(None),
+                other => other,
+            },
+            // a thread's creator in a window a live read gives to another account: both use it
+            Ok(Some(a)) if w.vouched.keys().any(|v| *v != a) => Err(()),
             other => other,
         };
         several |= own.is_err();
+        contested.push(own.is_err());
         owner.push(own.ok().flatten());
     }
     let mut known: HashSet<String> = owner.iter().flatten().cloned().collect();
@@ -354,9 +402,21 @@ pub fn resolve_codex(store: &mut Store) -> Result<()> {
         owner.iter_mut().for_each(|o| *o = Some(id.clone()));
     }
 
-    let named = |i: usize| requests[i].creator.is_some() || req_win[i].is_some();
+    // the creator is the account picked when the thread started and vouches for it while the weekly
+    // window stays the same, which in a week two accounts share proves nothing: a switch can come
+    // at any request, even the first ones, and change neither window. A thread's creator speaks
+    // for all of its requests or for none.
+    let doubted: HashSet<&str> = requests
+        .iter()
+        .zip(&req_win)
+        .filter_map(|(r, w)| Some((r, (*w)?, r.creator.as_deref()?)))
+        .filter(|&(_, w, c)| contested[w] || belied.contains(&(w, c)))
+        .map(|(r, _, _)| r.thread.as_str())
+        .collect();
+    let creator = |r: &Request| r.creator.clone().filter(|_| !doubted.contains(r.thread.as_str()));
+    let named = |i: usize| creator(&requests[i]).is_some() || req_win[i].is_some();
     let mut req_owner: Vec<Option<String>> =
-        requests.iter().zip(&req_win).map(|(r, w)| r.creator.clone().or_else(|| w.and_then(|w| owner[w].clone()))).collect();
+        requests.iter().zip(&req_win).map(|(r, w)| creator(r).or_else(|| w.and_then(|w| owner[w].clone()))).collect();
     // a request that names no window: from the requests around it in its thread, when both sides
     // agree
     let mut by_thread: HashMap<&str, Vec<usize>> = HashMap::new();
@@ -385,12 +445,10 @@ pub fn resolve_codex(store: &mut Store) -> Result<()> {
         at.entry(r.ts_ms).or_default().insert(o.as_deref());
     }
     let own = |r: &Reading, w: Option<usize>| r.account.clone().or_else(|| w.and_then(|w| owner[w].clone()));
-    let main_at: HashMap<(i64, &str), Option<String>> = readings
-        .iter()
-        .zip(&read_win)
-        .filter(|(r, w)| r.main && (w.is_some() || r.account.is_some()))
-        .map(|(r, w)| ((r.ts_ms, r.source.as_str()), own(r, *w)))
-        .collect();
+    let mut main_at: HashMap<(i64, &str), HashSet<Option<String>>> = HashMap::new();
+    for (r, w) in readings.iter().zip(&read_win).filter(|(r, w)| r.main && (w.is_some() || r.account.is_some())) {
+        main_at.entry((r.ts_ms, r.source.as_str())).or_default().insert(own(r, *w));
+    }
     let read_owner: Vec<Option<String>> = readings
         .iter()
         .zip(&read_win)
@@ -398,8 +456,9 @@ pub fn resolve_codex(store: &mut Store) -> Result<()> {
             if r.account.is_some() || w.is_some() {
                 return own(r, *w);
             }
-            if let Some(o) = main_at.get(&(r.ts_ms, r.source.as_str())) {
-                return o.clone();
+            // two accounts read at the same moment leave it unknown which one this belongs to
+            if let Some(set) = main_at.get(&(r.ts_ms, r.source.as_str())) {
+                return only_one_of(set);
             }
             match at.get(&r.ts_ms) {
                 Some(set) if set.len() == 1 => set.iter().next().copied().flatten().map(str::to_owned),
@@ -408,7 +467,6 @@ pub fn resolve_codex(store: &mut Store) -> Result<()> {
         })
         .collect();
 
-    let tx = store.conn().unchecked_transaction()?;
     {
         let mut st = tx.prepare_cached("UPDATE usage_event SET owner = ?2 WHERE rowid = ?1")?;
         for (r, o) in requests.iter().zip(&req_owner) {
@@ -445,6 +503,16 @@ pub fn root_key(dir: &std::path::Path) -> String {
     dir.components().collect::<std::path::PathBuf>().to_string_lossy().into_owned()
 }
 
+/// Holds the archive's write lock from the first read, so a resolve running elsewhere at the same
+/// time cannot store owners worked out from what it read before this one wrote.
+fn settling(store: &Store) -> Result<rusqlite::Transaction<'_>> {
+    rusqlite::Transaction::new_unchecked(store.conn(), rusqlite::TransactionBehavior::Immediate)
+}
+
+fn only_one_of(set: &HashSet<Option<String>>) -> Option<String> {
+    (set.len() == 1).then(|| set.iter().next().cloned().flatten()).flatten()
+}
+
 /// The one value of a set, if it has exactly one.
 fn only_one(set: Option<&HashSet<String>>) -> Option<String> {
     let set = set?;
@@ -478,6 +546,7 @@ struct ClaudeRequest {
 /// Ties every Claude request and reading to its account (see the module notes) and stores the
 /// result where it changed.
 pub fn resolve_claude(store: &mut Store) -> Result<()> {
+    let tx = settling(store)?;
     let conn = store.conn();
     // only a weekly window marks an account's window: a five-hour reading alone (the line Claude
     // Code logs at a five-hour limit) would look like a window of its own
@@ -518,7 +587,6 @@ pub fn resolve_claude(store: &mut Store) -> Result<()> {
     known.extend(distinct("SELECT DISTINCT account FROM signin_span WHERE account IS NOT NULL")?);
     several |= known.len() > 1;
 
-    let tx = conn.unchecked_transaction()?;
     if !several && let Some(id) = known.iter().next() {
         tx.execute("UPDATE usage_event SET owner = ?1 WHERE tool = 'claude_code' AND owner IS NOT ?1", [id])?;
         tx.execute("UPDATE limit_snapshot SET owner = ?1 WHERE provider = 'anthropic' AND owner IS NOT ?1", [id])?;
@@ -639,15 +707,16 @@ fn load_codex_requests(store: &Store) -> Result<Vec<Request>> {
     .collect()
 }
 
-/// The readings matching `rows`, one per moment, source and limit. `main` picks the windows that
-/// tell accounts apart; a reading marks its window only by one at least `mark_minutes` long.
+/// The readings matching `rows`, one per moment, source, limit and named account. `main` picks
+/// the windows that tell accounts apart; a reading marks its window only by one at least
+/// `mark_minutes` long.
 fn load_readings(store: &Store, rows: &str, main: fn(&str, &str) -> bool, mark_minutes: i64) -> Result<Vec<Reading>> {
     let mut st = store.conn().prepare(&format!(
         "SELECT rowid, ts_ms, source, limit_id, window, resets_at, used_pct, account, owner
-         FROM limit_snapshot WHERE {rows} ORDER BY ts_ms, source, limit_id"
+         FROM limit_snapshot WHERE {rows} ORDER BY ts_ms, source, limit_id, account"
     ))?;
     let mut readings: Vec<Reading> = Vec::new();
-    let mut key: Option<(i64, String, String)> = None;
+    let mut key: Option<(i64, String, String, String)> = None;
     let mut windows: Vec<(i64, i64, Option<f64>)> = Vec::new();
     for row in st.query_map([], |r| {
         Ok((
@@ -664,7 +733,7 @@ fn load_readings(store: &Store, rows: &str, main: fn(&str, &str) -> bool, mark_m
     })? {
         let (rowid, ts, source, limit_id, window, reset, used, account, owner) = row?;
         let is_main = main(&limit_id, &window);
-        let k = (ts, source, limit_id);
+        let k = (ts, source, limit_id, account);
         if key.as_ref() != Some(&k) {
             readings.push(Reading {
                 rowids: Vec::new(),
@@ -672,10 +741,11 @@ fn load_readings(store: &Store, rows: &str, main: fn(&str, &str) -> bool, mark_m
                 source: k.1.clone(),
                 main: false,
                 mark: None,
+                began: None,
                 used: false,
                 pct: None,
                 short: None,
-                account: (!account.is_empty()).then_some(account),
+                account: (!k.3.is_empty()).then(|| k.3.clone()),
                 owner,
             });
             key = Some(k);
@@ -690,6 +760,7 @@ fn load_readings(store: &Store, rows: &str, main: fn(&str, &str) -> bool, mark_m
             let (m, reset, used) = windows[0];
             if m >= mark_minutes {
                 r.mark = Some(reset);
+                r.began = Some(reset * 1000 - m * 60_000);
                 r.used = !unused(m, reset, used, ts);
                 r.pct = used;
             }

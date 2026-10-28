@@ -547,8 +547,8 @@ fn read_claude(state: &AppState, s: &Settings, bin: &Path) -> Result<Vec<tracker
 type SeenSignin = std::collections::HashMap<PathBuf, ((u64, Option<std::time::SystemTime>), Option<String>)>;
 
 /// Notes which account each Claude config folder is signed in to (see `tracker_core::accounts`).
-/// A settings file that has not changed since the last look is not read again. Returns whether a
-/// sign-in started or changed.
+/// A settings file that has not changed since the last look is not read again. Returns whether
+/// requests were tied anew (see `Store::note_signin`).
 fn note_claude_signins(state: &AppState, s: &Settings, seen: &mut SeenSignin) -> bool {
     let _writing = state.writers.read().unwrap_or_else(|e| e.into_inner());
     let env = Env::from_system();
