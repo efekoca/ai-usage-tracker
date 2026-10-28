@@ -403,7 +403,7 @@ pub struct ProjectShare {
 #[derive(Debug, Clone, Serialize)]
 pub struct LimitView {
     pub provider: Provider,
-    /// Codex account the view belongs to, when the archive holds more than one (see
+    /// Codex or Claude account the view belongs to, when the archive holds more than one (see
     /// [`crate::accounts::accounts`]); `None` there for an account no evidence names.
     pub account: Option<String>,
     /// The provider's account in use: the one its newest reading belongs to. Always true for a

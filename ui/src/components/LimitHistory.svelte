@@ -13,7 +13,7 @@
 
   const DAY = 864e5
   let provider: 'all' | Provider = $state('all')
-  /** 'all', a Codex account id, or '' for windows of no known account */
+  /** 'all', or an account as `provider:id` (`provider:` for windows of no known account) */
   let acct = $state('all')
   let win: 'five_hour' | 'seven_day' = $state('five_hour')
   let range = $state(28)

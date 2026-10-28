@@ -111,8 +111,8 @@
     commit('provider_order')
   }
   const providerOn = (p: Provider) => ws.providers.length === 0 || ws.providers.includes(p)
-  // each provider with more than one named account, in the widget's order
-  const accountGroups = $derived(ordered.map((p) => ({ p, list: app.accounts.filter((a) => a.provider === p && a.id !== null) })).filter((g) => g.list.length > 1))
+  // each provider whose accounts are told apart, in the widget's order
+  const accountGroups = $derived(ordered.map((p) => ({ p, list: app.accounts.filter((a) => a.provider === p && a.id !== null) })).filter((g) => g.list.length > 0))
   function toggleAccount(id: string, v: boolean) {
     set('accounts', v ? [...ws.accounts, id] : ws.accounts.filter((x) => x !== id))
   }

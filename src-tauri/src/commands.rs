@@ -236,7 +236,8 @@ pub async fn get_limits(state: State<'_, AppState>) -> Res<Vec<LimitView>> {
 /// Codex and Claude accounts, each provider's only while it has more than one.
 #[tauri::command]
 pub async fn get_accounts(state: State<'_, AppState>) -> Res<Vec<tracker_core::accounts::Account>> {
-    tracker_core::accounts::accounts(&state.db()).map_err(err)
+    let providers = enabled_providers(&state.settings.read().unwrap());
+    Ok(tracker_core::accounts::accounts(&state.db()).map_err(err)?.into_iter().filter(|a| providers.contains(&a.provider)).collect())
 }
 
 /// A known account, by which the unnamed ones are numbered per provider.
@@ -256,6 +257,7 @@ pub struct WidgetTool {
     tool: Tool,
     tokens: u64,
     cost_usd: f64,
+    has_unpriced: bool,
 }
 
 #[derive(Serialize)]
@@ -268,7 +270,7 @@ pub struct WidgetLimit {
     accuracy: Accuracy,
     resets_at: Option<i64>,
     observed_ms: Option<i64>,
-    /// The Codex account, while there are several.
+    /// The Codex or Claude account, while there are several.
     account: Option<String>,
     active: bool,
 }
@@ -322,9 +324,10 @@ fn widget_period(
         out.has_unpriced |= cost.is_none();
         out.tokens += e.tokens.total();
         out.cost_usd += c;
-        let t = per.entry(e.tool.as_str()).or_insert(WidgetTool { tool: e.tool, tokens: 0, cost_usd: 0.0 });
+        let t = per.entry(e.tool.as_str()).or_insert(WidgetTool { tool: e.tool, tokens: 0, cost_usd: 0.0, has_unpriced: false });
         t.tokens += e.tokens.total();
         t.cost_usd += c;
+        t.has_unpriced |= cost.is_none();
     }
     out.tools = per.into_values().collect();
     Ok(out)

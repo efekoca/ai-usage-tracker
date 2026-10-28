@@ -2,7 +2,7 @@
 //! offset; re-running over unchanged files does nothing, and re-reading a file from scratch
 //! (truncation, replacement, move) cannot double count because every record has a global key.
 
-use crate::discovery::DiscoveredFile;
+use crate::discovery::{file_key, DiscoveredFile};
 use crate::capture::statusline;
 use crate::sources::{antigravity, claude_code, claude_plan, claude_sessions, codex, cowork_audit, is_compressed, opencode, ParseOutput, ParserKind, MAX_WARNING_DETAILS};
 use crate::store::Store;
@@ -57,13 +57,14 @@ pub fn ingest(store: &mut Store, files: &[DiscoveredFile], mut on_progress: impl
                 claude_read |= f.parser.is_claude();
                 rep.records_written += read.records;
                 rep.warning_count += read.warning_count;
-                let p = f.path.to_string_lossy().into_owned();
+                let p = file_key(&f.path);
                 rep.warnings.extend(read.warnings.into_iter().map(|w| (p.clone(), w)));
             }
             Ok(None) => {}
             Err(e) => {
-                log::warn!("ingest failed for {}: {e}", f.path.display());
-                rep.errors.push((f.path.to_string_lossy().into_owned(), e));
+                let p = file_key(&f.path);
+                log::warn!("ingest failed for {p}: {e}");
+                rep.errors.push((p, e));
             }
         }
         on_progress(Progress { done: i + 1, total: files.len() });
@@ -110,7 +111,7 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<FileR
             mtime_ms = mtime_ms.max(m);
         }
     }
-    let key = f.path.to_string_lossy().into_owned();
+    let key = file_key(&f.path);
     let cp = store.checkpoint(&key).map_err(|e| e.to_string())?;
     // offsets count decompressed bytes, which the file size cannot be compared with; a changed
     // compressed file is read again from its start, and its keys merge with what was stored

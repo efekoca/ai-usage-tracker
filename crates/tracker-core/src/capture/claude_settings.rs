@@ -356,7 +356,26 @@ pub fn managed_files(dir: &Path) -> Vec<Value> {
         .collect();
     drop_ins.sort();
     paths.extend(drop_ins);
-    paths.iter().filter_map(|p| fs::read_to_string(p).ok()).filter_map(|s| serde_json::from_str(s.trim_start_matches('\u{feff}')).ok()).collect()
+    paths.iter().filter_map(|p| read_settings(p)).collect()
+}
+
+/// A settings file as JSON, when it is there and parses.
+pub fn read_settings(path: &Path) -> Option<Value> {
+    serde_json::from_str(fs::read_to_string(path).ok()?.trim_start_matches('\u{feff}')).ok()
+}
+
+/// Variables that give Claude Code a sign-in other than its config folder's.
+const OWN_SIGN_IN: [&str; 3] = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"];
+
+/// Whether settings give Claude Code a sign-in of its own: a token or key in their `env`, or a
+/// key helper. Only the names count.
+pub fn own_sign_in(docs: &[Value]) -> bool {
+    docs.iter().any(|d| d.get("env").and_then(Value::as_object).is_some_and(|e| OWN_SIGN_IN.iter().any(|k| e.contains_key(*k))) || d.get("apiKeyHelper").is_some())
+}
+
+/// The same in this process's environment, which the CLI inherits.
+pub fn own_sign_in_env() -> bool {
+    OWN_SIGN_IN.iter().any(|k| std::env::var_os(k).is_some_and(|v| !v.is_empty()))
 }
 
 pub fn install_otel(st: &mut CaptureState, data_dir: &Path, settings_file: &Path, port: u16, token: &str, now_ms: i64) -> Result<OtelChange, SettingsError> {
@@ -607,6 +626,17 @@ mod tests {
         fs::write(cc.join("managed-settings.d").join("notes.txt"), "{}").unwrap();
         assert_eq!(managed_files(&cc), vec![json!({"a": 1}), json!({"b": 2})]);
         assert!(managed_files(&dir.path().join("missing")).is_empty());
+    }
+
+    #[test]
+    fn a_token_key_or_key_helper_in_settings_is_a_sign_in_of_its_own() {
+        for doc in [json!({"env": {"CLAUDE_CODE_OAUTH_TOKEN": "x"}}), json!({"env": {"ANTHROPIC_API_KEY": ""}}), json!({"apiKeyHelper": "/bin/key.sh"})] {
+            assert!(own_sign_in(&[json!({"model": "opus"}), doc.clone()]), "{doc}");
+        }
+        assert!(!own_sign_in(&[json!({"env": {"OTEL_LOGS_EXPORTER": "otlp", "ANTHROPIC_BASE_URL": "x"}}), json!("not an object")]));
+        let (_d, file, _) = setup(Some("\u{feff}{\"env\": {\"ANTHROPIC_AUTH_TOKEN\": \"x\"}}"));
+        assert!(own_sign_in(&read_settings(&file).into_iter().collect::<Vec<_>>()));
+        assert!(read_settings(&file.with_extension("missing")).is_none());
     }
 
     #[test]

@@ -63,7 +63,7 @@ The **History** tab on the **Limits** page lists every five-hour and weekly wind
 
 For each window, it shows how full it got, whether it filled, how long it took to fill and how long it stayed full, whether it was watched to its end, and this computer's use inside it (tokens and API-equivalent cost). A window whose end was not watched is shown hatched, as "at least" its highest reading.
 
-- **Filters:** provider, account (with more than one Codex account), window (five-hour or weekly), period (7 days to all), and status (filled, 80 % and above, or watched to their end).
+- **Filters:** provider, account (with more than one Codex or Claude account), window (five-hour or weekly), period (7 days to all), and status (filled, 80 % and above, or watched to their end).
 - **Summary:** the number of windows, how many filled and for how long in total, the average and median peak, the average time to fill, and the distribution of peaks.
 - **A whole window in API terms** (an estimate): this computer's API-equivalent use up to the window's highest reading, divided by that percentage. The figure is the median over windows watched to their end and at least 10 % full, shown with its range. If the limit was also used on another device, on the web, or in the desktop chat, the real value is higher.
 - **Table:** every window, sortable by start, peak, time to fill, or local use.

@@ -13,7 +13,7 @@ export const app = $state({
   filter: {} as Filter,
   report: null as Report | null,
   limits: [] as LimitView[],
-  /** Codex accounts; empty while there is only one, and then nothing about accounts shows. */
+  /** Codex and Claude accounts; a provider has none while it has only one, and then nothing about accounts shows. */
   accounts: [] as Account[],
   loading: false,
   error: '',

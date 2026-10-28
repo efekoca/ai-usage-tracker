@@ -145,7 +145,7 @@ pub struct PanelLimit {
     state: LimitState,
     resets_at: Option<i64>,
     forecast: Option<Forecast>,
-    /// The Codex account, while there are several.
+    /// The Codex or Claude account, while there are several.
     account: Option<String>,
     active: bool,
 }

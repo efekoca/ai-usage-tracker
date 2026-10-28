@@ -127,7 +127,7 @@ pub struct Current {
     pub behind: bool,
 }
 
-/// Every pool's current window, of each known Codex account too; `None` when limits cannot be read
+/// Every pool's current window, of each known Codex and Claude account too; `None` when limits cannot be read
 /// right now, so the tray keeps what it shows.
 pub(crate) fn readings(app: &AppHandle, s: &Settings) -> Option<Vec<Reading>> {
     let state = app.state::<AppState>();
@@ -236,8 +236,8 @@ pub(crate) fn data(app: &AppHandle, s: &Settings, cfg: &TraySettings, readings: 
     Data { readings, usage, opencode, scan_ms, accounts }
 }
 
-/// Each account's short name: the user's, else its number among its provider's accounts in order
-/// of first use, as the Limits page numbers them.
+/// Each account's short name: the user's, else "Account" and its number among its provider's
+/// accounts in order of first use, as the Limits page numbers them.
 fn account_tags(app: &AppHandle, s: &Settings) -> std::collections::HashMap<String, String> {
     let list = tracker_core::accounts::accounts(&app.state::<AppState>().db()).unwrap_or_default();
     let mut counts: std::collections::HashMap<Provider, usize> = std::collections::HashMap::new();
@@ -246,7 +246,7 @@ fn account_tags(app: &AppHandle, s: &Settings) -> std::collections::HashMap<Stri
         .map(|(provider, id)| {
             let n = counts.entry(provider).or_default();
             *n += 1;
-            let tag = s.account_names.get(&id).cloned().unwrap_or_else(|| n.to_string());
+            let tag = s.account_names.get(&id).cloned().unwrap_or_else(|| format!("{} {n}", if turkish(s) { "Hesap" } else { "Account" }));
             (id, tag)
         })
         .collect()

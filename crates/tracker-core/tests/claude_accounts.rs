@@ -147,6 +147,32 @@ impl Claude {
             .query_row("SELECT owner FROM limit_snapshot WHERE ts_ms = ?1 AND source = ?2 AND window = 'seven_day'", rusqlite::params![ts, source], |r| r.get(0))
             .unwrap()
     }
+
+    /// A status-line reading, which names no account: (five-hour reset, weekly reset) in seconds.
+    fn status(&mut self, ts: i64, five_reset: i64, week_reset: i64, five_pct: f64, week_pct: f64) -> &mut Claude {
+        let snap = |window: &str, reset: i64, pct: f64| LimitSnapshot {
+            ts_ms: ts,
+            provider: Provider::Anthropic,
+            tool: Tool::ClaudeCode,
+            account: None,
+            limit_id: String::new(),
+            window: window.into(),
+            used_pct: Some(pct),
+            resets_at: Some(reset),
+            status: None,
+            plan: None,
+            source: "claude_statusline".into(),
+            accuracy: Accuracy::Captured,
+        };
+        let mut tx = self.store.transaction().unwrap();
+        tx.insert_limits(&[snap("five_hour", five_reset, five_pct), snap("seven_day", week_reset, week_pct)]).unwrap();
+        tx.commit().unwrap();
+        self
+    }
+
+    fn claude_accounts(&self) -> Vec<Option<String>> {
+        accounts(&self.store).unwrap().into_iter().filter(|a| a.provider == Provider::Anthropic).map(|a| a.id).collect()
+    }
 }
 
 #[test]
@@ -454,6 +480,13 @@ fn logs_the_desktop_session_list_and_the_sign_in_tie_requests_end_to_end() {
     assert_eq!(owner("req_2"), Some(claude_account(org_d)), "the desktop app's own sign-in");
     let list = accounts(&store).unwrap();
     assert_eq!(list.iter().filter(|a| a.provider == Provider::Anthropic && a.id.is_some()).count(), 2);
+    let raw: i64 = store
+        .conn()
+        .query_row("SELECT COUNT(*) FROM file_checkpoint WHERE path LIKE '%1d1d1d1d%' OR path LIKE ?1", [format!("%{org_d}%")], |r| r.get(0))
+        .unwrap();
+    assert_eq!(raw, 0, "the account ids the desktop app names its folders after are kept as digests");
+    let again = tracker_core::ingest::ingest(&mut store, &enumerate_files(&env, &ExtraPaths::default(), &all), |_| {});
+    assert_eq!(again.files_read, 0, "and found again under them");
 
     // the folder a session lies in is kept, so read-again checkpoints and deleted logs lose nothing
     store.conn().execute("DELETE FROM file_checkpoint", []).unwrap();
@@ -656,4 +689,176 @@ fn a_folder_is_one_folder_however_its_path_is_spelt() {
     let sub = Path::new("/x/claude/projects/-w/abc/subagents/agent-1.jsonl");
     assert_eq!(claude_log_session(sub), Some((root_key(Path::new("/x/claude")), "abc".into())));
     assert_eq!(claude_log_session(Path::new("/x/claude/elsewhere/-w/abc.jsonl")), None);
+}
+
+#[test]
+fn telemetry_on_another_account_leaves_its_sessions_folder_naming_none_of_it() {
+    // the folder only ever named A, but the session runs on B's token; one event reached the app
+    let mut c = Claude::new();
+    let (a, b) = (org(1), org(2));
+    c.signed_in(Some(&a), BASE, BASE + 3 * H);
+    c.ask("s1", "cli", BASE + 10 * M, "r1");
+    c.ask("s1", "cli", BASE + 20 * M, "r2").told("s1", BASE + 20 * M, "r2", Some(b.clone()));
+    c.ask("s1", "cli", BASE + 30 * M, "r3").resolve();
+    assert_eq!(c.owner("r2"), Some(b));
+    assert_eq!([c.owner("r1"), c.owner("r3")], [None, None]);
+}
+
+#[test]
+fn a_session_waking_with_its_older_reading_does_not_make_one_account_look_like_two() {
+    let a = org(1);
+    let (five, week) = (BASE / 1000 + 2 * 3600, BASE / 1000 + 3 * 86_400);
+    // the same week, lower than just read
+    let mut c = Claude::new();
+    c.signed_in(Some(&a), BASE, BASE + 3 * H).ask("s1", "cli", BASE + 10 * M, "r1");
+    c.status(BASE + 20 * M, five, week, 40.0, 50.0).status(BASE + 25 * M, five, week, 10.0, 30.0);
+    c.status(BASE + 30 * M, five, week, 41.0, 51.0).resolve();
+    assert_eq!(c.claude_accounts(), Vec::<Option<String>>::new());
+    let views = limits_view(&c.store, &PriceBook::default_book(), BASE + 31 * M, &[]).unwrap();
+    let weekly: Vec<(Option<String>, u64)> = views.iter().filter(|v| v.window == "seven_day").map(|v| (v.account.clone(), v.window_usage.events)).collect();
+    assert_eq!(weekly, [(None, 1)]);
+
+    // a five-hour window that ended hours ago
+    let mut c = Claude::new();
+    let (f0, f1) = (BASE / 1000 + 3600, BASE / 1000 + 6 * 3600);
+    c.signed_in(Some(&a), BASE - 4 * H, BASE + 3 * H).ask("s1", "cli", BASE - 3 * H, "r1");
+    c.status(BASE - 3 * H, f0, week, 30.0, 20.0).status(BASE - 2 * H, f0, week, 40.0, 22.0);
+    c.status(BASE + H + 10 * M, f1, week, 5.0, 25.0).status(BASE + 2 * H, f1, week, 12.0, 27.0);
+    c.status(BASE + 2 * H + 5 * M, f0, week, 40.0, 22.0).status(BASE + 2 * H + 10 * M, f1, week, 13.0, 27.0).resolve();
+    assert_eq!(c.claude_accounts(), Vec::<Option<String>>::new());
+
+    // last week, after the new one began
+    let mut c = Claude::new();
+    let (w1, w2) = (BASE / 1000, BASE / 1000 + 7 * 86_400);
+    c.signed_in(Some(&a), BASE - 3 * H, BASE + 2 * H).ask("s1", "cli", BASE - 2 * H + M, "r1");
+    c.status(BASE - 2 * H, BASE / 1000 - 3600, w1, 30.0, 90.0).status(BASE - H, BASE / 1000 + 3600, w1, 50.0, 95.0);
+    c.status(BASE + 10 * M, BASE / 1000 + 5 * 3600, w2, 2.0, 1.5).status(BASE + 40 * M, BASE / 1000 + 5 * 3600, w2, 6.0, 3.0);
+    c.status(BASE + 45 * M, BASE / 1000 + 3600, w1, 50.0, 95.0).status(BASE + 60 * M, BASE / 1000 + 5 * 3600, w2, 8.0, 4.0).resolve();
+    assert_eq!(c.claude_accounts(), Vec::<Option<String>>::new());
+    assert_eq!(c.owner("r1"), Some(a));
+}
+
+#[test]
+fn a_backup_with_a_sign_in_dated_ahead_leaves_this_computers_looks_counting() {
+    let (a, b) = (org(1), org(2));
+    let dir = tempfile::tempdir().unwrap();
+    let backup = dir.path().join("ahead.db");
+    {
+        let mut ahead = Claude::new();
+        ahead.signed_in(Some(&a), BASE, BASE + 10 * M).ask("sa", "cli", BASE + M, "ra");
+        ahead.store.conn().execute("INSERT INTO signin_span(root, account, from_ms, to_ms) VALUES(?1, ?2, ?3, ?3)", rusqlite::params![root(), a, 32_000_000_000_000i64]).unwrap();
+        ahead.store.backup_to(&backup).unwrap();
+    }
+    let mut c = Claude::new();
+    c.signed_in_at(&other_root(), Some(&b), BASE, BASE + 3 * H);
+    c.signed_in(Some(&a), BASE, BASE + H).ask("sa", "cli", BASE + M, "ra");
+    c.store.merge_from(&backup).unwrap();
+    c.signed_in(Some(&a), BASE + H + 30_000, BASE + 3 * H).ask("s2", "cli", BASE + 2 * H, "r2").resolve();
+    assert_eq!(c.owner("r2"), Some(a));
+}
+
+#[test]
+fn a_session_continued_in_another_config_folder_is_tied_by_neither_folder() {
+    let mut c = Claude::new();
+    let (a, b) = (org(1), org(2));
+    c.signed_in(Some(&a), BASE, BASE + 3 * H).signed_in_at(&other_root(), Some(&b), BASE, BASE + 3 * H);
+    c.ask("s1", "cli", BASE + 10 * M, "r1").resolve();
+    assert_eq!(c.owner("r1"), Some(a));
+    // its log copied into the other folder and resumed there
+    c.ask_in(&other_root(), "s1", "cli", BASE + H, "r2").resolve();
+    assert_eq!([c.owner("r1"), c.owner("r2")], [None, None]);
+
+    // the same, known only by the folders kept while reading its logs
+    c.ask("s2", "cli", BASE + 20 * M, "r3");
+    let mut tx = c.store.transaction().unwrap();
+    tx.note_session_root(Tool::ClaudeCode, "s2", &root()).unwrap();
+    tx.note_session_root(Tool::ClaudeCode, "s2", &other_root()).unwrap();
+    tx.commit().unwrap();
+    c.store.conn().execute("DELETE FROM file_checkpoint", []).unwrap();
+    c.resolve();
+    assert_eq!(c.owner("r3"), None);
+}
+
+#[test]
+fn a_backup_that_saw_a_session_in_two_folders_keeps_it_tied_by_neither() {
+    let (a, b) = (org(1), org(2));
+    let mut source = Claude::new();
+    source.signed_in(Some(&a), BASE, BASE + H).signed_in_at(&other_root(), Some(&b), BASE, BASE + H);
+    let noted = |c: &mut Claude, folder: &str| {
+        let mut tx = c.store.transaction().unwrap();
+        tx.note_session_root(Tool::ClaudeCode, "s1", folder).unwrap();
+        tx.commit().unwrap();
+    };
+    source.ask("s1", "cli", BASE + M, "r1");
+    noted(&mut source, &root());
+    let dir = tempfile::tempdir().unwrap();
+    let file = |n: &str| dir.path().join(n);
+    source.store.backup_to(&file("early.db")).unwrap();
+    // resumed in the other folder, where telemetry names one request's account
+    source.ask_in(&other_root(), "s1", "cli", BASE + 20 * M, "r2").ask_in(&other_root(), "s1", "cli", BASE + 30 * M, "r3");
+    source.told("s1", BASE + 30 * M, "r3", Some(a.clone()));
+    noted(&mut source, &other_root());
+    source.resolve();
+    let owners = |c: &Claude| [c.owner("r1"), c.owner("r2"), c.owner("r3")];
+    let want = [None, None, Some(a.clone())];
+    assert_eq!(owners(&source), want);
+    source.store.backup_to(&file("later.db")).unwrap();
+    // the same backup knowing the folders only by what was noted while reading
+    source.store.backup_to(&file("bare.db")).unwrap();
+    rusqlite::Connection::open(file("bare.db")).unwrap().execute("DELETE FROM file_checkpoint", []).unwrap();
+
+    let imported = |backups: &[&str]| {
+        let mut c = Claude::new();
+        for b in backups {
+            c.store.merge_from(&file(b)).unwrap();
+            c.resolve();
+        }
+        c
+    };
+    assert_eq!(imported(&["early.db"]).owner("r1"), Some(a.clone()));
+    for order in [["early.db", "later.db"], ["later.db", "early.db"], ["bare.db", "early.db"], ["early.db", "bare.db"]] {
+        assert_eq!(owners(&imported(&order)), want, "{order:?}");
+    }
+    // a hand-made one giving the mark sign-ins of its own
+    source.store.backup_to(&file("odd.db")).unwrap();
+    let odd = rusqlite::Connection::open(file("odd.db")).unwrap();
+    odd.execute("INSERT INTO signin_span(root, account, from_ms, to_ms) VALUES('', ?1, ?2, ?3)", rusqlite::params![a, BASE, BASE + H]).unwrap();
+    drop(odd);
+    let again = imported(&["early.db", "later.db", "later.db", "odd.db"]);
+    assert_eq!(owners(&again), want);
+    again.store.backup_to(&file("again.db")).unwrap();
+    let mut reopened = Claude { store: Store::open(&file("again.db")).unwrap() };
+    assert_eq!(owners(reopened.resolve()), want);
+
+    // this computer, which read the session in the first folder only
+    for backup in ["later.db", "bare.db"] {
+        let mut here = Claude::new();
+        here.signed_in(Some(&a), BASE, BASE + H).ask("s1", "cli", BASE + M, "r1").resolve();
+        assert_eq!(here.owner("r1"), Some(a.clone()));
+        here.store.merge_from(&file(backup)).unwrap();
+        assert_eq!(owners(here.resolve()), want, "{backup}");
+    }
+}
+
+#[test]
+fn a_file_without_a_physical_id_keeps_no_account_id_in_its_fallback_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let (login, org) = ("0b5e2c1d-3f4a-4b6c-8d9e-0f1a2b3c4d5e", "7c8d9e0f-1a2b-4c3d-9e4f-5a6b7c8d9e0f");
+    let p = dir.path().join("claude-code-sessions").join(login).join(org).join("local_a.json");
+    // a file not there yet has no physical id: the fallback the file system can also force
+    let fallback = tracker_core::discovery::file_identity(&p);
+    assert!(fallback.starts_with("path:"));
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, r#"{"cliSessionId":"local-session"}"#).unwrap();
+    let f = tracker_core::discovery::DiscoveredFile {
+        path: p,
+        file_id: fallback,
+        parser: tracker_core::sources::ParserKind::ClaudeDesktopSession,
+        source: tracker_core::discovery::SourceId::ClaudeDesktop,
+    };
+    let mut store = Store::open_in_memory().unwrap();
+    assert!(tracker_core::ingest::ingest(&mut store, std::slice::from_ref(&f), |_| {}).errors.is_empty());
+    let (path, id): (String, String) = store.conn().query_row("SELECT path, file_id FROM file_checkpoint", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+    assert!(![&path, &id].iter().any(|v| v.contains(login) || v.contains(org)));
+    assert_eq!(tracker_core::ingest::ingest(&mut store, &[f], |_| {}).files_read, 0);
 }

@@ -666,7 +666,7 @@ export function installMock() {
           console.info('panel action', a.action)
           return null
         case 'get_widget_data': {
-          const per = (tok: number, cost: number) => ({ tokens: tok, cost_usd: cost, has_unpriced: false, tools: [{ tool: 'claude_code', tokens: tok * 0.75, cost_usd: cost * 0.83 }, { tool: 'codex', tokens: tok * 0.15, cost_usd: cost * 0.12 }, { tool: 'antigravity', tokens: tok * 0.07, cost_usd: cost * 0.03 }, ...(ocMissing ? [] : [{ tool: 'opencode', tokens: tok * 0.03, cost_usd: cost * 0.02 }])] })
+          const per = (tok: number, cost: number) => ({ tokens: tok, cost_usd: cost, has_unpriced: false, tools: [{ tool: 'claude_code', tokens: tok * 0.75, cost_usd: cost * 0.83, has_unpriced: false }, { tool: 'codex', tokens: tok * 0.15, cost_usd: cost * 0.12, has_unpriced: false }, { tool: 'antigravity', tokens: tok * 0.07, cost_usd: cost * 0.03, has_unpriced: false }, ...(ocMissing ? [] : [{ tool: 'opencode', tokens: tok * 0.03, cost_usd: cost * 0.02, has_unpriced: false }])] })
           return { today: per(18_400_000, 12.84), days7: per(96_000_000, 71.3), month1: per(402_000_000, 288.1), limits: limits().map((l) => ({ provider: l.provider, limit_id: l.limit_id, window: l.window, used_pct: l.used_pct, state: l.state, accuracy: l.accuracy, resets_at: l.resets_at, observed_ms: l.observed_ms, account: l.account, active: l.active })), providers: ['anthropic', 'openai', 'google'], opencode: !ocMissing, accounts: knownAccounts(), updated_ms: Date.now() - 60000 }
         }
         case 'capture_status':
