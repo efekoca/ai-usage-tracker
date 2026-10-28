@@ -7,7 +7,7 @@
 use crate::sources::{is_compressed, ParserKind};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -361,11 +361,33 @@ pub fn enumerate_files(env: &Env, extra: &ExtraPaths, enabled: &HashSet<SourceId
     out
 }
 
-/// Physical identity of a file; falls back to the lower-cased path when unavailable.
+/// The name a file is kept and reported under: the Claude desktop app names its session folders
+/// after account ids, which become digests like every account id.
+pub fn file_key(path: &Path) -> String {
+    let named = |c: &Component| matches!(c, Component::Normal(n) if *n == "claude-code-sessions" || *n == "local-agent-mode-sessions");
+    if !path.components().any(|c| named(&c)) {
+        return path.to_string_lossy().into_owned();
+    }
+    let (mut out, mut hide) = (PathBuf::new(), 0);
+    for c in path.components() {
+        if hide > 0 {
+            hide -= 1;
+            out.push(crate::model::account_digest(&c.as_os_str().to_string_lossy()));
+        } else {
+            out.push(c);
+        }
+        if named(&c) {
+            hide = 2;
+        }
+    }
+    out.to_string_lossy().into_owned()
+}
+
+/// Physical identity of a file; falls back to the lower-cased name it is kept under.
 pub fn file_identity(path: &Path) -> String {
     match file_id::get_file_id(path) {
         Ok(id) => format!("{id:?}"),
-        Err(_) => format!("path:{}", path.to_string_lossy().to_lowercase()),
+        Err(_) => format!("path:{}", file_key(path).to_lowercase()),
     }
 }
 

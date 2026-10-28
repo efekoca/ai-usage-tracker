@@ -21,7 +21,7 @@ pub struct Reading {
     pub fills_at_ms: Option<i64>,
     /// Where it would stand at the reset when it does not fill.
     pub at_reset: Option<f64>,
-    /// The Codex account it belongs to, while there are several.
+    /// The Codex or Claude account it belongs to, while there are several.
     pub account: Option<String>,
     /// The provider's account in use.
     pub active: bool,
@@ -47,7 +47,7 @@ pub struct Data {
     /// OpenCode alone, for items whose `provider` is `opencode`; `None` while its source is off.
     pub opencode: Option<[Usage; 3]>,
     pub scan_ms: Option<i64>,
-    /// Each Codex account's short name, by digest, for items of an account.
+    /// Each Codex or Claude account's short name, by digest, for items of an account.
     pub accounts: std::collections::HashMap<String, String>,
 }
 

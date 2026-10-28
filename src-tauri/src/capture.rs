@@ -533,11 +533,15 @@ fn read_claude(state: &AppState, s: &Settings, bin: &Path) -> Result<Vec<tracker
     let env = Env::from_system();
     let cfg = claude_usage::config_dir(&env, &s.extra_paths);
     // the sign-in the CLI reads with, when it is the same before and after the read
-    let file = cfg.clone().or_else(|| env.home.as_ref().map(|h| h.join(".claude"))).map(|root| claude_signin::config_file(&env, &root));
+    let root = cfg.clone().or_else(|| env.home.as_ref().map(|h| h.join(".claude")));
+    let file = root.as_deref().map(|r| claude_signin::config_file(&env, r));
     let signed_in = || file.as_deref().and_then(|f| claude_signin::signed_in(f).ok().flatten());
     let before = signed_in();
     let mut snaps = claude_usage::query(bin, &work, cfg.as_deref(), Duration::from_secs(30), now_ms()).map_err(|e| e.to_string())?;
-    if before.is_some() && before == signed_in() {
+    // a token or key the CLI is given wins over the folder's sign-in
+    let mut docs = managed_settings();
+    docs.extend(root.as_deref().and_then(|r| cs::read_settings(&cs::settings_path(r))));
+    if !cs::own_sign_in_env() && !cs::own_sign_in(&docs) && before.is_some() && before == signed_in() {
         snaps.iter_mut().for_each(|l| l.account = before.clone());
     }
     Ok(snaps)

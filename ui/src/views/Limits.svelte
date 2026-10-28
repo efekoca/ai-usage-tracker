@@ -135,7 +135,7 @@
         {#if a.active}<span class="pill in-use">{t('accounts.inUse')}</span>{/if}
         <span class="spacer"></span>
         <span class="subtle small">{t('accounts.seen', { from: fmtDate(a.first_ms, 'short'), to: fmtDate(a.last_ms, 'short') })}</span>
-        <span class="num small">{fmtCompact(a.requests)} {t('accounts.requests')}</span>
+        <span class="num small">{fmtCompact(a.requests)} {t(a.requests === 1 ? 'accounts.request' : 'accounts.requests')}</span>
       </div>
     {/each}
   </section>

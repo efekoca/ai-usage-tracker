@@ -497,3 +497,48 @@ fn an_early_reset_with_late_reports_of_the_old_window_keeps_one_account() {
     assert!(accounts(&x.store).unwrap().is_empty(), "a late report is not a second account");
     assert_eq!(x.owners(), [(Some(a()), 5)]);
 }
+
+#[test]
+fn a_request_reporting_its_window_long_after_a_granted_reset_gives_no_request_to_the_other_account() {
+    let mut x = Archive::new();
+    x.live(BASE - 2 * M, win_a(), Some("acc-a"));
+    // started before a reset the provider granted to A and B alike, it reports A's old window 15
+    // minutes later, longer than a reading is usually late
+    let mut old = Thread::new(1, BASE - H, Some("acc-a"));
+    old.ask(BASE - H + M, Some(win_a())).ask(BASE + 15 * M, Some(win_a()));
+    let fresh = Win(BASE / 1000 + 7 * DAY_S, 2.0);
+    let mut current = Thread::new(2, BASE, Some("acc-a"));
+    current.ask(BASE + M, Some(fresh));
+    x.add(&[&old, &current]);
+    x.live(BASE + 20 * M, Win(fresh.0, 30.0), Some("acc-b"));
+    assert_eq!(x.owner_at(BASE + M), None, "A's request in the window both share");
+}
+
+#[test]
+fn a_request_without_a_window_before_its_thread_moved_to_another_window_names_no_account() {
+    let mut x = Archive::new();
+    let mut t1 = Thread::new(1, BASE, Some("acc-a"));
+    t1.ask(BASE + M, Some(win_a()));
+    let mut t2 = Thread::new(2, BASE + 3 * M, Some("acc-b"));
+    t2.ask(BASE + 3 * M + 30_000, Some(win_b()));
+    t1.ask(BASE + 5 * M, None).ask(BASE + 8 * M, Some(win_b()));
+    x.add(&[&t1, &t2]);
+    assert_eq!(x.owner_at(BASE + M), Some(a()));
+    assert_eq!(x.owner_at(BASE + 8 * M), Some(b()));
+    assert_eq!(x.owner_at(BASE + 5 * M), None, "the switch may have come before it");
+}
+
+#[test]
+fn the_days_limit_peaks_follow_the_account_filter() {
+    let mut x = Archive::new();
+    let mut t = Thread::new(1, BASE, Some("acc-a"));
+    t.ask(BASE + M, Some(Win(win_a().0, 90.0)));
+    let mut u = Thread::new(2, BASE + H, Some("acc-b"));
+    u.ask(BASE + H + M, Some(win_b()));
+    x.add(&[&t, &u]);
+    let only_b = Filter { accounts: vec![account_key(Provider::OpenAI, Some(&b()))], ..Default::default() };
+    let day = chrono::NaiveDate::from_ymd_opt(2026, 9, 1).unwrap();
+    let d = tracker_core::insights::day_detail(&x.store, &PriceBook::default_book(), day, &only_b, &chrono::Utc).unwrap();
+    let weekly: Vec<f64> = d.limit_peaks.iter().filter(|p| p.window == "seven_day").map(|p| p.peak_pct).collect();
+    assert_eq!(weekly, [10.0]);
+}

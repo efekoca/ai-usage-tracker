@@ -42,7 +42,8 @@
   const inUse = (p: Provider) => data?.limits.find((l) => l.provider === p && l.active)?.account ?? null
   const othersOf = (p: Provider) => (ws.accounts ?? []).filter((id) => id !== inUse(p) && (data?.accounts ?? []).some((a) => a.provider === p && a.id === id))
   // rows are named by account only where a provider shows more than one
-  const accountTag = (p: Provider, id: string | null) => (id === null || !othersOf(p).length ? '' : nameAccount(id, p, data?.accounts ?? [], accountNames, true))
+  const accountTag = (p: Provider, id: string | null) =>
+    !othersOf(p).length ? '' : id === null ? t('accounts.unknown') : nameAccount(id, p, data?.accounts ?? [], accountNames, true)
   // a provider with several pools (Antigravity) gets a row per pool when all are shown
   const entries = $derived(
     providers.flatMap((p) => {
@@ -83,17 +84,17 @@
   const R = 15
   const C = 2 * Math.PI * R
   // models without a price add nothing, so such a sum is only a lower bound
-  const money = (p: WidgetPeriod, usd: number) => (p.has_unpriced ? `≥ ${fmtMoney(usd)}` : fmtMoney(usd))
+  const money = (unpriced: boolean | undefined, usd: number) => (unpriced ? `≥ ${fmtMoney(usd)}` : fmtMoney(usd))
   const partial = (p: WidgetPeriod | null) => (p?.has_unpriced ? t('widget.unpriced') : undefined)
-  const primaryValue = $derived(period ? (ws.primary_metric === 'tokens' ? fmtCompact(period.tokens) : money(period, period.cost_usd)) : '–')
+  const primaryValue = $derived(period ? (ws.primary_metric === 'tokens' ? fmtCompact(period.tokens) : money(period.has_unpriced, period.cost_usd)) : '–')
   const opencode = $derived.by(() => {
     const u = period?.tools.find((x) => x.tool === 'opencode')
     if (!period) return null
     const tokens = fmtCompact(u?.tokens ?? 0)
-    const cost = money(period, u?.cost_usd ?? 0)
+    const cost = money(u?.has_unpriced, u?.cost_usd ?? 0)
     return ws.primary_metric === 'tokens' ? { main: tokens, rest: cost } : { main: cost, rest: `${tokens} ${lower(t('metric.tokens'))}` }
   })
-  const secondaryValue = $derived(period ? (ws.primary_metric === 'tokens' ? money(period, period.cost_usd) : fmtCompact(period.tokens) + ' ' + lower(t('metric.tokens'))) : '')
+  const secondaryValue = $derived(period ? (ws.primary_metric === 'tokens' ? money(period.has_unpriced, period.cost_usd) : fmtCompact(period.tokens) + ' ' + lower(t('metric.tokens'))) : '')
 </script>
 
 {#snippet stat(kind: WidgetItemKind)}
@@ -107,15 +108,15 @@
   {:else if kind === 'tools' && period}
     <div class="tools">
       {#each period.tools as tl (tl.tool)}
-        <span class="tool"><i style="background:{toolColor[tl.tool]}"></i>{#if ws.show_labels}<span class="tn">{toolLabel(tl.tool)}</span>{/if}<b class="num" title={ws.primary_metric === 'cost' ? partial(period) : undefined}>{ws.primary_metric === 'tokens' ? fmtCompact(tl.tokens) : money(period, tl.cost_usd)}</b></span>
+        <span class="tool"><i style="background:{toolColor[tl.tool]}"></i>{#if ws.show_labels}<span class="tn">{toolLabel(tl.tool)}</span>{/if}<b class="num" title={ws.primary_metric === 'cost' && tl.has_unpriced ? t('widget.unpriced') : undefined}>{ws.primary_metric === 'tokens' ? fmtCompact(tl.tokens) : money(tl.has_unpriced, tl.cost_usd)}</b></span>
       {/each}
     </div>
   {:else if kind === 'week_tokens' && data}
     <span class="mini">{#if ws.show_labels}<span class="ml">{t('widget.period.days7')}</span>{/if}<b class="num">{fmtCompact(data.days7.tokens)}</b></span>
   {:else if kind === 'week_cost' && data}
-    <span class="mini">{#if ws.show_labels}<span class="ml">{t('widget.period.days7')}</span>{/if}<b class="num" title={partial(data.days7)}>{money(data.days7, data.days7.cost_usd)}</b></span>
+    <span class="mini">{#if ws.show_labels}<span class="ml">{t('widget.period.days7')}</span>{/if}<b class="num" title={partial(data.days7)}>{money(data.days7.has_unpriced, data.days7.cost_usd)}</b></span>
   {:else if kind === 'month_cost' && data}
-    <span class="mini">{#if ws.show_labels}<span class="ml">{t('widget.period.month1')}</span>{/if}<b class="num" title={partial(data.month1)}>{money(data.month1, data.month1.cost_usd)}</b></span>
+    <span class="mini">{#if ws.show_labels}<span class="ml">{t('widget.period.month1')}</span>{/if}<b class="num" title={partial(data.month1)}>{money(data.month1.has_unpriced, data.month1.cost_usd)}</b></span>
   {:else if kind === 'updated' && data}
     <span class="updated">{t('widget.updated', { t: fmtTime(data.updated_ms) })}</span>
   {/if}

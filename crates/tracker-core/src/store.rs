@@ -172,6 +172,12 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX IF NOT EXISTS usage_event_tool_owner ON usage_event(tool, owner);
     "#,
+    // v14: the Claude desktop app names its session folders after account ids; files under them
+    // are kept under digests (`discovery::file_key`), so they are read again under that name
+    r#"
+    DELETE FROM file_checkpoint WHERE parser IN ('claude_desktop_session', 'cowork_jsonl', 'cowork_audit')
+        AND (path LIKE '%claude-code-sessions%' OR path LIKE '%local-agent-mode-sessions%');
+    "#,
 ];
 
 /// How long the sign-in of a Claude config folder may go unseen and still count as unchanged: the
@@ -216,7 +222,7 @@ fn claude_session_roots(conn: &Connection, schema: &str) -> Result<HashMap<Strin
     let mut st = conn.prepare(&format!("SELECT path FROM {schema}.file_checkpoint WHERE parser = 'claude_code_jsonl' AND typeof(path) = 'text'"))?;
     for path in st.query_map([], |r| r.get::<_, String>(0))? {
         if let Some((root, session)) = crate::accounts::claude_log_session(Path::new(&path?)) {
-            out.insert(session, root);
+            crate::accounts::note_root(&mut out, session, root);
         }
     }
     let mut st = conn.prepare(&format!(
@@ -224,7 +230,7 @@ fn claude_session_roots(conn: &Connection, schema: &str) -> Result<HashMap<Strin
     ))?;
     for row in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
         let (session, root) = row?;
-        out.insert(session, root);
+        crate::accounts::note_root(&mut out, session, root);
     }
     Ok(out)
 }
@@ -237,7 +243,7 @@ fn import_signins(conn: &Connection, now_ms: i64) -> Result<()> {
     use crate::accounts::IMPORTED_ROOT;
     let (ours, theirs) = (claude_session_roots(conn, "main")?, claude_session_roots(conn, "other")?);
     let mut shared: HashMap<&str, std::collections::BTreeSet<&str>> = HashMap::new();
-    for (session, root) in &theirs {
+    for (session, root) in theirs.iter().filter(|(_, r)| *r != crate::accounts::MANY_ROOTS) {
         if let Some(here) = ours.get(session) {
             shared.entry(root.as_str()).or_default().insert(here.as_str());
         }
@@ -257,10 +263,10 @@ fn import_signins(conn: &Connection, now_ms: i64) -> Result<()> {
     let spans: Vec<(String, Option<String>, i64, i64)> = conn
         .prepare(
             "SELECT root, account, from_ms, to_ms FROM other.signin_span
-             WHERE typeof(root) = 'text' AND typeof(from_ms) = 'integer' AND typeof(to_ms) = 'integer' AND from_ms <= to_ms
-               AND (account IS NULL OR (typeof(account) = 'text' AND length(account) = 16))",
+             WHERE typeof(root) = 'text' AND typeof(from_ms) = 'integer' AND typeof(to_ms) = 'integer' AND 0 <= from_ms AND from_ms <= to_ms
+               AND to_ms <= ?1 AND (account IS NULL OR (typeof(account) = 'text' AND length(account) = 16))",
         )?
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+        .query_map([latest_accepted_ms()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
         .collect::<Result<_>>()?;
     // a newer backup of the same folder carries the same spans grown longer
     let mut grow = conn.prepare(
@@ -276,9 +282,14 @@ fn import_signins(conn: &Connection, now_ms: i64) -> Result<()> {
             other.execute(params![root, account, from - 1])?;
         }
     }
-    let mut st = conn.prepare("INSERT OR IGNORE INTO session_root(tool, session_id, root) VALUES('claude_code', ?1, ?2)")?;
+    let mut st = conn.prepare(
+        "INSERT INTO session_root(tool, session_id, root) VALUES('claude_code', ?1, ?2)
+         ON CONFLICT(tool, session_id) DO UPDATE SET root = ?3 WHERE root <> excluded.root",
+    )?;
     for (session, root) in &theirs {
-        st.execute(params![session, name(root)])?;
+        // a session the backup saw in two folders stays tied by none, here too
+        let root = if root == crate::accounts::MANY_ROOTS { root.clone() } else { name(root) };
+        st.execute(params![session, root, crate::accounts::MANY_ROOTS])?;
     }
     Ok(())
 }
@@ -1004,9 +1015,13 @@ impl StoreTx<'_> {
         Ok(())
     }
 
-    /// The Claude config folder a session's log lies in.
+    /// The Claude config folder a session's log lies in; `MANY_ROOTS` once it shows up in another.
     pub fn note_session_root(&mut self, tool: Tool, session_id: &str, root: &str) -> Result<()> {
-        self.tx.execute("INSERT OR IGNORE INTO session_root(tool, session_id, root) VALUES(?1, ?2, ?3)", params![tool.as_str(), session_id, root])?;
+        self.tx.execute(
+            "INSERT INTO session_root(tool, session_id, root) VALUES(?1, ?2, ?3)
+             ON CONFLICT(tool, session_id) DO UPDATE SET root = ?4 WHERE root <> excluded.root",
+            params![tool.as_str(), session_id, root, crate::accounts::MANY_ROOTS],
+        )?;
         Ok(())
     }
 

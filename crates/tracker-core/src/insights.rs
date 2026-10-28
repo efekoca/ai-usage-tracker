@@ -841,8 +841,11 @@ pub fn day_detail<Tz: TimeZone>(store: &Store, book: &PriceBook, date: NaiveDate
         last = Some(last.map_or(e.ts_ms, |l| l.max(e.ts_ms)));
     }
     let mut peaks: BTreeMap<(Provider, String), (f64, i64)> = BTreeMap::new();
-    for s in store.limits_between(from, to)? {
+    for (s, owner) in store.owned_limits_between(from, to)? {
         let (Some(u), true) = (s.used_pct, s.window == "five_hour" || s.window == "seven_day") else { continue };
+        if !filter.accounts.is_empty() && !filter.accounts.contains(&crate::analytics::account_key(s.provider, owner.as_deref())) {
+            continue;
+        }
         let p = peaks.entry((s.provider, s.window.clone())).or_insert((u, s.ts_ms));
         if u > p.0 {
             *p = (u, s.ts_ms);

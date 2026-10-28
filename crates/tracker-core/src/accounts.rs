@@ -382,6 +382,7 @@ pub fn resolve_codex(store: &mut Store) -> Result<()> {
     for (i, (w, reads)) in windows.iter().zip(reads.iter_mut()).enumerate() {
         let named = if shared(reads) { Err(()) } else { sole(&w.named) };
         let own = match named {
+            // a creator set aside names no window, but still shows another account may use it
             Ok(None) => match sole(&w.vouched) {
                 Ok(Some(c)) if belied.contains(&(i, c.as_str())) => Ok(None),
                 other => other,
@@ -413,16 +414,27 @@ pub fn resolve_codex(store: &mut Store) -> Result<()> {
         .filter(|&(_, w, c)| contested[w] || belied.contains(&(w, c)))
         .map(|(r, _, _)| r.thread.as_str())
         .collect();
-    let creator = |r: &Request| r.creator.clone().filter(|_| !doubted.contains(r.thread.as_str()));
-    let named = |i: usize| creator(&requests[i]).is_some() || req_win[i].is_some();
-    let mut req_owner: Vec<Option<String>> =
-        requests.iter().zip(&req_win).map(|(r, w)| creator(r).or_else(|| w.and_then(|w| owner[w].clone()))).collect();
-    // a request that names no window: from the requests around it in its thread, when both sides
-    // agree
     let mut by_thread: HashMap<&str, Vec<usize>> = HashMap::new();
     for (i, r) in requests.iter().enumerate() {
         by_thread.entry(&r.thread).or_default().push(i);
     }
+    // a windowless request before a window its creator stopped vouching for may follow a switch
+    let mut switched: HashSet<usize> = HashSet::new();
+    for idx in by_thread.values() {
+        let mut later = None;
+        for &i in idx.iter().rev() {
+            match req_win[i] {
+                Some(_) => later = Some(requests[i].creator.is_some()),
+                None if later == Some(false) => _ = switched.insert(i),
+                None => {}
+            }
+        }
+    }
+    let creator = |i: usize| requests[i].creator.clone().filter(|_| !doubted.contains(requests[i].thread.as_str()) && !switched.contains(&i));
+    let named = |i: usize| creator(i).is_some() || req_win[i].is_some();
+    let mut req_owner: Vec<Option<String>> = (0..requests.len()).map(|i| creator(i).or_else(|| req_win[i].and_then(|w| owner[w].clone()))).collect();
+    // a request that names no window: from the requests around it in its thread, when both sides
+    // agree
     for idx in by_thread.values() {
         let around: Vec<Option<String>> = idx.iter().map(|&i| req_owner[i].clone()).collect();
         for (n, &i) in idx.iter().enumerate() {
@@ -498,6 +510,15 @@ fn own_sign_in(client: &str) -> bool {
     desktop_run(client) || client.starts_with("sdk")
 }
 
+/// Notes the folder a session's log lies in. A session logged in two folders (continued under
+/// another config folder) gets none: `MANY_ROOTS`, which no sign-in names.
+pub(crate) fn note_root(roots: &mut HashMap<String, String>, session: String, root: String) {
+    roots.entry(session).and_modify(|r| if *r != root { MANY_ROOTS.clone_into(r) }).or_insert(root);
+}
+
+/// The folder kept for a session logged in more than one.
+pub const MANY_ROOTS: &str = "";
+
 /// One spelling of a folder, as its logs' paths and the sign-in records name it.
 pub fn root_key(dir: &std::path::Path) -> String {
     dir.components().collect::<std::path::PathBuf>().to_string_lossy().into_owned()
@@ -570,12 +591,10 @@ pub fn resolve_claude(store: &mut Store) -> Result<()> {
             reads[w].push((r.ts_ms, r.pct, r.short));
         }
     }
-    let mut several = overlap(windows.iter().map(|w| (w.first_ms, w.last_ms)).collect());
+    // a shared window names neither; an idle session's old reading must not make one account two
     let mut owner: Vec<Option<String>> = Vec::with_capacity(windows.len());
     for (w, reads) in windows.iter().zip(reads.iter_mut()) {
-        let own = if shared(reads) { Err(()) } else { sole(&w.named) };
-        several |= own.is_err();
-        owner.push(own.ok().flatten());
+        owner.push(if shared(reads) { None } else { sole(&w.named).ok().flatten() });
     }
 
     // every account any evidence names
@@ -585,9 +604,9 @@ pub fn resolve_claude(store: &mut Store) -> Result<()> {
     known.extend(distinct("SELECT DISTINCT creator FROM usage_event WHERE tool = 'claude_code' AND creator IS NOT NULL")?);
     known.extend(distinct("SELECT DISTINCT account FROM account_session WHERE tool = 'claude_code'")?);
     known.extend(distinct("SELECT DISTINCT account FROM signin_span WHERE account IS NOT NULL")?);
-    several |= known.len() > 1;
-
-    if !several && let Some(id) = known.iter().next() {
+    if known.len() == 1
+        && let Some(id) = known.iter().next()
+    {
         tx.execute("UPDATE usage_event SET owner = ?1 WHERE tool = 'claude_code' AND owner IS NOT ?1", [id])?;
         tx.execute("UPDATE limit_snapshot SET owner = ?1 WHERE provider = 'anthropic' AND owner IS NOT ?1", [id])?;
         return tx.commit();
@@ -651,12 +670,12 @@ fn claude_requests(store: &Store) -> Result<Vec<Owned>> {
     let mut root_of: HashMap<String, String> = HashMap::new();
     for path in conn.prepare("SELECT path FROM file_checkpoint WHERE parser = 'claude_code_jsonl'")?.query_map([], |r| r.get::<_, String>(0))? {
         if let Some((root, session)) = claude_log_session(std::path::Path::new(&path?)) {
-            root_of.insert(session, root);
+            note_root(&mut root_of, session, root);
         }
     }
     for row in conn.prepare("SELECT session_id, root FROM session_root WHERE tool = 'claude_code'")?.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))? {
         let (session, root): (String, String) = row?;
-        root_of.insert(session, root);
+        note_root(&mut root_of, session, root);
     }
     let mut spans: HashMap<String, Vec<(i64, i64, Option<String>)>> = HashMap::new();
     for row in conn.prepare("SELECT root, from_ms, to_ms, account FROM signin_span ORDER BY root, from_ms")?.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))? {
@@ -671,6 +690,14 @@ fn claude_requests(store: &Store) -> Result<Vec<Owned>> {
             (ids.len() == 1).then(|| ids.into_iter().next().map(|id| (root.as_str(), id))).flatten()
         })
         .collect();
+    // telemetry on another account shows the session runs on a token of its own, not the folder's
+    for r in &requests {
+        if let (Some(s), Some(c)) = (&r.session, &r.creator)
+            && root_of.get(s).and_then(|root| single.get(root.as_str())).is_some_and(|only| *only != c)
+        {
+            desktop.insert(s);
+        }
+    }
     // that account, seen without a break from the session's first request to this one
     let signed_in = |session: &str, ts: i64| -> Option<String> {
         let root = root_of.get(session)?;

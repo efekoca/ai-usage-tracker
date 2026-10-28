@@ -193,7 +193,7 @@ const PROVIDER_ORDER: [&str; 3] = ["anthropic", "google", "openai"];
 
 const MAX_SHOWN_ACCOUNTS: usize = 8;
 
-/// A Codex account's id: 16 hex digits of its digest.
+/// A Codex or Claude account's id: 16 hex digits of its digest.
 fn is_digest(id: &str) -> bool {
     id.len() == 16 && id.bytes().all(|b| b.is_ascii_hexdigit())
 }
@@ -566,7 +566,7 @@ pub struct Settings {
     pub tint_icons: bool,
     /// Each tool's mark next to its name in the app; the widget has its own switch.
     pub show_icons: bool,
-    /// Codex account digest → the name the user gave it; an unnamed account is numbered.
+    /// Codex or Claude account digest → the name the user gave it; an unnamed account is numbered.
     pub account_names: std::collections::BTreeMap<String, String>,
 }
 

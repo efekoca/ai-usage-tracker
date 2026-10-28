@@ -37,7 +37,7 @@ export interface TrayItem {
   pool: string
   /** "today" | "days7" | "month1" for usage kinds. */
   period: string
-  /** A Codex limit of this account (its digest); empty for the account in use. */
+  /** A Codex or Claude limit of this account (its digest); empty for the account in use. */
   account: string
 }
 export interface TraySettings {
@@ -75,7 +75,7 @@ export interface PanelModule {
   size: PanelSize
   /** "ring" | "bar" for limits; empty elsewhere. */
   style: string
-  /** A Codex limit of this account (its digest); empty for the account in use. */
+  /** A Codex or Claude limit of this account (its digest); empty for the account in use. */
   account: string
 }
 export interface PanelSettings {
@@ -97,7 +97,7 @@ export interface PanelLimit {
   state: LimitState
   resets_at: number | null
   forecast: Forecast | null
-  /** The Codex account, while there are several. */
+  /** The Codex or Claude account, while there are several. */
   account: string | null
   active: boolean
 }
@@ -240,7 +240,7 @@ export interface ProjectShare {
 
 export interface LimitView {
   provider: Provider
-  /** Codex account, only while the archive holds more than one (`null` there: an unknown account). */
+  /** Codex or Claude account, only while the archive holds more than one (`null` there: an unknown account). */
   account: string | null
   /** The provider's account in use; other accounts' views show only on the Limits page. */
   active: boolean
@@ -268,7 +268,7 @@ export interface WidgetPeriod {
   tokens: number
   cost_usd: number
   has_unpriced: boolean
-  tools: { tool: Tool; tokens: number; cost_usd: number }[]
+  tools: { tool: Tool; tokens: number; cost_usd: number; has_unpriced: boolean }[]
 }
 
 export interface WidgetData {
@@ -404,7 +404,7 @@ export interface Settings {
   provider_colors: Partial<Record<Provider, string>>
   tint_icons: boolean
   show_icons: boolean
-  /** Codex account id → the name the user gave it. */
+  /** Codex or Claude account id → the name the user gave it. */
   account_names: Record<string, string>
 }
 
