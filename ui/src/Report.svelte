@@ -2,7 +2,7 @@
   // Rendered in a hidden window and saved as a PDF by the app.
   import { onMount, tick } from 'svelte'
   import { invoke } from '@tauri-apps/api/core'
-  import { applyAppearance, toolColor } from './lib/store.svelte'
+  import { accountKey, applyAppearance, toolColor } from './lib/store.svelte'
   import { api, providerOfSource, providersOf, type Account, type ContextStats, type LimitView, type PlansFile, type Provider, type Report, type Sessions, type Settings } from './lib/api'
   import { accountPlan, planPrice } from './lib/plans'
   import { fmtCompact, fmtDate, fmtDateTime, fmtDec, fmtInt, fmtLimit, fmtMoney, fmtPct, fmtSpan, i18n, limitName, t, toolLabel, windowLabel } from './lib/i18n.svelte'
@@ -19,6 +19,8 @@
   let limits = $state<LimitView[]>([])
   let plans = $state<PlansFile | null>(null)
   let accounts = $state<Account[]>([])
+  /** Per provider, the cost of its accounts on a free or API plan in the period; `null` when it could not be read. */
+  let unpaidCost = $state<Partial<Record<Provider, number>> | null>({})
   let failed = $state('')
 
   onMount(async () => {
@@ -34,6 +36,21 @@
       document.documentElement.dataset.theme = 'light'
       const period = { kind: 'custom' as const, from, to }
       ;[r, sessions, ctx, limits, plans, accounts] = await Promise.all([api.report(period), api.sessions(period), api.contextStats(period), api.limits(), api.plans(), api.accounts()])
+      const unpaid = (['anthropic', 'openai'] as Provider[]).flatMap((p) => seen(p).filter((x) => x.unpaid).map((x) => accountKey(p, x.id)))
+      if (unpaid.length) {
+        try {
+          const u = await api.report(period, { accounts: unpaid })
+          const cost: Partial<Record<Provider, number>> = {}
+          for (const key of unpaid) cost[key.split(':')[0] as Provider] = 0
+          for (const g of u.by_tool) {
+            const p = providerOfSource(g.key)
+            if (p && p in cost) cost[p] = (cost[p] ?? 0) + g.totals.cost_usd
+          }
+          unpaidCost = cost
+        } catch {
+          unpaidCost = null
+        }
+      }
     } catch (e) {
       failed = String(e)
     }
@@ -75,30 +92,40 @@
     hideAll || hidden ? `${t('projects.hidden')}${id !== null ? ` #${id}` : ''}` : name || t('projects.noProject')
 
   const days = $derived(r ? r.days_in_range : 7)
-  function value(p: Provider) {
-    const cost = (r?.by_tool ?? []).filter((g) => providerOfSource(g.key) === p).reduce((a, g) => a + g.totals.cost_usd, 0)
-    const shareOf = (usd: number | null) => (usd !== null && usd > 0 ? (usd * days) / (365.25 / 12) : null)
-    // several accounts: each one seen in the period on its own plan, against their prices together
+  /** A provider's accounts seen in the period, each on its own plan; several accounts only. */
+  function seen(p: Provider) {
     const start = from ? new Date(`${from}T00:00:00`).getTime() : 0
     const [y, mo, d] = to.split('-').map(Number)
     const end = to ? new Date(y, mo - 1, d + 1).getTime() : Infinity
-    const several = accounts.filter((a) => a.provider === p && a.id !== null && a.last_ms >= start && a.first_ms < end)
-    if (several.length) {
-      const all = several.map((a) => accountPlan(plans, s, a)).map((plan, i) => ({ plan, usd: planPrice(s, p, plan, several[i].id).usd }))
-      // the summary has no per-account cost, so use on the API or a free plan cannot be taken out
-      const unpaid = all.filter((x) => x.plan?.id === 'api' || x.usd === 0)
-      const parts = all.filter((x) => !unpaid.includes(x))
-      const label = [...new Set(parts.map((x) => x.plan?.name).filter(Boolean))].join(' + ') + (parts.length > 1 ? ` · ${t('value.accounts', { n: parts.length })}` : '')
-      const missing = parts.some((x) => !x.plan || x.usd === null)
-      const share = missing || unpaid.length ? null : shareOf(parts.reduce((t, x) => t + (x.usd ?? 0), 0))
-      const note = parts.some((x) => !x.plan) ? t('rep.noPlan') : missing ? t('value.enterPrice') : unpaid.length && parts.length ? t('rep.valueUnpaid') : unpaid.every((x) => x.plan?.id === 'api') ? t('value.api') : t('value.free')
+    return accounts
+      .filter((a) => a.provider === p && a.id !== null && a.last_ms >= start && a.first_ms < end)
+      .map((a) => {
+        const plan = accountPlan(plans, s, a)
+        const usd = planPrice(s, p, plan, a.id).usd
+        return { id: a.id as string, plan, usd, unpaid: plan?.id === 'api' || usd === 0 }
+      })
+  }
+  function value(p: Provider) {
+    const total = (r?.by_tool ?? []).filter((g) => providerOfSource(g.key) === p).reduce((a, g) => a + g.totals.cost_usd, 0)
+    const shareOf = (usd: number | null) => (usd !== null && usd > 0 ? (usd * days) / (365.25 / 12) : null)
+    const list = seen(p)
+    if (list.length) {
+      // use on a free or API plan is not paid for by the plans counted here
+      const paid = list.filter((x) => !x.unpaid)
+      const left = list.length > paid.length ? unpaidCost?.[p] : 0
+      const cost = total - (left ?? 0)
+      const names = [...new Set(paid.map((x) => x.plan?.name).filter(Boolean))].join(' + ')
+      const label = [names, paid.length > 1 ? t('value.accounts', { n: paid.length }) : ''].filter(Boolean).join(' · ')
+      const missing = paid.some((x) => !x.plan || x.usd === null)
+      const share = missing || left === undefined ? null : shareOf(paid.reduce((t, x) => t + (x.usd ?? 0), 0))
+      const note = paid.some((x) => !x.plan) ? t('rep.noPlan') : missing ? t('value.enterPrice') : left === undefined ? t('rep.valueUnpaid') : list.every((x) => x.plan?.id === 'api') ? t('value.api') : t('value.free')
       return { label, cost, share, ratio: share ? cost / share : null, note }
     }
     const planId = s?.plans[p]
     const plan = planId ? plans?.providers[p]?.plans.find((x) => x.id === planId) : undefined
     const share = shareOf(planPrice(s, p, plan).usd)
     const note = !plan ? t('rep.noPlan') : plan.id === 'api' ? t('value.api') : plan.monthly_usd === 0 ? t('value.free') : t('value.enterPrice')
-    return { label: plan?.name ?? '', cost, share, ratio: share ? cost / share : null, note }
+    return { label: plan?.name ?? '', cost: total, share, ratio: share ? total / share : null, note }
   }
   const providers = $derived(
     providersOf((r?.by_tool ?? []).map((g) => g.key)),

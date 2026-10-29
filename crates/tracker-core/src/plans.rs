@@ -75,11 +75,12 @@ impl PlansFile {
     }
 }
 
-/// Whether a limit reading's plan name fits a plan: Claude reports "max" for both Max plans,
-/// Codex "team" for Business and "edu" for Enterprise / Edu.
+/// Whether a limit reading's plan name fits a plan: Claude reports "max" for both Max plans and
+/// "team" for both Team plans, Codex "team" for Business and "edu" for Enterprise / Edu.
 pub fn fits(p: Provider, id: &str, read: &str) -> bool {
     match (p, id) {
         (Provider::Anthropic, id) if id.starts_with("max") => read == "max",
+        (Provider::Anthropic, id) if id.starts_with("team") => read == "team",
         (Provider::OpenAI, "business") => read == "business" || read == "team",
         (Provider::OpenAI, "enterprise") => read == "enterprise" || read == "edu",
         _ => id == read,
@@ -117,7 +118,9 @@ mod tests {
         assert_eq!(plan(None, Some("max"), Some("pro")), None, "Max 5x or 20x is the user's to say");
         assert_eq!(plan(None, Some("max"), None), None);
         assert_eq!(plan(None, None, Some("pro")).as_deref(), Some("pro"));
-        assert_eq!(plan(None, Some("team"), Some("pro")), None, "a reading no listed plan fits rules out the provider's plan too");
+        assert_eq!(plan(None, Some("team"), Some("team_premium")).as_deref(), Some("team_premium"), "\"team\" fits both Team plans");
+        assert_eq!(plan(None, Some("team"), Some("pro")), None, "Team Standard or Premium is the user's to say");
+        assert_eq!(plan(None, Some("unknown"), Some("pro")), None, "a reading no listed plan fits rules out the provider's plan too");
         assert_eq!(plan(Some("gone"), Some("pro"), None).as_deref(), Some("pro"), "a choice no longer listed is ignored");
         let codex = |read| f.account_plan(Provider::OpenAI, None, Some(read), Some("plus"));
         assert_eq!(codex("plus").as_deref(), Some("plus"));

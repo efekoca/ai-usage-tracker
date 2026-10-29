@@ -75,18 +75,22 @@
     const list = STEPS[kind].includes(every(kind)) ? STEPS[kind] : [...STEPS[kind], every(kind)].sort((a, b) => a - b)
     return list.map((n) => ({ value: String(n), label: t('cap.every', { n }) }))
   }
-  // only the newest choice's answer is shown, and it touches only the capture settings; a failed
-  // save redraws the list so it shows the interval still in use
+  // per reader, only the newest choice's answer counts, and it touches only the capture settings;
+  // a failed save redraws the list so it shows the interval still in use
   let unsaved = $state(0)
-  let asked = 0
+  let everyError = $state<Record<string, string>>({})
+  const asked: Record<string, number> = {}
   async function setEvery(kind: 'claude' | 'codex' | 'antigravity', minutes: number) {
-    const mine = ++asked
+    const mine = (asked[kind] = (asked[kind] ?? 0) + 1)
     try {
       const s = await api.setReadInterval(kind, minutes)
-      if (mine === asked && app.settings) app.settings = { ...app.settings, capture: s.capture }
+      if (mine !== asked[kind]) return
+      if (app.settings) app.settings = { ...app.settings, capture: s.capture }
+      delete everyError[kind]
     } catch (e) {
-      note[kind] = { ok: false, text: explain(kind, String(e), false) }
-      if (mine === asked) unsaved++
+      if (mine !== asked[kind]) return
+      everyError[kind] = explain(kind, String(e), false)
+      unsaved++
     }
   }
   const GUIDES = {
@@ -139,6 +143,7 @@
                 <Select label="{t(`cap.${kind}.name`)} · {t('cap.interval')}" value={String(every(kind))} options={steps(kind)} onchange={(v) => setEvery(kind, Number(v))} />
               {/key}
               {#if kind === 'claude'}<span class="subtle small">{t('cap.claude.idle')}</span>{/if}
+              {#if everyError[kind]}<Icon name="warning" size={13} /> <span class="msg">{everyError[kind]}</span>{/if}
             </dd>
           {/if}
           <dt>{t('cap.status')}</dt>
