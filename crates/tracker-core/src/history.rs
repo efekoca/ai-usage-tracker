@@ -45,7 +45,7 @@ pub struct WindowRecord {
     pub in_progress: bool,
     /// Plan named by the readings (Codex), when any.
     pub plan: Option<String>,
-    /// Every plan the readings name; a window read on two plans is no evidence for either.
+    /// Every plan the readings name; a window read on two listed plans is no evidence for either.
     #[serde(skip)]
     pub plans: Vec<String>,
     /// This computer's logged use of the provider inside the window (see [`add_local_usage`]).
@@ -455,7 +455,9 @@ const DOWNGRADE_FIVE_HOUR: u32 = 5;
 /// The plan below must have left at least this much room in every window.
 const DOWNGRADE_MAX_PCT: f64 = 80.0;
 
-fn stats(history: &LimitHistory, provider: Provider, pick: &dyn Fn(&WindowSeries) -> bool, window: &str, plan_filter: Option<&str>, since_ms: i64) -> WindowStats {
+fn stats(history: &LimitHistory, provider: Provider, pick: &dyn Fn(&WindowSeries) -> bool, window: &str, plan_filter: Option<&str>, plans: &PlansFile, since_ms: i64) -> WindowStats {
+    // a name no listed plan has tells no more than a reading without one
+    let other = |want: &str, had: &str| !crate::plans::fits(provider, want, had) && plans.plans(provider).iter().any(|d| crate::plans::fits(provider, &d.id, had));
     let mut s = WindowStats::default();
     for series in history.series.iter().filter(|x| x.provider == provider && x.window == window && pick(x)) {
         for w in &series.windows {
@@ -464,7 +466,7 @@ fn stats(history: &LimitHistory, provider: Provider, pick: &dyn Fn(&WindowSeries
             }
             // a window read on another plan, even in part, says nothing about this one
             if let Some(want) = plan_filter
-                && w.plans.iter().any(|had| !crate::plans::fits(provider, want, had))
+                && w.plans.iter().any(|had| other(want, had))
             {
                 continue;
             }
@@ -509,8 +511,8 @@ fn advise(history: &LimitHistory, provider: Provider, pick: &dyn Fn(&WindowSerie
         strong: false,
         days: ADVICE_DAYS,
         observed_days,
-        five_hour: stats(history, provider, pick, "five_hour", plan_id, since),
-        weekly: stats(history, provider, pick, "seven_day", plan_id, since),
+        five_hour: stats(history, provider, pick, "five_hour", plan_id, plans, since),
+        weekly: stats(history, provider, pick, "seven_day", plan_id, plans, since),
         session_ratio: None,
         projected_five_hour: None,
         projected_weekly_if_same_ratio: None,

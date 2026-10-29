@@ -36,7 +36,13 @@ describe('accountPlan', () => {
   it('leaves Max 5x or 20x, and a plan the list lacks, to the user', () => {
     expect(accountPlan(plans, settings({ plans: { anthropic: 'pro' } }), account('max'))).toBeUndefined()
     expect(accountPlan(plans, settings(), account('max'))).toBeUndefined()
-    expect(accountPlan(plans, settings({ plans: { anthropic: 'pro' } }), account('team'))).toBeUndefined()
+    expect(accountPlan(plans, settings({ plans: { anthropic: 'pro' } }), account('unknown'))).toBeUndefined()
+  })
+
+  it('reads Claude "team" as either Team plan', () => {
+    const team = { ...plans, providers: { ...plans.providers, anthropic: { label: 'Claude', plans: [...plans.providers.anthropic.plans, { id: 'team_standard', name: 'Team (Standard)', windows: [], source: '', monthly_usd: 25 }, { id: 'team_premium', name: 'Team (Premium)', windows: [], source: '', monthly_usd: 125 }] } } } as PlansFile
+    expect(accountPlan(team, settings({ plans: { anthropic: 'team_premium' } }), account('team'))?.id).toBe('team_premium')
+    expect(accountPlan(team, settings({ plans: { anthropic: 'pro' } }), account('team'))).toBeUndefined()
   })
 
   it('reads Codex "team" as Business', () => {
@@ -62,5 +68,8 @@ describe('planPrice', () => {
     expect(planPrice(s, 'anthropic', max, 'a1')).toEqual({ usd: 100, custom: false })
     expect(planPrice(s, 'anthropic', pro)).toEqual({ usd: 17, custom: true })
     expect(planPrice(s, 'anthropic', undefined, 'a1')).toEqual({ usd: null, custom: false })
+    const free = { id: 'free', name: 'Free', windows: [], source: '', monthly_usd: 0 }
+    const left = settings({ plans: { anthropic: 'free' }, plan_prices: { anthropic: 24 } })
+    expect(planPrice(left, 'anthropic', free), 'a price left from another plan').toEqual({ usd: 0, custom: false })
   })
 })

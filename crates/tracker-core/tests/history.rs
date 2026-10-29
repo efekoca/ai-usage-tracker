@@ -302,6 +302,19 @@ fn a_window_read_on_two_plans_counts_for_neither() {
 }
 
 #[test]
+fn a_plan_name_no_listed_plan_has_does_not_drop_the_window() {
+    let mut v = Vec::new();
+    let reset = NOW - DAY;
+    for d in 0..5 {
+        v.push(snap(reset - 6 * DAY + d * DAY, Provider::Anthropic, "seven_day", 20.0 * (d + 1) as f64, reset, Some("max")));
+    }
+    v.push(snap(reset - HOUR, Provider::Anthropic, "seven_day", 100.0, reset, Some("unknown")));
+    let h = limit_history(&store_with(v), NOW, 28).unwrap();
+    let max = plan_advice(&h, Provider::Anthropic, Some("max5x"), &PlansFile::bundled(), NOW);
+    assert_eq!((max.weekly.windows, max.weekly.full), (1, 1));
+}
+
+#[test]
 fn codex_team_readings_count_for_the_business_plan() {
     let v = (1..=3)
         .map(|d| {
