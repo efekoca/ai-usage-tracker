@@ -466,6 +466,10 @@
     gap: 8px;
     padding: 9px 10px;
   }
+  /* three lines beside the ring must fit the one-row tile */
+  .limit.w.ring .txt {
+    line-height: 1.2;
+  }
   .usage.w {
     padding: 0 13px;
     line-height: 1.15;
@@ -529,6 +533,13 @@
   .limit.s.bar .stack .tiny {
     color: inherit;
   }
+  .limit.s.ring {
+    gap: 2px;
+    padding: 4px 6px;
+  }
+  .limit.s.ring .tiny {
+    line-height: 12px;
+  }
   .center {
     display: grid;
     place-items: center;
@@ -569,16 +580,30 @@
     gap: 6px;
     width: 100%;
   }
+  /* a title and two bars in a one-row tile: tight lines, or they spill past its top and bottom */
   .provider.w,
   .provider.l {
     flex-direction: column;
     align-items: stretch;
     justify-content: center;
-    gap: 7px;
+    gap: 4px;
+    padding-block: 8px;
+  }
+  .provider.w .head,
+  .provider.l .head {
+    line-height: 15px;
+  }
+  .provider.w .bars {
+    gap: 3px;
   }
   .provider.l .bars {
     flex-direction: row;
     gap: 14px;
+  }
+  .provider.w .brow,
+  .provider.l .brow {
+    row-gap: 1px;
+    line-height: 13px;
   }
   .brow {
     display: grid;

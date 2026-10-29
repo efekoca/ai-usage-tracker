@@ -656,6 +656,12 @@ pub async fn set_capture(window: WebviewWindow, app: AppHandle, kind: String, en
 }
 
 #[tauri::command]
+pub async fn set_read_interval(window: WebviewWindow, app: AppHandle, kind: String, minutes: u64) -> Res<Settings> {
+    main_only(&window)?;
+    crate::capture::set_interval(&app, &kind, minutes)
+}
+
+#[tauri::command]
 pub async fn install_cli(window: WebviewWindow, app: AppHandle, kind: String) -> Res<String> {
     main_only(&window)?;
     tauri::async_runtime::spawn_blocking(move || crate::capture::install_cli(&app, &kind)).await.map_err(err)?
@@ -795,8 +801,6 @@ pub async fn get_tips(app: AppHandle, period: Period, filter: Option<Filter>) ->
 pub struct LimitHistoryView {
     history: tracker_core::history::LimitHistory,
     advice: Vec<tracker_core::history::PlanAdvice>,
-    /// Provider → plan id inferred from the readings when the user chose none.
-    detected_plans: std::collections::BTreeMap<String, String>,
 }
 
 /// Claude reports "max" for both Max plans, so only "pro" is taken from its readings.
@@ -823,24 +827,36 @@ pub async fn get_limit_history(app: AppHandle, days: Option<i64>) -> Res<LimitHi
     tracker_core::history::add_local_usage(&mut history, &store, &book).map_err(err)?;
     let advice_history = tracker_core::history::limit_history(&store, now, tracker_core::history::ADVICE_DAYS).map_err(err)?;
     let plans = tracker_core::plans::PlansFile::bundled();
-    let mut detected_plans = std::collections::BTreeMap::new();
+    let accounts = tracker_core::accounts::accounts(&store).map_err(err)?;
     // a provider whose plans have no limit windows never reports readings to advise on
     let mut ordered: Vec<Provider> =
         providers.into_iter().filter(|p| plans.plans(*p).iter().any(|d| !d.windows.is_empty())).collect();
     ordered.sort();
-    let advice = ordered
-        .into_iter()
-        .map(|p| {
-            let chosen = settings.plans.get(p.as_str()).filter(|id| !id.is_empty()).cloned();
-            let plan = chosen.or_else(|| {
-                let d = detected_plan(&store, p, &plans)?;
-                detected_plans.insert(p.as_str().to_owned(), d.clone());
-                Some(d)
-            });
-            tracker_core::history::plan_advice(&advice_history, p, plan.as_deref(), &plans, now)
-        })
-        .collect();
-    Ok(LimitHistoryView { history, advice, detected_plans })
+    let mut advice = Vec::new();
+    for p in ordered {
+        let chosen = settings.plans.get(p.as_str()).filter(|id| !id.is_empty()).map(String::as_str);
+        let several: Vec<(&str, Option<&str>, bool)> =
+            accounts.iter().filter(|a| a.provider == p).filter_map(|a| Some((a.id.as_deref()?, a.read_plan.as_deref(), a.active))).collect();
+        if several.is_empty() {
+            let detected = if chosen.is_none() { detected_plan(&store, p, &plans) } else { None };
+            let mut a = tracker_core::history::plan_advice(&advice_history, p, chosen.or(detected.as_deref()), &plans, now);
+            a.detected = detected.is_some();
+            advice.push(a);
+            continue;
+        }
+        for (id, read, active) in several {
+            let own = settings.account_plans.get(id).map(String::as_str);
+            let plan = plans.account_plan(p, own, read, chosen);
+            let mut a = tracker_core::history::account_advice(&advice_history, p, id, plan.as_deref(), &plans, now);
+            // another account not read in the advice period is not in use
+            if a.observed_days == 0 && !active {
+                continue;
+            }
+            a.detected = own.is_none() && plan.is_some() && plan.as_deref() != chosen;
+            advice.push(a);
+        }
+    }
+    Ok(LimitHistoryView { history, advice })
 }
 
 #[derive(Serialize)]

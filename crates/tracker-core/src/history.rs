@@ -97,6 +97,9 @@ pub struct LimitHistory {
     /// Days (UTC) in the advice period with at least one reading of the provider's account in
     /// use, the one the advice is built on.
     pub observed_days: BTreeMap<Provider, u32>,
+    /// The same days for each of several accounts ([`account_advice`]).
+    #[serde(skip)]
+    pub account_days: HashMap<(Provider, String), u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -170,7 +173,8 @@ pub fn limit_history(store: &Store, now_ms: i64, days: i64) -> Result<LimitHisto
         })
         .collect();
     let observed_days = days_seen.iter().filter(|((p, a), _)| current(p).is_none_or(|c| c == *a)).map(|((p, _), d)| (*p, d.len() as u32)).collect();
-    Ok(LimitHistory { from_ms, to_ms: now_ms, series, observed_days })
+    let account_days = days_seen.iter().filter_map(|((p, a), d)| Some(((*p, a.clone()?), d.len() as u32))).collect();
+    Ok(LimitHistory { from_ms, to_ms: now_ms, series, observed_days, account_days })
 }
 
 /// Splits one limit's readings into windows.
@@ -412,6 +416,10 @@ pub struct WindowStats {
 #[derive(Debug, Clone, Serialize)]
 pub struct PlanAdvice {
     pub provider: Provider,
+    /// One of several accounts the advice is for; `None` for the provider's account in use.
+    pub account: Option<String>,
+    /// The plan was taken from the readings, not chosen (set by the caller).
+    pub detected: bool,
     pub kind: AdviceKind,
     pub plan: Option<String>,
     pub suggested: Option<String>,
@@ -441,9 +449,9 @@ const DOWNGRADE_FIVE_HOUR: u32 = 5;
 /// The plan below must have left at least this much room in every window.
 const DOWNGRADE_MAX_PCT: f64 = 80.0;
 
-fn stats(history: &LimitHistory, provider: Provider, window: &str, plan_filter: Option<&str>, since_ms: i64) -> WindowStats {
+fn stats(history: &LimitHistory, provider: Provider, pick: &dyn Fn(&WindowSeries) -> bool, window: &str, plan_filter: Option<&str>, since_ms: i64) -> WindowStats {
     let mut s = WindowStats::default();
-    for series in history.series.iter().filter(|x| x.provider == provider && x.window == window && x.active) {
+    for series in history.series.iter().filter(|x| x.provider == provider && x.window == window && pick(x)) {
         for w in &series.windows {
             if w.resets_at_ms.unwrap_or(w.last_ms) < since_ms {
                 continue;
@@ -469,23 +477,36 @@ fn stats(history: &LimitHistory, provider: Provider, window: &str, plan_filter: 
     s
 }
 
+/// Advice for the provider's account in use.
 pub fn plan_advice(history: &LimitHistory, provider: Provider, plan_id: Option<&str>, plans: &PlansFile, now_ms: i64) -> PlanAdvice {
+    let days = history.observed_days.get(&provider).copied().unwrap_or(0);
+    advise(history, provider, &|s| s.active, days, plan_id, plans, now_ms)
+}
+
+/// Advice for one of several accounts, on its own windows and days.
+pub fn account_advice(history: &LimitHistory, provider: Provider, account: &str, plan_id: Option<&str>, plans: &PlansFile, now_ms: i64) -> PlanAdvice {
+    let days = history.account_days.get(&(provider, account.to_owned())).copied().unwrap_or(0);
+    let mut a = advise(history, provider, &|s| s.account.as_deref() == Some(account), days, plan_id, plans, now_ms);
+    a.account = Some(account.to_owned());
+    a
+}
+
+fn advise(history: &LimitHistory, provider: Provider, pick: &dyn Fn(&WindowSeries) -> bool, observed_days: u32, plan_id: Option<&str>, plans: &PlansFile, now_ms: i64) -> PlanAdvice {
     let since = now_ms - ADVICE_DAYS * DAY_MS;
     // Codex readings name the plan exactly; Claude's say only "max", which fits both Max plans
-    let filter = plan_id.map(|id| match provider {
-        Provider::Anthropic if id.starts_with("max") => "max",
-        _ => id,
-    });
+    let filter = plan_id.map(|id| crate::plans::read_name(provider, id));
     let mut a = PlanAdvice {
         provider,
+        account: None,
+        detected: false,
         kind: AdviceKind::NoPlan,
         plan: plan_id.map(str::to_owned),
         suggested: None,
         strong: false,
         days: ADVICE_DAYS,
-        observed_days: history.observed_days.get(&provider).copied().unwrap_or(0),
-        five_hour: stats(history, provider, "five_hour", filter, since),
-        weekly: stats(history, provider, "seven_day", filter, since),
+        observed_days,
+        five_hour: stats(history, provider, pick, "five_hour", filter, since),
+        weekly: stats(history, provider, pick, "seven_day", filter, since),
         session_ratio: None,
         projected_five_hour: None,
         projected_weekly_if_same_ratio: None,

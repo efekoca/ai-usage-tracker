@@ -3,7 +3,8 @@
   import { onMount, tick } from 'svelte'
   import { invoke } from '@tauri-apps/api/core'
   import { applyAppearance, toolColor } from './lib/store.svelte'
-  import { api, providerOfSource, providersOf, type ContextStats, type LimitView, type PlansFile, type Provider, type Report, type Sessions, type Settings } from './lib/api'
+  import { api, providerOfSource, providersOf, type Account, type ContextStats, type LimitView, type PlansFile, type Provider, type Report, type Sessions, type Settings } from './lib/api'
+  import { accountPlan, planPrice } from './lib/plans'
   import { fmtCompact, fmtDate, fmtDateTime, fmtDec, fmtInt, fmtLimit, fmtMoney, fmtPct, fmtSpan, i18n, limitName, t, toolLabel, windowLabel } from './lib/i18n.svelte'
   import Columns from './components/charts/Columns.svelte'
 
@@ -17,6 +18,7 @@
   let ctx = $state<ContextStats | null>(null)
   let limits = $state<LimitView[]>([])
   let plans = $state<PlansFile | null>(null)
+  let accounts = $state<Account[]>([])
   let failed = $state('')
 
   onMount(async () => {
@@ -31,7 +33,7 @@
       // paper is always light
       document.documentElement.dataset.theme = 'light'
       const period = { kind: 'custom' as const, from, to }
-      ;[r, sessions, ctx, limits, plans] = await Promise.all([api.report(period), api.sessions(period), api.contextStats(period), api.limits(), api.plans()])
+      ;[r, sessions, ctx, limits, plans, accounts] = await Promise.all([api.report(period), api.sessions(period), api.contextStats(period), api.limits(), api.plans(), api.accounts()])
     } catch (e) {
       failed = String(e)
     }
@@ -74,13 +76,24 @@
 
   const days = $derived(r ? r.days_in_range : 7)
   function value(p: Provider) {
+    const cost = (r?.by_tool ?? []).filter((g) => providerOfSource(g.key) === p).reduce((a, g) => a + g.totals.cost_usd, 0)
+    const shareOf = (usd: number | null) => (usd !== null && usd > 0 ? (usd * days) / (365.25 / 12) : null)
+    // several accounts: each one seen in the period on its own plan, against their prices together
+    const start = from ? new Date(`${from}T00:00:00`).getTime() : 0
+    const several = accounts.filter((a) => a.provider === p && a.id !== null && a.last_ms >= start)
+    if (several.length) {
+      const parts = several.map((a) => accountPlan(plans, s, a)).map((plan, i) => ({ plan, usd: planPrice(s, p, plan, several[i].id).usd })).filter((x) => x.plan?.id !== 'api')
+      const label = [...new Set(parts.map((x) => x.plan?.name).filter(Boolean))].join(' + ')
+      const missing = parts.some((x) => !x.plan || x.usd === null)
+      const share = missing ? null : shareOf(parts.reduce((t, x) => t + (x.usd ?? 0), 0))
+      const note = !parts.length ? t('value.api') : parts.some((x) => !x.plan) ? t('rep.noPlan') : missing ? t('value.enterPrice') : t('value.free')
+      return { label, cost, share, ratio: share ? cost / share : null, note }
+    }
     const planId = s?.plans[p]
     const plan = planId ? plans?.providers[p]?.plans.find((x) => x.id === planId) : undefined
-    const own = s?.plan_prices?.[p]
-    const price = typeof own === 'number' && own > 0 ? own : plan?.monthly_usd ?? null
-    const cost = (r?.by_tool ?? []).filter((g) => providerOfSource(g.key) === p).reduce((a, g) => a + g.totals.cost_usd, 0)
-    const share = typeof price === 'number' && price > 0 ? (price * days) / (365.25 / 12) : null
-    return { plan, cost, share, ratio: share ? cost / share : null }
+    const share = shareOf(planPrice(s, p, plan).usd)
+    const note = !plan ? t('rep.noPlan') : plan.id === 'api' ? t('value.api') : plan.monthly_usd === 0 ? t('value.free') : t('value.enterPrice')
+    return { label: plan?.name ?? '', cost, share, ratio: share ? cost / share : null, note }
   }
   const providers = $derived(
     providersOf((r?.by_tool ?? []).map((g) => g.key)),
@@ -167,12 +180,12 @@
           {#each providers as p (p)}
             {@const v = value(p)}
             <p class="line">
-              <b>{t(`provider.${p}`)}</b>{#if v.plan}<span class="muted">&nbsp;· {v.plan.name}</span>{/if}<br />
+              <b>{t(`provider.${p}`)}</b>{#if v.label}<span class="muted">&nbsp;· {v.label}</span>{/if}<br />
               {#if v.share !== null}
                 <span class="big num">{fmtDec(v.ratio ?? 0, (v.ratio ?? 0) < 10 ? 1 : 0)}×</span>
                 <span class="muted small">{t('rep.valueLine', { c: fmtMoney(v.cost), n: days, s: fmtMoney(v.share) })}</span>
               {:else}
-                <span class="muted small">{!v.plan ? t('rep.noPlan') : v.plan.id === 'api' ? t('value.api') : v.plan.monthly_usd === 0 ? t('value.free') : t('value.enterPrice')}</span>
+                <span class="muted small">{v.note}</span>
               {/if}
             </p>
           {/each}

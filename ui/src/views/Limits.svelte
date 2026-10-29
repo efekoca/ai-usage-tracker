@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { accountName, accountOf, app, saveSettings, markTint } from '../lib/store.svelte'
-  import { api, providersOf, type PlansFile, type Provider, type Threshold } from '../lib/api'
+  import { api, providersOf, type PlanDef, type PlansFile, type Provider, type Threshold } from '../lib/api'
+  import { accountPlan } from '../lib/plans'
   import { fmtCompact, fmtDate, fmtInput, fmtMoney, fmtPct, i18n, limitName, parseNumber, t, windowLabel } from '../lib/i18n.svelte'
   import LimitMeter from '../components/LimitMeter.svelte'
   import AccuracyBadge from '../components/AccuracyBadge.svelte'
@@ -51,6 +52,31 @@
       else delete next[id]
       return { account_names: next }
     })
+  }
+  function setAccountPlan(id: string, plan: string) {
+    saveSettings((c) => {
+      const next = { ...c.account_plans }
+      if (plan) next[id] = plan
+      else delete next[id]
+      return { account_plans: next }
+    })
+  }
+  function setAccountPrice(id: string, raw: string): boolean {
+    const v = parseNumber(raw)
+    if (raw.trim() !== '' && !(v !== null && v > 0)) return false
+    saveSettings((c) => {
+      const next = { ...c.account_prices }
+      if (v !== null && v > 0) next[id] = v
+      else delete next[id]
+      return { account_prices: next }
+    })
+    return true
+  }
+  /** What an account's price field falls back to when it is left empty. */
+  function fallbackPrice(p: Provider, plan: PlanDef): string {
+    const shared = app.settings?.plan_prices?.[p]
+    if (plan.id === app.settings?.plans[p] && typeof shared === 'number' && shared > 0) return fmtInput(shared)
+    return typeof plan.monthly_usd === 'number' ? `${fmtInput(plan.monthly_usd)} (${t('value.listPrice')})` : '—'
   }
   const planNote = (p: Provider) => plans?.providers[p]?.plans.find((x) => x.id === app.settings?.plans[p])
   function setPrice(p: Provider, raw: string): boolean {
@@ -117,6 +143,7 @@
   <section class="card accounts">
     <h2><BrandIcon provider={p} color={markTint(p)} />{t(`accounts.title.${p}`)}</h2>
     <p class="subtle small help">{t(`accounts.help.${p}`)}</p>
+    <p class="subtle small help">{t('accounts.plans.help', { provider: t(`provider.${p}`) })}</p>
     {#each app.accounts.filter((a) => a.provider === p) as a (a.id ?? '')}
       <div class="acct-row">
         {#if a.id !== null}
@@ -132,10 +159,32 @@
         {:else}
           <span class="unknown" title={t('accounts.unknown.help')}>{accountName(null, p)}</span>
         {/if}
-        {#if a.active}<span class="pill in-use">{t('accounts.inUse')}</span>{/if}
-        <span class="spacer"></span>
+        <span>{#if a.active}<span class="pill in-use">{t('accounts.inUse')}</span>{/if}</span>
+        {#if a.id !== null && plans}
+          {@const id = a.id}
+          {@const plan = accountPlan(plans, app.settings, a)}
+          <Select
+            label="{accountName(id, p)} · {t('limits.plan')}"
+            value={app.settings?.account_plans?.[id] ?? ''}
+            options={[{ value: '', label: plan ? t('accounts.plan.auto', { plan: plan.name }) : t('value.pickPlan') }, ...plans.providers[p].plans.map((pl) => ({ value: pl.id, label: pl.name, sub: pl.relative }))]}
+            onchange={(v) => setAccountPlan(id, v)}
+          />
+          <span class="extra">
+            {#if plan && plan.id !== 'api' && plan.monthly_usd !== 0}
+              {@const own = app.settings?.account_prices?.[id]}
+              <label class="price">
+                <span class="subtle small">{t('value.price')}</span>
+                <input class="field" inputmode="decimal" value={fmtInput(own)} placeholder={fallbackPrice(p, plan)} aria-label="{accountName(id, p)} · {t('value.price')}" onchange={(e) => { if (!setAccountPrice(id, e.currentTarget.value)) e.currentTarget.value = fmtInput(own) }} title={plan.price_note?.[i18n.lang] ?? ''} />
+              </label>
+            {:else if !plan && a.read_plan}
+              <span class="subtle small">{t('accounts.plan.which')}</span>
+            {/if}
+          </span>
+        {:else}
+          <span></span><span></span>
+        {/if}
         <span class="subtle small">{t('accounts.seen', { from: fmtDate(a.first_ms, 'short'), to: fmtDate(a.last_ms, 'short') })}</span>
-        <span class="num small">{fmtCompact(a.requests)} {t(a.requests === 1 ? 'accounts.request' : 'accounts.requests')}</span>
+        <span class="num small reqs">{fmtCompact(a.requests)} {t(a.requests === 1 ? 'accounts.request' : 'accounts.requests')}</span>
       </div>
     {/each}
   </section>
@@ -346,16 +395,41 @@
     align-items: center;
     gap: 8px;
   }
+  .accounts {
+    container: accounts / inline-size;
+  }
+  /* name, in-use mark, plan, price, then when it was seen */
   .acct-row {
-    display: flex;
+    display: grid;
+    grid-template-columns: 168px 84px 176px minmax(0, 1fr) auto auto;
     align-items: center;
-    flex-wrap: wrap;
     gap: 8px 12px;
     padding: 6px 0;
     border-top: 0.5px solid var(--hairline);
   }
-  .acct-row .field {
-    width: 220px;
+  .acct-row > .field {
+    min-width: 0;
+  }
+  .acct-row .extra {
+    min-width: 0;
+  }
+  .acct-row .price {
+    white-space: nowrap;
+  }
+  .acct-row .price .field {
+    width: 128px;
+  }
+  .reqs {
+    text-align: right;
+    white-space: nowrap;
+  }
+  @container accounts (max-width: 820px) {
+    .acct-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+    .acct-row .extra:empty {
+      display: none;
+    }
   }
   .unknown {
     font-weight: 600;

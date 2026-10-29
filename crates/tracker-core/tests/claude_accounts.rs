@@ -110,6 +110,11 @@ impl Claude {
 
     /// A reading of the five-hour and weekly windows; `week` is when the weekly one resets.
     fn read(&mut self, ts: i64, source: &str, account: Option<String>, week: i64, used: f64) -> &mut Claude {
+        self.read_on("max", ts, source, account, week, used)
+    }
+
+    /// [`Claude::read`] on another plan.
+    fn read_on(&mut self, plan: &str, ts: i64, source: &str, account: Option<String>, week: i64, used: f64) -> &mut Claude {
         let snap = |window: &str, reset: Option<i64>| LimitSnapshot {
             ts_ms: ts,
             provider: Provider::Anthropic,
@@ -120,7 +125,7 @@ impl Claude {
             used_pct: Some(used),
             resets_at: reset,
             status: None,
-            plan: Some("max".into()),
+            plan: Some(plan.into()),
             source: source.into(),
             accuracy: Accuracy::Captured,
         };
@@ -678,6 +683,56 @@ fn plan_advice_counts_the_days_of_the_account_in_use() {
     assert_eq!(h.observed_days.get(&Provider::Anthropic), Some(&1), "B, in use, was read on one day");
     let advice = plan_advice(&h, Provider::Anthropic, Some("max5x"), &tracker_core::plans::PlansFile::bundled(), BASE + M);
     assert!(matches!(advice.kind, AdviceKind::Insufficient), "A's days do not make B's data enough: {advice:?}");
+}
+
+#[test]
+fn each_account_gets_advice_on_its_own_plan_windows_and_days() {
+    use tracker_core::history::{account_advice, limit_history, AdviceKind};
+    let plans = tracker_core::plans::PlansFile::bundled();
+    let mut c = Claude::new();
+    let (a, b) = (org(1), org(2));
+    let week = (BASE + H) / 1000;
+    // a week of daily readings: A, on Pro, ends it full; B, on Max, stays low
+    for d in 0..7 {
+        let ts = BASE - (7 - d) * 86_400_000 + 2 * H;
+        c.read_on("pro", ts, "claude_code_usage", Some(a.clone()), week, if d == 6 { 100.0 } else { 10.0 * d as f64 });
+        c.read(ts + H, "claude_code_usage", Some(b.clone()), week + 3600, 8.0);
+    }
+    c.resolve();
+    let listed: Vec<(Option<String>, Option<String>)> =
+        accounts(&c.store).unwrap().into_iter().map(|x| (x.id, x.read_plan)).collect();
+    assert_eq!(listed, [(Some(a.clone()), Some("pro".into())), (Some(b.clone()), Some("max".into()))]);
+    let h = limit_history(&c.store, BASE, 28).unwrap();
+    let pro = account_advice(&h, Provider::Anthropic, &a, Some("pro"), &plans, BASE);
+    assert!(matches!(pro.kind, AdviceKind::Upgrade), "{pro:?}");
+    assert_eq!((pro.account.as_deref(), pro.suggested.as_deref(), pro.observed_days), (Some(a.as_str()), Some("max5x"), 7));
+    let max = account_advice(&h, Provider::Anthropic, &b, Some("max5x"), &plans, BASE);
+    assert!(matches!(max.kind, AdviceKind::Fits), "{max:?}");
+    assert_eq!((max.weekly.full, max.weekly.windows), (0, 1), "A's full week is not B's");
+    let unchosen = account_advice(&h, Provider::Anthropic, &b, None, &plans, BASE);
+    assert!(matches!(unchosen.kind, AdviceKind::NoPlan));
+}
+
+#[test]
+fn plan_value_splits_a_providers_use_between_its_accounts() {
+    use chrono::FixedOffset;
+    use tracker_core::analytics::Range;
+    let mut c = Claude::new();
+    let (a, b) = (org(1), org(2));
+    c.read(BASE - H, "claude_code_usage", Some(a.clone()), BASE / 1000 + 86_400, 10.0);
+    c.read(BASE - H + M, "claude_code_usage", Some(b.clone()), BASE / 1000 + 2 * 86_400, 10.0);
+    for (ts, rid, who) in [(BASE + M, "r1", Some(&a)), (BASE + 2 * M, "r2", Some(&a)), (BASE + 3 * M, "r3", Some(&b)), (BASE + 4 * M, "r4", None)] {
+        c.ask("s1", "cli", ts, rid).told("s1", ts, rid, who.cloned());
+    }
+    c.resolve();
+    let tz = FixedOffset::east_opt(0).unwrap();
+    let v = tracker_core::insights::plan_value(&c.store, &PriceBook::default_book(), Range { from_ms: BASE, to_ms: BASE + H }, &tz).unwrap();
+    let claude = v.providers.iter().find(|p| p.provider == Provider::Anthropic).unwrap();
+    let split: std::collections::BTreeMap<Option<String>, u64> = claude.accounts.iter().map(|x| (x.account.clone(), x.events)).collect();
+    assert_eq!(split, [(None, 1), (Some(a.clone()), 2), (Some(b.clone()), 1)].into());
+    assert_eq!(claude.events, 4, "the total keeps use no account is known for");
+    let parts: f64 = claude.accounts.iter().map(|x| x.cumulative.last().unwrap()).sum();
+    assert!((parts - claude.cumulative.last().unwrap()).abs() < 1e-12 && claude.cost_usd > 0.0);
 }
 
 #[test]

@@ -285,6 +285,7 @@ fn plan_value_runs_a_daily_total_per_provider() {
     assert!(close(a.cumulative[0], 2.0) && close(a.cumulative[1], 2.0) && close(a.cumulative[2], 3.0));
     let o = v.providers.iter().find(|p| p.provider == Provider::OpenAI).unwrap();
     assert!(close(o.cost_usd, 0.4));
+    assert!(a.accounts.is_empty() && o.accounts.is_empty(), "one account each: no split");
 }
 
 #[test]

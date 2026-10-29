@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { api, type LimitHistoryView, type PlansFile, type Tip, type Tips } from '../lib/api'
-  import { app, latest } from '../lib/store.svelte'
+  import { api, type AdviceKind, type LimitHistoryView, type PlansFile, type Tip, type Tips } from '../lib/api'
+  import { accountName, app, latest } from '../lib/store.svelte'
   import { fmtCompact, fmtInt, fmtMoney, fmtPct, has, t, toolLabel } from '../lib/i18n.svelte'
   import Icon from '../components/Icon.svelte'
   import PlanAdvice from '../components/PlanAdvice.svelte'
@@ -34,6 +34,21 @@
       (h) => (history = h),
       () => (history = null),
     )
+  })
+
+  // one account at its limits while another of the same provider has room
+  const FULL: AdviceKind[] = ['upgrade', 'at_top']
+  const ROOM: AdviceKind[] = ['fits', 'downgrade']
+  const room = $derived.by(() => {
+    const out: { provider: string; full: string; free: string }[] = []
+    const advice = (history?.advice ?? []).filter((a) => a.account !== null)
+    for (const p of new Set(advice.map((a) => a.provider))) {
+      const names = (kinds: AdviceKind[]) => advice.filter((a) => a.provider === p && kinds.includes(a.kind)).map((a) => accountName(a.account, p)).join(', ')
+      const full = names(FULL)
+      const free = names(ROOM)
+      if (full && free) out.push({ provider: p, full, free })
+    }
+    return out
   })
 
   function toolName(tool: string, name: string) {
@@ -81,10 +96,13 @@
 {#if history && history.advice.length}
   <h2 class="section">{t('advice.title')}</h2>
   <div class="advice-grid">
-    {#each history.advice as a (a.provider)}
-      <PlanAdvice advice={a} {plans} detected={a.provider in history.detected_plans} compact />
+    {#each history.advice as a (a.provider + (a.account ?? ''))}
+      <PlanAdvice advice={a} {plans} compact />
     {/each}
   </div>
+  {#each room as r (r.provider)}
+    <p class="room small"><Icon name="info" size={14} />{t('advice.room', { full: r.full, free: r.free })}</p>
+  {/each}
 {/if}
 
 {#if failed}
@@ -145,6 +163,18 @@
     grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
     gap: 16px;
     margin-bottom: 20px;
+  }
+  .room {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin: -8px 0 20px;
+    color: var(--ink-2);
+    line-height: 1.5;
+  }
+  .room :global(svg) {
+    flex: none;
+    margin-top: 2px;
   }
   .tips {
     display: grid;

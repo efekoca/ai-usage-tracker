@@ -81,6 +81,8 @@ pub struct Account {
     pub requests: u64,
     /// The account in use ([`in_use`]).
     pub active: bool,
+    /// The plan its newest reading names, as the provider names it (Claude: "pro", "max").
+    pub read_plan: Option<String>,
 }
 
 /// Which rows of a provider are its requests and its readings.
@@ -112,7 +114,7 @@ pub fn several(store: &Store) -> Result<HashSet<Provider>> {
 fn provider_accounts(store: &Store, provider: Provider) -> Result<Vec<Account>> {
     let mut seen: BTreeMap<Option<String>, Account> = BTreeMap::new();
     let mut note = |id: Option<String>, ts: i64, last: i64, n: u64| {
-        let a = seen.entry(id.clone()).or_insert(Account { provider, id, first_ms: ts, last_ms: last, requests: 0, active: false });
+        let a = seen.entry(id.clone()).or_insert(Account { provider, id, first_ms: ts, last_ms: last, requests: 0, active: false, read_plan: None });
         a.first_ms = a.first_ms.min(ts);
         a.last_ms = a.last_ms.max(last);
         a.requests += n;
@@ -135,6 +137,14 @@ fn provider_accounts(store: &Store, provider: Provider) -> Result<Vec<Account>> 
     let named = seen.keys().filter(|k| k.is_some()).count();
     if named + usize::from(seen.contains_key(&None)) < 2 || named == 0 {
         return Ok(Vec::new());
+    }
+    // SQLite takes the bare `plan` from the row holding the newest reading
+    let mut st = conn.prepare(&format!("SELECT owner, plan, MAX(ts_ms) FROM limit_snapshot WHERE {readings} AND plan IS NOT NULL AND owner IS NOT NULL GROUP BY owner"))?;
+    for row in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+        let (id, plan) = row?;
+        if let Some(a) = seen.get_mut(&Some(id)) {
+            a.read_plan = Some(plan);
+        }
     }
     let active = in_use(store, provider, chrono::Utc::now().timestamp_millis())?;
     let mut out: Vec<Account> = seen.into_values().collect();
