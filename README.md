@@ -84,7 +84,7 @@ The **Tips** page turns your own records into findings, each with the figures it
 
 Claude's readings say only "max" for both Max plans, so choose your plan on the **Limits** page. Claude windows read on another plan (Pro against Max) are left out. Codex readings name the plan exactly and are used when none is chosen.
 
-With more than one Codex or Claude account, each account gets its own recommendation, built on its own windows and its own plan. Choose each account's plan on the **Limits** page. An account without one takes the plan its readings name. Claude's readings do not tell Max 5x from Max 20x, so a Max account takes the Max plan you chose for Claude, or asks you to choose. An account without readings takes the plan you chose for the provider. If one account keeps filling its limits while another has room, the **Tips** page says so.
+With more than one Codex or Claude account, each account gets its own recommendation, built on its own windows and its own plan. Choose each account's plan on the **Limits** page. An account without one takes the plan its readings name. Claude's readings do not tell Max 5x from Max 20x, so a Max account takes the Max plan you chose for Claude, or asks you to choose; it also asks when the readings name a plan the list does not have. An account without readings takes the plan you chose for the provider. If one account keeps filling its limits while another has room, the **Tips** page says so.
 
 **Tips.** Every rule has a fixed threshold, and an amount must be at least $0.50 and 1 % of the period's cost. The rules look for:
 
@@ -99,7 +99,7 @@ Amounts are API equivalents. On a subscription you do not pay them; they show th
 
 - **List prices** come from [`config/plans.json`](config/plans.json), verified on 2026-10-02 against the official pages ([Claude](https://claude.com/pricing), [ChatGPT](https://learn.chatgpt.com/docs/pricing)).
 - **Your price:** plans without a fixed price (ChatGPT Pro, Enterprise) ask for one, and you can override any plan's price on the **Limits** page (e.g., for annual billing).
-- **More than one account:** each Codex or Claude account seen in those 30 days counts with its own plan and price, and their prices are added up. The card lists each account's API-equivalent use next to its plan. Use that no evidence ties to an account counts only toward the total.
+- **More than one account:** each Codex or Claude account seen in those 30 days counts with its own plan and price, and their prices are added up. The card lists each account's API-equivalent use next to its plan. Use on a free plan or at API rates is left out of the total, and use that no evidence ties to an account counts only toward the total. A price you enter for an account applies to that account's current plan only.
 - **Lower bound:** chat use in Claude and ChatGPT is not in local logs, so the real value can be higher.
 
 ### Day by day

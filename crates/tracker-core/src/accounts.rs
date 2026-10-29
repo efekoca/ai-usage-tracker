@@ -138,9 +138,11 @@ fn provider_accounts(store: &Store, provider: Provider) -> Result<Vec<Account>> 
     if named + usize::from(seen.contains_key(&None)) < 2 || named == 0 {
         return Ok(Vec::new());
     }
-    // SQLite takes the bare `plan` from the row holding the newest reading
-    let mut st = conn.prepare(&format!("SELECT owner, plan, MAX(ts_ms) FROM limit_snapshot WHERE {readings} AND plan IS NOT NULL AND owner IS NOT NULL GROUP BY owner"))?;
-    for row in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+    // SQLite takes the bare `plan` from the row holding the newest reading; rows dated ahead of the clock are ignored
+    let mut st = conn.prepare(&format!(
+        "SELECT owner, plan, MAX(ts_ms) FROM limit_snapshot WHERE {readings} AND plan IS NOT NULL AND owner IS NOT NULL AND ts_ms BETWEEN 0 AND ?1 GROUP BY owner"
+    ))?;
+    for row in st.query_map([crate::store::latest_accepted_ms()], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
         let (id, plan) = row?;
         if let Some(a) = seen.get_mut(&Some(id)) {
             a.read_plan = Some(plan);

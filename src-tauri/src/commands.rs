@@ -808,7 +808,7 @@ fn detected_plan(store: &tracker_core::store::Store, provider: Provider, plans: 
     let newest = store.latest_limits().ok()?.into_iter().filter(|s| s.provider == provider && s.plan.is_some()).max_by_key(|s| s.ts_ms)?;
     let plan = newest.plan?;
     match provider {
-        Provider::OpenAI => plans.find(provider, &plan).map(|p| p.id.clone()),
+        Provider::OpenAI => plans.plans(provider).iter().find(|d| tracker_core::plans::fits(provider, &d.id, &plan)).map(|p| p.id.clone()),
         Provider::Anthropic => (plan == "pro").then_some(plan),
         Provider::Google => None,
     }
@@ -845,7 +845,7 @@ pub async fn get_limit_history(app: AppHandle, days: Option<i64>) -> Res<LimitHi
             continue;
         }
         for (id, read, active) in several {
-            let own = settings.account_plans.get(id).map(String::as_str);
+            let own = settings.account_plans.get(id).map(String::as_str).filter(|own| plans.find(p, own).is_some());
             let plan = plans.account_plan(p, own, read, chosen);
             let mut a = tracker_core::history::account_advice(&advice_history, p, id, plan.as_deref(), &plans, now);
             // another account not read in the advice period is not in use

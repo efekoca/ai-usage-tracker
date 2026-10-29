@@ -212,7 +212,7 @@ const MAX_IMPORTED_COUNT: i64 = 1_000_000_000_000;
 const MAX_IMPORTED_MS: i64 = 32_503_680_000_000;
 
 /// The newest reading time accepted now: a little ahead of the clock for drift, never far ahead.
-fn latest_accepted_ms() -> i64 {
+pub(crate) fn latest_accepted_ms() -> i64 {
     chrono::Utc::now().timestamp_millis() + MAX_CLOCK_SKEW_MS
 }
 
