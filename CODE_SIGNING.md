@@ -1,14 +1,8 @@
 # Code signing policy
 
-Windows installers are to be signed for free by [SignPath.io](https://about.signpath.io/), with a certificate by the [SignPath Foundation](https://signpath.org/). Until that is in place, the Windows installer is not code-signed and Windows may show "Unknown publisher".
+The Windows installer is not code-signed, so Windows may show "Unknown publisher" when you run it. The Linux packages are not signed by a distribution key either.
 
-macOS apps and disk images are signed with an Apple Developer ID and notarized by Apple. Every download that the in-app updater installs carries its own signature, which the app checks before installing.
-
-## Team
-
-- **Authors:** [Efe Koca](https://github.com/efekoca)
-- **Reviewers:** [Efe Koca](https://github.com/efekoca)
-- **Approvers:** [Efe Koca](https://github.com/efekoca)
+macOS apps and disk images are signed with an Apple Developer ID and notarized by Apple. Every download that the in-app updater installs carries its own signature, which the app checks before installing. Each release also lists every download in `SHA256SUMS`, so you can check a file by hand.
 
 ## Build and approval
 

@@ -239,7 +239,7 @@ Windows 10 ve 11.
 1. `AI-Usage-Tracker_x.y.z_x64-setup.exe` dosyasını çalıştırın. Kurulum yalnızca sizin kullanıcı hesabınıza yapılır ve yönetici yetkisi istemez; uygulama `%LOCALAPPDATA%\AI Usage Tracker` klasörüne kurulur.
 2. WebView2 Windows 11'de zaten yüklüdür. Windows 10'da eksikse kurulum dosyası onu da yükler.
 
-> **SmartScreen uyarısı.** Kurulum dosyası henüz kod imzası taşımadığı için Windows "Bilinmeyen yayımcı" uyarısı gösterebilir. Bu durumda **Ek bilgi → Yine de çalıştır**'ı seçin.
+> **SmartScreen uyarısı.** Kurulum dosyası kod imzası taşımadığı için Windows "Bilinmeyen yayımcı" uyarısı gösterebilir. Bu durumda **Ek bilgi → Yine de çalıştır**'ı seçin.
 
 **Kaldırma.** **Ayarlar → Uygulamalar → AI Usage Tracker → Kaldır** yolunu izleyin. Uygulama kaldırılırken **Canlı yakalama** ile Claude Code ayarlarında yapılan değişiklikler geri alınır. "Uygulama verilerini sil" kutusunu işaretlerseniz `%LOCALAPPDATA%\AIUsageTracker` klasörü de silinir. "Windows ile başlat" kaydı her durumda temizlenir.
 
