@@ -12,7 +12,7 @@ A private app for Windows, macOS, and Linux that reads the usage logs your AI to
 
 [Features](#features) · [Install](#install) · [Privacy](#privacy) · [How it works](#how-it-works) · [Build from source](#build-from-source) · [Türkçe](README.tr.md)
 
-![The AI Usage Tracker overview with a 30-day trend, token mix and current limits, and the desktop widget showing today's tokens and limit rings](assets/readme/hero-en.webp)
+![The AI Usage Tracker overview with a 30-day trend for Claude Code, Codex, Antigravity and OpenCode and the plan value, and the desktop widget showing today's tokens, limit rings and OpenCode usage](assets/readme/hero-en.webp)
 
 - **Private by design.** Prompts and responses never enter the app's archive. Only counts and metadata are kept, in a local SQLite file, and your usage data never leaves the computer.
 - **Know where every number comes from.** Every figure is labeled: **Exact** from the tool's own log, **Estimated** by the app, or **Captured** live. Nothing is guessed silently.
@@ -30,7 +30,7 @@ A private app for Windows, macOS, and Linux that reads the usage logs your AI to
 - **Measure what the cache saves you.** You see the hit rate, the net savings, and what it cost when the cache had to be written again after a long pause.
 - **Keep your history.** Resumed and forked sessions are never counted twice, and your history stays in the archive even after the tools delete their own logs (Claude Code does so after 30 days).
 
-![A short tour: the overview with a chart tooltip and plan value, current limits including Antigravity, limit history, tips, the daily view, the model comparison, live capture and the Widget studio changing the widget's layout](assets/readme/demo-en.gif)
+![A short tour: the overview with a chart tooltip and plan value, the account filter, separate limits for each Claude account, limit history, tips, the daily view, the model comparison, the Menu bar page and the Widget studio changing the widget's layout](assets/readme/demo-en.webp)
 
 ## Features
 
@@ -38,7 +38,7 @@ A private app for Windows, macOS, and Linux that reads the usage logs your AI to
 
 The app reads the five-hour and weekly limit percentages through the tools' own interfaces (Claude Code, Codex and the Antigravity CLI), so the numbers match what the tools show. Each window gets a forecast at its average pace, and each project gets an estimated share of it.
 
-![Limits page with the five-hour and weekly windows of Claude, Codex and Antigravity, forecasts, and project shares](assets/readme/limits-en.webp)
+![Limits page with the five-hour and weekly windows of two Claude accounts, Team in use and Personal, with forecasts, project shares and the share not in local logs](assets/readme/limits-en.webp)
 
 Providers publish how their limits work, not the numbers themselves. The app therefore follows these rules:
 
@@ -53,13 +53,15 @@ Providers publish how their limits work, not the numbers themselves. The app the
 
 **More than one Claude account.** Claude's limits belong to your plan's organization, so each Claude account gets its own limits, history, and forecast, and a Team plan you use with the same login counts as its own account. Claude Code does not record which account sent each request, so the app learns it only from what shows it for certain: the request's own telemetry event while the local telemetry receiver is on, and the Claude desktop app's account for the sessions it runs in its Code tab. Without telemetry, a terminal session counts for an account only if its Claude config folder was signed in to that one account all the time the app watched it (the app checks every 30 seconds while it runs), as with one `CLAUDE_CONFIG_DIR` per account. A running Claude Code keeps the sign-in it loaded for a while after you `/login` elsewhere, and its log does not say when a session started, so if you switch accounts in the same folder, turn on the local telemetry receiver. Otherwise those requests are not guessed; they stay under **Unidentified account**, as do requests from before the app watched the sign-in. The app's own limit read counts for the account Claude Code was signed in to, and the desktop app's usage history for the desktop app's account. If your folders are signed in to different accounts at the same time, the account in use is the one the app reads limits with. The **Limits** page, the usage filter, the widget, the panel, and the menu bar work as for Codex. With a single account, nothing changes.
 
+![Claude and Codex accounts on the Limits page, each named, with the account in use marked, the dates each was seen, its requests, and the requests of no known account](assets/readme/accounts-en.webp)
+
 **Forecast.** Every current limit reading carries a forecast based on the window's **average pace since it started** (current % ÷ time since the window began). Every window starts at 0 % when it resets, so this pace is known and already includes idle hours: a burst of work is not extrapolated as if it never stopped. The app then says when the window would fill ("fills around Sun 21:12, 9 h before the reset") or where it would stand at the reset. If the provider resets a window early without moving its end, the pace is measured from that reset. No forecast is made in the first tenth of a window, and every forecast is labeled **Estimated**.
 
 ### Limit history
 
 The **History** tab on the **Limits** page lists every five-hour and weekly window your readings cover. From those windows, the app estimates what a whole window is worth in API terms.
 
-![Limit history with window statistics, the API value of a whole window, and a chart of each window's peak](assets/readme/history-en.webp)
+![Limit history with filters for provider, account, window, period and status, window statistics, the API value of a whole window for each account in use, and a chart of each window's peak per account](assets/readme/history-en.webp)
 
 For each window, it shows how full it got, whether it filled, how long it took to fill and how long it stayed full, whether it was watched to its end, and this computer's use inside it (tokens and API-equivalent cost). A window whose end was not watched is shown hatched, as "at least" its highest reading.
 
@@ -101,7 +103,7 @@ Amounts are API equivalents. On a subscription you do not pay them; they show th
 
 The **Daily** page shows the period day by day, as columns or, for long periods, as a calendar, in tokens, API-equivalent cost, or requests. It highlights the busiest day, the average per active day, the longest and current streaks of active days, and the weekend share.
 
-![Daily page with daily columns for Claude Code, Codex and Antigravity and the busiest-day and streak figures](assets/readme/daily-en.webp)
+![Daily page with the tool, model, project and account filters, daily columns for Claude Code, Codex, Antigravity and OpenCode, the busiest-day and streak figures, and the day view](assets/readme/daily-en.webp)
 
 Pick a day, or step through the active days, to see it in detail:
 
@@ -169,11 +171,11 @@ Negative savings mean that written cache was not read enough to pay off.
 
 An always-on-top mini window sits by default in the bottom-right corner of the screen. It sizes itself to its content and, when snapped to a corner, stays flush with that corner while it resizes. Dragging it leaves it where you drop it.
 
-![The desktop widget showing today's tokens and cost with rings for the Claude, Codex and Antigravity five-hour limits](assets/readme/widget-en.webp)
+![The desktop widget showing today's tokens and cost, five-hour rings and weekly percentages for two Claude accounts, Antigravity and two Codex accounts, and today's OpenCode usage](assets/readme/widget-en.webp)
 
 The **Widget studio** page changes what the widget shows and how it looks, with a live preview.
 
-![Widget studio with a live preview and the list of items the widget can show](assets/readme/studio-en.webp)
+![Widget studio with a live preview of the widget, including its Claude and Codex accounts and OpenCode usage, and the list of items the widget can show](assets/readme/studio-en.webp)
 
 - **Content:** the items shown and their order (main number, secondary value, five-hour and weekly limits, OpenCode usage, per-tool split, 7- and 30-day totals, and last update time), which tools' limits to show and in what order, and which Antigravity limit to show: Gemini, Claude and GPT, both, or whichever is fuller
 - **Layout:** horizontal, vertical, or a single line
@@ -189,6 +191,8 @@ The widget also comes with a tray icon and a shortcut:
   - Set it all up on the **Menu bar** page: drag tiles from a gallery into a live preview of the panel, drag them to reorder or back to the gallery to remove them, and click a tile to pick its size (small, wide, large or full width) and whether it shows a ring or a bar.
   - The text next to the icon takes any limit, forecast, usage figure (for every tool or OpenCode alone) or the last scan, in the order you choose, with full names, short ones or none; used or left; percent, a bar, both, or a circle; the reset as a countdown or a clock time; a separator, text at both ends, and a ⚠︎ past the warning threshold. On macOS the icon can be hidden so only the text shows.
 - **Shortcut:** a system-wide key combination shows or hides the widget (default **Ctrl+Alt+Shift+W**, on macOS **⌃⌥⇧W**). To change it, open **Settings → Widget** and press the new combination. A combination that another program owns is refused.
+
+![Menu bar page with a live preview of the control panel, holding Claude and Codex limit rings, today's usage, OpenCode usage and a forecast, next to the gallery of tiles with every account](assets/readme/menubar-en.webp)
 
 ### Weekly PDF, export, and your own prices
 

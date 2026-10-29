@@ -74,7 +74,8 @@ const settings: Settings = {
       pm({ kind: 'provider', provider: 'anthropic', size: 'm', style: 'ring' }),
       pm({ kind: 'provider', provider: 'openai', size: 'm', style: 'ring' }),
       pm({ kind: 'usage', period: 'today', size: 'w' }),
-      pm({ kind: 'forecast', provider: 'anthropic', window: 'five_hour', size: 'w' }),
+      ...(showcase ? [pm({ kind: 'usage', provider: 'opencode', period: 'today', size: 'w' })] : []),
+      pm({ kind: 'forecast', provider: 'anthropic', window: 'five_hour', size: showcase ? 'l' : 'w' }),
       ...['open', 'widget', 'rescan', 'settings'].map((action) => pm({ kind: 'action', action, size: 's' })),
     ],
   },
@@ -82,7 +83,16 @@ const settings: Settings = {
   provider_colors: {},
   tint_icons: false,
   show_icons: true,
-  account_names: twoAccounts ? { [ACCOUNT_A]: 'İş' } : {},
+  account_names: accountNames(),
+}
+
+// showcase names every account; otherwise one name sits next to the placeholders
+function accountNames(): Record<string, string> {
+  if (!twoAccounts) return {}
+  if (!showcase) return { [ACCOUNT_A]: 'İş' }
+  return scenario.get('lang') === 'en'
+    ? { [CLAUDE_A]: 'Personal', [CLAUDE_B]: 'Team', [ACCOUNT_A]: 'Work', [ACCOUNT_B]: 'Personal' }
+    : { [CLAUDE_A]: 'Kişisel', [CLAUDE_B]: 'Ekip', [ACCOUNT_A]: 'İş', [ACCOUNT_B]: 'Kişisel' }
 }
 
 const day = 864e5
@@ -203,8 +213,8 @@ function withAccounts(all: LimitView[]): LimitView[] {
     const mine = all.filter((l) => l.provider === provider).map((l) => ({ ...l, account: b }))
     const other = mine.map((l) =>
       l.window === 'five_hour'
-        ? { ...l, account: a, active: false, used_pct: 100, state: 'reset' as const, resets_at: Math.round(now / 1000 - 1800), observed_ms: now - 2 * 3600e3, forecast: null, usage_since: totals(0, 0), unlogged_pct: null }
-        : { ...l, account: a, active: false, used_pct: 96, state: 'fresh' as const, resets_at: Math.round(now / 1000 + 1.4 * 86400), observed_ms: now - 2 * 3600e3, window_start_ms: now - 5.6 * 86400e3, window_usage: totals(88e6, 41.2), forecast: null, unlogged_pct: null },
+        ? { ...l, account: a, active: false, used_pct: 100, state: 'reset' as const, resets_at: Math.round(now / 1000 - 1800), observed_ms: now - 2 * 3600e3, forecast: null, usage_since: totals(0, 0), window_usage: totals(0, 0), projects: [], unlogged_pct: null }
+        : { ...l, account: a, active: false, used_pct: 96, state: 'fresh' as const, resets_at: Math.round(now / 1000 + 1.4 * 86400), observed_ms: now - 2 * 3600e3, window_start_ms: now - 5.6 * 86400e3, window_usage: totals(88e6, 41.2), forecast: null, projects: l.projects.map((p, i) => ({ ...p, share: [0.48, 0.3, 0.14][i], estimated_pct: [46.1, 28.8, 13.4][i] })), unlogged_pct: null },
     )
     return [...mine, ...other]
   }
