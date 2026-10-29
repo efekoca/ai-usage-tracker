@@ -152,6 +152,8 @@ export interface Account {
   last_ms: number
   requests: number
   active: boolean
+  /** The plan its newest reading names, as the provider names it (Claude: "pro", "max"). */
+  read_plan: string | null
 }
 
 export interface Tokens {
@@ -406,6 +408,10 @@ export interface Settings {
   show_icons: boolean
   /** Codex or Claude account id → the name the user gave it. */
   account_names: Record<string, string>
+  /** Account id → the plan chosen for it, while its provider has several accounts. */
+  account_plans: Record<string, string>
+  /** Account id → monthly USD price, when it differs from the list price or the plan has none. */
+  account_prices: Record<string, number>
 }
 
 export interface SourceInfo {
@@ -601,6 +607,15 @@ export interface ProviderValue {
   events: number
   unpriced_events: number
   cumulative: number[]
+  /** Each account's share while the provider has several; `account` null for use no evidence ties to one. */
+  accounts: AccountValue[]
+}
+export interface AccountValue {
+  account: string | null
+  cost_usd: number
+  events: number
+  unpriced_events: number
+  cumulative: number[]
 }
 export interface PlanValue {
   range: { from_ms: number; to_ms: number }
@@ -726,6 +741,10 @@ export interface WindowStats {
 export type AdviceKind = 'no_plan' | 'not_applicable' | 'insufficient' | 'upgrade' | 'at_top' | 'downgrade' | 'fits'
 export interface PlanAdvice {
   provider: Provider
+  /** One of several accounts the advice is for; null for the provider's account in use. */
+  account: string | null
+  /** The plan was taken from the readings, not chosen. */
+  detected: boolean
   kind: AdviceKind
   plan: string | null
   suggested: string | null
@@ -743,7 +762,6 @@ export interface PlanAdvice {
 export interface LimitHistoryView {
   history: { from_ms: number; to_ms: number; series: WindowSeries[]; observed_days: Record<string, number> }
   advice: PlanAdvice[]
-  detected_plans: Record<string, string>
 }
 
 export interface HourPoint {
@@ -826,6 +844,7 @@ export const api = {
   quit: () => invoke<void>('quit_app'),
   captureStatus: () => invoke<CaptureStatus>('capture_status'),
   setCapture: (kind: CaptureKind, enabled: boolean) => invoke<string>('set_capture', { kind, enabled }),
+  setReadInterval: (kind: 'claude' | 'codex' | 'antigravity', minutes: number) => invoke<Settings>('set_read_interval', { kind, minutes }),
   installCli: (kind: CaptureKind) => invoke<string>('install_cli', { kind }),
   placeWidget: (corner: string, remember = true) => invoke<void>('place_widget', { corner, remember }),
   listFonts: () => invoke<string[]>('list_fonts'),

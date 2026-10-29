@@ -900,6 +900,17 @@ fn reads_allowed(s: &Settings, sources: &[SourceId]) -> bool {
     s.onboarded && sources.iter().any(|id| s.enabled_sources.contains(id))
 }
 
+/// How often a limit reader runs. Claude's usage service answers at most every 5 minutes.
+pub fn set_interval(app: &AppHandle, kind: &str, minutes: u64) -> Result<Settings, String> {
+    match kind {
+        "claude" => persist(app, |s| s.capture.claude_poll_minutes = minutes.clamp(5, 120)),
+        // the Claude reader looks at its interval every 30 seconds; these two would wait out the old one
+        "codex" => persist(app, |s| s.capture.codex_poll_minutes = minutes.clamp(1, 120)).inspect(|_| wake_codex(app)),
+        "antigravity" => persist(app, |s| s.capture.antigravity_poll_minutes = minutes.clamp(1, 120)).inspect(|_| wake_antigravity(app)),
+        _ => Err(format!("unknown capture kind: {kind}")),
+    }
+}
+
 pub fn wake_readers(app: &AppHandle) {
     wake_claude(app);
     wake_codex(app);

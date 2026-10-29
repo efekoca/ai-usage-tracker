@@ -55,6 +55,32 @@ impl PlansFile {
         let rung = plan.ladder?;
         self.plans(p).iter().filter(|x| x.ladder.is_some_and(|l| l < rung)).max_by_key(|x| x.ladder)
     }
+
+    /// One of several accounts' plan: the one chosen for it, else the one its newest reading
+    /// names, else the provider's. A reading that fits more than one plan (Claude's "max") takes
+    /// the provider's plan only when that is one of them, and else leaves the choice to the user.
+    pub fn account_plan(&self, p: Provider, chosen: Option<&str>, read: Option<&str>, provider_plan: Option<&str>) -> Option<String> {
+        if let Some(id) = chosen.filter(|id| self.find(p, id).is_some()) {
+            return Some(id.to_owned());
+        }
+        let provider_plan = provider_plan.filter(|id| self.find(p, id).is_some());
+        let Some(read) = read else { return provider_plan.map(str::to_owned) };
+        let fits: Vec<&str> = self.plans(p).iter().map(|d| d.id.as_str()).filter(|id| read_name(p, id) == read).collect();
+        match (fits.as_slice(), provider_plan) {
+            ([], plan) => plan.map(str::to_owned),
+            (_, Some(plan)) if fits.contains(&plan) => Some(plan.to_owned()),
+            ([only], _) => Some((*only).to_owned()),
+            _ => None,
+        }
+    }
+}
+
+/// The name a limit reading gives a plan: Claude reports "max" for both Max plans.
+pub fn read_name(p: Provider, id: &str) -> &str {
+    match p {
+        Provider::Anthropic if id.starts_with("max") => "max",
+        _ => id,
+    }
 }
 
 #[cfg(test)]
@@ -76,6 +102,21 @@ mod tests {
         assert_eq!(pro.id, "pro");
         assert!(!pro.windows.iter().any(|w| w == "five_hour"), "Pro has no five-hour limit");
         assert!(f.plans(Provider::OpenAI).iter().all(|p| p.session_multiple.is_none()), "OpenAI publishes no ratio");
+    }
+
+    #[test]
+    fn an_account_takes_its_own_plan_then_its_readings_then_the_providers() {
+        let f = PlansFile::bundled();
+        let plan = |chosen, read, provider| f.account_plan(Provider::Anthropic, chosen, read, provider);
+        assert_eq!(plan(Some("max20x"), Some("pro"), Some("pro")).as_deref(), Some("max20x"), "the user's choice wins");
+        assert_eq!(plan(None, Some("pro"), Some("max5x")).as_deref(), Some("pro"), "a reading outranks the provider's plan");
+        assert_eq!(plan(None, Some("max"), Some("max20x")).as_deref(), Some("max20x"));
+        assert_eq!(plan(None, Some("max"), Some("pro")), None, "Max 5x or 20x is the user's to say");
+        assert_eq!(plan(None, Some("max"), None), None);
+        assert_eq!(plan(None, None, Some("pro")).as_deref(), Some("pro"));
+        assert_eq!(plan(None, Some("enterprise_x"), Some("pro")).as_deref(), Some("pro"), "a plan the list lacks names nothing");
+        assert_eq!(plan(Some("gone"), Some("pro"), None).as_deref(), Some("pro"), "a choice no longer listed is ignored");
+        assert_eq!(f.account_plan(Provider::OpenAI, None, Some("plus"), Some("pro")).as_deref(), Some("plus"));
     }
 
     #[test]

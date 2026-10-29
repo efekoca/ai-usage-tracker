@@ -84,6 +84,8 @@ const settings: Settings = {
   tint_icons: false,
   show_icons: true,
   account_names: accountNames(),
+  account_plans: {},
+  account_prices: {},
 }
 
 // showcase names every account; otherwise one name sits next to the placeholders
@@ -194,12 +196,12 @@ function mockAccounts() {
   const now = Date.now()
   const day = 864e5
   return [
-    { provider: 'anthropic', id: CLAUDE_A, first_ms: now - 60 * day, last_ms: now - 3 * day, requests: 21400, active: false },
-    { provider: 'anthropic', id: CLAUDE_B, first_ms: now - 9 * day, last_ms: now - 5 * 60000, requests: 6830, active: true },
-    { provider: 'anthropic', id: null, first_ms: now - 70 * day, last_ms: now - 10 * day, requests: 920, active: false },
-    { provider: 'openai', id: ACCOUNT_A, first_ms: now - 40 * day, last_ms: now - 2 * 3600e3, requests: 4180, active: false },
-    { provider: 'openai', id: ACCOUNT_B, first_ms: now - 12 * day, last_ms: now - 20 * 60000, requests: 1260, active: true },
-    { provider: 'openai', id: null, first_ms: now - 52 * day, last_ms: now - 41 * day, requests: 312, active: false },
+    { provider: 'anthropic', id: CLAUDE_A, first_ms: now - 60 * day, last_ms: now - 3 * day, requests: 21400, active: false, read_plan: 'pro' },
+    { provider: 'anthropic', id: CLAUDE_B, first_ms: now - 9 * day, last_ms: now - 5 * 60000, requests: 6830, active: true, read_plan: 'max' },
+    { provider: 'anthropic', id: null, first_ms: now - 70 * day, last_ms: now - 10 * day, requests: 920, active: false, read_plan: null },
+    { provider: 'openai', id: ACCOUNT_A, first_ms: now - 40 * day, last_ms: now - 2 * 3600e3, requests: 4180, active: false, read_plan: 'plus' },
+    { provider: 'openai', id: ACCOUNT_B, first_ms: now - 12 * day, last_ms: now - 20 * 60000, requests: 1260, active: true, read_plan: 'plus' },
+    { provider: 'openai', id: null, first_ms: now - 52 * day, last_ms: now - 41 * day, requests: 312, active: false, read_plan: null },
   ]
 }
 
@@ -310,13 +312,19 @@ function mockPlanValue() {
   const a = run(9.1)
   const o = run(1.2)
   const g = run(0.78)
+  const part = (account: string | null, cum: number[], share: number, events: number, unpriced = 0) => {
+    const c = cum.map((v) => v * share)
+    return { account, cost_usd: c[n - 1], events: Math.round(events * share), unpriced_events: Math.round(unpriced * share), cumulative: c }
+  }
+  const claude = twoAccounts ? [part(CLAUDE_A, a, 0.32, 9000), part(CLAUDE_B, a, 0.6, 9000), part(null, a, 0.08, 9000)] : []
+  const codex = twoAccounts ? [part(ACCOUNT_A, o, 0.7, 1200, 93), part(ACCOUNT_B, o, 0.3, 1200, 93)] : []
   return {
     range: { from_ms: Date.now() - n * 86400e3, to_ms: Date.now() },
     dates,
     providers: [
-      { provider: 'anthropic', cost_usd: a[n - 1], events: 9000, unpriced_events: 0, cumulative: a },
-      { provider: 'openai', cost_usd: o[n - 1], events: 1200, unpriced_events: 93, cumulative: o },
-      { provider: 'google', cost_usd: g[n - 1], events: 640, unpriced_events: 0, cumulative: g },
+      { provider: 'anthropic', cost_usd: a[n - 1], events: 9000, unpriced_events: 0, cumulative: a, accounts: claude },
+      { provider: 'openai', cost_usd: o[n - 1], events: 1200, unpriced_events: 93, cumulative: o, accounts: codex },
+      { provider: 'google', cost_usd: g[n - 1], events: 640, unpriced_events: 0, cumulative: g, accounts: [] },
     ],
   }
 }
@@ -477,11 +485,16 @@ function mockHistory() {
       ],
       observed_days: { anthropic: 26, openai: 14, google: 12 },
     },
-    advice: [
-      { provider: 'anthropic', kind: 'upgrade', plan: 'max5x', suggested: 'max20x', strong: false, days: 28, observed_days: 26, five_hour: stats(24, 18, 3, 180, 100, 100), weekly: stats(4, 3, 1, 540, 100, 100), session_ratio: 4, projected_five_hour: null, projected_weekly_if_same_ratio: null, suggested_has_no_five_hour: false, monthly_delta_usd: 100 },
-      { provider: 'openai', kind: 'fits', plan: 'plus', suggested: null, strong: false, days: 28, observed_days: 14, five_hour: stats(12, 8, 0, 0, 41, 41), weekly: stats(4, 3, 0, 0, 44, 44), session_ratio: null, projected_five_hour: null, projected_weekly_if_same_ratio: null, suggested_has_no_five_hour: false, monthly_delta_usd: null },
-    ],
-    detected_plans: {},
+    advice: twoAccounts
+      ? [
+          { provider: 'anthropic', account: CLAUDE_A, detected: true, kind: 'upgrade', plan: 'pro', suggested: 'max5x', strong: true, days: 28, observed_days: 21, five_hour: stats(30, 22, 7, 410, 100, 100), weekly: stats(3, 3, 2, 1860, 100, 100), session_ratio: 5, projected_five_hour: null, projected_weekly_if_same_ratio: null, suggested_has_no_five_hour: false, monthly_delta_usd: 80 },
+          { provider: 'anthropic', account: CLAUDE_B, detected: false, kind: 'fits', plan: 'max5x', suggested: null, strong: false, days: 28, observed_days: 9, five_hour: stats(14, 9, 0, 0, 58, 58), weekly: stats(2, 1, 0, 0, 47, 47), session_ratio: null, projected_five_hour: null, projected_weekly_if_same_ratio: null, suggested_has_no_five_hour: false, monthly_delta_usd: null },
+          { provider: 'openai', account: ACCOUNT_A, detected: true, kind: 'fits', plan: 'plus', suggested: null, strong: false, days: 28, observed_days: 14, five_hour: stats(12, 8, 0, 0, 41, 41), weekly: stats(4, 3, 0, 0, 44, 44), session_ratio: null, projected_five_hour: null, projected_weekly_if_same_ratio: null, suggested_has_no_five_hour: false, monthly_delta_usd: null },
+        ]
+      : [
+          { provider: 'anthropic', account: null, detected: false, kind: 'upgrade', plan: 'max5x', suggested: 'max20x', strong: false, days: 28, observed_days: 26, five_hour: stats(24, 18, 3, 180, 100, 100), weekly: stats(4, 3, 1, 540, 100, 100), session_ratio: 4, projected_five_hour: null, projected_weekly_if_same_ratio: null, suggested_has_no_five_hour: false, monthly_delta_usd: 100 },
+          { provider: 'openai', account: null, detected: false, kind: 'fits', plan: 'plus', suggested: null, strong: false, days: 28, observed_days: 14, five_hour: stats(12, 8, 0, 0, 41, 41), weekly: stats(4, 3, 0, 0, 44, 44), session_ratio: null, projected_five_hour: null, projected_weekly_if_same_ratio: null, suggested_has_no_five_hour: false, monthly_delta_usd: null },
+        ],
   }
 }
 
@@ -701,6 +714,11 @@ export function installMock() {
           else if (k === 'claude') settings.capture.claude_poll = !!a.enabled
           else settings.capture[k] = !!a.enabled
           return a.enabled ? 'enabled' : 'restored'
+        }
+        case 'set_read_interval': {
+          const k = a.kind as 'claude' | 'codex' | 'antigravity'
+          settings.capture[`${k}_poll_minutes`] = Math.min(120, Math.max(k === 'claude' ? 5 : 1, Number(a.minutes)))
+          return settings
         }
         case 'place_widget':
           return null

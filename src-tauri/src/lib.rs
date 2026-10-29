@@ -425,6 +425,7 @@ pub fn run() {
             commands::quit_app,
             commands::capture_status,
             commands::set_capture,
+            commands::set_read_interval,
             commands::install_cli,
             commands::get_branches,
             commands::get_agents_tools,

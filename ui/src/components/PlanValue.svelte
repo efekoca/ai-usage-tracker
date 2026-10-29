@@ -1,8 +1,9 @@
 <script lang="ts">
   // Chat use is not in local logs, so the figure is a lower bound.
   import { untrack } from 'svelte'
-  import { app, latest, providerColor, saveSettings, tint, markTint } from '../lib/store.svelte'
-  import { api, providersOf, type PlanDef, type PlansFile, type PlanValue, type Provider } from '../lib/api'
+  import { accountName, app, latest, providerColor, saveSettings, tint, markTint } from '../lib/store.svelte'
+  import { api, providersOf, type AccountValue, type PlanDef, type PlansFile, type PlanValue, type Provider, type ProviderValue } from '../lib/api'
+  import { accountPlan, planPrice } from '../lib/plans'
   import { fmtDate, fmtDec, fmtInt, fmtMoney, i18n, parseNumber, t } from '../lib/i18n.svelte'
   import Icon from './Icon.svelte'
   import BrandIcon from './BrandIcon.svelte'
@@ -36,12 +37,6 @@
     const id = app.settings?.plans[p]
     return id ? plans?.providers[p]?.plans.find((x) => x.id === id) : undefined
   }
-  function priceOf(p: Provider): { usd: number | null; custom: boolean } {
-    const own = app.settings?.plan_prices?.[p]
-    if (typeof own === 'number' && own > 0) return { usd: own, custom: true }
-    const list = planOf(p)?.monthly_usd
-    return { usd: typeof list === 'number' ? list : null, custom: false }
-  }
   function setPlan(p: Provider, id: string) {
     saveSettings((c) => ({ plans: { ...c.plans, [p]: id } }))
   }
@@ -57,16 +52,63 @@
     })
   }
 
+  function setAccountPlan(id: string, plan: string) {
+    saveSettings((c) => ({ account_plans: { ...c.account_plans, [id]: plan } }))
+  }
+  function setAccountPrice(id: string, raw: string) {
+    const v = parseNumber(raw)
+    if (!(v !== null && v > 0)) return
+    saveSettings((c) => ({ account_prices: { ...c.account_prices, [id]: v } }))
+  }
+
+  const shareOf = (usd: number | null) => (usd !== null ? (usd * (value?.dates.length ?? 30)) / DAYS_PER_MONTH : null)
   function row(p: Provider) {
     const pv = value?.providers.find((x) => x.provider === p)
     const plan = planOf(p)
-    const price = priceOf(p)
+    const price = planPrice(app.settings, p, plan)
     const cost = pv?.cost_usd ?? 0
-    const share = price.usd !== null ? (price.usd * (value?.dates.length ?? 30)) / DAYS_PER_MONTH : null
+    const share = shareOf(price.usd)
     const ratio = share && share > 0 ? cost / share : null
     const day = share !== null && pv ? pv.cumulative.findIndex((c) => c >= share) : -1
     return { pv, plan, price, cost, share, ratio, day }
   }
+
+  /** A provider with several accounts: each account seen in the period on its own plan, against their prices together. */
+  function split(p: Provider) {
+    const pv = value?.providers.find((x) => x.provider === p)
+    const parts = app.accounts
+      .filter((a) => a.provider === p && a.id !== null && a.last_ms >= (value?.range.from_ms ?? 0))
+      .map((a) => {
+        const id = a.id as string
+        const plan = accountPlan(plans, app.settings, a)
+        const price = planPrice(app.settings, p, plan, id)
+        return { id, plan, price, share: shareOf(price.usd), use: pv?.accounts.find((x) => x.account === id) }
+      })
+    const unknown = pv?.accounts.find((x) => x.account === null)
+    // use billed at API rates has no plan to set it against
+    const counted = parts.filter((x) => x.plan?.id !== 'api')
+    const missing = counted.find((x) => !x.plan || x.share === null)
+    const uses = [...counted.map((x) => x.use), unknown].filter((u): u is AccountValue => !!u)
+    const cost = uses.reduce((t, u) => t + u.cost_usd, 0)
+    const cumulative = (value?.dates ?? []).map((_, i) => uses.reduce((t, u) => t + (u.cumulative[i] ?? 0), 0))
+    const share = counted.reduce((t, x) => t + (x.share ?? 0), 0)
+    return {
+      pv,
+      parts,
+      unknown,
+      missing,
+      cost,
+      cumulative,
+      share,
+      ratio: share > 0 ? cost / share : null,
+      day: share > 0 ? cumulative.findIndex((c) => c >= share) : -1,
+      monthly: counted.reduce((t, x) => t + (x.price.usd ?? 0), 0),
+      custom: counted.some((x) => x.price.custom),
+      events: uses.reduce((t, u) => t + u.events, 0),
+      unpriced: uses.reduce((t, u) => t + u.unpriced_events, 0),
+    }
+  }
+  const multiple = (r: number | null) => t('value.multiple', { n: fmtDec(r ?? 0, r !== null && r < 10 ? 1 : 0) })
 
   const W = 240
   const H = 64
@@ -79,20 +121,57 @@
   }
 </script>
 
-{#snippet usage(p: Provider, r: ReturnType<typeof row>)}
-  {#if r.pv && r.pv.events > 0}
-    {@const g = path(r.pv.cumulative, r.cost * 1.08 || 1)}
+{#snippet usage(p: Provider, pv: ProviderValue | undefined)}
+  {#if pv && pv.events > 0}
+    {@const g = path(pv.cumulative, pv.cost_usd * 1.08 || 1)}
     <div class="figure">
-      <div class="big num">{fmtMoney(r.cost)}</div>
+      <div class="big num">{fmtMoney(pv.cost_usd)}</div>
       <span class="subtle small">{t('value.apiEq')}</span>
     </div>
-    <svg class="spark" viewBox="0 0 {W} {H}" preserveAspectRatio="none" role="img" aria-label="{t('value.chart.api')}: {fmtMoney(r.cost)}">
+    <svg class="spark" viewBox="0 0 {W} {H}" preserveAspectRatio="none" role="img" aria-label="{t('value.chart.api')}: {fmtMoney(pv.cost_usd)}">
       <path d={g.area} class="area" style="--c:{tint(p) ?? providerColor[p]}" />
       <path d={g.line} class="line" style="--c:{tint(p) ?? providerColor[p]}" />
     </svg>
   {:else}
     <p class="muted small">{t('value.noUse')}</p>
   {/if}
+{/snippet}
+
+{#snippet compare(p: Provider, cost: number, share: number, ratio: number | null, day: number, cumulative: number[], note: string)}
+  {@const top = Math.max(cost, share) * 1.08 || 1}
+  {@const g = path(cumulative, top)}
+  {@const planY = H - 2 - (share / top) * (H - 6)}
+  <div class="figure">
+    <div class="big num" title={t('value.multipleHelp')}>{multiple(ratio)}</div>
+    <dl>
+      <dt>{t('value.apiEq')}</dt>
+      <dd class="num">{fmtMoney(cost)}</dd>
+      <dt>{t('value.planShare')}</dt>
+      <dd class="num">{fmtMoney(share)}</dd>
+      <dd class="note subtle small">{note}</dd>
+    </dl>
+  </div>
+  <svg class="spark" viewBox="0 0 {W} {H}" preserveAspectRatio="none" role="img"
+    aria-label="{t('value.chart.api')}: {fmtMoney(cost)}; {t('value.chart.plan')}: {fmtMoney(share)}">
+    <path d={g.area} class="area" style="--c:{tint(p) ?? providerColor[p]}" />
+    <path d={g.line} class="line" style="--c:{tint(p) ?? providerColor[p]}" />
+    <line x1="0" x2={W} y1={planY} y2={planY} class="plan" />
+  </svg>
+  <div class="legend small subtle">
+    <span><i class="sw" style="background:{tint(p) ?? providerColor[p]}"></i>{t('value.chart.api')}</span>
+    <span><i class="sw dash"></i>{t('value.chart.plan')}</span>
+    <span class="spacer"></span>
+    {#if value}<span>{fmtDate(value.dates[0], 'short')} – {fmtDate(value.dates[value.dates.length - 1], 'short')}</span>{/if}
+  </div>
+  <p class="verdict small">
+    {#if (ratio ?? 0) >= 1}
+      <Icon name="check" size={13} />
+      {t('value.saved', { v: fmtMoney(cost - share) })} · {day >= 0 ? t('value.breakeven', { d: day + 1 }) : t('value.notYet')}
+    {:else}
+      <Icon name="info" size={13} />
+      {t('value.lost', { v: fmtMoney(share - cost) })}
+    {/if}
+  </p>
 {/snippet}
 
 <section class="card value">
@@ -111,6 +190,62 @@
     {#if !used.length}<p class="muted small">{t('value.noUse')}</p>{/if}
     <div class="rows">
       {#each used as p (p)}
+        {#if app.accounts.some((a) => a.provider === p)}
+          {@const m = split(p)}
+          {@const miss = m.missing}
+          <div class="prow">
+            <div class="who">
+              <b class="brandname"><BrandIcon provider={p} color={markTint(p)} />{t(`provider.${p}`)}</b>
+              {#each [...new Set(m.parts.map((x) => x.plan?.name).filter(Boolean))] as name (name)}<span class="pill">{name}</span>{/each}
+            </div>
+            {#if miss}
+              {@render usage(p, m.pv)}
+              <div class="pick">
+                <span class="small"><b>{accountName(miss.id, p)}</b> · {miss.plan ? (miss.plan.price_note?.[i18n.lang] ?? t('value.enterPrice')) : t('value.pickAccount')}</span>
+                {#if !miss.plan}
+                  <Select
+                    label="{accountName(miss.id, p)} · {t('limits.plan')}"
+                    placeholder={t('value.pickPlan')}
+                    minWidth={170}
+                    options={plans.providers[p]?.plans.map((pl) => ({ value: pl.id, label: pl.name, sub: pl.relative })) ?? []}
+                    onchange={(v) => setAccountPlan(miss.id, v)}
+                  />
+                {:else}
+                  {#each miss.plan.price_options ?? [] as o (o)}
+                    <button class="btn small" onclick={() => setAccountPrice(miss.id, String(o))}>{fmtMoney(o)}</button>
+                  {/each}
+                  <input class="field price" inputmode="decimal" placeholder={t('value.price')} aria-label="{accountName(miss.id, p)} · {t('value.price')}" onchange={(e) => setAccountPrice(miss.id, e.currentTarget.value)} />
+                {/if}
+              </div>
+            {:else if m.share <= 0}
+              <p class="muted small">{m.parts.every((x) => x.plan?.id === 'api') ? t('value.api') : t('value.free')}</p>
+            {:else if m.events === 0}
+              <p class="muted small">{t('value.noUse')}</p>
+            {:else}
+              {@render compare(p, m.cost, m.share, m.ratio, m.day, m.cumulative, `${fmtMoney(m.monthly)}/${i18n.lang === 'tr' ? 'ay' : 'mo'} ${m.custom ? t('value.customPrice') : t('value.listPrice')} · ${t('value.accounts', { n: m.parts.length })}`)}
+              <ul class="parts small">
+                {#each m.parts as x (x.id)}
+                  <li>
+                    <span class="pname">{accountName(x.id, p)}</span>
+                    <span class="subtle">{x.plan?.name ?? ''}</span>
+                    <span class="num">{fmtMoney(x.use?.cost_usd ?? 0)}</span>
+                    <span class="num subtle">{x.share && x.plan?.id !== 'api' ? multiple((x.use?.cost_usd ?? 0) / x.share) : '—'}</span>
+                  </li>
+                {/each}
+                {#if m.unknown && m.unknown.events > 0}
+                  <li>
+                    <span class="pname muted">{accountName(null, p)}</span>
+                    <span></span>
+                    <span class="num">{fmtMoney(m.unknown.cost_usd)}</span>
+                    <span class="num subtle">—</span>
+                  </li>
+                {/if}
+              </ul>
+              {#if m.unknown && m.unknown.events > 0}<p class="subtle small">{t('value.unknownShare')}</p>{/if}
+              {#if m.unpriced > 0}<p class="subtle small">{t('value.unpriced', { n: fmtInt(m.unpriced) })}</p>{/if}
+            {/if}
+          </div>
+        {:else}
         {@const r = row(p)}
         <div class="prow">
           <div class="who">
@@ -119,7 +254,7 @@
           </div>
 
           {#if !r.plan}
-            {@render usage(p, r)}
+            {@render usage(p, r.pv)}
             <div class="pick">
               <span class="small">{t('value.pickLead')}</span>
               <Select
@@ -135,7 +270,7 @@
           {:else if r.price.usd === 0}
             <p class="muted small">{t('value.free')}</p>
           {:else if r.price.usd === null}
-            {@render usage(p, r)}
+            {@render usage(p, r.pv)}
             <div class="pick">
               <span class="small">{r.plan.price_note?.[i18n.lang] ?? t('value.enterPrice')}</span>
               {#each r.plan.price_options ?? [] as o (o)}
@@ -146,43 +281,11 @@
           {:else if !r.pv || r.pv.events === 0}
             <p class="muted small">{t('value.noUse')}</p>
           {:else}
-            {@const top = Math.max(r.cost, r.share ?? 0) * 1.08 || 1}
-            {@const g = path(r.pv.cumulative, top)}
-            {@const planY = H - 2 - ((r.share ?? 0) / top) * (H - 6)}
-            <div class="figure">
-              <div class="big num" title={t('value.multipleHelp')}>{t('value.multiple', { n: fmtDec(r.ratio ?? 0, r.ratio !== null && r.ratio < 10 ? 1 : 0) })}</div>
-              <dl>
-                <dt>{t('value.apiEq')}</dt>
-                <dd class="num">{fmtMoney(r.cost)}</dd>
-                <dt>{t('value.planShare')}</dt>
-                <dd class="num">{fmtMoney(r.share ?? 0)}</dd>
-                <dd class="note subtle small">{fmtMoney(r.price.usd)}/{i18n.lang === 'tr' ? 'ay' : 'mo'} {r.price.custom ? t('value.customPrice') : t('value.listPrice')}</dd>
-              </dl>
-            </div>
-            <svg class="spark" viewBox="0 0 {W} {H}" preserveAspectRatio="none" role="img"
-              aria-label="{t('value.chart.api')}: {fmtMoney(r.cost)}; {t('value.chart.plan')}: {fmtMoney(r.share ?? 0)}">
-              <path d={g.area} class="area" style="--c:{tint(p) ?? providerColor[p]}" />
-              <path d={g.line} class="line" style="--c:{tint(p) ?? providerColor[p]}" />
-              <line x1="0" x2={W} y1={planY} y2={planY} class="plan" />
-            </svg>
-            <div class="legend small subtle">
-              <span><i class="sw" style="background:{tint(p) ?? providerColor[p]}"></i>{t('value.chart.api')}</span>
-              <span><i class="sw dash"></i>{t('value.chart.plan')}</span>
-              <span class="spacer"></span>
-              <span>{fmtDate(value.dates[0], 'short')} – {fmtDate(value.dates[value.dates.length - 1], 'short')}</span>
-            </div>
-            <p class="verdict small">
-              {#if (r.ratio ?? 0) >= 1}
-                <Icon name="check" size={13} />
-                {t('value.saved', { v: fmtMoney(r.cost - (r.share ?? 0)) })} · {r.day >= 0 ? t('value.breakeven', { d: r.day + 1 }) : t('value.notYet')}
-              {:else}
-                <Icon name="info" size={13} />
-                {t('value.lost', { v: fmtMoney((r.share ?? 0) - r.cost) })}
-              {/if}
-            </p>
+            {@render compare(p, r.cost, r.share ?? 0, r.ratio, r.day, r.pv.cumulative, `${fmtMoney(r.price.usd)}/${i18n.lang === 'tr' ? 'ay' : 'mo'} ${r.price.custom ? t('value.customPrice') : t('value.listPrice')}`)}
             {#if r.pv.unpriced_events > 0}<p class="subtle small">{t('value.unpriced', { n: fmtInt(r.pv.unpriced_events) })}</p>{/if}
           {/if}
         </div>
+        {/if}
       {/each}
     </div>
     <p class="subtle small foot">{t('value.notSavings')} {t('value.lowerBound')} {plans.prices_verified_at ? t('value.source', { d: fmtDate(plans.prices_verified_at) }) : ''}</p>
@@ -320,6 +423,29 @@
   .pick span {
     flex: 1 1 180px;
     color: var(--ink-2);
+  }
+  .parts {
+    list-style: none;
+    margin: 0;
+    padding: 8px 0 0;
+    border-top: 0.5px solid var(--hairline);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .parts li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto 72px 52px;
+    gap: 10px;
+    align-items: baseline;
+  }
+  .parts .num {
+    text-align: right;
+  }
+  .pname {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .foot {
     margin: 14px 0 0;

@@ -382,6 +382,18 @@ pub struct ProviderValue {
     pub unpriced_events: u64,
     /// Running total of the API-equivalent cost per local day of the range.
     pub cumulative: Vec<f64>,
+    /// Each account's share while the provider has several; `account` is `None` for use no
+    /// evidence ties to one.
+    pub accounts: Vec<AccountValue>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AccountValue {
+    pub account: Option<String>,
+    pub cost_usd: f64,
+    pub events: u64,
+    pub unpriced_events: u64,
+    pub cumulative: Vec<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -404,30 +416,51 @@ pub fn plan_value<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, t
         d = next;
     }
     let idx: HashMap<NaiveDate, usize> = dates.iter().enumerate().map(|(i, d)| (*d, i)).collect();
+    let several = crate::accounts::several(store)?;
     let mut acc: BTreeMap<Provider, (Totals, Vec<f64>)> = BTreeMap::new();
+    let mut by_account: BTreeMap<(Provider, Option<String>), (Totals, Vec<f64>)> = BTreeMap::new();
     for e in store.events_between(range.from_ms, range.to_ms)? {
         // a plan's value counts only usage known to go through that plan
         let Some(p) = e.tool.provider() else { continue };
-        let entry = acc.entry(p).or_insert_with(|| (Totals::default(), vec![0.0; dates.len()]));
-        add(&mut entry.0, book, &e);
         let date = local_date(tz, e.ts_ms);
         let i = idx.get(&date).copied().or_else(|| (date < first && !dates.is_empty()).then_some(0));
-        if let (Some(c), Some(i)) = (book.cost(&input_of(&e)), i) {
-            entry.1[i] += c.total();
+        let cost = book.cost(&input_of(&e)).map(|c| c.total());
+        let tally = |entry: &mut (Totals, Vec<f64>)| {
+            add(&mut entry.0, book, &e);
+            if let (Some(c), Some(i)) = (cost, i) {
+                entry.1[i] += c;
+            }
+        };
+        if several.contains(&p) {
+            tally(by_account.entry((p, e.account.clone())).or_insert_with(|| (Totals::default(), vec![0.0; dates.len()])));
         }
+        tally(acc.entry(p).or_insert_with(|| (Totals::default(), vec![0.0; dates.len()])));
     }
+    let running = |daily: Vec<f64>| -> Vec<f64> {
+        let mut run = 0.0;
+        daily
+            .into_iter()
+            .map(|v| {
+                run += v;
+                run
+            })
+            .collect()
+    };
     let providers = acc
         .into_iter()
         .map(|(provider, (t, daily))| {
-            let mut run = 0.0;
-            let cumulative = daily
-                .into_iter()
-                .map(|v| {
-                    run += v;
-                    run
+            let accounts = by_account
+                .iter()
+                .filter(|((p, _), _)| *p == provider)
+                .map(|((_, account), (t, daily))| AccountValue {
+                    account: account.clone(),
+                    cost_usd: t.cost_usd,
+                    events: t.events,
+                    unpriced_events: t.unpriced_events,
+                    cumulative: running(daily.clone()),
                 })
                 .collect();
-            ProviderValue { provider, cost_usd: t.cost_usd, events: t.events, unpriced_events: t.unpriced_events, cumulative }
+            ProviderValue { provider, cost_usd: t.cost_usd, events: t.events, unpriced_events: t.unpriced_events, cumulative: running(daily), accounts }
         })
         .collect();
     Ok(PlanValue { range, dates: dates.iter().map(|d| d.format("%Y-%m-%d").to_string()).collect(), providers })

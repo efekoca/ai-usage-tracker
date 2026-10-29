@@ -4,6 +4,7 @@
   import { api, type CaptureKind, type CaptureStatus } from '../lib/api'
   import { fmtDuration, fmtInt, t } from '../lib/i18n.svelte'
   import Toggle from './Toggle.svelte'
+  import Select from './Select.svelte'
   import Icon from './Icon.svelte'
   import AccuracyBadge from './AccuracyBadge.svelte'
   import SignInSteps from './SignInSteps.svelte'
@@ -67,6 +68,20 @@
       await load()
     }
   }
+  // Claude's usage service answers at most every 5 minutes
+  const STEPS = { claude: [5, 10, 15, 30, 60], codex: [1, 2, 5, 10, 15, 30, 60], antigravity: [1, 2, 5, 10, 15, 30, 60] }
+  const every = (kind: 'claude' | 'codex' | 'antigravity') => app.settings?.capture[`${kind}_poll_minutes`] ?? 5
+  function steps(kind: 'claude' | 'codex' | 'antigravity') {
+    const list = STEPS[kind].includes(every(kind)) ? STEPS[kind] : [...STEPS[kind], every(kind)].sort((a, b) => a - b)
+    return list.map((n) => ({ value: String(n), label: t('cap.every', { n }) }))
+  }
+  async function setEvery(kind: 'claude' | 'codex' | 'antigravity', minutes: number) {
+    try {
+      app.settings = await api.setReadInterval(kind, minutes)
+    } catch (e) {
+      note[kind] = { ok: false, text: explain(kind, String(e), false) }
+    }
+  }
   const GUIDES = {
     claude: 'https://code.claude.com/docs/en/setup',
     codex: 'https://learn.chatgpt.com/docs/codex/cli',
@@ -110,6 +125,13 @@
             {#if kind === 'codex' || kind === 'claude' || kind === 'antigravity'}{t(`cap.${kind}.changes`)}
             {:else}{t(`cap.${kind}.changes`)} <code>{st.settings_file}</code>{/if}
           </dd>
+          {#if kind === 'claude' || kind === 'codex' || kind === 'antigravity'}
+            <dt>{t('cap.interval')}</dt>
+            <dd>
+              <Select label="{t(`cap.${kind}.name`)} · {t('cap.interval')}" value={String(every(kind))} options={steps(kind)} onchange={(v) => setEvery(kind, Number(v))} />
+              {#if kind === 'claude'}<span class="subtle small">{t('cap.claude.idle')}</span>{/if}
+            </dd>
+          {/if}
           <dt>{t('cap.status')}</dt>
           <dd>
             {#if busy === kind}

@@ -568,6 +568,11 @@ pub struct Settings {
     pub show_icons: bool,
     /// Codex or Claude account digest → the name the user gave it; an unnamed account is numbered.
     pub account_names: std::collections::BTreeMap<String, String>,
+    /// Account digest → the plan chosen for it, while its provider has several accounts. An account
+    /// without one takes the plan its readings name, else the provider's (`plans`).
+    pub account_plans: std::collections::BTreeMap<String, String>,
+    /// Account digest → monthly USD price, when it differs from the list price or the plan has none.
+    pub account_prices: std::collections::BTreeMap<String, f64>,
 }
 
 /// Long enough for "Work (team)", short enough for a limit card's header.
@@ -604,6 +609,8 @@ impl Default for Settings {
             tint_icons: false,
             show_icons: true,
             account_names: Default::default(),
+            account_plans: Default::default(),
+            account_prices: Default::default(),
         }
     }
 }
@@ -668,6 +675,8 @@ impl Settings {
             *name = name.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(MAX_ACCOUNT_NAME).collect();
         }
         self.account_names.retain(|_, n| !n.is_empty());
+        self.account_plans.retain(|id, plan| is_digest(id) && !plan.is_empty());
+        self.account_prices.retain(|id, usd| is_digest(id) && usd.is_finite() && *usd > 0.0);
     }
 
     /// Normalizes in place first, so what callers keep and publish is exactly what was stored.
@@ -697,6 +706,17 @@ mod tests {
         assert_eq!(s.limit_display, "used");
         assert!(s.tray.show_percent && s.update_check);
         assert_eq!(s.widget.hotkey, DEFAULT_HOTKEY);
+    }
+
+    #[test]
+    fn account_plans_and_prices_are_only_kept_for_account_digests() {
+        let mut s: Settings = serde_json::from_str(
+            r#"{"account_plans":{"3f9c1a7e52b0d846":"max5x","b71e04c9a3d25f18":"","not-a-digest":"pro"},"account_prices":{"3f9c1a7e52b0d846":120,"b71e04c9a3d25f18":0,"0123456789abcdef":-5}}"#,
+        )
+        .unwrap();
+        s.normalize();
+        assert_eq!(s.account_plans.into_iter().collect::<Vec<_>>(), [("3f9c1a7e52b0d846".to_owned(), "max5x".to_owned())]);
+        assert_eq!(s.account_prices.into_iter().collect::<Vec<_>>(), [("3f9c1a7e52b0d846".to_owned(), 120.0)]);
     }
 
     #[test]

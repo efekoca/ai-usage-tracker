@@ -1,12 +1,12 @@
 <script lang="ts">
   import type { PlanAdvice, PlansFile } from '../lib/api'
   import { api } from '../lib/api'
-  import { app, markTint } from '../lib/store.svelte'
+  import { accountName, app, markTint } from '../lib/store.svelte'
   import { fmtDuration, fmtMoney, fmtPct, i18n, t } from '../lib/i18n.svelte'
   import Icon from './Icon.svelte'
   import BrandIcon from './BrandIcon.svelte'
 
-  let { advice, plans, detected = false, compact = false }: { advice: PlanAdvice; plans: PlansFile | null; detected?: boolean; compact?: boolean } = $props()
+  let { advice, plans, compact = false }: { advice: PlanAdvice; plans: PlansFile | null; compact?: boolean } = $props()
 
   const a = $derived(advice)
   const list = $derived(plans?.providers[a.provider]?.plans ?? [])
@@ -58,7 +58,7 @@
         out.push(t('advice.why.insufficient', { n: a.observed_days }))
         break
       case 'no_plan':
-        out.push(t('advice.why.noPlan'))
+        out.push(t(a.account ? 'advice.why.noPlanAccount' : 'advice.why.noPlan'))
         break
       case 'not_applicable':
         out.push(t('advice.why.notApplicable'))
@@ -77,8 +77,8 @@
     <span class="mark" aria-hidden="true"><Icon name={icon} size={16} /></span>
     <div class="titles">
       <div class="who">
-        <BrandIcon provider={a.provider} size={13} color={markTint(a.provider)} />{t(`provider.${a.provider}`)}{#if a.plan}{` · ${name(a.plan)}`}{/if}
-        {#if detected}<span class="pill">{t('advice.detected')}</span>{/if}
+        <BrandIcon provider={a.provider} size={13} color={markTint(a.provider)} />{t(`provider.${a.provider}`)}{#if a.account}{` · ${accountName(a.account, a.provider)}`}{/if}{#if a.plan}{` · ${name(a.plan)}`}{/if}
+        {#if a.detected}<span class="pill">{t('advice.detected')}</span>{/if}
       </div>
       <h3>{title}</h3>
       {#if price}<div class="price">{price}</div>{/if}

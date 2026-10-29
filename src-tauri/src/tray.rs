@@ -453,8 +453,9 @@ pub fn badge(text: &str, size: u32, level: Level) -> Vec<u8> {
     let (gw, gh) = if narrow { (4i64, 7i64) } else { (5, 7) };
     let n = digits.len() as i64;
     let units_w = n * gw + (n - 1);
-    // largest whole-pixel scale that leaves a one-pixel margin
-    let unit = (((s - 2) / units_w).min((s - 2) / gh)).max(1);
+    // largest whole-pixel scale that leaves a one-pixel margin; one digit is sized as two so "7" matches "28"
+    let fit_w = n.max(2) * gw + (n.max(2) - 1);
+    let unit = (((s - 2) / fit_w).min((s - 2) / gh)).max(1);
     let (w, h) = (units_w * unit, gh * unit);
     let (ox, oy) = ((s - w) / 2, (s - h) / 2);
     for (k, d) in digits.iter().enumerate() {
@@ -503,6 +504,17 @@ mod tests {
                 // the glyph boxes are centred; a narrow glyph (the 1) may sit a pixel or two off
                 assert!((minx as i64 - (size - 1 - maxx) as i64).abs() <= 2, "{text} at {size}");
             }
+        }
+    }
+
+    #[test]
+    fn one_digit_is_as_tall_as_two() {
+        for size in [16, 20, 24, 32, 40] {
+            let height = |text: &str| {
+                let on = lit(&badge(text, size, Level::Normal), size, colors(Level::Normal).1);
+                on.iter().map(|p| p.1).max().unwrap() - on.iter().map(|p| p.1).min().unwrap()
+            };
+            assert_eq!(height("7"), height("28"), "at {size}");
         }
     }
 
