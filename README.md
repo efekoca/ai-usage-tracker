@@ -247,7 +247,7 @@ Windows 10 and 11.
 1. Run `AI-Usage-Tracker_x.y.z_x64-setup.exe`. The installer is **per-user** (it installs to `%LOCALAPPDATA%\AI Usage Tracker`) and needs no administrator rights.
 2. Windows 11 already includes WebView2. On Windows 10, the installer adds it if it is missing.
 
-> **SmartScreen.** The installer is not code-signed yet, so Windows may show "Unknown publisher". Choose **More info → Run anyway**.
+> **SmartScreen.** The installer is not code-signed, so Windows may show "Unknown publisher". Choose **More info → Run anyway**.
 
 **Uninstall.** Use Windows Settings → Apps. The uninstaller reverts the Claude Code settings changed under **Live capture**. Ticking "Delete the application data" also removes `%LOCALAPPDATA%\AIUsageTracker`. The start-with-Windows entry is always removed.
 

@@ -46,7 +46,7 @@ jobs:
       - name: Install UI dependencies
         run: npm --prefix ui ci --ignore-scripts
 
-      # no update signing key on the runner: the updater signature is added after code signing
+      # no update signing key on the runner: the maintainer adds the updater signatures with sign-release
       - name: Build installer
         run: npm --prefix ui run release
 
