@@ -58,28 +58,31 @@ impl PlansFile {
 
     /// One of several accounts' plan: the one chosen for it, else the one its newest reading
     /// names, else the provider's. A reading that fits more than one plan (Claude's "max") takes
-    /// the provider's plan only when that is one of them, and else leaves the choice to the user.
+    /// the provider's plan only when that is one of them; a reading no listed plan fits rules the
+    /// provider's plan out too. Either way the choice is left to the user.
     pub fn account_plan(&self, p: Provider, chosen: Option<&str>, read: Option<&str>, provider_plan: Option<&str>) -> Option<String> {
         if let Some(id) = chosen.filter(|id| self.find(p, id).is_some()) {
             return Some(id.to_owned());
         }
         let provider_plan = provider_plan.filter(|id| self.find(p, id).is_some());
         let Some(read) = read else { return provider_plan.map(str::to_owned) };
-        let fits: Vec<&str> = self.plans(p).iter().map(|d| d.id.as_str()).filter(|id| read_name(p, id) == read).collect();
-        match (fits.as_slice(), provider_plan) {
-            ([], plan) => plan.map(str::to_owned),
-            (_, Some(plan)) if fits.contains(&plan) => Some(plan.to_owned()),
+        let fit: Vec<&str> = self.plans(p).iter().map(|d| d.id.as_str()).filter(|id| fits(p, id, read)).collect();
+        match (fit.as_slice(), provider_plan) {
+            (_, Some(plan)) if fit.contains(&plan) => Some(plan.to_owned()),
             ([only], _) => Some((*only).to_owned()),
             _ => None,
         }
     }
 }
 
-/// The name a limit reading gives a plan: Claude reports "max" for both Max plans.
-pub fn read_name(p: Provider, id: &str) -> &str {
-    match p {
-        Provider::Anthropic if id.starts_with("max") => "max",
-        _ => id,
+/// Whether a limit reading's plan name fits a plan: Claude reports "max" for both Max plans,
+/// Codex "team" for Business and "edu" for Enterprise / Edu.
+pub fn fits(p: Provider, id: &str, read: &str) -> bool {
+    match (p, id) {
+        (Provider::Anthropic, id) if id.starts_with("max") => read == "max",
+        (Provider::OpenAI, "business") => read == "business" || read == "team",
+        (Provider::OpenAI, "enterprise") => read == "enterprise" || read == "edu",
+        _ => id == read,
     }
 }
 
@@ -114,9 +117,12 @@ mod tests {
         assert_eq!(plan(None, Some("max"), Some("pro")), None, "Max 5x or 20x is the user's to say");
         assert_eq!(plan(None, Some("max"), None), None);
         assert_eq!(plan(None, None, Some("pro")).as_deref(), Some("pro"));
-        assert_eq!(plan(None, Some("enterprise_x"), Some("pro")).as_deref(), Some("pro"), "a plan the list lacks names nothing");
+        assert_eq!(plan(None, Some("team"), Some("pro")), None, "a reading no listed plan fits rules out the provider's plan too");
         assert_eq!(plan(Some("gone"), Some("pro"), None).as_deref(), Some("pro"), "a choice no longer listed is ignored");
-        assert_eq!(f.account_plan(Provider::OpenAI, None, Some("plus"), Some("pro")).as_deref(), Some("plus"));
+        let codex = |read| f.account_plan(Provider::OpenAI, None, Some(read), Some("plus"));
+        assert_eq!(codex("plus").as_deref(), Some("plus"));
+        assert_eq!(codex("team").as_deref(), Some("business"), "Codex still calls Business \"team\"");
+        assert_eq!(codex("edu").as_deref(), Some("enterprise"));
     }
 
     #[test]

@@ -3,7 +3,7 @@
   import { untrack } from 'svelte'
   import { accountName, app, latest, providerColor, saveSettings, tint, markTint } from '../lib/store.svelte'
   import { api, providersOf, type AccountValue, type PlanDef, type PlansFile, type PlanValue, type Provider, type ProviderValue } from '../lib/api'
-  import { accountPlan, planPrice } from '../lib/plans'
+  import { accountPlan, planPrice, priceKey } from '../lib/plans'
   import { fmtDate, fmtDec, fmtInt, fmtMoney, i18n, parseNumber, t } from '../lib/i18n.svelte'
   import Icon from './Icon.svelte'
   import BrandIcon from './BrandIcon.svelte'
@@ -55,10 +55,10 @@
   function setAccountPlan(id: string, plan: string) {
     saveSettings((c) => ({ account_plans: { ...c.account_plans, [id]: plan } }))
   }
-  function setAccountPrice(id: string, raw: string) {
+  function setAccountPrice(key: string, raw: string) {
     const v = parseNumber(raw)
     if (!(v !== null && v > 0)) return
-    saveSettings((c) => ({ account_prices: { ...c.account_prices, [id]: v } }))
+    saveSettings((c) => ({ account_prices: { ...c.account_prices, [key]: v } }))
   }
 
   const shareOf = (usd: number | null) => (usd !== null ? (usd * (value?.dates.length ?? 30)) / DAYS_PER_MONTH : null)
@@ -85,8 +85,8 @@
         return { id, plan, price, share: shareOf(price.usd), use: pv?.accounts.find((x) => x.account === id) }
       })
     const unknown = pv?.accounts.find((x) => x.account === null)
-    // use billed at API rates has no plan to set it against
-    const counted = parts.filter((x) => x.plan?.id !== 'api')
+    // use billed at API rates, or on a free plan, is not paid for by the plans counted here
+    const counted = parts.filter((x) => x.plan?.id !== 'api' && x.price.usd !== 0)
     const missing = counted.find((x) => !x.plan || x.share === null)
     const uses = [...counted.map((x) => x.use), unknown].filter((u): u is AccountValue => !!u)
     const cost = uses.reduce((t, u) => t + u.cost_usd, 0)
@@ -104,6 +104,7 @@
       day: share > 0 ? cumulative.findIndex((c) => c >= share) : -1,
       monthly: counted.reduce((t, x) => t + (x.price.usd ?? 0), 0),
       custom: counted.some((x) => x.price.custom),
+      accounts: counted.length,
       events: uses.reduce((t, u) => t + u.events, 0),
       unpriced: uses.reduce((t, u) => t + u.unpriced_events, 0),
     }
@@ -190,8 +191,8 @@
     {#if !used.length}<p class="muted small">{t('value.noUse')}</p>{/if}
     <div class="rows">
       {#each used as p (p)}
-        {#if app.accounts.some((a) => a.provider === p)}
-          {@const m = split(p)}
+        {@const m = app.accounts.some((a) => a.provider === p) ? split(p) : null}
+        {#if m && m.parts.length}
           {@const miss = m.missing}
           <div class="prow">
             <div class="who">
@@ -200,6 +201,7 @@
             </div>
             {#if miss}
               {@render usage(p, m.pv)}
+              {#key miss.id}
               <div class="pick">
                 <span class="small"><b>{accountName(miss.id, p)}</b> · {miss.plan ? (miss.plan.price_note?.[i18n.lang] ?? t('value.enterPrice')) : t('value.pickAccount')}</span>
                 {#if !miss.plan}
@@ -211,25 +213,27 @@
                     onchange={(v) => setAccountPlan(miss.id, v)}
                   />
                 {:else}
-                  {#each miss.plan.price_options ?? [] as o (o)}
-                    <button class="btn small" onclick={() => setAccountPrice(miss.id, String(o))}>{fmtMoney(o)}</button>
+                  {@const plan = miss.plan}
+                  {#each plan.price_options ?? [] as o (o)}
+                    <button class="btn small" onclick={() => setAccountPrice(priceKey(miss.id, plan.id), String(o))}>{fmtMoney(o)}</button>
                   {/each}
-                  <input class="field price" inputmode="decimal" placeholder={t('value.price')} aria-label="{accountName(miss.id, p)} · {t('value.price')}" onchange={(e) => setAccountPrice(miss.id, e.currentTarget.value)} />
+                  <input class="field price" inputmode="decimal" placeholder={t('value.price')} aria-label="{accountName(miss.id, p)} · {t('value.price')}" onchange={(e) => setAccountPrice(priceKey(miss.id, plan.id), e.currentTarget.value)} />
                 {/if}
               </div>
+              {/key}
             {:else if m.share <= 0}
               <p class="muted small">{m.parts.every((x) => x.plan?.id === 'api') ? t('value.api') : t('value.free')}</p>
             {:else if m.events === 0}
               <p class="muted small">{t('value.noUse')}</p>
             {:else}
-              {@render compare(p, m.cost, m.share, m.ratio, m.day, m.cumulative, `${fmtMoney(m.monthly)}/${i18n.lang === 'tr' ? 'ay' : 'mo'} ${m.custom ? t('value.customPrice') : t('value.listPrice')} · ${t('value.accounts', { n: m.parts.length })}`)}
+              {@render compare(p, m.cost, m.share, m.ratio, m.day, m.cumulative, `${fmtMoney(m.monthly)}/${i18n.lang === 'tr' ? 'ay' : 'mo'} ${m.custom ? t('value.customPrice') : t('value.listPrice')} · ${t('value.accounts', { n: m.accounts })}`)}
               <ul class="parts small">
                 {#each m.parts as x (x.id)}
                   <li>
                     <span class="pname">{accountName(x.id, p)}</span>
                     <span class="subtle">{x.plan?.name ?? ''}</span>
                     <span class="num">{fmtMoney(x.use?.cost_usd ?? 0)}</span>
-                    <span class="num subtle">{x.share && x.plan?.id !== 'api' ? multiple((x.use?.cost_usd ?? 0) / x.share) : '—'}</span>
+                    <span class="num subtle">{x.share ? multiple((x.use?.cost_usd ?? 0) / x.share) : '—'}</span>
                   </li>
                 {/each}
                 {#if m.unknown && m.unknown.events > 0}

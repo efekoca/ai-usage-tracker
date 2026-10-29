@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import { accountName, accountOf, app, saveSettings, markTint } from '../lib/store.svelte'
   import { api, providersOf, type PlanDef, type PlansFile, type Provider, type Threshold } from '../lib/api'
-  import { accountPlan } from '../lib/plans'
+  import { accountPlan, autoPlan, priceKey } from '../lib/plans'
   import { fmtCompact, fmtDate, fmtInput, fmtMoney, fmtPct, i18n, limitName, parseNumber, t, windowLabel } from '../lib/i18n.svelte'
   import LimitMeter from '../components/LimitMeter.svelte'
   import AccuracyBadge from '../components/AccuracyBadge.svelte'
@@ -61,13 +61,13 @@
       return { account_plans: next }
     })
   }
-  function setAccountPrice(id: string, raw: string): boolean {
+  function setAccountPrice(key: string, raw: string): boolean {
     const v = parseNumber(raw)
     if (raw.trim() !== '' && !(v !== null && v > 0)) return false
     saveSettings((c) => {
       const next = { ...c.account_prices }
-      if (v !== null && v > 0) next[id] = v
-      else delete next[id]
+      if (v !== null && v > 0) next[key] = v
+      else delete next[key]
       return { account_prices: next }
     })
     return true
@@ -163,27 +163,29 @@
         {#if a.id !== null && plans}
           {@const id = a.id}
           {@const plan = accountPlan(plans, app.settings, a)}
+          {@const auto = autoPlan(plans, app.settings, a)}
           <Select
             label="{accountName(id, p)} · {t('limits.plan')}"
             value={app.settings?.account_plans?.[id] ?? ''}
-            options={[{ value: '', label: plan ? t('accounts.plan.auto', { plan: plan.name }) : t('value.pickPlan') }, ...plans.providers[p].plans.map((pl) => ({ value: pl.id, label: pl.name, sub: pl.relative }))]}
+            options={[{ value: '', label: auto ? t('accounts.plan.auto', { plan: auto.name }) : t('value.pickPlan') }, ...plans.providers[p].plans.map((pl) => ({ value: pl.id, label: pl.name, sub: pl.relative }))]}
             onchange={(v) => setAccountPlan(id, v)}
           />
           <span class="extra">
             {#if plan && plan.id !== 'api' && plan.monthly_usd !== 0}
-              {@const own = app.settings?.account_prices?.[id]}
+              {@const key = priceKey(id, plan.id)}
+              {@const own = app.settings?.account_prices?.[key]}
               <label class="price">
                 <span class="subtle small">{t('value.price')}</span>
-                <input class="field" inputmode="decimal" value={fmtInput(own)} placeholder={fallbackPrice(p, plan)} aria-label="{accountName(id, p)} · {t('value.price')}" onchange={(e) => { if (!setAccountPrice(id, e.currentTarget.value)) e.currentTarget.value = fmtInput(own) }} title={plan.price_note?.[i18n.lang] ?? ''} />
+                <input class="field" inputmode="decimal" value={fmtInput(own)} placeholder={fallbackPrice(p, plan)} aria-label="{accountName(id, p)} · {t('value.price')}" onchange={(e) => { if (!setAccountPrice(key, e.currentTarget.value)) e.currentTarget.value = fmtInput(own) }} title={plan.price_note?.[i18n.lang] ?? ''} />
               </label>
             {:else if !plan && a.read_plan}
               <span class="subtle small">{t('accounts.plan.which')}</span>
             {/if}
           </span>
         {:else}
-          <span></span><span></span>
+          <span class="pad"></span><span class="pad"></span>
         {/if}
-        <span class="subtle small">{t('accounts.seen', { from: fmtDate(a.first_ms, 'short'), to: fmtDate(a.last_ms, 'short') })}</span>
+        <span class="subtle small seen">{t('accounts.seen', { from: fmtDate(a.first_ms, 'short'), to: fmtDate(a.last_ms, 'short') })}</span>
         <span class="num small reqs">{fmtCompact(a.requests)} {t(a.requests === 1 ? 'accounts.request' : 'accounts.requests')}</span>
       </div>
     {/each}
@@ -401,7 +403,7 @@
   /* name, in-use mark, plan, price, then when it was seen */
   .acct-row {
     display: grid;
-    grid-template-columns: 168px 84px 176px minmax(0, 1fr) auto auto;
+    grid-template-columns: 168px 84px 176px auto minmax(0, 1fr) auto;
     align-items: center;
     gap: 8px 12px;
     padding: 6px 0;
@@ -419,15 +421,25 @@
   .acct-row .price .field {
     width: 128px;
   }
+  .seen {
+    min-width: 0;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .reqs {
     text-align: right;
     white-space: nowrap;
   }
-  @container accounts (max-width: 820px) {
+  @container accounts (max-width: 940px) {
     .acct-row {
-      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-columns: minmax(0, 340px) minmax(0, 1fr);
     }
-    .acct-row .extra:empty {
+    .seen {
+      text-align: left;
+    }
+    .acct-row .pad {
       display: none;
     }
   }

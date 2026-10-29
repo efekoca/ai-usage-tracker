@@ -702,6 +702,10 @@ fn each_account_gets_advice_on_its_own_plan_windows_and_days() {
     let listed: Vec<(Option<String>, Option<String>)> =
         accounts(&c.store).unwrap().into_iter().map(|x| (x.id, x.read_plan)).collect();
     assert_eq!(listed, [(Some(a.clone()), Some("pro".into())), (Some(b.clone()), Some("max".into()))]);
+    // an older version's row dated far ahead of the clock does not decide the plan
+    c.read_on("max20x-typo", BASE - H, "claude_code_usage", Some(b.clone()), week + 3600, 8.0);
+    c.store.conn().execute("UPDATE limit_snapshot SET ts_ms = ?1 WHERE plan = 'max20x-typo'", [BASE + 50 * 365 * 86_400_000]).unwrap();
+    assert_eq!(accounts(&c.store).unwrap()[1].read_plan.as_deref(), Some("max"));
     let h = limit_history(&c.store, BASE, 28).unwrap();
     let pro = account_advice(&h, Provider::Anthropic, &a, Some("pro"), &plans, BASE);
     assert!(matches!(pro.kind, AdviceKind::Upgrade), "{pro:?}");

@@ -80,13 +80,18 @@
     const shareOf = (usd: number | null) => (usd !== null && usd > 0 ? (usd * days) / (365.25 / 12) : null)
     // several accounts: each one seen in the period on its own plan, against their prices together
     const start = from ? new Date(`${from}T00:00:00`).getTime() : 0
-    const several = accounts.filter((a) => a.provider === p && a.id !== null && a.last_ms >= start)
+    const [y, mo, d] = to.split('-').map(Number)
+    const end = to ? new Date(y, mo - 1, d + 1).getTime() : Infinity
+    const several = accounts.filter((a) => a.provider === p && a.id !== null && a.last_ms >= start && a.first_ms < end)
     if (several.length) {
-      const parts = several.map((a) => accountPlan(plans, s, a)).map((plan, i) => ({ plan, usd: planPrice(s, p, plan, several[i].id).usd })).filter((x) => x.plan?.id !== 'api')
-      const label = [...new Set(parts.map((x) => x.plan?.name).filter(Boolean))].join(' + ')
+      const all = several.map((a) => accountPlan(plans, s, a)).map((plan, i) => ({ plan, usd: planPrice(s, p, plan, several[i].id).usd }))
+      // the summary has no per-account cost, so use on the API or a free plan cannot be taken out
+      const unpaid = all.filter((x) => x.plan?.id === 'api' || x.usd === 0)
+      const parts = all.filter((x) => !unpaid.includes(x))
+      const label = [...new Set(parts.map((x) => x.plan?.name).filter(Boolean))].join(' + ') + (parts.length > 1 ? ` · ${t('value.accounts', { n: parts.length })}` : '')
       const missing = parts.some((x) => !x.plan || x.usd === null)
-      const share = missing ? null : shareOf(parts.reduce((t, x) => t + (x.usd ?? 0), 0))
-      const note = !parts.length ? t('value.api') : parts.some((x) => !x.plan) ? t('rep.noPlan') : missing ? t('value.enterPrice') : t('value.free')
+      const share = missing || unpaid.length ? null : shareOf(parts.reduce((t, x) => t + (x.usd ?? 0), 0))
+      const note = parts.some((x) => !x.plan) ? t('rep.noPlan') : missing ? t('value.enterPrice') : unpaid.length && parts.length ? t('rep.valueUnpaid') : unpaid.every((x) => x.plan?.id === 'api') ? t('value.api') : t('value.free')
       return { label, cost, share, ratio: share ? cost / share : null, note }
     }
     const planId = s?.plans[p]

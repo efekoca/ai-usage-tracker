@@ -45,6 +45,9 @@ pub struct WindowRecord {
     pub in_progress: bool,
     /// Plan named by the readings (Codex), when any.
     pub plan: Option<String>,
+    /// Every plan the readings name; a window read on two plans is no evidence for either.
+    #[serde(skip)]
+    pub plans: Vec<String>,
     /// This computer's logged use of the provider inside the window (see [`add_local_usage`]).
     pub local: LocalUsage,
 }
@@ -277,7 +280,9 @@ fn record(items: &[&Reading], reset: Option<(i64, i64)>, dur_ms: i64, now_ms: i6
             *plans.entry(p.as_str()).or_default() += 1;
         }
     }
-    let plan = plans.into_iter().max_by_key(|(p, n)| (*n, std::cmp::Reverse(*p))).map(|(p, _)| p.to_owned());
+    let plan = plans.iter().max_by_key(|(p, n)| (**n, std::cmp::Reverse(**p))).map(|(p, _)| (*p).to_owned());
+    let mut named: Vec<String> = plans.into_keys().map(str::to_owned).collect();
+    named.sort();
     WindowRecord {
         start_ms: reset.map(|(r, _)| r - dur_ms),
         resets_at_ms: reset.map(|(r, _)| r),
@@ -296,6 +301,7 @@ fn record(items: &[&Reading], reset: Option<(i64, i64)>, dur_ms: i64, now_ms: i6
         complete,
         in_progress,
         plan,
+        plans: named,
         local: LocalUsage::default(),
     }
 }
@@ -456,9 +462,9 @@ fn stats(history: &LimitHistory, provider: Provider, pick: &dyn Fn(&WindowSeries
             if w.resets_at_ms.unwrap_or(w.last_ms) < since_ms {
                 continue;
             }
-            // a window recorded under another plan says nothing about this one
-            if let (Some(want), Some(had)) = (plan_filter, &w.plan)
-                && want != had
+            // a window read on another plan, even in part, says nothing about this one
+            if let Some(want) = plan_filter
+                && w.plans.iter().any(|had| !crate::plans::fits(provider, want, had))
             {
                 continue;
             }
@@ -493,8 +499,6 @@ pub fn account_advice(history: &LimitHistory, provider: Provider, account: &str,
 
 fn advise(history: &LimitHistory, provider: Provider, pick: &dyn Fn(&WindowSeries) -> bool, observed_days: u32, plan_id: Option<&str>, plans: &PlansFile, now_ms: i64) -> PlanAdvice {
     let since = now_ms - ADVICE_DAYS * DAY_MS;
-    // Codex readings name the plan exactly; Claude's say only "max", which fits both Max plans
-    let filter = plan_id.map(|id| crate::plans::read_name(provider, id));
     let mut a = PlanAdvice {
         provider,
         account: None,
@@ -505,8 +509,8 @@ fn advise(history: &LimitHistory, provider: Provider, pick: &dyn Fn(&WindowSerie
         strong: false,
         days: ADVICE_DAYS,
         observed_days,
-        five_hour: stats(history, provider, pick, "five_hour", filter, since),
-        weekly: stats(history, provider, pick, "seven_day", filter, since),
+        five_hour: stats(history, provider, pick, "five_hour", plan_id, since),
+        weekly: stats(history, provider, pick, "seven_day", plan_id, since),
         session_ratio: None,
         projected_five_hour: None,
         projected_weekly_if_same_ratio: None,

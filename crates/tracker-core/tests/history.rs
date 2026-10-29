@@ -278,6 +278,46 @@ fn without_enough_days_or_a_plan_nothing_is_recommended() {
 }
 
 #[test]
+fn a_window_read_on_two_plans_counts_for_neither() {
+    let plans = PlansFile::bundled();
+    for (before, after) in [("pro", "max"), ("max", "pro")] {
+        let mut v = Vec::new();
+        // one week Pro filled and then Max read at 10 % (or the other way round), the reset kept
+        let mixed = NOW - DAY;
+        v.push(snap(mixed - 6 * DAY, Provider::Anthropic, "seven_day", 100.0, mixed, Some(before)));
+        for d in 0..5 {
+            v.push(snap(mixed - 5 * DAY + d * DAY, Provider::Anthropic, "seven_day", 10.0, mixed, Some(after)));
+        }
+        // the week before, read on each plan alone and filled
+        let pure = mixed - WEEK;
+        v.push(snap(pure - 2 * DAY, Provider::Anthropic, "seven_day", 100.0, pure, Some("max")));
+        let pro_week = pure - WEEK;
+        v.push(snap(pro_week - 2 * DAY, Provider::Anthropic, "seven_day", 100.0, pro_week, Some("pro")));
+        let h = limit_history(&store_with(v), NOW, 28).unwrap();
+        let max = plan_advice(&h, Provider::Anthropic, Some("max5x"), &plans, NOW);
+        assert_eq!((max.weekly.windows, max.weekly.full), (1, 1), "{before} then {after}: only the week read on Max alone");
+        let pro = plan_advice(&h, Provider::Anthropic, Some("pro"), &plans, NOW);
+        assert_eq!((pro.weekly.windows, pro.weekly.full), (1, 1), "{before} then {after}: only the week read on Pro alone");
+    }
+}
+
+#[test]
+fn codex_team_readings_count_for_the_business_plan() {
+    let v = (1..=3)
+        .map(|d| {
+            let reset = NOW - d * DAY;
+            snap(reset - 10 * MIN, Provider::OpenAI, "five_hour", 100.0, reset, Some("team"))
+        })
+        .collect();
+    let h = limit_history(&store_with(v), NOW, 28).unwrap();
+    let plans = PlansFile::bundled();
+    let business = plan_advice(&h, Provider::OpenAI, Some("business"), &plans, NOW);
+    assert_eq!((business.five_hour.windows, business.five_hour.full), (3, 3));
+    let plus = plan_advice(&h, Provider::OpenAI, Some("plus"), &plans, NOW);
+    assert_eq!(plus.five_hour.windows, 0, "a Business window says nothing about Plus");
+}
+
+#[test]
 fn claude_windows_from_another_plan_do_not_count() {
     let mut v = Vec::new();
     // Max now, at 10 % on ten days

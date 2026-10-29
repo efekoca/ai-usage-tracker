@@ -84,7 +84,7 @@ Her pencere için ne kadar süre dolu kaldığı ve sonuna kadar izlenip izlenme
 
 Claude okumaları iki Max planı için de yalnızca "max" der; bu yüzden planınızı **Limitler** sayfasından seçin. Seçtiğiniz plandan farklı bir planda okunmuş Claude pencereleri (Pro ile Max arasında) hesaba katılmaz. Codex okumaları planın adını tam olarak içerir ve siz plan seçmediyseniz bu bilgi kullanılır.
 
-Birden fazla Codex ya da Claude hesabınız varsa her hesap, kendi pencerelerine ve kendi planına göre ayrı bir öneri alır. Her hesabın planını **Limitler** sayfasından seçin. Plan seçmediğiniz hesap, okumalarının söylediği planı alır. Claude okumaları Max 5x ile Max 20x'i ayırmaz; bu yüzden Max hesabı, Claude için seçtiğiniz Max planını alır ya da sizden seçmenizi ister. Okuması olmayan hesap, sağlayıcı için seçtiğiniz planı alır. Bir hesap limitlere takılırken diğerinde yer varsa **Öneriler** sayfası bunu söyler.
+Birden fazla Codex ya da Claude hesabınız varsa her hesap, kendi pencerelerine ve kendi planına göre ayrı bir öneri alır. Her hesabın planını **Limitler** sayfasından seçin. Plan seçmediğiniz hesap, okumalarının söylediği planı alır. Claude okumaları Max 5x ile Max 20x'i ayırmaz; bu yüzden Max hesabı, Claude için seçtiğiniz Max planını alır ya da sizden seçmenizi ister. Okumalar listede olmayan bir plan söylüyorsa da seçmenizi ister. Okuması olmayan hesap, sağlayıcı için seçtiğiniz planı alır. Bir hesap limitlere takılırken diğerinde yer varsa **Öneriler** sayfası bunu söyler.
 
 **Bulgular.** Her kuralın sabit bir eşiği vardır. Bir bulgunun gösterilmesi için tutarın en az 0,50 $ olması ve dönem maliyetinin en az %1'ine ulaşması gerekir. Uygulama şunlara bakar:
 
@@ -99,7 +99,7 @@ Tutarlar API eşdeğeridir. Abonelikle kullanıyorsanız bu tutarları ödemezsi
 
 - **Liste fiyatları** [`config/plans.json`](config/plans.json) dosyasındadır ve 2026-10-02'de resmi sayfalardan doğrulanmıştır ([Claude](https://claude.com/pricing), [ChatGPT](https://learn.chatgpt.com/docs/pricing)).
 - **Kendi fiyatınız:** Sabit fiyatı olmayan planlarda (ChatGPT Pro, Enterprise) fiyatı siz girersiniz. Her planın fiyatını **Limitler** sayfasından değiştirebilirsiniz (örneğin yıllık ödüyorsanız).
-- **Birden fazla hesap:** Bu 30 günde görülen her Codex ve Claude hesabı kendi planı ve fiyatıyla hesaba katılır; fiyatlar toplanır. Kart her hesabın API eşdeğeri kullanımını planıyla birlikte listeler. Hiçbir hesaba bağlanamayan kullanım yalnızca toplama girer.
+- **Birden fazla hesap:** Bu 30 günde görülen her Codex ve Claude hesabı kendi planı ve fiyatıyla hesaba katılır; fiyatlar toplanır. Kart her hesabın API eşdeğeri kullanımını planıyla birlikte listeler. Ücretsiz plandaki ya da API fiyatıyla ödenen kullanım toplama girmez; hiçbir hesaba bağlanamayan kullanım ise yalnızca toplama girer. Bir hesaba girdiğiniz fiyat, yalnızca o hesabın o anki planı için geçerlidir.
 - **Alt sınır:** Claude ve ChatGPT'deki sohbet kullanımı yerel kayıtlarda olmadığı için gerçek değer daha yüksek olabilir.
 
 ### Kullanımınızı gün gün görün
