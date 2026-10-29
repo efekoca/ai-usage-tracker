@@ -12,7 +12,7 @@ AI Usage Tracker, Windows, macOS ve Linux'ta çalışan bir uygulamadır. Yapay 
 
 [Özellikler](#özellikler) · [Kurulum](#kurulum) · [Gizlilik](#gizlilik) · [Nasıl çalışır](#nasıl-çalışır) · [Kaynaktan derleme](#kaynaktan-derleme) · [English](README.md)
 
-![Genel bakış ekranı: 30 günlük trend, token dağılımı ve güncel limitler; yanında bugünkü token sayısını ve limit halkalarını gösteren masaüstü widget'ı](assets/readme/hero-tr.webp)
+![Genel bakış ekranı: Claude Code, Codex, Antigravity ve OpenCode için 30 günlük trend ve abonelik değeri; yanında bugünkü token sayısını, limit halkalarını ve OpenCode kullanımını gösteren masaüstü widget'ı](assets/readme/hero-tr.webp)
 
 - **Verileriniz sizde kalır.** Prompt ve yanıtlarınız uygulamanın arşivine hiçbir zaman kaydedilmez. Uygulama yalnızca sayıları ve meta verileri bilgisayarınızdaki bir dosyada tutar ve hiçbir yere göndermez.
 - **Her sayının nereden geldiğini bilirsiniz.** Araçtan doğrudan okunan değerler **Kesin**, uygulamanın hesapladıkları **Tahmini**, canlı okunanlar **Yakalanan** etiketiyle gösterilir. Hiçbir değer sessizce tahmin edilmez.
@@ -30,7 +30,7 @@ AI Usage Tracker, Windows, macOS ve Linux'ta çalışan bir uygulamadır. Yapay 
 - **Önbelleğin size ne kazandırdığını ölçün.** İsabet oranını, net tasarrufu ve uzun bir aradan sonra önbelleğin yeniden yazılmasının maliyetini görürsünüz.
 - **Geçmişinizi kaybetmeyin.** Devam ettirdiğiniz ya da kopyasından yeni oturum açtığınız sohbetler iki kez sayılmaz. Claude Code kayıtlarını 30 gün sonra silse bile geçmişiniz uygulamanın veri tabanında kalır.
 
-![Kısa bir tur: grafik ipucu ve abonelik değeriyle genel bakış, Antigravity dahil güncel limitler, limit geçmişi, öneriler, günlük görünüm, model karşılaştırması, canlı yakalama ve widget'ın yerleşimini değiştiren Widget stüdyosu](assets/readme/demo-tr.gif)
+![Kısa bir tur: grafik ipucu ve abonelik değeriyle genel bakış, hesap filtresi, her Claude hesabı için ayrı limitler, limit geçmişi, öneriler, günlük görünüm, model karşılaştırması, Menü çubuğu sayfası ve widget'ın yerleşimini değiştiren Widget stüdyosu](assets/readme/demo-tr.webp)
 
 ## Özellikler
 
@@ -38,7 +38,7 @@ AI Usage Tracker, Windows, macOS ve Linux'ta çalışan bir uygulamadır. Yapay 
 
 5 saatlik ve haftalık limit yüzdeleriniz Claude Code'un, Codex'in ve Antigravity CLI'ın kendi arayüzlerinden okunur; gördüğünüz sayılar araçların gösterdiğiyle aynıdır. Her pencerenin ne zaman dolacağını ve her projenin limitin ne kadarını kullandığını görürsünüz.
 
-![Limitler sayfası: Claude, Codex ve Antigravity'nin 5 saatlik ve haftalık pencereleri, dolma tahminleri ve proje paylarıyla](assets/readme/limits-tr.webp)
+![Limitler sayfası: kullanımdaki Ekip ve Kişisel adlı iki Claude hesabının 5 saatlik ve haftalık pencereleri, dolma tahminleri, proje payları ve kayıtlarda görünmeyen kullanım](assets/readme/limits-tr.webp)
 
 Sağlayıcılar limitlerin sayısal karşılığını yayımlamıyor, yalnızca nasıl işlediklerini açıklıyor. Bu yüzden uygulama şu kurallara uyar:
 
@@ -53,13 +53,15 @@ Sağlayıcılar limitlerin sayısal karşılığını yayımlamıyor, yalnızca 
 
 **Birden fazla Claude hesabı.** Claude'un limitleri planınızın bağlı olduğu kuruluşa aittir. Bu yüzden her Claude hesabının limiti, geçmişi ve dolma tahmini ayrı görünür; aynı girişle kullandığınız bir ekip planı da ayrı hesap sayılır. Claude Code her isteğin hangi hesaptan gittiğini kaydetmez. Uygulama hesabı yalnızca bunu kesin gösteren bilgilerden öğrenir: yerel telemetri alıcısı açıksa isteğin kendi telemetri kaydından, Claude masaüstünün Code sekmesindeki oturumlarda ise masaüstünün hesabından. Telemetri kapalıyken terminaldeki bir oturum, ancak çalıştığı Claude ayar klasörü uygulamanın izlediği süre boyunca hep aynı hesapta kaldıysa o hesaba yazılır; örneğin her hesap için ayrı bir `CLAUDE_CONFIG_DIR` kullanıyorsanız. Uygulama açık hesabı, çalıştığı sürece 30 saniyede bir kontrol eder. Çalışan bir Claude Code, başka yerde `/login` yaptıktan sonra da bir süre eski girişle devam eder ve kayıtlar oturumun ne zaman açıldığını yazmaz. Bu yüzden aynı klasörde hesap değiştiriyorsanız yerel telemetri alıcısını açın. Açmazsanız bu istekler tahmin edilmez; **Tanımlanmamış hesap** altında kalır. Uygulamanın açık hesabı izlemeye başlamasından önceki istekler de öyle. Uygulamanın kendi limit okuması, Claude Code'da açık olan hesaba; masaüstü uygulamasının kullanım geçmişi masaüstünün hesabına yazılır. Klasörleriniz aynı anda farklı hesaplarda açıksa kullanımdaki hesap, uygulamanın limitleri okuduğu hesaptır. **Limitler** sayfası, kullanım filtresi, widget, panel ve menü çubuğu Codex'teki gibi çalışır. Tek hesap kullanıyorsanız hiçbir şey değişmez.
 
+![Limitler sayfasında Claude ve Codex hesapları: her birinin adı, kullanımdaki hesap, görüldüğü tarihler, istek sayısı ve hesabı belirlenemeyen istekler](assets/readme/accounts-tr.webp)
+
 **Dolma tahmini.** Uygulama her güncel okumada, pencerenin **başından bu yana ortalama hızınıza** göre bir tahmin yapar (şu anki yüzde ÷ pencere başladığından bu yana geçen süre). Her pencere %0'dan başladığı için bu hız kesin olarak bilinir ve boşta geçen saatleri de içerir; kısa bir yoğunluk hiç bitmeyecekmiş gibi ileriye taşınmaz. Sonuçta pencerenin ne zaman dolacağını ("Paz 21:12 civarında dolacak, sıfırlanmadan 9 sa önce") ya da sıfırlandığında hangi seviyede olacağını görürsünüz. Sağlayıcı bir pencereyi bitiş zamanını değiştirmeden erkenden sıfırlarsa hız o sıfırlamadan itibaren ölçülür. Pencerenin ilk onda birinde tahmin yapılmaz. Tahminler **Tahmini** etiketi taşır.
 
 ### Geçmiş limit pencerelerinizi inceleyin
 
 **Limitler** sayfasındaki **Geçmiş** sekmesinde her 5 saatlik ve haftalık pencerenizi görürsünüz: ne kadar dolduğunu, dolup dolmadığını, ne kadar sürede dolduğunu ve o sırada bu bilgisayarda ne kadar kullandığınızı. Uygulama bu pencerelerden yola çıkarak bir pencerenin tamamının API eşdeğeri olarak kaça denk geldiğini de tahmin eder.
 
-![Limit geçmişi: pencere istatistikleri, bir pencerenin API değeri ve her pencerenin en yüksek kullanımını gösteren grafik](assets/readme/history-tr.webp)
+![Limit geçmişi: sağlayıcı, hesap, pencere, dönem ve durum filtreleri, pencere istatistikleri, kullanımdaki her hesap için bir pencerenin API değeri ve her pencerenin en yüksek kullanımını hesap bazında gösteren grafik](assets/readme/history-tr.webp)
 
 Her pencere için ne kadar süre dolu kaldığı ve sonuna kadar izlenip izlenmediği de yazar. Kullanım token ve API eşdeğeri olarak gösterilir. Sonu izlenmemiş pencereler taralı çizilir; bunların en yüksek okuması "en az" olarak okunmalıdır.
 
@@ -101,7 +103,7 @@ Tutarlar API eşdeğeridir. Abonelikle kullanıyorsanız bu tutarları ödemezsi
 
 **Günlük** sayfası seçtiğiniz dönemi gün gün gösterir. Kısa dönemlerde sütunlar, uzun dönemlerde takvim görürsünüz; değerleri token, API eşdeğeri ya da istek sayısı olarak seçebilirsiniz.
 
-![Günlük sayfası: Claude Code, Codex ve Antigravity için günlük sütunlar, en yoğun gün ve aktif gün serileri](assets/readme/daily-tr.webp)
+![Günlük sayfası: araç, model, proje ve hesap filtreleri, Claude Code, Codex, Antigravity ve OpenCode için günlük sütunlar, en yoğun gün ve aktif gün serileri ve gün görünümü](assets/readme/daily-tr.webp)
 
 Sayfanın üstünde en yoğun gününüz, aktif gün başına ortalamanız, en uzun ve şu anki aktif gün seriniz ve hafta sonu payınız yer alır. Bir gün seçtiğinizde ya da aktif günler arasında gezindiğinizde o günün ayrıntıları açılır: token, maliyet, istek, oturum, ilk ve son etkinlik, önbellek isabeti, saat saat grafik, kullandığınız araçlar, modeller ve projeler, o gün ulaşılan en yüksek limit okumaları. Yanında haftanın her gününün ortalamasını ve en yoğun günlerinizi görürsünüz.
 
@@ -158,9 +160,9 @@ Net tasarruf eksi çıkıyorsa, yazılan önbellek maliyetini karşılayacak kad
 
 Widget her zaman üstte duran küçük bir penceredir. Varsayılan olarak ekranın sağ alt köşesinde durur. Neleri gösterdiğini ve nasıl göründüğünü **Widget stüdyosu**'nda canlı önizlemeyle değiştirirsiniz.
 
-![Bugünkü token ve maliyeti, Claude, Codex ve Antigravity'nin 5 saatlik limit halkalarıyla gösteren masaüstü widget'ı](assets/readme/widget-tr.webp)
+![Bugünkü token ve maliyeti, iki Claude hesabı, Antigravity ve iki Codex hesabı için 5 saatlik limit halkaları ve haftalık yüzdelerle, bugünkü OpenCode kullanımıyla gösteren masaüstü widget'ı](assets/readme/widget-tr.webp)
 
-![Widget stüdyosu: canlı önizleme ve widget'ın gösterebileceği öğelerin listesi](assets/readme/studio-tr.webp)
+![Widget stüdyosu: Claude ve Codex hesaplarını ve OpenCode kullanımını da gösteren canlı önizleme ve widget'ın gösterebileceği öğelerin listesi](assets/readme/studio-tr.webp)
 
 **Widget stüdyosu**'nda şunları ayarlayabilirsiniz:
 
@@ -178,6 +180,8 @@ Widget boyutunu içeriğe göre kendisi ayarlar. Bir köşeye sabitlediyseniz b�
   - Hepsini **Menü çubuğu** sayfasından ayarlayın: kutucukları galeriden panelin canlı önizlemesine sürükleyin, sürükleyerek sıralayın, galeriye geri sürükleyerek kaldırın. Bir kutucuğa tıklayıp boyutunu (küçük, geniş, büyük, tam genişlik) ve halka ya da çubuk görünümünü seçin.
   - Simgenin yanındaki metne istediğiniz limitleri, tahminleri, kullanım değerlerini (tüm araçlar ya da yalnızca OpenCode) ya da son taramayı istediğiniz sırayla ekleyin. Ayrıca şunları belirleyebilirsiniz: tam ad, kısa ad ya da etiketsiz; kullanılan ya da kalan; yüzde, çubuk, ikisi birden ya da daire; sıfırlanmaya kalan süre ya da saati; ayraç, metnin iki ucuna eklenecek işaretler ve uyarı eşiğini geçen değerde ⚠︎. macOS'te simgeyi gizleyip yalnızca metni bırakabilirsiniz.
 - **Kısayol:** Sistem genelinde bir tuş kısayoluyla widget'ı gösterip gizleyebilirsiniz (varsayılan **Ctrl+Alt+Shift+W**, macOS'te **⌃⌥⇧W**). Değiştirmek için **Ayarlar → Widget** bölümünü kullanabilirsiniz. Başka bir programın kullandığı kısayol kabul edilmez.
+
+![Menü çubuğu sayfası: Claude ve Codex limit halkaları, bugünkü kullanım, OpenCode kullanımı ve tahmin içeren kontrol panelinin canlı önizlemesi; yanında her hesabı içeren kutucuk galerisi](assets/readme/menubar-tr.webp)
 
 ### Haftalık rapor alın, verilerinizi yönetin
 
