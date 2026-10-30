@@ -497,32 +497,28 @@ fn menu_change(id: &str) -> Option<SettingsChange<'_>> {
 const AUTOSTART_NAME: &str = "AI Usage Tracker";
 
 /// Quoted, so a folder name with spaces cannot be read as another program.
-pub fn apply_autostart(on: bool, user_choice: bool) {
+/// Logs and returns a failure, so a switch the system refused does not stay on.
+pub fn apply_autostart(on: bool, user_choice: bool) -> Result<(), String> {
     #[cfg(windows)]
-    {
-        let r = if on {
-            std::env::current_exe().map_err(|e| e.to_string()).and_then(|exe| autostart::enable(AUTOSTART_NAME, &autostart_command(&exe), user_choice))
-        } else {
-            autostart::disable(AUTOSTART_NAME)
-        };
-        if let Err(e) = r {
-            log::warn!("autostart change failed: {e}");
-        }
-    }
+    let r = if on {
+        std::env::current_exe().map_err(|e| e.to_string()).and_then(|exe| autostart::enable(AUTOSTART_NAME, &autostart_command(&exe), user_choice))
+    } else {
+        autostart::disable(AUTOSTART_NAME)
+    };
     #[cfg(target_os = "macos")]
-    {
+    let r = {
         let _ = user_choice;
-        if let Err(e) = launch_agent::apply(on) {
-            log::warn!("autostart change failed: {e}");
-        }
-    }
+        launch_agent::apply(on)
+    };
     #[cfg(not(any(windows, target_os = "macos")))]
-    {
+    let r = {
         let _ = user_choice;
-        if let Err(e) = xdg_autostart::apply(on) {
-            log::warn!("autostart change failed: {e}");
-        }
+        xdg_autostart::apply(on)
+    };
+    if let Err(e) = &r {
+        log::warn!("autostart change failed: {e}");
     }
+    r
 }
 
 #[cfg(any(windows, test))]

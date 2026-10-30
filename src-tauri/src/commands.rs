@@ -86,6 +86,9 @@ fn save_settings_inner(app: &AppHandle, state: &AppState, make: impl FnOnce(&Set
     settings.widget.x = old.widget.x;
     settings.widget.y = old.widget.y;
     settings.widget.anchor = old.widget.anchor.clone();
+    if old.autostart != settings.autostart && windows::apply_autostart(settings.autostart, true).is_err() {
+        settings.autostart = old.autostart;
+    }
     settings.save(&store)?;
     *state.settings.write().unwrap() = settings.clone();
     drop(store);
@@ -95,9 +98,6 @@ fn save_settings_inner(app: &AppHandle, state: &AppState, make: impl FnOnce(&Set
         || old.onboarded != settings.onboarded
     {
         state.worker.send(Msg::Reconfigure);
-    }
-    if old.autostart != settings.autostart {
-        windows::apply_autostart(settings.autostart, true);
     }
     windows::apply_widget_settings(app, &settings);
     if old.theme != settings.theme {
@@ -643,9 +643,10 @@ pub fn widget_menu(app: AppHandle) {
     windows::popup_widget_menu(&app);
 }
 
+/// Async: finding a CLI can run `--version` on each install, which must not block the UI thread.
 #[tauri::command]
-pub fn capture_status(app: AppHandle) -> crate::capture::CaptureStatus {
-    crate::capture::status(&app)
+pub async fn capture_status(app: AppHandle) -> Res<crate::capture::CaptureStatus> {
+    tauri::async_runtime::spawn_blocking(move || crate::capture::status(&app)).await.map_err(err)
 }
 
 /// Async: enabling Codex runs one limit read (up to ~20 s) and must not block the UI thread.

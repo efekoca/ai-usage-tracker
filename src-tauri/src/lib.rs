@@ -369,7 +369,7 @@ pub fn run() {
             windows::apply_widget_settings(app.handle(), &settings);
             if settings.autostart {
                 // rewrites an entry made by an older version (unquoted path) and follows a moved exe
-                windows::apply_autostart(true, false);
+                let _ = windows::apply_autostart(true, false);
             }
             windows::start_fullscreen_watch(app.handle().clone());
             capture::start(app.handle());
