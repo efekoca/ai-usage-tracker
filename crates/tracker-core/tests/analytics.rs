@@ -32,7 +32,7 @@ fn all_time_report_prices_every_known_model_and_flags_unknown_ones() {
     let book = PriceBook::default_book();
     let now = ms(2026, 9, 3, 13, 0);
     let range = period_range(Period::All, &tz(), now, store.first_event_ms().unwrap());
-    let r = report(&store, &book, range, &Filter::default(), &tz()).unwrap();
+    let r = report(&store, &book, range, &Filter::default(), &tz(), i64::MAX).unwrap();
 
     assert_eq!(r.totals.events, 9);
     // hand-computed from the fixtures and bundled prices (see fixture comments in ingest.rs)
@@ -73,14 +73,14 @@ fn filters_by_tool_project_and_model() {
     let (_m, store) = loaded();
     let book = PriceBook::default_book();
     let range = Range { from_ms: 0, to_ms: i64::MAX / 2 };
-    let codex = report(&store, &book, range, &Filter { tools: vec![Tool::Codex], ..Default::default() }, &tz()).unwrap();
+    let codex = report(&store, &book, range, &Filter { tools: vec![Tool::Codex], ..Default::default() }, &tz(), i64::MAX).unwrap();
     assert_eq!(codex.totals.events, 5);
 
     let demo = store.projects().unwrap().into_iter().find(|p| p.name == "demo-app").unwrap();
-    let only_demo = report(&store, &book, range, &Filter { projects: vec![demo.id], ..Default::default() }, &tz()).unwrap();
+    let only_demo = report(&store, &book, range, &Filter { projects: vec![demo.id], ..Default::default() }, &tz(), i64::MAX).unwrap();
     assert_eq!(only_demo.totals.events, 8); // everything except the Cowork session
 
-    let sonnet = report(&store, &book, range, &Filter { models: vec!["claude-sonnet-5".into()], ..Default::default() }, &tz()).unwrap();
+    let sonnet = report(&store, &book, range, &Filter { models: vec!["claude-sonnet-5".into()], ..Default::default() }, &tz(), i64::MAX).unwrap();
     assert_eq!(sonnet.totals.events, 1);
     assert_eq!(sonnet.totals.tokens, Tokens { input: 3, cache_read: 3000, cache_write: 200, cache_write_1h: 0, output: 50, reasoning: 0 });
 }
@@ -91,7 +91,7 @@ fn trend_compares_with_the_previous_period() {
     let book = PriceBook::default_book();
     // "today" = 2026-09-02 local; previous = 2026-09-01 local
     let range = period_range(Period::Today, &tz(), ms(2026, 9, 2, 12, 0), None);
-    let r = report(&store, &book, range, &Filter::default(), &tz()).unwrap();
+    let r = report(&store, &book, range, &Filter::default(), &tz(), i64::MAX).unwrap();
     assert_eq!(r.totals.events, 1);
     assert_eq!(r.previous.events, 7);
 }
@@ -102,7 +102,7 @@ fn hidden_projects_keep_their_data_but_are_flagged() {
     let book = PriceBook::default_book();
     let demo = store.projects().unwrap().into_iter().find(|p| p.name == "demo-app").unwrap();
     store.set_project_hidden(demo.id, true).unwrap();
-    let r = report(&store, &book, Range { from_ms: 0, to_ms: i64::MAX / 2 }, &Filter::default(), &tz()).unwrap();
+    let r = report(&store, &book, Range { from_ms: 0, to_ms: i64::MAX / 2 }, &Filter::default(), &tz(), i64::MAX).unwrap();
     let g = r.by_project.iter().find(|g| g.key == demo.id.to_string()).unwrap();
     assert!(g.hidden);
     assert_eq!(r.totals.events, 9);
@@ -779,7 +779,7 @@ fn custom_ranges_are_ordered_bounded_and_never_overflow() {
         let r = period_range(Period::Custom { from: a, to: b }, &tz(), now, None);
         assert!(r.from_ms < r.to_ms && (r.to_ms - r.from_ms) / day <= MAX_RANGE_DAYS as i64);
         let store = Store::open_in_memory().unwrap();
-        let rep = report(&store, &PriceBook::default_book(), r, &Filter::default(), &tz()).unwrap();
+        let rep = report(&store, &PriceBook::default_book(), r, &Filter::default(), &tz(), i64::MAX).unwrap();
         assert!(rep.daily.len() as u64 <= MAX_RANGE_DAYS);
     }
     // an event far in the past does not stretch "all time" without bound
@@ -803,7 +803,7 @@ fn cache_reuse_counts_codex_models_that_log_their_writes() {
         tx.commit().unwrap();
     }
     let range = Range { from_ms: now - 86_400_000, to_ms: now };
-    let r = report(&store, &PriceBook::default_book(), range, &Filter::default(), &tz()).unwrap();
+    let r = report(&store, &PriceBook::default_book(), range, &Filter::default(), &tz(), i64::MAX).unwrap();
     assert_eq!((r.totals.cache_read_with_writes, r.totals.cache_write_with_reads), (4_000, 1_000));
 }
 

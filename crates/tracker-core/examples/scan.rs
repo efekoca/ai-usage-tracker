@@ -81,7 +81,7 @@ fn main() {
     for period in [Period::Today, Period::Month1, Period::All] {
         let range = period_range(period, &chrono::Local, now, store.first_event_ms().unwrap());
         let t = Instant::now();
-        let r = report(&store, &book, range, &Default::default(), &chrono::Local).unwrap();
+        let r = report(&store, &book, range, &Default::default(), &chrono::Local, chrono::Utc::now().timestamp_millis()).unwrap();
         println!(
             "{period:?}: events={} tokens={} api_eq=${:.2} unpriced={:?} days={} active={} peak_hour={:?} ({:?})",
             r.totals.events,
