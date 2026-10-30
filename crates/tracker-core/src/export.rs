@@ -100,7 +100,7 @@ where
     };
 
     let mut rows: Vec<Row> = Vec::new();
-    let mut daily: std::collections::BTreeMap<(String, String, String, String, String), Row> = Default::default();
+    let mut daily: std::collections::BTreeMap<(String, String, String, Option<i64>, String), Row> = Default::default();
     for e in store.events_between(range.from_ms, range.to_ms)? {
         if !filter.matches(&e) {
             continue;
@@ -137,7 +137,8 @@ where
             Granularity::Events => rows.push(row),
             Granularity::Daily => {
                 let date = local.map(|d| d.date_naive().to_string()).unwrap_or_default();
-                let key = (date.clone(), row.tool.clone(), row.model.clone(), row.project.clone(), row.accuracy.clone());
+                // by id: two folders can share a name
+                let key = (date.clone(), row.tool.clone(), row.model.clone(), e.project_id, row.accuracy.clone());
                 let agg = daily.entry(key).or_insert_with(|| Row { time: date, events: 0, input: 0, output: 0, cache_read: 0, cache_write: 0, reasoning: 0, total_tokens: 0, api_equivalent_usd: Some(0.0), client: String::new(), ..row });
                 agg.events += 1;
                 agg.input += e.tokens.input;

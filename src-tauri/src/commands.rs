@@ -434,7 +434,7 @@ pub fn save_pricing(window: WebviewWindow, app: AppHandle, state: State<AppState
     main_only(&window)?;
     let json = serde_json::to_string_pretty(&file).map_err(err)?;
     let book = PriceBook::from_json(&json).map_err(err)?.with_catalog(crate::state::opencode_catalog()); // validate before writing
-    std::fs::write(state.user_pricing_path(), json).map_err(err)?;
+    export::write_atomically(&state.user_pricing_path(), |f| std::io::Write::write_all(f, json.as_bytes()).map_err(|e| e.to_string()))?;
     *state.book.write().unwrap() = book;
     *state.pricing_origin.write().unwrap() = "user".into();
     let _ = app.emit("data-changed", ());

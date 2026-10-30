@@ -1,11 +1,11 @@
 use crate::state::AppState;
 use tauri::{AppHandle, Manager};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 pub fn parse(hotkey: &str) -> Result<Shortcut, String> {
     let s: Shortcut = hotkey.trim().parse().map_err(|e| format!("{e}"))?;
-    if s.mods.is_empty() {
-        // a bare key would be taken away from every other program
+    if (s.mods - Modifiers::SHIFT).is_empty() {
+        // a bare or shifted key would be taken away from every other program
         return Err("hotkey_needs_modifier".into());
     }
     Ok(s)
@@ -152,6 +152,7 @@ mod tests {
         assert!(parse("Super+Shift+F9").is_ok());
         assert!(parse("Ctrl+Alt+Digit1").is_ok());
         assert!(parse("W").is_err());
+        assert!(parse("Shift+A").is_err(), "Shift alone still takes a capital letter away");
         assert!(parse("Ctrl+").is_err());
         assert!(parse("Ctrl+Alt+NoSuchKey").is_err());
     }

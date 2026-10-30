@@ -668,6 +668,8 @@ fn the_account_filter_keeps_only_that_accounts_tool_calls() {
     let got = tracker_core::insights::agents_tools(&c.store, &PriceBook::default_book(), Range { from_ms: BASE, to_ms: BASE + H }, &f).unwrap();
     assert_eq!(got.tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), ["Read"]);
     assert!(got.filtered_by_session);
+    let tips = tracker_core::tips::tips(&c.store, &PriceBook::default_book(), Range { from_ms: BASE, to_ms: BASE + H }, &f).unwrap();
+    assert_eq!(tips.tool_calls, 1, "the tips count the same calls");
 }
 
 #[test]

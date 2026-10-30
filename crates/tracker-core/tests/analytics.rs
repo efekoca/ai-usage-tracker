@@ -841,3 +841,26 @@ fn antigravity_pools_count_only_their_own_models() {
     let b = v.iter().find(|v| v.provider == Provider::Google && v.window == "seven_day").unwrap();
     assert_eq!((b.window_usage.events, b.used_pct), (3, Some(10.0)));
 }
+
+#[test]
+fn daily_export_keeps_two_folders_of_the_same_name_apart() {
+    use tracker_core::export::{export, Format, Granularity};
+    let mut store = Store::open_in_memory().unwrap();
+    let at = ms(2026, 10, 2, 12, 0);
+    {
+        let mut tx = store.transaction().unwrap();
+        tx.upsert_events(&[
+            ev("a", at, Tool::ClaudeCode, "claude-sonnet-5", r"C:\a\api", 1_000, 0),
+            ev("b", at + 60_000, Tool::ClaudeCode, "claude-sonnet-5", r"C:\b\api", 2_000, 0),
+        ])
+        .unwrap();
+        tx.commit().unwrap();
+    }
+    let mut daily = Vec::new();
+    let range = Range { from_ms: 0, to_ms: i64::MAX / 2 };
+    export(&store, &PriceBook::default_book(), range, &Filter::default(), &tz(), Granularity::Daily, Format::Json, false, &mut daily).unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&daily).unwrap();
+    let inputs: Vec<u64> = v.as_array().unwrap().iter().map(|r| r["input"].as_u64().unwrap()).collect();
+    assert_eq!(inputs.len(), 2, "{v}");
+    assert_eq!(inputs.iter().sum::<u64>(), 3_000);
+}

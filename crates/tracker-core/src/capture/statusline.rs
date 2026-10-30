@@ -82,19 +82,20 @@ pub fn record(data_dir: &Path, windows: &Map<String, Value>, now_ms: i64) -> boo
     if same && recent {
         return false;
     }
-    let line = json!({ "ts": now_ms, "windows": windows });
+    let line = json!({ "ts": now_ms, "windows": windows }).to_string();
     let path = capture_file(data_dir);
     if fs::metadata(&path).is_ok_and(|m| m.len() > ROTATE_BYTES) {
         let _ = fs::rename(&path, rotated_file(data_dir));
     }
+    // one write per line: several sessions append at once and must not interleave
     let ok = OpenOptions::new()
         .create(true)
         .append(true)
         .open(&path)
-        .and_then(|mut f| writeln!(f, "{line}"))
+        .and_then(|mut f| f.write_all(format!("{line}\n").as_bytes()))
         .is_ok();
     if ok {
-        let _ = fs::write(last_file(data_dir), line.to_string());
+        let _ = fs::write(last_file(data_dir), line);
     }
     ok
 }
