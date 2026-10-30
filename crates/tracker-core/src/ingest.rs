@@ -83,6 +83,9 @@ pub fn ingest(store: &mut Store, files: &[DiscoveredFile], mut on_progress: impl
     rep
 }
 
+/// A record dated further ahead than this is damaged, not from a clock that ran fast.
+const HOLD_AHEAD_MS: i64 = 30 * 86_400_000;
+
 fn size_and_mtime(path: &std::path::Path) -> std::io::Result<(u64, i64)> {
     let meta = std::fs::metadata(path)?;
     let mtime_ms = meta.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64).unwrap_or(0);
@@ -119,15 +122,24 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<FileR
 
     let (mut offset, mut state) = match &cp {
         Some(c) if c.file_id == f.file_id && c.size == size && c.mtime_ms == mtime_ms => return Ok(None),
-        Some(c) if f.parser.is_incremental() && !packed && c.file_id == f.file_id && size >= c.offset => (c.offset, c.state.clone()),
+        Some(c) if f.parser.is_incremental() && !packed && c.file_id == f.file_id && size >= c.offset && same_tail(&f.path, c) => (c.offset, c.state.clone()),
         Some(c) if f.parser.keeps_state() && c.file_id == f.file_id => (0, c.state.clone()),
         _ => (0, serde_json::Value::Null), // new, replaced, truncated or whole-document file
     };
 
     let mut read = FileRead::default();
+    // where the first record dated too far ahead was read: the file is read from there again
+    // until the clock reaches it, instead of skipping it for good
+    let mut hold: Option<(u64, serde_json::Value)> = None;
     loop {
         let mut out = parse(f, offset, &state).map_err(|e| e.to_string())?;
         let more = f.parser.is_incremental() && out.round_full() && out.next_offset > offset && (packed || out.next_offset < size);
+        let latest = crate::store::latest_accepted_ms();
+        let ahead = |ts: i64| ts > latest && ts - latest <= HOLD_AHEAD_MS;
+        if hold.is_none() && (out.events.iter().any(|e| ahead(e.ts_ms)) || out.limits.iter().any(|l| ahead(l.ts_ms)) || out.tool_calls.iter().any(|c| ahead(c.ts_ms))) {
+            hold = Some((offset, state.clone()));
+            out.warn("records dated ahead of the clock are read once it reaches them");
+        }
 
         let mut tx = store.transaction().map_err(|e| e.to_string())?;
         tx.drop_stale(&out.stale_events, &out.stale_tool_calls, &out.stale_limits).map_err(|e| e.to_string())?;
@@ -153,20 +165,27 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<FileR
             }
             read.warnings.push(w);
         }
+        // store the consumed size so a pending partial line or the next round is read next time
+        let stored = match (packed, more) {
+            (true, true) => 0,
+            (true, false) => size,
+            _ if out.next_offset < size && f.parser.is_incremental() => out.next_offset,
+            _ => size,
+        };
+        let (stored, next, kept) = match &hold {
+            // size 0 never matches, so the next scan reads from the held point
+            Some((at, st)) => (0, *at, st),
+            None => (stored, out.next_offset, &out.state),
+        };
+        let kept = if f.parser.is_incremental() && !packed { with_tail(kept, &f.path, next) } else { kept.clone() };
         tx.set_checkpoint(
             &key,
             &f.file_id,
             f.parser.as_str(),
-            // store the consumed size so a pending partial line or the next round is read next time
-            match (packed, more) {
-                (true, true) => 0,
-                (true, false) => size,
-                _ if out.next_offset < size && f.parser.is_incremental() => out.next_offset,
-                _ => size,
-            },
+            stored,
             mtime_ms,
-            out.next_offset,
-            &out.state,
+            next,
+            &kept,
             read.warning_count,
             read.warnings.last().map(String::as_str),
         )
@@ -179,6 +198,46 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<FileR
         offset = out.next_offset;
         state = out.state;
     }
+}
+
+/// Where a checkpoint keeps a digest of the bytes before its offset (never the bytes themselves).
+const TAIL_KEY: &str = "_tail";
+
+fn tail_digest(path: &std::path::Path, offset: u64) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let from = offset.saturating_sub(64);
+    let mut f = std::fs::File::open(path).ok()?;
+    f.seek(SeekFrom::Start(from)).ok()?;
+    let mut buf = Vec::with_capacity(64);
+    f.take(offset - from).read_to_end(&mut buf).ok()?;
+    // FNV-1a: stable across builds, unlike the standard library's hasher
+    let h = buf.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, &b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3));
+    (buf.len() as u64 == offset - from).then(|| format!("{h:016x}"))
+}
+
+/// A file rewritten in place keeps its identity and may grow past the old offset; the bytes
+/// before the offset tell it apart from one that was only appended to.
+fn same_tail(path: &std::path::Path, c: &crate::store::Checkpoint) -> bool {
+    match c.state.get(TAIL_KEY).and_then(serde_json::Value::as_str) {
+        Some(t) => tail_digest(path, c.offset).as_deref() == Some(t),
+        None => true,
+    }
+}
+
+fn with_tail(state: &serde_json::Value, path: &std::path::Path, offset: u64) -> serde_json::Value {
+    let mut state = state.clone();
+    if offset > 0
+        && let Some(t) = tail_digest(path, offset)
+    {
+        match &mut state {
+            serde_json::Value::Object(m) => {
+                m.insert(TAIL_KEY.into(), t.into());
+            }
+            serde_json::Value::Null => state = serde_json::json!({ TAIL_KEY: t }),
+            _ => {}
+        }
+    }
+    state
 }
 
 fn parse(f: &DiscoveredFile, offset: u64, state: &serde_json::Value) -> std::io::Result<ParseOutput> {
