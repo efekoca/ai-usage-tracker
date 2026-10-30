@@ -625,12 +625,14 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
 
     // user thresholds fill in windows without any real reading
     for t in thresholds {
-        if out.iter().any(|v| v.provider == t.provider && v.window == t.window) {
+        // another account's reading does not stand in for the account in use
+        if out.iter().any(|v| v.active && v.provider == t.provider && v.window == t.window) {
             continue;
         }
         let Some(minutes) = window_minutes(&t.window) else { continue };
         let start = now_ms - minutes * 60_000;
-        let (usage, mut shares, _) = window_usage(store, book, &projects, t.provider, "", &t.window, None, start, now_ms, None, &[])?;
+        let account = active.get(&t.provider).map(Option::as_deref);
+        let (usage, mut shares, _) = window_usage(store, book, &projects, t.provider, "", &t.window, account, start, now_ms, None, &[])?;
         let pct = match (t.cost_usd, t.tokens) {
             (Some(c), _) if c > 0.0 => Some(usage.cost_usd / c * 100.0),
             (_, Some(n)) if n > 0 => Some(usage.total_tokens as f64 / n as f64 * 100.0),
@@ -641,7 +643,7 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
         }
         out.push(LimitView {
             provider: t.provider,
-            account: None,
+            account: account.flatten().map(str::to_owned),
             active: true,
             limit_id: String::new(),
             window: t.window.clone(),

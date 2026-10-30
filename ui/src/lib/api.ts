@@ -804,7 +804,7 @@ export interface UpdateStatus {
 export const api = {
   appInfo: () => invoke<AppInfo>('app_info'),
   getSettings: () => invoke<Settings>('get_settings'),
-  saveSettings: (settings: Settings) => invoke<Settings>('save_settings', { settings }),
+  saveSettings: (settings: Settings, base?: Settings) => invoke<Settings>('save_settings', { settings, base }),
   detectSources: () => invoke<SourceInfo[]>('detect_sources'),
   scanStatus: () => invoke<ScanStatus>('scan_status'),
   rescan: () => invoke<void>('rescan'),

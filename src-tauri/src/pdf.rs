@@ -31,20 +31,19 @@ pub fn render(app: &AppHandle, from: &str, to: &str, out: &Path) -> Result<(), S
         .inner_size(820.0, 1160.0)
         .build()
         .map_err(|e| e.to_string())?;
-    let partial = partial_path(out);
     let result = (|| {
         if !rx.recv_timeout(Duration::from_secs(45)).map_err(|_| "report_timeout".to_string())? {
             return Err("report_data_failed".to_string());
         }
-        // printed beside the target, so a failed render never leaves a broken PDF in its place
-        print_to_pdf(&win, &partial)?;
-        std::fs::rename(&partial, out).map_err(|e| e.to_string())
+        // printed into a private folder: a print that finishes after its timeout writes there,
+        // never into the user's folder, and a failed render never replaces the target
+        let tmp = tempfile::Builder::new().prefix("ai-usage-tracker-pdf-").tempdir().map_err(|e| e.to_string())?;
+        let printed = tmp.path().join("report.pdf");
+        print_to_pdf(&win, &printed)?;
+        place(&printed, out)
     })();
     let _ = win.destroy();
     *app.state::<AppState>().report_ready.lock().unwrap() = None;
-    if result.is_err() {
-        let _ = std::fs::remove_file(&partial);
-    }
     // the next render reuses the label, so the window must be gone before the lock is released
     if let Err(e) = close(app) {
         log::warn!("report window still open: {e}");
@@ -69,6 +68,20 @@ fn close(app: &AppHandle) -> Result<(), String> {
 /// An export never writes over the open archive or its SQLite side files.
 pub fn not_the_archive(store: &tracker_core::store::Store, out: &Path) -> Result<(), String> {
     if store.is_live_file(out) { Err("export_target_is_archive".into()) } else { Ok(()) }
+}
+
+/// Moves a finished file to `out`; across disks it is copied beside `out` first, so `out` is
+/// replaced only by a whole file.
+fn place(src: &Path, out: &Path) -> Result<(), String> {
+    if std::fs::rename(src, out).is_ok() {
+        return Ok(());
+    }
+    let partial = partial_path(out);
+    let r = std::fs::copy(src, &partial).and_then(|_| std::fs::rename(&partial, out)).map_err(|e| e.to_string());
+    if r.is_err() {
+        let _ = std::fs::remove_file(&partial);
+    }
+    r
 }
 
 fn partial_path(out: &Path) -> PathBuf {
@@ -382,6 +395,17 @@ mod tests {
         assert_eq!(last_full_week(d(2026, 10, 5)), (d(2026, 9, 28), d(2026, 10, 4)));
         // Sunday still belongs to the current week
         assert_eq!(last_full_week(d(2026, 10, 4)), (d(2026, 9, 21), d(2026, 9, 27)));
+    }
+
+    #[test]
+    fn a_finished_file_replaces_the_target_and_leaves_nothing_behind() {
+        let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (src, out) = (a.path().join("report.pdf"), b.path().join("AI-Usage.pdf"));
+        std::fs::write(&src, b"new").unwrap();
+        std::fs::write(&out, b"old").unwrap();
+        place(&src, &out).unwrap();
+        assert_eq!(std::fs::read(&out).unwrap(), b"new");
+        assert_eq!(std::fs::read_dir(b.path()).unwrap().count(), 1);
     }
 
     #[test]

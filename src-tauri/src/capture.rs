@@ -862,8 +862,32 @@ fn start_otel(app: &AppHandle) {
         *state.capture.receiver_error.lock().unwrap() = Some(TOKEN_MISSING.into());
         return;
     };
-    if let Err(e) = start_receiver(app, port, token) {
+    if let Err(e) = start_receiver(app, port, token.clone()) {
         log::warn!("otlp receiver could not start: {e}");
+        let app = app.clone();
+        std::thread::spawn(move || otel_port_taken(&app, port, token));
+    }
+}
+
+/// Claude Code keeps sending to the port in its settings: while another program holds it, that
+/// program would get the telemetry. After a short wait the export is taken out of the settings.
+fn otel_port_taken(app: &AppHandle, port: u16, token: String) {
+    for _ in 0..6 {
+        std::thread::sleep(Duration::from_secs(5));
+        let state = app.state::<AppState>();
+        if state.quitting.load(Ordering::SeqCst) || !state.settings.read().unwrap().capture.otel {
+            return;
+        }
+        if start_receiver(app, port, token.clone()).is_ok() {
+            return;
+        }
+    }
+    match set(app, "otel", false) {
+        Ok(_) => {
+            *app.state::<AppState>().capture.receiver_error.lock().unwrap() = Some(format!("port_busy_off:{port}"));
+            let _ = app.emit("settings-changed", app.state::<AppState>().settings.read().unwrap().clone());
+        }
+        Err(e) => log::warn!("telemetry left on with its port taken: {e}"),
     }
 }
 

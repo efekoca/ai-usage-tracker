@@ -627,6 +627,28 @@ fn known<'de, D: serde::Deserializer<'de>, T: serde::de::DeserializeOwned>(d: D)
     Ok(Vec::<serde_json::Value>::deserialize(d)?.into_iter().filter_map(|v| serde_json::from_value(v).ok()).collect())
 }
 
+/// Objects are compared key by key; anything else changed is taken whole.
+fn apply_changes(cur: &mut serde_json::Value, base: &serde_json::Value, next: &serde_json::Value) {
+    use serde_json::Value;
+    match (cur, base, next) {
+        (Value::Object(c), Value::Object(b), Value::Object(n)) => {
+            for (k, nv) in n {
+                match (b.get(k), c.get_mut(k)) {
+                    (Some(bv), _) if bv == nv => {}
+                    (Some(bv), Some(cv)) => apply_changes(cv, bv, nv),
+                    _ => {
+                        c.insert(k.clone(), nv.clone());
+                    }
+                }
+            }
+            for k in b.keys().filter(|k| !n.contains_key(*k)) {
+                c.remove(k);
+            }
+        }
+        (c, _, n) => *c = n.clone(),
+    }
+}
+
 fn sources_before_antigravity() -> Vec<SourceId> {
     vec![SourceId::ClaudeCode, SourceId::Cowork, SourceId::ClaudeDesktop, SourceId::Codex, SourceId::ChatgptDesktop]
 }
@@ -680,6 +702,14 @@ impl Settings {
         self.account_prices.retain(|key, usd| key.split_once(':').is_some_and(|(id, plan)| is_digest(id) && !plan.is_empty()) && usd.is_finite() && *usd > 0.0);
     }
 
+    /// The fields a page changed (`base` → `next`) applied to the current settings, so a change
+    /// the tray or a shortcut saved meanwhile is kept.
+    pub fn with_changes(&self, base: &Settings, next: &Settings) -> Settings {
+        let (Ok(mut cur), Ok(base), Ok(next_v)) = (serde_json::to_value(self), serde_json::to_value(base), serde_json::to_value(next)) else { return next.clone() };
+        apply_changes(&mut cur, &base, &next_v);
+        serde_json::from_value(cur).unwrap_or_else(|_| next.clone())
+    }
+
     /// Normalizes in place first, so what callers keep and publish is exactly what was stored.
     pub fn save(&mut self, store: &Store) -> Result<(), String> {
         self.normalize();
@@ -690,6 +720,26 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_page_save_keeps_what_the_tray_changed_meanwhile() {
+        let base = Settings::default();
+        let mut page = base.clone();
+        page.fx_rate = 2.0;
+        page.provider_colors.insert("openai".into(), "#10a37f".into());
+        let mut now = base.clone();
+        now.widget.visible = !base.widget.visible;
+        now.widget.opacity = 0.5;
+        now.provider_colors.insert("google".into(), "#4285f4".into());
+        let merged = now.with_changes(&base, &page);
+        assert_eq!((merged.fx_rate, merged.widget.visible, merged.widget.opacity), (2.0, now.widget.visible, 0.5));
+        assert_eq!(merged.provider_colors.len(), 2);
+
+        // a color the page removed goes, the others stay
+        let mut removed = merged.clone();
+        removed.provider_colors.remove("openai");
+        assert_eq!(merged.with_changes(&merged, &removed).provider_colors.keys().collect::<Vec<_>>(), ["google"]);
+    }
 
     #[test]
     fn limit_reads_are_on_and_file_editing_methods_off_by_default() {
