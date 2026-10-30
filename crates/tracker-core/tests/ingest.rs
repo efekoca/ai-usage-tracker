@@ -183,6 +183,51 @@ fn second_run_is_a_no_op() {
 }
 
 #[test]
+fn a_record_dated_ahead_of_the_clock_is_read_again_until_the_clock_reaches_it() {
+    let m = machine();
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &m.env);
+    let file = m.home.join(".claude/projects/C--Projects-demo-app/session-b.jsonl");
+    let at = |days: i64| (chrono::Utc::now() + chrono::Duration::days(days)).format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    let line = |id: &str, ts: String| format!(r#"{{"type":"assistant","sessionId":"s-b","timestamp":"{ts}","message":{{"id":"{id}","model":"claude-opus-5-5","usage":{{"input_tokens":1,"output_tokens":9}}}}}}"#);
+    let mut f = fs::OpenOptions::new().append(true).open(&file).unwrap();
+    writeln!(f, "{}", line("msg_ahead", at(2))).unwrap();
+    let rep = run(&mut store, &m.env);
+    assert_eq!(rep.new_events(), 0);
+    assert!(rep.warnings.iter().any(|(_, w)| w.contains("ahead of the clock")), "{:?}", rep.warnings);
+    assert_eq!(run(&mut store, &m.env).files_read, 1, "the held line is read again");
+
+    // a date far beyond any clock error is damage: dropped, and the file is not held for it
+    let other = m.home.join(".claude/projects/C--Projects-demo-app/session-a.jsonl");
+    writeln!(fs::OpenOptions::new().append(true).open(&other).unwrap(), "{}", line("msg_far", at(4000))).unwrap();
+    run(&mut store, &m.env);
+    let rep = run(&mut store, &m.env);
+    assert_eq!(rep.files_read, 1, "only the held file is read again");
+}
+
+#[test]
+fn a_log_rewritten_in_place_past_its_old_end_is_read_from_the_start() {
+    let m = machine();
+    let mut store = Store::open_in_memory().unwrap();
+    let file = m.home.join(".claude/projects/C--Projects-demo-app/session-c.jsonl");
+    let line = |id: &str, pad: usize| {
+        format!(r#"{{"type":"assistant","sessionId":"s-c","timestamp":"2026-09-03T10:00:00.000Z","message":{{"id":"{id}","model":"claude-opus-5-5","usage":{{"input_tokens":1,"output_tokens":2}}}},"pad":"{}"}}"#, "x".repeat(pad)) + "\n"
+    };
+    fs::write(&file, line("msg_c1", 0) + &line("msg_c2", 0)).unwrap();
+    run(&mut store, &m.env);
+    // the same file, truncated and written again (a sync tool, a copy over it): longer than before
+    fs::OpenOptions::new().write(true).truncate(true).open(&file).unwrap().write_all((line("msg_c3", 50) + &line("msg_c4", 50) + &line("msg_c5", 50)).as_bytes()).unwrap();
+    let rep = run(&mut store, &m.env);
+    assert_eq!(rep.new_events(), 3, "{:?}", rep.warnings);
+    assert!(rep.warnings.is_empty(), "{:?}", rep.warnings);
+
+    // plain appends still resume where the last read stopped
+    fs::OpenOptions::new().append(true).open(&file).unwrap().write_all(line("msg_c6", 0).as_bytes()).unwrap();
+    let rep = run(&mut store, &m.env);
+    assert_eq!((rep.new_events(), rep.warning_count), (1, 0));
+}
+
+#[test]
 fn appended_lines_are_read_incrementally_and_partial_lines_wait() {
     let m = machine();
     let mut store = Store::open_in_memory().unwrap();
