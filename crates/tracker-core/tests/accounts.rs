@@ -542,3 +542,19 @@ fn the_days_limit_peaks_follow_the_account_filter() {
     let weekly: Vec<f64> = d.limit_peaks.iter().filter(|p| p.window == "seven_day").map(|p| p.peak_pct).collect();
     assert_eq!(weekly, [10.0]);
 }
+
+#[test]
+fn a_user_threshold_counts_the_account_in_use() {
+    use tracker_core::analytics::Threshold;
+    let mut x = Archive::new();
+    let mut t = Thread::new(1, BASE, Some("acc-a"));
+    t.ask(BASE + M, Some(win_a())).ask(BASE + 2 * M, Some(win_a()));
+    let mut u = Thread::new(2, BASE + H, Some("acc-b"));
+    u.ask(BASE + H + M, Some(win_b()));
+    x.add(&[&t, &u]);
+    let th = [Threshold { provider: Provider::OpenAI, window: "one_day".into(), tokens: Some(1), cost_usd: None }];
+    let views = limits_view(&x.store, &PriceBook::default_book(), BASE + 2 * H, &th).unwrap();
+    let day: Vec<_> = views.iter().filter(|v| v.window == "one_day").collect();
+    assert_eq!(day.len(), 1);
+    assert_eq!((day[0].account.as_deref(), day[0].window_usage.events), (Some(b().as_str()), 1));
+}

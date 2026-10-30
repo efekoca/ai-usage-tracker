@@ -67,10 +67,14 @@ fn main_only(w: &WebviewWindow) -> Res<()> {
 
 // Commands that lock the store are async: a sync command runs on the event loop, and a long
 // query holding the store would freeze every window until it ends.
+/// `base` is what the page saw; only what it changed from there is saved.
 #[tauri::command]
-pub async fn save_settings(app: AppHandle, window: WebviewWindow, state: State<'_, AppState>, settings: Settings) -> Res<Settings> {
+pub async fn save_settings(app: AppHandle, window: WebviewWindow, state: State<'_, AppState>, settings: Settings, base: Option<Settings>) -> Res<Settings> {
     main_only(&window)?;
-    save_settings_inner(&app, &state, |_| settings)
+    save_settings_inner(&app, &state, |old| match base {
+        Some(base) => old.with_changes(&base, &settings),
+        None => settings,
+    })
 }
 
 /// `make` builds the new settings from the current ones while the store is locked.

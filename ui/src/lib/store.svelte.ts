@@ -100,7 +100,8 @@ export function saveSettings(patch: SettingsPatch): Promise<void> {
     if (!app.settings) return
     const cur = $state.snapshot(app.settings) as Settings
     const next = { ...cur, ...(typeof patch === 'function' ? patch(cur) : patch) } as Settings
-    app.settings = await api.saveSettings(next)
+    // only what this page changed is saved over what the tray or a shortcut changed meanwhile
+    app.settings = await api.saveSettings(next, cur)
     applyAppearance(app.settings, app.info)
   }
   const p = saving.then(run)

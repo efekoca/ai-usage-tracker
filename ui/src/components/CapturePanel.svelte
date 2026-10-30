@@ -170,7 +170,7 @@
               {:else}{t('common.off')}{/if}
             {:else}
               {#if on && st.otel_listening}<Icon name="check" size={13} /> {t('cap.otel.ok', { port: st.otel_port, n: fmtInt(st.otel_events), t: ago(st.otel_last_ms) })}
-              {:else if on}<Icon name="warning" size={13} /> <span class="msg">{st.otel_error ? explain('otel', st.otel_error, false) : t('cap.otel.notListening')}</span>
+              {:else if on || st.otel_error}<Icon name="warning" size={13} /> <span class="msg">{st.otel_error ? explain('otel', st.otel_error, false) : t('cap.otel.notListening')}</span>
               {:else}{t('common.off')}{/if}
             {/if}
           </dd>
