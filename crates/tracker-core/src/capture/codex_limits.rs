@@ -112,22 +112,30 @@ fn run_version(bin: &Path) -> Option<String> {
     }
     #[cfg(not(windows))]
     super::set_child_path(&mut cmd, bin);
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
     let mut child = cmd.spawn().ok()?;
+    let mut stdout = child.stdout.take()?;
+    // read on a thread: something the CLI started may keep its output open after it exits
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = std::io::Read::read_to_end(&mut std::io::Read::take(&mut stdout, 64 << 10), &mut buf);
+        let _ = tx.send(buf);
+    });
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         match child.try_wait() {
             Ok(Some(_)) => break,
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
             _ => {
-                let _ = child.kill();
-                let _ = child.wait();
+                super::kill_tree(&mut child);
                 return None;
             }
         }
     }
-    let mut out = String::new();
-    std::io::Read::read_to_string(&mut child.stdout.take()?, &mut out).ok()?;
-    Some(out)
+    let out = rx.recv_timeout(deadline.saturating_duration_since(Instant::now()).max(Duration::from_secs(1))).ok()?;
+    Some(String::from_utf8_lossy(&out).into_owned())
 }
 
 pub fn parse_result(result: &Value, now_ms: i64) -> Vec<LimitSnapshot> {
