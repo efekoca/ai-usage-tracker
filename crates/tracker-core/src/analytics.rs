@@ -38,6 +38,22 @@ impl Range {
         let days = (local_date(tz, self.to_ms - 1) - first).num_days().max(0) as u64 + 1;
         Range { from_ms: start_of_day(tz, first.checked_sub_days(Days::new(days)).unwrap_or(first)), to_ms: self.from_ms }
     }
+
+    /// [`Range::previous`] cut to the part of this range that has passed by `now_ms`, at the same
+    /// local time: today until 09:00 compares with yesterday until 09:00, not all of yesterday.
+    pub fn previous_until<Tz: TimeZone>(&self, tz: &Tz, now_ms: i64) -> Range {
+        let prev = self.previous(tz);
+        if now_ms <= self.from_ms || now_ms >= self.to_ms {
+            return prev;
+        }
+        let Some(now) = tz.timestamp_millis_opt(now_ms).single().map(|d| d.naive_local()) else { return prev };
+        let day = (now.date() - local_date(tz, self.from_ms)).num_days().max(0) as u64;
+        let cut = local_date(tz, prev.from_ms)
+            .checked_add_days(Days::new(day))
+            .and_then(|d| tz.from_local_datetime(&d.and_time(now.time())).earliest())
+            .map_or(prev.from_ms + (now_ms - self.from_ms), |t| t.timestamp_millis());
+        Range { to_ms: cut.clamp(prev.from_ms, prev.to_ms), ..prev }
+    }
 }
 
 /// Local midnight of `d` (DST-safe: the earliest instant of that local date).
@@ -247,7 +263,8 @@ fn sorted_groups(map: HashMap<String, (String, bool, Totals)>) -> Vec<Group> {
     v
 }
 
-pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filter: &Filter, tz: &Tz) -> Result<Report> {
+/// `now_ms` cuts the previous period to the same elapsed time, so a range still running compares fairly.
+pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filter: &Filter, tz: &Tz, now_ms: i64) -> Result<Report> {
     let projects: HashMap<i64, ProjectRow> = store.projects()?.into_iter().map(|p| (p.id, p)).collect();
     let events = store.events_between(range.from_ms, range.to_ms)?;
 
@@ -295,7 +312,7 @@ pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filte
         }
     }
 
-    let prev_range = range.previous(tz);
+    let prev_range = range.previous_until(tz, now_ms);
     let mut previous = Totals::default();
     let prev_events = store.events_between(prev_range.from_ms, prev_range.to_ms)?;
     let prev_writers = cache_writers(prev_events.iter().filter(|e| filter.matches(e)));
@@ -769,6 +786,18 @@ mod tests {
     use chrono::FixedOffset;
 
     const DAY_MS: i64 = 86_400_000;
+
+    #[test]
+    fn a_running_period_compares_with_the_same_part_of_the_one_before() {
+        let tz = FixedOffset::east_opt(3 * 3600).unwrap();
+        let at = |d, h| tz.with_ymd_and_hms(2026, 10, d, h, 0, 0).unwrap().timestamp_millis();
+        let today = period_range(Period::Today, &tz, at(2, 9), None);
+        assert_eq!(today.previous_until(&tz, at(2, 9)), Range { from_ms: at(1, 0), to_ms: at(1, 9) });
+        let week = period_range(Period::Days7, &tz, at(8, 9), None);
+        assert_eq!(week.previous_until(&tz, at(8, 9)), Range { from_ms: tz.with_ymd_and_hms(2026, 9, 25, 0, 0, 0).unwrap().timestamp_millis(), to_ms: at(1, 9) });
+        // a finished range keeps the whole period before it
+        assert_eq!(today.previous_until(&tz, at(3, 9)), today.previous(&tz));
+    }
 
     #[test]
     fn periods_are_local_calendar_days() {

@@ -192,8 +192,9 @@ fn mask_limits(v: &mut [LimitView], hide_all: bool) {
 pub async fn get_report(state: State<'_, AppState>, period: Period, filter: Option<Filter>) -> Res<Report> {
     let store = state.db();
     let book = state.book.read().unwrap();
-    let range = analytics::period_range(period, &chrono::Local, now_ms(), store.first_event_ms().map_err(err)?);
-    let mut r = analytics::report(&store, &book, range, &filter.unwrap_or_default(), &chrono::Local).map_err(err)?;
+    let now = now_ms();
+    let range = analytics::period_range(period, &chrono::Local, now, store.first_event_ms().map_err(err)?);
+    let mut r = analytics::report(&store, &book, range, &filter.unwrap_or_default(), &chrono::Local, now).map_err(err)?;
     mask_report(&mut r, state.settings.read().unwrap().hide_project_names);
     Ok(r)
 }

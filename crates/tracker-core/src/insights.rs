@@ -246,8 +246,8 @@ pub fn compare_models(store: &Store, book: &PriceBook, range: Range, filter: &Fi
     })
 }
 
-/// Bucket edges for prompt sizes. 200K and 272K are where long-context pricing starts for
-/// older Claude models and current OpenAI models.
+/// Bucket edges for prompt sizes. 100K, 200K and 272K are where long-context pricing starts for
+/// Claude Haiku 5.5, Gemini Pro and current OpenAI models.
 pub const CONTEXT_EDGES: [u64; 7] = [10_000, 50_000, 100_000, 200_000, 272_000, 500_000, 1_000_000];
 
 #[derive(Debug, Clone, Serialize)]
