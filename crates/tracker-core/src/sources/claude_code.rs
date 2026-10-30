@@ -61,7 +61,6 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
     let folder = project_folder(path);
     let mut lines = JsonlReader::open(path, offset)?;
     let mut out = ParseOutput::default();
-    let mut max_version = str_at(state, "max_version").map(str::to_owned);
     // The session's first working directory is its project; later lines can carry
     // sub-directories the agent cd'd into, which would split one project into many.
     let mut root_cwd = str_at(state, "root_cwd").map(str::to_owned);
@@ -74,11 +73,6 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
         };
         if v.get("type").is_some() {
             typed += 1;
-        }
-        if let Some(ver) = str_at(v, "version")
-            && max_version.as_deref().is_none_or(|m| version_gt(ver, m))
-        {
-            max_version = Some(ver.to_owned());
         }
         if root_cwd.is_none() {
             root_cwd = str_at(v, "cwd").filter(|s| !s.is_empty()).map(|c| launch_dir(c, folder.as_deref()));
@@ -114,7 +108,7 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
     if out.lines_total >= 20 && typed == 0 {
         out.warn("unrecognised format: no line has a `type` field");
     }
-    out.state = json!({ "max_version": max_version, "root_cwd": root_cwd });
+    out.state = json!({ "root_cwd": root_cwd });
     out.next_offset = lines.finish()?;
     Ok(out)
 }
@@ -293,7 +287,7 @@ fn tool_results(v: &Value) -> Vec<(String, bool)> {
 }
 
 fn quota_limit(v: &Value, ctx: &ClaudeCtx) -> Option<LimitSnapshot> {
-    let q = v.get("quotaLimits")?;
+    let q = v.get("quotaLimits").filter(|q| q.is_object())?;
     let status = str_at(q, "status").map(str::to_owned);
     let window = str_at(q, "rateLimitType").unwrap_or("unknown").to_owned();
     let ts_ms = str_at(v, "timestamp").and_then(parse_ts_ms)?;
@@ -311,12 +305,6 @@ fn quota_limit(v: &Value, ctx: &ClaudeCtx) -> Option<LimitSnapshot> {
         source: ctx.source.to_owned(),
         accuracy: Accuracy::Exact,
     })
-}
-
-/// Compares dotted numeric versions ("2.1.280" > "2.1.97").
-fn version_gt(a: &str, b: &str) -> bool {
-    let p = |s: &str| s.split(|c: char| !c.is_ascii_digit()).filter_map(|x| x.parse::<u64>().ok()).collect::<Vec<_>>();
-    p(a) > p(b)
 }
 
 #[cfg(test)]
@@ -337,9 +325,13 @@ mod tests {
     }
 
     #[test]
-    fn versions_compare_numerically() {
-        assert!(version_gt("2.1.280", "2.1.97"));
-        assert!(!version_gt("2.1.9", "2.1.10"));
+    fn a_quota_field_that_is_not_an_object_is_no_reading() {
+        let ctx = ClaudeCtx { client_override: None, source: "test" };
+        for q in [Value::Null, json!("rejected"), json!([])] {
+            assert!(quota_limit(&json!({"timestamp": "2026-09-01T08:00:00.000Z", "quotaLimits": q}), &ctx).is_none());
+        }
+        let ok = json!({"timestamp": "2026-09-01T08:00:00.000Z", "quotaLimits": {"status": "rejected", "rateLimitType": "five_hour"}});
+        assert_eq!(quota_limit(&ok, &ctx).unwrap().used_pct, Some(100.0));
     }
 
     fn line(usage: Value) -> Value {

@@ -156,8 +156,15 @@ fn read_session(conn: &Connection, sessions: &HashMap<String, Session>, id: &str
         })
     })?;
     for row in rows {
-        let row = row?;
         out.lines_total += 1;
+        // a field of an unexpected type damages only its own row
+        let row = match row {
+            Err(rusqlite::Error::InvalidColumnType(..) | rusqlite::Error::FromSqlConversionFailure(..) | rusqlite::Error::IntegralValueOutOfRange(..)) => {
+                out.warn(format!("session {id}: a part with unexpected fields was skipped"));
+                continue;
+            }
+            r => r?,
+        };
         // a subagent's requests count toward the session that started it, as for Claude Code
         let agent = if child {
             row.agent.clone().filter(|a| !a.is_empty()).or(Some("subagent".into()))

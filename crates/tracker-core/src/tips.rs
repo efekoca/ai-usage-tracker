@@ -217,7 +217,7 @@ pub fn tips(store: &Store, book: &PriceBook, range: Range, filter: &Filter) -> R
     // each tool error usually costs another request
     let mut tool_calls = 0u64;
     {
-        let by_session = !filter.models.is_empty() || !filter.clients.is_empty();
+        let by_session = !filter.models.is_empty() || !filter.clients.is_empty() || !filter.accounts.is_empty();
         let sessions: HashSet<(&'static str, &str)> = events.iter().filter_map(|e| e.session_id.as_deref().map(|s| (e.tool.as_str(), s))).collect();
         let mut per: BTreeMap<(&'static str, String), (Tool, u64, u64, u64)> = BTreeMap::new();
         for c in store.tool_calls_between(range.from_ms, range.to_ms)? {

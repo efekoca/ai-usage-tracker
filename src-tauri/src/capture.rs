@@ -1039,7 +1039,8 @@ fn start_claude_poller(app: &AppHandle) {
             let active_gap = (60_000 * s.capture.claude_poll_minutes.clamp(5, 120) as i64).max(ACTIVE_GAP_MS);
             let latest = latest_claude_event_ms(&state);
             let new_activity = latest.is_some() && latest != seen_event_ms;
-            let since = now - last_try_ms;
+            // a clock set back since the last try must not hold reads off until it catches up
+            let since = if now < last_try_ms { i64::MAX } else { now - last_try_ms };
             let due = if failures > 0 {
                 forced || since >= (ACTIVE_GAP_MS << (failures - 1).min(3)).min(MAX_BACKOFF_MS)
             } else {

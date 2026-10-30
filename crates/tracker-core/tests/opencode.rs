@@ -342,3 +342,19 @@ fn a_file_that_is_not_opencodes_database_is_reported_not_read() {
     assert!(rep.warnings.iter().any(|(_, w)| w.contains("not an OpenCode database")));
     assert!(events(&store).is_empty());
 }
+
+#[test]
+fn a_part_with_a_count_of_the_wrong_type_is_skipped_and_the_rest_is_read() {
+    let db = opencode();
+    db.conn
+        .execute(
+            "INSERT INTO part VALUES('prt_bad', 'msg_001', ?1, ?2, ?2, ?3)",
+            params![MAIN, T0 + 1600, r#"{"type":"step-finish","tokens":{"input":"10","output":5,"reasoning":0,"cache":{"read":0,"write":0}}}"#],
+        )
+        .unwrap();
+    let mut store = Store::open_in_memory().unwrap();
+    let rep = run(&mut store, &db.env);
+    assert!(rep.errors.is_empty(), "{:?}", rep.errors);
+    assert!(rep.warnings.iter().any(|(_, w)| w.contains("unexpected fields")), "{:?}", rep.warnings);
+    assert_eq!(events(&store).len(), 4);
+}

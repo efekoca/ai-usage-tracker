@@ -336,7 +336,7 @@ impl PriceBook {
         models.into_iter().filter(|m| self.from_catalog(m)).filter_map(|m| self.cataloged(m).cloned()).collect()
     }
 
-    /// Exact id → alias → user alias → id without a `-YYYYMMDD` date suffix, then OpenCode's
+    /// Exact id → alias → user alias → id without a `-YYYYMMDD` or `-YYYY-MM-DD` date suffix, then OpenCode's
     /// catalog. Nothing fuzzier, so a new model is reported as unpriced instead of silently
     /// getting a wrong price.
     pub fn lookup(&self, model: &str) -> Option<&ModelPrice> {
@@ -418,9 +418,16 @@ impl PriceBook {
     }
 }
 
+/// `-YYYYMMDD` or `-YYYY-MM-DD`.
 fn strip_date_suffix(m: &str) -> Option<&str> {
     let (head, tail) = m.rsplit_once('-')?;
-    (tail.len() == 8 && tail.bytes().all(|b| b.is_ascii_digit())).then_some(head)
+    if tail.len() == 8 && tail.bytes().all(|b| b.is_ascii_digit()) {
+        return Some(head);
+    }
+    let cut = m.len().checked_sub(11)?;
+    let (head, tail) = (m.get(..cut)?, m.get(cut..)?.as_bytes());
+    let dashes = [0, 5, 8];
+    (tail.iter().enumerate().all(|(i, b)| if dashes.contains(&i) { *b == b'-' } else { b.is_ascii_digit() }) && !head.is_empty()).then_some(head)
 }
 
 #[cfg(test)]
@@ -492,6 +499,8 @@ mod tests {
         assert_eq!(b.lookup("claude-haiku-4-5-20251001").unwrap().id, "claude-haiku-4-5");
         assert_eq!(b.lookup("claude-sonnet-4-5-20250929").unwrap().id, "claude-sonnet-4-5");
         assert_eq!(b.lookup("CLAUDE-OPUS-5").unwrap().id, "claude-opus-5");
+        assert_eq!(b.lookup("qwen3.8-max-2026-09-14").unwrap().id, "qwen3.8-max");
+        assert!(b.lookup("-2026-09-14").is_none());
         assert!(b.lookup("codex-auto-review").is_none());
         assert!(b.lookup("claude-opus-5-5-preview").is_none()); // no fuzzy matching
         assert!(b.lookup("gpt-5.6").is_none());

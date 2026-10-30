@@ -212,7 +212,8 @@ impl<Tz: TimeZone> Format<'_, Tz> {
 
     fn countdown(&self, r: &Reading) -> Option<String> {
         let s = self.left_secs(r)?;
-        let (d, h, m) = (s / 86_400, s % 86_400 / 3600, ((s % 3600 + 59) / 60).max(1));
+        let mins = (s + 59) / 60;
+        let (d, h, m) = (mins / 1440, mins % 1440 / 60, mins % 60);
         let (dd, hh, mm) = if self.tr { ("g", "sa", "dk") } else { ("d", "h", "m") };
         Some(if d > 0 {
             format!("{d}{dd}{h}{hh}")
@@ -415,6 +416,19 @@ mod tests {
         c.reset = "time".into();
         // 07:33 UTC is 10:33 at +03:00; the weekly reset is Thursday 15:33
         assert_eq!(fmt(&c, false, &tz).title(&data()), "42% ↻12:47 · ⚠︎86% ↻Thu 15:33 · 12% ↻10:43");
+    }
+
+    #[test]
+    fn a_countdown_never_shows_sixty_minutes() {
+        let tz = FixedOffset::east_opt(0).unwrap();
+        let c = cfg(vec![limit("anthropic", "five_hour", "")], |c| {
+            c.label = "none".into();
+            c.reset = "countdown".into();
+        });
+        for (secs, want) in [(7190, "2h0m"), (3590, "1h0m"), (30, "1m"), (86_399, "1d0h")] {
+            let d = Data { readings: vec![read(Provider::Anthropic, "", "five_hour", 42.0, secs)], ..Data::default() };
+            assert_eq!(fmt(&c, false, &tz).title(&d), format!("42% ↻{want}"));
+        }
     }
 
     #[test]
