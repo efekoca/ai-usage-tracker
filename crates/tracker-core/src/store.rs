@@ -2,7 +2,7 @@
 //! after the source tools delete or rotate their logs. No content columns exist by design.
 
 use crate::model::{Accuracy, LimitSnapshot, Provider, SessionAccount, Tokens, Tool, ToolCall, UsageEvent, MAX_CLOCK_SKEW_MS, MAX_EPOCH_SECS, MAX_WINDOW_MINUTES};
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde::Serialize;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -420,8 +420,10 @@ impl Store {
         &self.conn
     }
 
+    /// Takes the write lock up front: one that read first would fail at once, without waiting, when
+    /// another connection wrote meanwhile.
     pub fn transaction(&mut self) -> Result<StoreTx<'_>> {
-        let tx = self.conn.transaction()?;
+        let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         Ok(StoreTx { tx, project_cache: self.project_cache.get_mut(), new_projects: HashMap::new() })
     }
 
@@ -572,7 +574,7 @@ impl Store {
     /// else starts a new span. Returns whether requests may now be tied differently: a new span
     /// started, or the span grew over a request no account was found for yet.
     pub fn note_signin(&mut self, root: &str, account: Option<&str>, now_ms: i64) -> Result<bool> {
-        let tx = self.conn.transaction()?;
+        let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let last: Option<(i64, Option<String>, i64)> = tx
             .query_row("SELECT from_ms, account, to_ms FROM signin_span WHERE root = ?1 ORDER BY from_ms DESC LIMIT 1", [root], |r| {
                 Ok((r.get(0)?, r.get(1)?, r.get(2)?))
