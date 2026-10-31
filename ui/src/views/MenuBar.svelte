@@ -133,7 +133,7 @@
         return t(`panel.action.${m.action}`)
     }
   }
-  const actionIcon: Record<string, string> = { open: 'overview', widget: 'widget', rescan: 'refresh', settings: 'settings' }
+  const actionIcon: Record<string, string> = { open: 'app', widget: 'pip', rescan: 'sync', settings: 'gear' }
   const has = (m: PanelModule) => modules.some((x) => moduleKey(x) === moduleKey(m))
 
   let cat = $state('all')
