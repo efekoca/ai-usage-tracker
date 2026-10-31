@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, untrack } from 'svelte'
   import { app, latest, nameAccount, saveSettings } from '../lib/store.svelte'
-  import { api, type PanelData, type PanelModule, type PanelSize, type Provider, type TrayItem, type TrayPreview, type TraySettings } from '../lib/api'
+  import { api, type PanelData, type PanelModule, type PanelSize, type Provider, type TrayItem, type TrayMark, type TrayPreview, type TraySettings } from '../lib/api'
   import { fmtClock, fmtPct, limitName, t, toolLabel, windowLabel } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
   import Select from '../components/Select.svelte'
@@ -345,6 +345,16 @@
   const sepChoice = $derived(separators.includes(tray.separator) ? tray.separator : 'custom')
   let customSep = $state(false)
 
+  const markOptions = $derived([
+    { value: 'app', label: t('settings.tray.mark.app') },
+    { value: 'number', label: t('settings.tray.mark.number') },
+    { value: 'tool', label: t('settings.tray.mark.tool') },
+    ...(['anthropic', 'openai', 'google', 'opencode'] as const).map((p) => ({ value: p, label: t('settings.tray.mark.logo', { name: p === 'opencode' ? toolLabel(p) : t(`provider.${p}`) }) })),
+  ])
+  function setMark(v: string) {
+    set('show_percent', v !== 'app')
+    if (v !== 'app') set('mark', v as TrayMark)
+  }
   const iconLimits = [
     ['anthropic', 'five_hour'],
     ['anthropic', 'seven_day'],
@@ -400,7 +410,9 @@
       <div class="menubar" aria-hidden="true">
         <span class="spacer"></span>
         <span class="tray">
-          {#if showsIcon}<img src="/app-icon.png" alt="" width="16" height="16" />{/if}
+          {#if showsIcon && preview?.icon}
+            <span class="badge" style:background={preview.icon.bg} style:color={preview.icon.fg}>{#if preview.icon.logo}<BrandIcon provider={preview.icon.logo} size={12} always />{:else}{preview.icon.text}{/if}</span>
+          {:else if showsIcon}<img src="/app-icon.png" alt="" width="16" height="16" />{/if}
           {#if !windows && preview?.title}<span class="title">{preview.title}</span>{/if}
         </span>
         <span class="clock">{clock}</span>
@@ -610,7 +622,11 @@
     {#if windows}<p class="subtle small">{t('settings.tray.help')}</p>{/if}
     <div class="item">
       <div><span>{t('settings.tray.show')}</span><div class="subtle small">{t('settings.tray.showHelp', { warn: fmtPct(app.settings?.widget.warn_at ?? 80), high: fmtPct(app.settings?.widget.high_at ?? 95) })}</div></div>
-      <Toggle checked={tray.show_percent} label={t('settings.tray.show')} onchange={(v) => set('show_percent', v)} />
+      <Select label={t('settings.tray.show')} value={tray.show_percent ? tray.mark : 'app'} minWidth={220} options={markOptions} onchange={setMark} />
+    </div>
+    <div class="item">
+      <div><span>{t('settings.tray.toolColor')}</span><div class="subtle small">{t('settings.tray.toolColor.help')}</div></div>
+      <Toggle checked={tray.tool_color} disabled={!tray.show_percent} label={t('settings.tray.toolColor')} onchange={(v) => set('tool_color', v)} />
     </div>
     <div class="item">
       <span>{t('settings.tray.limit')}</span>
@@ -713,6 +729,17 @@
     backdrop-filter: blur(24px) saturate(1.6);
     -webkit-backdrop-filter: blur(24px) saturate(1.6);
     font: 500 13px/1.3 -apple-system, 'SF Pro Text', var(--font);
+  }
+  .badge {
+    display: inline-grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    font-size: 9px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
   }
   .tray {
     display: inline-flex;

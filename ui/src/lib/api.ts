@@ -40,8 +40,11 @@ export interface TrayItem {
   /** A Codex or Claude limit of this account (its digest); empty for the account in use. */
   account: string
 }
+export type TrayMark = 'number' | 'tool' | 'anthropic' | 'openai' | 'google' | 'opencode'
 export interface TraySettings {
   show_percent: boolean
+  mark: TrayMark
+  tool_color: boolean
   limit: string
   title: boolean
   items: TrayItem[]
@@ -60,6 +63,8 @@ export interface TrayPreview {
   /** Each item's own text in `items` and in the catalog; empty without a value. */
   parts: string[]
   catalog: string[]
+  /** The badge the icon would draw; null keeps the app icon. */
+  icon: { text: string; logo: '' | Provider | 'opencode'; bg: string; fg: string } | null
 }
 
 export type PanelKind = 'limit' | 'provider' | 'usage' | 'forecast' | 'scan' | 'action'

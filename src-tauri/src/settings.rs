@@ -211,8 +211,13 @@ pub const DEFAULT_HOTKEY: &str = "Ctrl+Alt+Shift+W";
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct TraySettings {
-    /// The chosen limit's percent drawn into the icon.
+    /// A colored badge for the chosen limit instead of the app icon.
     pub show_percent: bool,
+    /// What the badge shows: "number" (the limit's percent), "tool" (the logo of the limit's tool) or one
+    /// tool's logo: "anthropic", "openai", "google" or "opencode".
+    pub mark: String,
+    /// The badge takes its tool's color (`Settings::provider_colors`, else the tool's own) until the limit gets close.
+    pub tool_color: bool,
     /// "auto" (the fullest current limit) or "<provider>:<window>", e.g. "anthropic:five_hour".
     pub limit: String,
     /// Text next to the icon (macOS and Linux; Windows has no room for it).
@@ -293,6 +298,8 @@ impl Default for TraySettings {
         let limit = |provider: &str, window: &str| TrayItem { kind: "limit".into(), provider: provider.into(), window: window.into(), ..TrayItem::default() };
         TraySettings {
             show_percent: true,
+            mark: "number".into(),
+            tool_color: false,
             limit: "auto".into(),
             title: false,
             items: vec![limit("anthropic", "five_hour"), limit("anthropic", "seven_day"), limit("openai", "five_hour"), limit("openai", "seven_day")],
@@ -337,6 +344,7 @@ impl TraySettings {
                 *v = fallback.into();
             }
         };
+        pick(&mut self.mark, &["number", "tool", "anthropic", "openai", "google", "opencode"], "number");
         pick(&mut self.label, &["name", "short", "none"], "short");
         pick(&mut self.value, &["app", "used", "remaining"], "app");
         pick(&mut self.reset, &["none", "countdown", "time"], "none");
@@ -825,7 +833,7 @@ mod tests {
     #[test]
     fn menu_bar_settings_from_older_versions_keep_their_icon_and_start_without_text() {
         let s: Settings = serde_json::from_str(r#"{"tray":{"show_percent":false,"limit":"openai:five_hour"}}"#).unwrap();
-        assert_eq!((s.tray.show_percent, s.tray.limit.as_str(), s.tray.title), (false, "openai:five_hour", false));
+        assert_eq!((s.tray.show_percent, s.tray.mark.as_str(), s.tray.limit.as_str(), s.tray.title), (false, "number", "openai:five_hour", false));
         assert_eq!(s.tray.items.len(), 4);
         assert_eq!(s.panel, PanelSettings::default());
 
@@ -834,12 +842,12 @@ mod tests {
                          {"kind":"limit","provider":"openai","window":"seven_day"},
                          {"kind":"limit","provider":"nobody","window":"five_hour"},
                          {"kind":"tokens","period":"days7"}],
-                "label":"huge","value":"x","reset":"y","style":"z","separator":"","prefix":"a\tb"}"#,
+                "mark":"apple","label":"huge","value":"x","reset":"y","style":"z","separator":"","prefix":"a\tb"}"#,
         )
         .unwrap();
         t.normalize();
         assert_eq!(t.items.iter().map(|i| i.kind.as_str()).collect::<Vec<_>>(), ["limit", "tokens"], "duplicates and unknown items are dropped, the order is kept");
-        assert_eq!((t.label.as_str(), t.value.as_str(), t.reset.as_str(), t.style.as_str()), ("short", "app", "none", "percent"));
+        assert_eq!((t.mark.as_str(), t.label.as_str(), t.value.as_str(), t.reset.as_str(), t.style.as_str()), ("number", "short", "app", "none", "percent"));
         assert_eq!((t.separator.as_str(), t.prefix.as_str()), (" · ", "ab"));
         t.items = tray_catalog();
         t.normalize();

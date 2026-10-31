@@ -24,7 +24,7 @@ static DIRTY: AtomicBool = AtomicBool::new(true);
 /// Last applied state, so the icon and menu are replaced only when they change.
 #[derive(Default, PartialEq, Clone)]
 struct Shown {
-    icon: Option<(String, Level, u32)>,
+    icon: Option<(Badge, u32)>,
     /// macOS: text without the icon.
     icon_hidden: bool,
     title: String,
@@ -127,6 +127,21 @@ pub struct Current {
     pub behind: bool,
 }
 
+/// What the badge shows: the limit's percent or a tool's logo, by its key in `LOGOS`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Mark {
+    Number(String),
+    Logo(&'static str),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Badge {
+    pub mark: Mark,
+    pub level: Level,
+    /// The tool's color, shown while the limit is not close.
+    pub tint: Option<[u8; 3]>,
+}
+
 /// Every pool's current window, of each known Codex and Claude account too; `None` when limits cannot be read
 /// right now, so the tray keeps what it shows.
 pub(crate) fn readings(app: &AppHandle, s: &Settings) -> Option<Vec<Reading>> {
@@ -166,7 +181,7 @@ pub(crate) fn readings(app: &AppHandle, s: &Settings) -> Option<Vec<Reading>> {
 }
 
 /// The fullest pool of each provider's window in use, for the icon and the tooltip.
-fn current_limits(readings: &[Reading]) -> Vec<Current> {
+pub(crate) fn current_limits(readings: &[Reading]) -> Vec<Current> {
     let mut out: Vec<Current> = Vec::new();
     for r in readings.iter().filter(|r| r.active) {
         let c = Current { provider: r.provider, window: r.window.clone(), used: r.used, behind: r.behind };
@@ -280,6 +295,34 @@ pub fn pick<'a>(limits: &'a [Current], choice: &str) -> Option<&'a Current> {
     }
 }
 
+/// The badge `cfg` draws, colored by its limit; `None` keeps the app icon.
+pub(crate) fn badge(s: &Settings, cfg: &TraySettings, limits: &[Current]) -> Option<Badge> {
+    if !cfg.show_percent || !s.onboarded {
+        return None;
+    }
+    let c = pick(limits, &cfg.limit);
+    let level = c.map_or(Level::Normal, |c| level(c.used, s.widget.warn_at, s.widget.high_at));
+    let (mark, tool) = match cfg.mark.as_str() {
+        "number" => {
+            let c = c?;
+            (Mark::Number(shown_value(c.used, s.limit_display == "remaining").to_string()), c.provider.as_str())
+        }
+        "tool" => (Mark::Logo(c?.provider.as_str()), c?.provider.as_str()),
+        key => {
+            let key = LOGOS.iter().find(|l| l.0 == key)?.0;
+            (Mark::Logo(key), key)
+        }
+    };
+    let tint = if cfg.tool_color { tool_color(s, tool) } else { None };
+    Some(Badge { mark, level, tint })
+}
+
+/// The color chosen for a tool in the app, else the tool's own.
+fn tool_color(s: &Settings, tool: &str) -> Option<[u8; 3]> {
+    let chosen = s.provider_colors.get(tool).and_then(|c| u32::from_str_radix(c.strip_prefix('#')?, 16).ok());
+    chosen.map(|v| [(v >> 16) as u8, (v >> 8) as u8, v as u8]).or_else(|| LOGOS.iter().find(|l| l.0 == tool).map(|l| l.2))
+}
+
 pub fn level(used: f64, warn_at: f64, high_at: f64) -> Level {
     if used >= high_at {
         Level::High
@@ -331,13 +374,7 @@ fn update(app: &AppHandle) {
     let limits = current_limits(&readings);
     let update = app.state::<AppState>().updates.lock().unwrap().available.as_ref().map(|a| a.version.clone());
     let size = icon_size(app);
-    let icon = if s.tray.show_percent && s.onboarded {
-        pick(&limits, &s.tray.limit).map(|c| {
-            (shown_value(c.used, s.limit_display == "remaining").to_string(), level(c.used, s.widget.warn_at, s.widget.high_at), size)
-        })
-    } else {
-        None
-    };
+    let icon = badge(&s, &s.tray, &limits).map(|b| (b, size));
     let title = if s.onboarded { title(app, &s, &s.tray, &readings) } else { String::new() };
     // a menu bar item needs something to show: the icon stays while the text is empty
     let icon_hidden = cfg!(target_os = "macos") && s.tray.hide_icon && !title.is_empty();
@@ -356,7 +393,7 @@ fn update(app: &AppHandle) {
     if shown.is_none() || prev.icon != next.icon || prev.icon_hidden != next.icon_hidden {
         let image = match &next.icon {
             _ if next.icon_hidden => None,
-            Some((text, lvl, size)) => Some(Image::new_owned(badge(text, *size, *lvl), *size, *size)),
+            Some((b, size)) => Some(Image::new_owned(draw(b, *size), *size, *size)),
             None => app.default_window_icon().cloned(),
         };
         if let Err(e) = tray.set_icon(image) {
@@ -415,7 +452,32 @@ const DIGITS_4X7: [[u8; 7]; 10] = [
     [0x6, 0x9, 0x9, 0x7, 0x1, 0x1, 0x6],
 ];
 
-fn colors(level: Level) -> ([u8; 3], [u8; 3]) {
+/// The app's monochrome marks (24×24, even-odd), from lobe-icons, MIT License, Copyright (c) 2023 LobeHub
+/// (github.com/lobehub/lobe-icons), with each tool's color. The marks and names belong to their owners.
+const LOGOS: [(&str, &str, [u8; 3]); 4] = [
+    ("anthropic", "M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z", [0xD9, 0x77, 0x57]),
+    ("openai", "M8.086.457a6.105 6.105 0 013.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 00.107.029c1.408-.346 2.762-.224 4.061.366l.063.03.154.076c1.357.703 2.33 1.77 2.918 3.198.278.679.418 1.388.421 2.126a5.655 5.655 0 01-.18 1.631.167.167 0 00.04.155 5.982 5.982 0 011.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 01-2.934 1.851.162.162 0 00-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 00-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 01-2.595-.622 6.058 6.058 0 01-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 01-.495-1.283 6.11 6.11 0 01-.017-3.064.166.166 0 00.008-.074.115.115 0 00-.037-.064 5.958 5.958 0 01-1.38-2.202 5.196 5.196 0 01-.333-1.589 6.915 6.915 0 01.188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 00.087-.087A6.016 6.016 0 015.635 2.31C6.315 1.464 7.132.846 8.086.457zm-.804 7.85a.848.848 0 00-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 001.46.864l1.94-3.272a.849.849 0 00.007-.854l-1.94-3.393zm5.446 6.24a.849.849 0 000 1.695h4.848a.849.849 0 000-1.696h-4.848z", [0x10, 0xA3, 0x7F]),
+    ("google", "M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z", [0x42, 0x85, 0xF4]),
+    ("opencode", "M16 6H8v12h8V6zm4 16H4V2h16v20z", [0x52, 0x51, 0x4E]),
+];
+
+/// The square's color and the mark's: the tool's while the limit is not close, white on it unless it is too light.
+pub(crate) fn colors(b: &Badge) -> ([u8; 3], [u8; 3]) {
+    match (b.level, b.tint) {
+        (Level::Normal, Some(bg)) => {
+            let lin = |c: u8| {
+                let c = c as f64 / 255.0;
+                if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+            };
+            let lum = 0.2126 * lin(bg[0]) + 0.7152 * lin(bg[1]) + 0.0722 * lin(bg[2]);
+            // white while it keeps the 3:1 contrast icons need
+            (bg, if 1.05 / (lum + 0.05) >= 3.0 { [0xFF, 0xFF, 0xFF] } else { [0x11, 0x11, 0x11] })
+        }
+        (level, _) => level_colors(level),
+    }
+}
+
+fn level_colors(level: Level) -> ([u8; 3], [u8; 3]) {
     match level {
         // slate with white digits: readable on light and dark taskbars
         Level::Normal => ([0x33, 0x41, 0x55], [0xFF, 0xFF, 0xFF]),
@@ -425,10 +487,9 @@ fn colors(level: Level) -> ([u8; 3], [u8; 3]) {
     }
 }
 
-/// Whole-pixel scaling keeps the digits sharp.
-pub fn badge(text: &str, size: u32, level: Level) -> Vec<u8> {
+pub fn draw(b: &Badge, size: u32) -> Vec<u8> {
     let s = size as i64;
-    let (bg, fg) = colors(level);
+    let (bg, fg) = colors(b);
     let mut px = vec![0u8; (size * size * 4) as usize];
     let r = (s as f64 * 0.22).max(2.0);
     for y in 0..s {
@@ -445,9 +506,22 @@ pub fn badge(text: &str, size: u32, level: Level) -> Vec<u8> {
             }
         }
     }
+    match &b.mark {
+        Mark::Number(text) => number(&mut px, s, text, fg),
+        Mark::Logo(key) => {
+            if let Some((_, d, _)) = LOGOS.iter().find(|l| l.0 == *key) {
+                logo(&mut px, s, d, fg);
+            }
+        }
+    }
+    px
+}
+
+/// Whole-pixel scaling keeps the digits sharp.
+fn number(px: &mut [u8], s: i64, text: &str, fg: [u8; 3]) {
     let digits: Vec<usize> = text.chars().filter_map(|c| c.to_digit(10)).map(|d| d as usize).collect();
     if digits.is_empty() {
-        return px;
+        return;
     }
     let narrow = digits.len() >= 3;
     let (gw, gh) = if narrow { (4i64, 7i64) } else { (5, 7) };
@@ -479,12 +553,80 @@ pub fn badge(text: &str, size: u32, level: Level) -> Vec<u8> {
             }
         }
     }
-    px
+}
+
+/// The mark fills most of the badge, anti-aliased: exact coverage across a row, 16 samples down a pixel.
+fn logo(px: &mut [u8], s: i64, d: &str, fg: [u8; 3]) {
+    use kurbo::{Affine, BezPath, PathEl, Point, Shape};
+    const SUB: usize = 16;
+    let Ok(mut path) = BezPath::from_svg(d) else { return };
+    let b = path.bounding_box();
+    let side = s as f64;
+    let k = side * 0.72 / b.width().max(b.height());
+    path.apply_affine(Affine::new([k, 0.0, 0.0, k, (side - b.width() * k) / 2.0 - b.x0 * k, (side - b.height() * k) / 2.0 - b.y0 * k]));
+    let mut edges: Vec<(Point, Point)> = Vec::new();
+    let (mut start, mut last) = (Point::ZERO, Point::ZERO);
+    // a fill closes every subpath, closed or not
+    kurbo::flatten(path.iter(), 0.02, |el| match el {
+        PathEl::MoveTo(p) => {
+            if last != start {
+                edges.push((last, start));
+            }
+            (start, last) = (p, p);
+        }
+        PathEl::LineTo(p) => {
+            edges.push((last, p));
+            last = p;
+        }
+        PathEl::ClosePath => {
+            if last != start {
+                edges.push((last, start));
+            }
+            last = start;
+        }
+        _ => {}
+    });
+    if last != start {
+        edges.push((last, start));
+    }
+    let n = s as usize;
+    let mut cover = vec![0f64; n * n];
+    let mut xs = Vec::new();
+    for row in 0..n * SUB {
+        let y = (row as f64 + 0.5) / SUB as f64;
+        xs.clear();
+        xs.extend(edges.iter().filter(|(a, b)| (a.y <= y) != (b.y <= y)).map(|(a, b)| a.x + (y - a.y) * (b.x - a.x) / (b.y - a.y)));
+        xs.sort_by(f64::total_cmp);
+        for [x0, x1] in xs.as_chunks::<2>().0 {
+            let (x0, x1) = (x0.clamp(0.0, side), x1.clamp(0.0, side));
+            for col in x0.floor() as usize..(x1.ceil() as usize).min(n) {
+                let c = col as f64;
+                cover[row / SUB * n + col] += (x1.min(c + 1.0) - x0.max(c)).max(0.0) / SUB as f64;
+            }
+        }
+    }
+    for (i, a) in cover.iter().enumerate() {
+        let a = a.min(1.0);
+        if a <= 0.0 {
+            continue;
+        }
+        let p = &mut px[i * 4..i * 4 + 4];
+        let under = p[3] as f64 / 255.0 * (1.0 - a);
+        let out = a + under;
+        for c in 0..3 {
+            p[c] = ((fg[c] as f64 * a + p[c] as f64 * under) / out).round() as u8;
+        }
+        p[3] = (out * 255.0).round() as u8;
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn plain(mark: Mark, level: Level) -> Badge {
+        Badge { mark, level, tint: None }
+    }
 
     fn lit(px: &[u8], size: u32, fg: [u8; 3]) -> Vec<(u32, u32)> {
         (0..size * size).filter(|i| px[(*i * 4) as usize..(*i * 4 + 3) as usize] == fg && px[(*i * 4 + 3) as usize] == 255).map(|i| (i % size, i / size)).collect()
@@ -494,9 +636,9 @@ mod tests {
     fn digits_are_centred_whole_pixels_with_a_margin() {
         for size in [16, 20, 24, 32, 40] {
             for text in ["7", "42", "100"] {
-                let px = badge(text, size, Level::Normal);
+                let px = draw(&plain(Mark::Number(text.into()), Level::Normal), size);
                 assert_eq!(px.len(), (size * size * 4) as usize);
-                let on = lit(&px, size, colors(Level::Normal).1);
+                let on = lit(&px, size, level_colors(Level::Normal).1);
                 assert!(!on.is_empty(), "{text} at {size}");
                 let (minx, maxx) = (on.iter().map(|p| p.0).min().unwrap(), on.iter().map(|p| p.0).max().unwrap());
                 let (miny, maxy) = (on.iter().map(|p| p.1).min().unwrap(), on.iter().map(|p| p.1).max().unwrap());
@@ -511,7 +653,7 @@ mod tests {
     fn one_digit_is_as_tall_as_two() {
         for size in [16, 20, 24, 32, 40] {
             let height = |text: &str| {
-                let on = lit(&badge(text, size, Level::Normal), size, colors(Level::Normal).1);
+                let on = lit(&draw(&plain(Mark::Number(text.into()), Level::Normal), size), size, level_colors(Level::Normal).1);
                 on.iter().map(|p| p.1).max().unwrap() - on.iter().map(|p| p.1).min().unwrap()
             };
             assert_eq!(height("7"), height("28"), "at {size}");
@@ -520,10 +662,97 @@ mod tests {
 
     #[test]
     fn corners_are_transparent_and_the_middle_is_filled() {
-        let px = badge("", 16, Level::High);
+        let px = draw(&plain(Mark::Number(String::new()), Level::High), 16);
         assert_eq!(px[3], 0);
         let mid = ((8 * 16 + 8) * 4) as usize;
         assert_eq!(&px[mid..mid + 4], &[0xDC, 0x26, 0x26, 255]);
+    }
+
+    #[test]
+    fn each_logo_sits_in_the_middle_of_the_badge() {
+        for (key, _, _) in LOGOS {
+            for size in [16, 20, 24, 32, 40] {
+                let px = draw(&plain(Mark::Logo(key), Level::Warn), size);
+                let (bg, fg) = level_colors(Level::Warn);
+                // pixels at least half covered by the logo
+                let on: Vec<(u32, u32)> = (0..size * size)
+                    .map(|i| (i, &px[(i * 4) as usize..(i * 4 + 4) as usize]))
+                    .filter(|(_, p)| p[3] == 255 && p[0].abs_diff(fg[0]) < p[0].abs_diff(bg[0]))
+                    .map(|(i, _)| (i % size, i / size))
+                    .collect();
+                assert!(!on.is_empty(), "{key} at {size}");
+                let (minx, maxx) = (on.iter().map(|p| p.0).min().unwrap(), on.iter().map(|p| p.0).max().unwrap());
+                let (miny, maxy) = (on.iter().map(|p| p.1).min().unwrap(), on.iter().map(|p| p.1).max().unwrap());
+                assert!(minx >= 2 && miny >= 2 && maxx <= size - 3 && maxy <= size - 3, "{key} at {size}: {minx}-{maxx} {miny}-{maxy}");
+                assert!((minx as i64 - (size - 1 - maxx) as i64).abs() <= 1 && (miny as i64 - (size - 1 - maxy) as i64).abs() <= 1, "{key} at {size}");
+                assert!((maxx - minx).max(maxy - miny) + 1 >= size * 3 / 5, "{key} at {size} is too small");
+                // the badge's corners stay as they were
+                assert_eq!(px[3], 0);
+            }
+        }
+    }
+
+    #[test]
+    fn the_logos_are_the_apps_own_marks() {
+        let ui = include_str!("../../ui/src/components/BrandIcon.svelte");
+        for (key, d, _) in LOGOS {
+            assert!(ui.contains(&format!("{key}: '{d}'")), "{key}");
+        }
+    }
+
+    #[test]
+    fn the_badge_shows_the_chosen_mark_in_its_limits_color() {
+        let mut s = Settings { onboarded: true, ..Default::default() };
+        let l = vec![
+            Current { provider: Provider::Anthropic, window: "five_hour".into(), used: 30.0, behind: false },
+            Current { provider: Provider::OpenAI, window: "seven_day".into(), used: 96.0, behind: false },
+        ];
+        let shown = |s: &Settings, l: &[Current]| badge(s, &s.tray, l);
+        assert_eq!(shown(&s, &l), Some(plain(Mark::Number("96".into()), Level::High)));
+        s.tray.mark = "tool".into();
+        assert_eq!(shown(&s, &l), Some(plain(Mark::Logo("openai"), Level::High)));
+        s.tray.limit = "anthropic:five_hour".into();
+        assert_eq!(shown(&s, &l), Some(plain(Mark::Logo("anthropic"), Level::Normal)));
+        s.tray.mark = "opencode".into();
+        assert_eq!(shown(&s, &l), Some(plain(Mark::Logo("opencode"), Level::Normal)));
+        // a chosen logo stays without a reading; a number or the limit's tool needs one
+        assert_eq!(shown(&s, &[]), Some(plain(Mark::Logo("opencode"), Level::Normal)));
+        for m in ["number", "tool"] {
+            s.tray.mark = m.into();
+            assert_eq!(shown(&s, &[]), None, "{m}");
+        }
+        s.tray.show_percent = false;
+        assert_eq!(shown(&s, &l), None);
+    }
+
+    #[test]
+    fn the_square_takes_its_tools_color_until_the_limit_gets_close() {
+        let mut s = Settings { onboarded: true, ..Default::default() };
+        s.tray.tool_color = true;
+        s.tray.limit = "anthropic:five_hour".into();
+        let mut l = vec![Current { provider: Provider::Anthropic, window: "five_hour".into(), used: 30.0, behind: false }];
+        let claude = [0xD9, 0x77, 0x57];
+        for (m, mark) in [("number", Mark::Number("30".into())), ("tool", Mark::Logo("anthropic"))] {
+            s.tray.mark = m.into();
+            assert_eq!(badge(&s, &s.tray, &l), Some(Badge { mark, level: Level::Normal, tint: Some(claude) }), "{m}");
+        }
+        // a chosen logo takes its own tool's color, whichever limit colors it
+        s.tray.mark = "opencode".into();
+        assert_eq!(badge(&s, &s.tray, &l).unwrap().tint, Some([0x52, 0x51, 0x4E]));
+        s.tray.mark = "anthropic".into();
+        s.provider_colors.insert("anthropic".into(), "#F0E68C".into());
+        let b = badge(&s, &s.tray, &l).unwrap();
+        assert_eq!(colors(&b), ([0xF0, 0xE6, 0x8C], [0x11, 0x11, 0x11]), "a light color keeps a dark mark");
+        let px = draw(&b, 16);
+        let mid = ((8 * 16 + 1) * 4) as usize;
+        assert_eq!(&px[mid..mid + 4], &[0xF0, 0xE6, 0x8C, 255]);
+        s.provider_colors.clear();
+        assert_eq!(colors(&badge(&s, &s.tray, &l).unwrap()), (claude, [0xFF, 0xFF, 0xFF]));
+        l[0].used = 75.0;
+        assert_eq!(colors(&badge(&s, &s.tray, &l).unwrap()), level_colors(Level::Warn), "the warning colors win");
+        s.tray.tool_color = false;
+        l[0].used = 30.0;
+        assert_eq!(badge(&s, &s.tray, &l).unwrap().tint, None);
     }
 
     #[test]
