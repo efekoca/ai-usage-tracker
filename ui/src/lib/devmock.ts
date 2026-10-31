@@ -615,17 +615,22 @@ function mockTrayPreview(tray: TraySettings) {
     .sort((a, b) => b.used_pct! - a.used_pct!)[0]
   const level = !c ? 'normal' : c.used_pct! >= settings.widget.high_at ? 'high' : c.used_pct! >= settings.widget.warn_at ? 'warn' : 'normal'
   const used = c ? Math.round(c.used_pct!) : 0
-  const tool = tray.mark === 'number' || tray.mark === 'tool' ? c?.provider : tray.mark
+  const tool = tray.mark === 'number' || tray.mark === 'dial' || tray.mark === 'tool' ? c?.provider : tray.mark
   const own: Record<string, string> = { anthropic: '#d97757', openai: '#10a37f', google: '#4285f4', opencode: '#52514e' }
   const tint = tray.tool_color && tool ? settings.provider_colors[tool as Provider]?.toLowerCase() || own[tool] : ''
   const [bg, fg] = level === 'high' ? ['#dc2626', '#ffffff'] : level === 'warn' ? ['#f59e0b', '#111111'] : tint ? [tint, '#ffffff'] : ['#334155', '#ffffff']
+  const shownPct = settings.limit_display === 'remaining' ? 100 - used : used
+  const dialBg = platform === 'macos' && level === 'normal' ? '' : '#161e3e'
+  const dialFg = dialBg ? (level === 'high' ? '#dc2626' : level === 'warn' ? '#f59e0b' : '#3884ff') : ''
   const icon = !tray.show_percent
     ? null
     : tray.mark === 'number'
-      ? c && { text: String(settings.limit_display === 'remaining' ? 100 - used : used), logo: '' as const, bg, fg }
-      : tray.mark === 'tool'
-        ? c && { text: '', logo: c.provider, bg, fg }
-        : { text: '', logo: tray.mark, bg, fg }
+      ? c && { text: String(shownPct), logo: '' as const, bg, fg, dial: null }
+      : tray.mark === 'dial'
+        ? c && { text: '', logo: '' as const, bg: dialBg, fg: dialFg, dial: shownPct / 100 }
+        : tray.mark === 'tool'
+          ? c && { text: '', logo: c.provider, bg, fg, dial: null }
+          : { text: '', logo: tray.mark, bg, fg, dial: null }
   return { title: tray.title && shown.length && platform !== 'windows' ? `${tray.prefix}${shown.join(tray.separator)}${tray.suffix}` : '', parts, catalog, icon: icon || null }
 }
 
