@@ -27,6 +27,8 @@ struct Shown {
     icon: Option<(Badge, u32)>,
     /// macOS: text without the icon.
     icon_hidden: bool,
+    /// Windows: the plain mark follows the taskbar's light or dark look.
+    light_taskbar: bool,
     title: String,
     tooltip: String,
     menu: (bool, Option<String>, String),
@@ -77,13 +79,42 @@ fn menu(app: &AppHandle, tr: bool, update: Option<&str>, hotkey: &str) -> tauri:
 }
 
 /// The app's mark without a badge: on macOS a template image, which the menu bar tints for its
-/// light or dark look.
+/// light or dark look; on Windows the tray mark drawn for the taskbar's look.
 fn plain_icon(app: &AppHandle) -> Option<Image<'static>> {
     #[cfg(target_os = "macos")]
     if let Ok(mark) = Image::from_bytes(include_bytes!("../icons/menu-bar-template.png")) {
         return Some(mark);
     }
+    #[cfg(windows)]
+    {
+        let ico: &[u8] = if crate::windows::light_taskbar() {
+            include_bytes!("../icons/tray-light-taskbar.ico")
+        } else {
+            include_bytes!("../icons/tray-dark-taskbar.ico")
+        };
+        if let Some(mark) = ico_entry(ico, icon_size(app)).and_then(|png| Image::from_bytes(png).ok()) {
+            return Some(mark);
+        }
+    }
     app.default_window_icon().map(|i| i.clone().to_owned())
+}
+
+/// The PNG of an `.ico` drawn for `size`, else for the next size up, else its largest.
+#[cfg(any(windows, test))]
+fn ico_entry(ico: &[u8], size: u32) -> Option<&[u8]> {
+    let count = u16::from_le_bytes(ico.get(4..6)?.try_into().ok()?) as usize;
+    let mut entries: Vec<(u32, &[u8])> = (0..count)
+        .filter_map(|i| {
+            let e = ico.get(6 + 16 * i..22 + 16 * i)?;
+            let side = if e[0] == 0 { 256 } else { e[0] as u32 };
+            let len = u32::from_le_bytes(e[8..12].try_into().ok()?) as usize;
+            let at = u32::from_le_bytes(e[12..16].try_into().ok()?) as usize;
+            let data = ico.get(at..at.checked_add(len)?)?;
+            data.starts_with(b"\x89PNG").then_some((side, data))
+        })
+        .collect();
+    entries.sort_by_key(|e| e.0);
+    entries.iter().find(|e| e.0 >= size).or(entries.last()).map(|e| e.1)
 }
 
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
@@ -394,9 +425,14 @@ fn update(app: &AppHandle) {
     let title = if s.onboarded { title(app, &s, &s.tray, &readings) } else { String::new() };
     // a menu bar item needs something to show: the icon stays while the text is empty
     let icon_hidden = cfg!(target_os = "macos") && s.tray.hide_icon && !title.is_empty();
+    #[cfg(windows)]
+    let light_taskbar = crate::windows::light_taskbar();
+    #[cfg(not(windows))]
+    let light_taskbar = false;
     let next = Shown {
         icon,
         icon_hidden,
+        light_taskbar,
         title,
         tooltip: tooltip(&limits, &s, update.as_deref()),
         menu: (turkish(&s), update.clone(), s.widget.hotkey.clone()),
@@ -406,7 +442,7 @@ fn update(app: &AppHandle) {
     if shown.is_some() && prev == next {
         return;
     }
-    if shown.is_none() || prev.icon != next.icon || prev.icon_hidden != next.icon_hidden {
+    if shown.is_none() || prev.icon != next.icon || prev.icon_hidden != next.icon_hidden || prev.light_taskbar != next.light_taskbar {
         let image = match &next.icon {
             _ if next.icon_hidden => None,
             Some((b, size)) => Some(Image::new_owned(draw(b, *size), *size, *size)),
@@ -858,6 +894,18 @@ mod tests {
         s.tray.tool_color = false;
         l[0].used = 30.0;
         assert_eq!(badge(&s, &s.tray, &l).unwrap().tint, None);
+    }
+
+    #[test]
+    fn the_windows_tray_mark_takes_the_size_drawn_for_the_screen() {
+        let side = |ico: &[u8], size: u32| {
+            let png = ico_entry(ico, size).unwrap();
+            u32::from_be_bytes(png[16..20].try_into().unwrap())
+        };
+        for ico in [&include_bytes!("../icons/tray-light-taskbar.ico")[..], &include_bytes!("../icons/tray-dark-taskbar.ico")[..]] {
+            assert_eq!((side(ico, 16), side(ico, 20), side(ico, 28), side(ico, 32), side(ico, 64)), (16, 20, 32, 32, 48));
+        }
+        assert_eq!(ico_entry(b"\0\0\x01\0\x02\0", 16), None, "a damaged file draws nothing");
     }
 
     #[test]

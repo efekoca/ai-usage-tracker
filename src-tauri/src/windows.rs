@@ -44,6 +44,21 @@ fn os_build() -> u32 {
     v.build
 }
 
+/// Whether the taskbar has Windows' light look; the apps' own light or dark mode is set apart.
+#[cfg(windows)]
+pub fn light_taskbar() -> bool {
+    use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
+    let key: Vec<u16> = "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize\0".encode_utf16().collect();
+    let val: Vec<u16> = "SystemUsesLightTheme\0".encode_utf16().collect();
+    let mut data: u32 = 0;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    let rc = unsafe {
+        RegGetValueW(HKEY_CURRENT_USER, key.as_ptr(), val.as_ptr(), RRF_RT_REG_DWORD, std::ptr::null_mut(), &mut data as *mut u32 as *mut _, &mut size)
+    };
+    // missing on older Windows 10, whose taskbar is dark
+    rc == 0 && data == 1
+}
+
 pub fn accent_color() -> Option<String> {
     #[cfg(windows)]
     {
