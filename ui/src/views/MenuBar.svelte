@@ -434,7 +434,7 @@
             </span>
           {:else if showsIcon && preview?.icon}
             <span class="badge" style:background={preview.icon.bg} style:color={preview.icon.fg}>{#if preview.icon.logo}<BrandIcon provider={preview.icon.logo} size={12} always />{:else}{preview.icon.text}{/if}</span>
-          {:else if showsIcon}<img src={mac ? '/menu-bar-template.png' : '/app-icon.png'} class:template={mac} alt="" width="16" height="16" />{/if}
+          {:else if showsIcon}<img src={mac ? '/menu-bar-template.png' : windows ? `/tray-windows-${backdrop}.png` : '/app-icon.png'} class:template={mac} alt="" width="16" height="16" />{/if}
           {#if !windows && preview?.title}<span class="title">{preview.title}</span>{/if}
         </span>
         <span class="clock">{clock}</span>
