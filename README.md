@@ -53,7 +53,7 @@ Providers publish how their limits work, not the numbers themselves. The app the
 
 **More than one Claude account.** Claude's limits belong to your plan's organization, so each Claude account gets its own limits, history, and forecast, and a Team plan you use with the same login counts as its own account. Claude Code does not record which account sent each request, so the app learns it only from what shows it for certain: the request's own telemetry event while the local telemetry receiver is on, and the Claude desktop app's account for the sessions it runs in its Code tab. Without telemetry, a terminal session counts for an account only if its Claude config folder was signed in to that one account all the time the app watched it (the app checks every 30 seconds while it runs), as with one `CLAUDE_CONFIG_DIR` per account. A running Claude Code keeps the sign-in it loaded for a while after you `/login` elsewhere, and its log does not say when a session started, so if you switch accounts in the same folder, turn on the local telemetry receiver. Otherwise those requests are not guessed; they stay under **Unidentified account**, as do requests from before the app watched the sign-in. The app's own limit read counts for the account Claude Code was signed in to, and the desktop app's usage history for the desktop app's account. If your folders are signed in to different accounts at the same time, the account in use is the one the app reads limits with. If the app knows one Claude account and your weekly window starts again days before it was due to end, the **Limits** page says so and shows how to make the other account visible. The **Limits** page, the usage filter, the widget, the panel, and the menu bar work as for Codex. With a single account, nothing changes.
 
-![Claude and Codex accounts on the Limits page, each named, with the account in use marked, the dates each was seen, its requests, and the requests of no known account](assets/readme/accounts-en.webp)
+![Claude and Codex accounts on the Limits page, each named, with the account in use marked, its plan and monthly price, the dates each was seen, its requests, and the requests of no known account](assets/readme/accounts-en.webp)
 
 **Forecast.** Every current limit reading carries a forecast based on the window's **average pace since it started** (current % ÷ time since the window began). Every window starts at 0 % when it resets, so this pace is known and already includes idle hours: a burst of work is not extrapolated as if it never stopped. The app then says when the window would fill ("fills around Sun 21:12, 9 h before the reset") or where it would stand at the reset. If the provider resets a window early without moving its end, the pace is measured from that reset. No forecast is made in the first tenth of a window, and every forecast is labeled **Estimated**.
 
@@ -74,7 +74,7 @@ For each window, it shows how full it got, whether it filled, how long it took t
 
 The **Tips** page turns your own records into findings, each with the figures it rests on, what helps, and how it was calculated. Its plan recommendation tells you when your limits keep filling and suggests a smaller plan only when the published ratios back it up.
 
-![Tips page with plan recommendations for Claude and Codex and findings about cache rebuilds and long-context surcharges](assets/readme/tips-en.webp)
+![Tips page with a plan recommendation for each Claude and Codex account, a note that one account keeps filling its limits while another has room, and findings about cache rebuilds and long-context surcharges](assets/readme/tips-en.webp)
 
 **Plan recommendation.** It covers the last 28 days and rests only on those measurements and on what the providers publish:
 
@@ -195,7 +195,7 @@ The widget also comes with a tray icon and a shortcut:
   - The text next to the icon takes any limit, forecast, usage figure (for every tool or OpenCode alone) or the last scan, in the order you choose, with full names, short ones or none; used or left; percent, a bar, both, or a circle; the reset as a countdown or a clock time; a separator, text at both ends, and a ⚠︎ past the warning threshold. On macOS the icon can be hidden so only the text shows.
 - **Shortcut:** a system-wide key combination shows or hides the widget (default **Ctrl+Alt+Shift+W**, on macOS **⌃⌥⇧W**). To change it, open **Settings → Widget** and press the new combination. A combination that another program owns is refused.
 
-![Menu bar page with a live preview of the control panel, holding Claude and Codex limit rings, today's usage, OpenCode usage and a forecast, next to the gallery of tiles with every account](assets/readme/menubar-en.webp)
+![Menu bar page with a live preview: the icon showing the Claude logo on a square in Claude's color, and under it the control panel with Claude and Codex limit rings, today's usage, OpenCode usage, a forecast and buttons, next to the gallery of tiles with every account](assets/readme/menubar-en.webp)
 
 ### Weekly PDF, export, and your own prices
 
@@ -305,7 +305,7 @@ Every release includes `SHA256SUMS`, the checksum of each file. Put it next to y
 
 **Sources → Live capture** has five switches. The three **limit reads are on by default**: they change no files, make no model request, and use only your own Claude Code, Codex or Antigravity CLI sign-in. They run within seconds of the app starting, so the widget shows current limits right away. The two methods that edit Claude Code's settings file are **off by default**. Each switch shows exactly what it changes, and turning it off undoes the change. The Windows uninstaller and removing the Linux package revert them too, but updates leave them alone. On macOS and with the AppImage, turn them off before you delete the app.
 
-![Live capture panel with the five switches and what each one changes](assets/readme/capture-en.webp)
+![Live capture panel with the five switches, what each one changes, and how often each limit read runs](assets/readme/capture-en.webp)
 
 | Method | What it does | What it changes |
 |---|---|---|
