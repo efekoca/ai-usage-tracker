@@ -550,6 +550,8 @@ pub struct Settings {
     pub widget: WidgetSettings,
     pub capture: CaptureSettings,
     pub autostart: bool,
+    /// macOS: the app in the Dock and ⌘Tab; without it the menu bar icon opens the app.
+    pub show_in_dock: bool,
     /// Opt-in network use: fetch a newer pricing/plan file.
     pub allow_config_updates: bool,
     /// "tokens" | "cost"
@@ -604,6 +606,7 @@ impl Default for Settings {
             widget: WidgetSettings::default(),
             capture: CaptureSettings::default(),
             autostart: false,
+            show_in_dock: true,
             allow_config_updates: false,
             primary_metric: "tokens".into(),
             dismissed_unpriced: Vec::new(),
@@ -763,7 +766,7 @@ mod tests {
         assert!(s.capture.claude_poll && s.capture.antigravity_poll);
         assert!(!s.capture.codex_poll, "an explicit choice is kept");
         assert_eq!(s.limit_display, "used");
-        assert!(s.tray.show_percent && s.update_check);
+        assert!(s.tray.show_percent && s.update_check && s.show_in_dock);
         assert_eq!(s.widget.hotkey, DEFAULT_HOTKEY);
     }
 

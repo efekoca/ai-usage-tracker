@@ -277,6 +277,12 @@
     <div><span>{t(autostartKey)}</span><div class="subtle small">{t('settings.autostart.help')}</div></div>
     <Toggle checked={s.autostart} label={t(autostartKey)} onchange={(v) => saveSettings({ autostart: v })} />
   </div>
+  {#if app.info?.platform === 'macos'}
+    <div class="item">
+      <div><span>{t('settings.dock')}</span><div class="subtle small">{t('settings.dock.help')}</div></div>
+      <Toggle checked={s.show_in_dock} label={t('settings.dock')} onchange={(v) => saveSettings({ show_in_dock: v })} />
+    </div>
+  {/if}
   <div class="item">
     <div><span>{t('settings.currency')}</span><div class="subtle small">{t('settings.currency.help')}</div></div>
     <div class="row">
