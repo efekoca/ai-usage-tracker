@@ -923,3 +923,30 @@ fn a_file_without_a_physical_id_keeps_no_account_id_in_its_fallback_id() {
     assert!(![&path, &id].iter().any(|v| v.contains(login) || v.contains(org)));
     assert_eq!(tracker_core::ingest::ingest(&mut store, &[f], |_| {}).files_read, 0);
 }
+
+#[test]
+fn a_sign_in_waits_for_another_connections_write_instead_of_failing() {
+    let path = std::env::temp_dir().join(format!("aiut-signin-lock-{}.db", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let mut store = Store::open(&path).unwrap();
+    store.note_signin("/Users/u/.claude", Some("a"), 1_000).unwrap();
+    let (held, release) = (std::sync::mpsc::channel(), std::sync::mpsc::channel::<()>());
+    let other = {
+        let path = path.clone();
+        let held = held.0;
+        std::thread::spawn(move || {
+            let writer = Store::open(&path).unwrap();
+            writer.conn().execute_batch("BEGIN IMMEDIATE; INSERT INTO setting(key, value) VALUES('lock', 'held');").unwrap();
+            held.send(()).unwrap();
+            let _ = release.1.recv_timeout(std::time::Duration::from_millis(300));
+            writer.conn().execute_batch("COMMIT;").unwrap();
+        })
+    };
+    held.1.recv().unwrap();
+    // the look reads the last span before it writes; the ingest worker writing meanwhile must not make it fail
+    let noted = store.note_signin("/Users/u/.claude", Some("a"), 31_000);
+    let _ = release.0.send(());
+    other.join().unwrap();
+    assert!(noted.is_ok(), "{noted:?}");
+    let _ = std::fs::remove_file(&path);
+}
