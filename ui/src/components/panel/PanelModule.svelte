@@ -101,7 +101,7 @@
   })
   const hit = $derived(usage && usage.prompt > 0 ? (usage.cache_read / usage.prompt) * 100 : null)
 
-  const actionIcon: Record<string, string> = { open: 'overview', widget: 'widget', rescan: 'refresh', settings: 'settings' }
+  const actionIcon: Record<string, string> = { open: 'app', widget: 'pip', rescan: 'sync', settings: 'gear' }
   const active = $derived(m.action === 'widget' ? !!data?.widget_visible : m.action === 'rescan' ? !!data?.scanning : false)
   const scanning = $derived(!!data?.scanning)
   const actionLabel = $derived(
@@ -120,12 +120,12 @@
 
 {#if m.kind === 'action'}
   <button class="mod action {m.size}" class:on={active} class:spin={m.action === 'rescan' && scanning} class:done={m.action === 'rescan' && scanned && !scanning} title={actionLabel} aria-label={actionLabel} aria-pressed={m.action === 'widget' ? active : undefined} aria-busy={m.action === 'rescan' ? scanning : undefined} disabled={m.action === 'rescan' && scanning && !edit} tabindex={edit ? -1 : 0} onclick={act(m.action)}>
-    <span class="disc"><Icon name={m.action === 'rescan' && scanned && !scanning ? 'check' : actionIcon[m.action]} size={16} /></span>
+    <span class="disc"><Icon name={m.action === 'rescan' && scanned && !scanning ? 'check' : actionIcon[m.action]} size={m.size === 's' ? 22 : 16} /></span>
     {#if m.size === 'w'}<span class="lbl">{actionLabel}</span>{/if}
   </button>
 {:else if m.kind === 'scan'}
   <button class="mod scan w" class:spin={scanning} class:done={scanned && !scanning} aria-busy={scanning} disabled={scanning && !edit} tabindex={edit ? -1 : 0} onclick={act('rescan')} title={t('panel.action.rescan')}>
-    <span class="disc"><Icon name={scanned && !scanning ? 'check' : 'refresh'} size={16} /></span>
+    <span class="disc"><Icon name={scanned && !scanning ? 'check' : 'sync'} size={16} /></span>
     <span class="txt">
       <span class="lbl">{t('panel.scan')}</span>
       <span class="sub">{scanning ? t('panel.scan.running') : scanned ? t('panel.scan.done') : data?.last_scan_ms ? t('panel.scan.ago', { span: fmtSpan(Math.max(0, now - data.last_scan_ms)) }) : t('panel.scan.never')}</span>
@@ -432,18 +432,14 @@
     background: color-mix(in srgb, var(--good) 18%, transparent);
     color: var(--good-ink);
   }
-  /* round toggles sit inside their cell */
+  /* small buttons fill their cell like the other tiles */
   .action.s {
-    width: 52px;
-    height: 52px;
-    margin: 6px;
     padding: 0;
-    border-radius: 50%;
-    justify-content: center;
   }
   .action.s .disc {
     width: 100%;
     height: 100%;
+    border-radius: inherit;
     background: transparent;
   }
   .action.on,
