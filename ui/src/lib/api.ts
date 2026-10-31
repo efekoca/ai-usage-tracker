@@ -387,6 +387,7 @@ export interface Settings {
   onboarded: boolean
   language: 'system' | 'tr' | 'en'
   theme: 'system' | 'light' | 'dark'
+  accent: 'app' | 'system'
   enabled_sources: SourceId[]
   known_sources: SourceId[]
   extra_paths: { claude_config_dirs: string[]; codex_homes: string[] }

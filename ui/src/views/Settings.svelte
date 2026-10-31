@@ -246,6 +246,12 @@
     <span>{t('settings.theme')}</span>
     <Segmented label={t('settings.theme')} value={s.theme} options={[{ value: 'system', label: t('settings.theme.system') }, { value: 'light', label: t('settings.theme.light') }, { value: 'dark', label: t('settings.theme.dark') }]} onchange={(v) => saveSettings({ theme: v })} />
   </div>
+  {#if app.info?.accent_color}
+    <div class="item">
+      <div><span>{t('settings.accent')}</span><div class="subtle small">{t('settings.accent.help')}</div></div>
+      <Segmented label={t('settings.accent')} value={s.accent} options={[{ value: 'app', label: t('settings.accent.app') }, { value: 'system', label: t('settings.accent.system') }]} onchange={(v) => saveSettings({ accent: v })} />
+    </div>
+  {/if}
   <div class="item">
     <div><span>{t('settings.toolColors')}</span><div class="subtle small">{t('settings.toolColors.help')}</div></div>
     <div class="tints">
