@@ -532,6 +532,8 @@ pub struct Settings {
     pub language: String,
     /// "system" | "light" | "dark"
     pub theme: String,
+    /// "app" (the app's own blue) or "system" (the system's accent color, where it has one).
+    pub accent: String,
     #[serde(deserialize_with = "known")]
     pub enabled_sources: Vec<SourceId>,
     /// Sources this install has offered; one added by a later version starts enabled.
@@ -595,6 +597,7 @@ impl Default for Settings {
             onboarded: false,
             language: "system".into(),
             theme: "system".into(),
+            accent: "app".into(),
             enabled_sources: SourceId::ALL.into_iter().filter(|s| s.supported()).collect(),
             known_sources: SourceId::ALL.to_vec(),
             extra_paths: ExtraPaths::default(),
@@ -699,6 +702,9 @@ impl Settings {
         self.widget.normalize();
         self.tray.normalize();
         self.panel.normalize();
+        if self.accent != "system" {
+            self.accent = "app".into();
+        }
         if !(self.fx_rate.is_finite() && self.fx_rate > 0.0) {
             self.fx_rate = 1.0;
         }
@@ -767,6 +773,7 @@ mod tests {
         assert!(!s.capture.codex_poll, "an explicit choice is kept");
         assert_eq!(s.limit_display, "used");
         assert!(s.tray.show_percent && s.update_check && s.show_in_dock);
+        assert_eq!(s.accent, "app");
         assert_eq!(s.widget.hotkey, DEFAULT_HOTKEY);
     }
 

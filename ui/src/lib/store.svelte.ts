@@ -29,9 +29,12 @@ export function applyAppearance(s: Settings, info: AppInfo | null) {
   if (s.theme === 'system') delete root.dataset.theme
   else root.dataset.theme = s.theme
   root.dataset.mica = String(!!info?.supports_mica && !root.classList.contains('widget'))
-  if (info?.accent_color) {
+  if (s.accent === 'system' && info?.accent_color) {
     root.style.setProperty('--accent', info.accent_color)
     root.style.setProperty('--accent-ink', inkOn(info.accent_color))
+  } else {
+    root.style.removeProperty('--accent')
+    root.style.removeProperty('--accent-ink')
   }
   i18n.lang = resolveLang(s.language)
   i18n.currency = s.currency || 'USD'

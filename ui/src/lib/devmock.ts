@@ -31,6 +31,7 @@ const settings: Settings = {
   onboarded: new URLSearchParams(location.search).get('onboarding') !== '1',
   language: (new URLSearchParams(location.search).get('lang') as 'tr' | 'en') ?? 'system',
   theme: (new URLSearchParams(location.search).get('theme') as 'light' | 'dark') ?? 'system',
+  accent: 'app',
   enabled_sources: ['claude_code', 'cowork', 'claude_desktop', 'codex', 'antigravity', ...(ocMissing ? [] : ['opencode' as const])],
   known_sources: ['claude_code', 'cowork', 'claude_desktop', 'codex', 'chatgpt_desktop', 'antigravity', 'opencode'],
   extra_paths: { claude_config_dirs: [], codex_homes: [] },
