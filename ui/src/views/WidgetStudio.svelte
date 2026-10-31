@@ -247,7 +247,7 @@
       </div>
       <div class="item">
         <span>{t('ws.accent')}</span>
-        <ColorPick value={ws.accent} label={t('ws.accent')} defaultLabel={t('ws.accent.system')} customLabel={t('ws.accent.custom')} swatches={['#2a78d6', '#1baf7a', '#eb6834', '#e87ba4', '#4a3aa7', '#52514e']} onchange={(v) => set('accent', v)} />
+        <ColorPick value={ws.accent} label={t('ws.accent')} defaultLabel={t('ws.accent.system')} customLabel={t('ws.accent.custom')} swatches={['#2f6feb', '#1baf7a', '#eb6834', '#e87ba4', '#4a3aa7', '#52514e']} onchange={(v) => set('accent', v)} />
       </div>
       {#each [['scale', 0.6, 2, 0.05, (v: number) => fmtPct(v * 100)], ['opacity', 0.3, 1, 0.05, (v: number) => fmtPct(v * 100)], ['corner_radius', 0, 28, 1, (v: number) => `${v}px`]] as const as [key, min, max, step, fmt] (key)}
         <div class="item">
