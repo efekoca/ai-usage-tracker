@@ -843,6 +843,17 @@ fn detected_plan(store: &tracker_core::store::Store, provider: Provider, plans: 
     }
 }
 
+/// A Claude weekly window of the last two weeks that started again days early while one Claude account is known.
+#[tauri::command]
+pub async fn early_restart(app: AppHandle) -> Res<Option<tracker_core::history::EarlyRestart>> {
+    const DAYS: i64 = 14;
+    let state = app.state::<AppState>();
+    let store = state.db();
+    let now = now_ms();
+    let history = tracker_core::history::limit_history(&store, now, DAYS).map_err(err)?;
+    Ok(tracker_core::history::early_restart(&history, Provider::Anthropic, now - DAYS * 86_400_000))
+}
+
 #[tauri::command]
 pub async fn get_limit_history(app: AppHandle, days: Option<i64>) -> Res<LimitHistoryView> {
     let state = app.state::<AppState>();

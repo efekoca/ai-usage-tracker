@@ -764,6 +764,12 @@ export interface PlanAdvice {
   suggested_has_no_five_hour: boolean
   monthly_delta_usd: number | null
 }
+/** A Claude weekly window that started again days early while one Claude account is known. */
+export interface EarlyRestart {
+  at_ms: number
+  resets_at_ms: number
+  peak_pct: number
+}
 export interface LimitHistoryView {
   history: { from_ms: number; to_ms: number; series: WindowSeries[]; observed_days: Record<string, number> }
   advice: PlanAdvice[]
@@ -858,6 +864,7 @@ export const api = {
   subagentCache: (period: Period, filter?: Filter) => invoke<SubagentCache>('get_subagent_cache', { period, filter }),
   tips: (period: Period, filter?: Filter) => invoke<Tips>('get_tips', { period, filter }),
   limitHistory: (days?: number) => invoke<LimitHistoryView>('get_limit_history', { days }),
+  earlyRestart: () => invoke<EarlyRestart | null>('early_restart'),
   dayDetail: (date: string, filter?: Filter) => invoke<DayDetail>('get_day_detail', { date, filter }),
   hotkeyStatus: () => invoke<HotkeyStatus>('hotkey_status'),
   setHotkey: (hotkey: string) => invoke<HotkeyStatus>('set_hotkey', { hotkey }),

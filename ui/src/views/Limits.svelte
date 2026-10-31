@@ -12,6 +12,7 @@
   import Select from '../components/Select.svelte'
   import LimitHistory from '../components/LimitHistory.svelte'
   import LimitNotices from '../components/LimitNotices.svelte'
+  import EarlyRestartNotice from '../components/EarlyRestartNotice.svelte'
 
   let plans: PlansFile | null = $state(null)
   onMount(async () => {
@@ -193,6 +194,7 @@
 {/each}
 
 <LimitNotices />
+{#if providers.includes('anthropic') && app.settings?.plans.anthropic !== 'api'}<EarlyRestartNotice />{/if}
 
 {#if app.limits.length === 0}
   <div class="banner"><Icon name="info" size={16} />{t('limits.none')}</div>
