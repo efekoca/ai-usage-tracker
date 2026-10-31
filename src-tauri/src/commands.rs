@@ -632,9 +632,11 @@ pub struct TrayBadge {
     text: String,
     /// The logo's tool; empty for the percent.
     logo: &'static str,
-    /// `#rrggbb` of the square and the mark.
+    /// `#rrggbb` of the square and the mark; a dial macOS tints has neither.
     bg: String,
     fg: String,
+    /// The dial's filled share, 0–1.
+    dial: Option<f64>,
 }
 
 /// What the text next to the tray icon would show with `tray`, before it is saved.
@@ -647,11 +649,20 @@ pub async fn tray_preview(app: AppHandle, tray: crate::settings::TraySettings) -
     let icon = crate::tray::badge(&s, &tray, &crate::tray::current_limits(&readings)).map(|b| {
         let hex = |c: [u8; 3]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
         let (bg, fg) = crate::tray::colors(&b);
-        let (text, logo) = match b.mark {
-            crate::tray::Mark::Number(text) => (text, ""),
-            crate::tray::Mark::Logo(logo) => (String::new(), logo),
-        };
-        TrayBadge { text, logo, bg: hex(bg), fg: hex(fg) }
+        match b.mark {
+            crate::tray::Mark::Number(text) => TrayBadge { text, logo: "", bg: hex(bg), fg: hex(fg), dial: None },
+            crate::tray::Mark::Logo(logo) => TrayBadge { text: String::new(), logo, bg: hex(bg), fg: hex(fg), dial: None },
+            crate::tray::Mark::Dial(used) => {
+                let tinted = crate::tray::is_template(&b);
+                TrayBadge {
+                    text: String::new(),
+                    logo: "",
+                    bg: if tinted { String::new() } else { hex(crate::tray::NAVY) },
+                    fg: if tinted { String::new() } else { hex(crate::tray::arc_color(b.level)) },
+                    dial: Some(used),
+                }
+            }
+        }
     });
     let mut data = crate::tray::data(&app, &s, &tray, readings);
     // the catalog shows every kind's value

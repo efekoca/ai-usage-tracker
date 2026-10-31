@@ -213,8 +213,8 @@ pub const DEFAULT_HOTKEY: &str = "Ctrl+Alt+Shift+W";
 pub struct TraySettings {
     /// A colored badge for the chosen limit instead of the app icon.
     pub show_percent: bool,
-    /// What the badge shows: "number" (the limit's percent), "tool" (the logo of the limit's tool) or one
-    /// tool's logo: "anthropic", "openai", "google" or "opencode".
+    /// What the badge shows: "number" (the limit's percent), "dial" (the app's dial filled to it), "tool"
+    /// (the logo of the limit's tool) or one tool's logo: "anthropic", "openai", "google" or "opencode".
     pub mark: String,
     /// The badge takes its tool's color (`Settings::provider_colors`, else the tool's own) until the limit gets close.
     pub tool_color: bool,
@@ -344,7 +344,7 @@ impl TraySettings {
                 *v = fallback.into();
             }
         };
-        pick(&mut self.mark, &["number", "tool", "anthropic", "openai", "google", "opencode"], "number");
+        pick(&mut self.mark, &["number", "dial", "tool", "anthropic", "openai", "google", "opencode"], "number");
         pick(&mut self.label, &["name", "short", "none"], "short");
         pick(&mut self.value, &["app", "used", "remaining"], "app");
         pick(&mut self.reset, &["none", "countdown", "time"], "none");

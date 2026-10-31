@@ -142,6 +142,8 @@ pub struct Current {
 pub enum Mark {
     Number(String),
     Logo(&'static str),
+    /// The app's dial, its arc filled to this share (0–1) of the limit.
+    Dial(f64),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -318,6 +320,10 @@ pub(crate) fn badge(s: &Settings, cfg: &TraySettings, limits: &[Current]) -> Opt
             (Mark::Number(shown_value(c.used, s.limit_display == "remaining").to_string()), c.provider.as_str())
         }
         "tool" => (Mark::Logo(c?.provider.as_str()), c?.provider.as_str()),
+        "dial" => {
+            let c = c?;
+            (Mark::Dial(shown_value(c.used, s.limit_display == "remaining") as f64 / 100.0), c.provider.as_str())
+        }
         key => {
             let key = LOGOS.iter().find(|l| l.0 == key)?.0;
             (Mark::Logo(key), key)
@@ -410,7 +416,7 @@ fn update(app: &AppHandle) {
             log::warn!("tray icon: {e}");
         }
         // setting an icon clears the template flag
-        let _ = tray.set_icon_as_template(cfg!(target_os = "macos") && next.icon.is_none());
+        let _ = tray.set_icon_as_template(cfg!(target_os = "macos") && next.icon.as_ref().is_none_or(|(b, _)| is_template(b)));
     }
     // Windows has no text next to a tray icon
     #[cfg(not(windows))]
@@ -501,8 +507,31 @@ fn level_colors(level: Level) -> ([u8; 3], [u8; 3]) {
 
 pub fn draw(b: &Badge, size: u32) -> Vec<u8> {
     let s = size as i64;
-    let (bg, fg) = colors(b);
     let mut px = vec![0u8; (size * size * 4) as usize];
+    if let Mark::Dial(used) = b.mark {
+        let look = dial_look(b.level);
+        if look == DialLook::Square {
+            square(&mut px, s, NAVY);
+        }
+        dial(&mut px, s, used, b.level, look);
+        return px;
+    }
+    let (bg, fg) = colors(b);
+    square(&mut px, s, bg);
+    match &b.mark {
+        Mark::Number(text) => number(&mut px, s, text, fg),
+        Mark::Logo(key) => {
+            if let Some((_, d, _)) = LOGOS.iter().find(|l| l.0 == *key) {
+                logo(&mut px, s, d, fg);
+            }
+        }
+        Mark::Dial(_) => {}
+    }
+    px
+}
+
+/// The badge's rounded square.
+fn square(px: &mut [u8], s: i64, bg: [u8; 3]) {
     let r = (s as f64 * 0.22).max(2.0);
     for y in 0..s {
         for x in 0..s {
@@ -518,15 +547,6 @@ pub fn draw(b: &Badge, size: u32) -> Vec<u8> {
             }
         }
     }
-    match &b.mark {
-        Mark::Number(text) => number(&mut px, s, text, fg),
-        Mark::Logo(key) => {
-            if let Some((_, d, _)) = LOGOS.iter().find(|l| l.0 == *key) {
-                logo(&mut px, s, d, fg);
-            }
-        }
-    }
-    px
 }
 
 /// Whole-pixel scaling keeps the digits sharp.
@@ -567,15 +587,23 @@ fn number(px: &mut [u8], s: i64, text: &str, fg: [u8; 3]) {
     }
 }
 
-/// The mark fills most of the badge, anti-aliased: exact coverage across a row, 16 samples down a pixel.
+/// The mark fills most of the badge.
 fn logo(px: &mut [u8], s: i64, d: &str, fg: [u8; 3]) {
-    use kurbo::{Affine, BezPath, PathEl, Point, Shape};
-    const SUB: usize = 16;
+    use kurbo::{Affine, BezPath, Shape};
     let Ok(mut path) = BezPath::from_svg(d) else { return };
     let b = path.bounding_box();
     let side = s as f64;
     let k = side * 0.72 / b.width().max(b.height());
     path.apply_affine(Affine::new([k, 0.0, 0.0, k, (side - b.width() * k) / 2.0 - b.x0 * k, (side - b.height() * k) / 2.0 - b.y0 * k]));
+    fill(px, s, &path, fg, 1.0);
+}
+
+/// Paints `path` (even-odd) at `alpha` over `px`, anti-aliased: exact coverage across a row, 16
+/// samples down a pixel.
+fn fill(px: &mut [u8], s: i64, path: &kurbo::BezPath, rgb: [u8; 3], alpha: f64) {
+    use kurbo::{PathEl, Point};
+    const SUB: usize = 16;
+    let side = s as f64;
     let mut edges: Vec<(Point, Point)> = Vec::new();
     let (mut start, mut last) = (Point::ZERO, Point::ZERO);
     // a fill closes every subpath, closed or not
@@ -618,7 +646,7 @@ fn logo(px: &mut [u8], s: i64, d: &str, fg: [u8; 3]) {
         }
     }
     for (i, a) in cover.iter().enumerate() {
-        let a = a.min(1.0);
+        let a = a.min(1.0) * alpha;
         if a <= 0.0 {
             continue;
         }
@@ -626,10 +654,75 @@ fn logo(px: &mut [u8], s: i64, d: &str, fg: [u8; 3]) {
         let under = p[3] as f64 / 255.0 * (1.0 - a);
         let out = a + under;
         for c in 0..3 {
-            p[c] = ((fg[c] as f64 * a + p[c] as f64 * under) / out).round() as u8;
+            p[c] = ((rgb[c] as f64 * a + p[c] as f64 * under) / out).round() as u8;
         }
         p[3] = (out * 255.0).round() as u8;
     }
+}
+
+/// The app icon's navy, its dial's track and its needle.
+pub(crate) const NAVY: [u8; 3] = [0x16, 0x1E, 0x3E];
+const TRACK: [u8; 3] = [0x28, 0x32, 0x56];
+const NEEDLE: [u8; 3] = [0xF2, 0xF5, 0xFA];
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum DialLook {
+    /// macOS tints a template image for its light or dark menu bar.
+    Template,
+    /// On the icon's navy square: taskbars may be light or dark, and a warning needs its color.
+    Square,
+}
+
+fn dial_look(level: Level) -> DialLook {
+    if cfg!(target_os = "macos") && level == Level::Normal { DialLook::Template } else { DialLook::Square }
+}
+
+/// The badge is drawn for macOS to tint.
+pub(crate) fn is_template(b: &Badge) -> bool {
+    matches!(b.mark, Mark::Dial(_)) && dial_look(b.level) == DialLook::Template
+}
+
+/// The dial's arc: the icon's blue, the warning colors as the limit gets close.
+pub(crate) fn arc_color(level: Level) -> [u8; 3] {
+    match level {
+        Level::Normal => [0x38, 0x84, 0xFF],
+        level => level_colors(level).0,
+    }
+}
+
+/// A gauge open at the bottom: the track, the arc to `used`, and the sparkle needle pointing at it.
+fn dial(px: &mut [u8], s: i64, used: f64, level: Level, look: DialLook) {
+    use kurbo::{Arc, BezPath, Cap, Point, Shape, Stroke, StrokeOpts, Vec2};
+    use std::f64::consts::FRAC_PI_2;
+    let side = s as f64;
+    let used = used.clamp(0.0, 1.0);
+    let (unit, track, track_alpha, arc, needle) = match look {
+        DialLook::Template => (side / 24.0, [0; 3], 0.35, [0; 3], [0; 3]),
+        DialLook::Square => (side * 0.84 / 24.0, TRACK, 1.0, arc_color(level), NEEDLE),
+    };
+    // the gap at the bottom leaves the ring looking high, so it sits a little lower
+    let c = Point::new(side / 2.0, side / 2.0 + 0.6 * unit);
+    let r = 8.0 * unit;
+    // small icons get a thicker ring so it still reads
+    let width = if side < 28.0 { 3.4 } else { 2.8 } * unit;
+    let ring = |sweep: f64| {
+        let arc = Arc::new(c, (r, r), 135f64.to_radians(), sweep.to_radians(), 0.0);
+        kurbo::stroke(arc.path_elements(0.05), &Stroke::new(width).with_caps(Cap::Round), &StrokeOpts::default(), 0.05)
+    };
+    fill(px, s, &ring(270.0), track, track_alpha);
+    if used > 0.0 {
+        fill(px, s, &ring(270.0 * used), arc, 1.0);
+    }
+    let a = (135.0 + 270.0 * used).to_radians();
+    let at = |angle: f64, len: f64| c + Vec2::new(angle.cos(), angle.sin()) * len * unit;
+    let tip = |k: usize| at(a + k as f64 * FRAC_PI_2, if k.is_multiple_of(4) { 5.6 } else { 3.0 });
+    let mut star = BezPath::new();
+    star.move_to(tip(0));
+    for k in 1..=4 {
+        star.quad_to(at(a + (k as f64 - 0.5) * FRAC_PI_2, 0.9), tip(k));
+    }
+    star.close_path();
+    fill(px, s, &star, needle, 1.0);
 }
 
 #[cfg(test)]
@@ -765,6 +858,39 @@ mod tests {
         s.tray.tool_color = false;
         l[0].used = 30.0;
         assert_eq!(badge(&s, &s.tray, &l).unwrap().tint, None);
+    }
+
+    #[test]
+    fn the_dial_fills_to_the_limit_and_its_needle_follows() {
+        let mut s = Settings { onboarded: true, ..Default::default() };
+        s.tray.mark = "dial".into();
+        let l = vec![Current { provider: Provider::Anthropic, window: "five_hour".into(), used: 30.0, behind: false }];
+        assert_eq!(badge(&s, &s.tray, &l), Some(plain(Mark::Dial(0.3), Level::Normal)));
+        assert_eq!(badge(&s, &s.tray, &[]), None, "no reading keeps the app icon");
+        s.limit_display = "remaining".into();
+        assert_eq!(badge(&s, &s.tray, &l).unwrap().mark, Mark::Dial(0.7));
+
+        let size = 32;
+        let drawn = |used: f64, look: DialLook| {
+            let mut px = vec![0u8; (size * size * 4) as usize];
+            if look == DialLook::Square {
+                square(&mut px, size as i64, NAVY);
+            }
+            dial(&mut px, size as i64, used, Level::Normal, look);
+            px
+        };
+        let count = |px: &[u8], rgb: [u8; 3]| lit(px, size, rgb).len();
+        let blue = arc_color(Level::Normal);
+        assert!(count(&drawn(0.0, DialLook::Square), blue) == 0);
+        assert!(count(&drawn(0.25, DialLook::Square), blue) < count(&drawn(0.75, DialLook::Square), blue));
+        let solid = |px: &[u8]| px.chunks(4).filter(|p| p[3] == 255).count();
+        assert!(solid(&drawn(0.25, DialLook::Template)) < solid(&drawn(0.75, DialLook::Template)), "the opaque arc grows");
+        assert_eq!(drawn(0.5, DialLook::Template)[3], 0, "a template has no square");
+        let needle_x = |used: f64| {
+            let on = lit(&drawn(used, DialLook::Square), size, NEEDLE);
+            on.iter().map(|p| p.0 as f64).sum::<f64>() / on.len() as f64
+        };
+        assert!(needle_x(0.0) + 1.0 < needle_x(1.0), "the needle turns from the start of the arc to its end");
     }
 
     #[test]

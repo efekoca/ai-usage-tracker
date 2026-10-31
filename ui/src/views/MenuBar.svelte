@@ -348,9 +348,21 @@
   const markOptions = $derived([
     { value: 'app', label: t('settings.tray.mark.app') },
     { value: 'number', label: t('settings.tray.mark.number') },
+    { value: 'dial', label: t('settings.tray.mark.dial') },
     { value: 'tool', label: t('settings.tray.mark.tool') },
     ...(['anthropic', 'openai', 'google', 'opencode'] as const).map((p) => ({ value: p, label: t('settings.tray.mark.logo', { name: p === 'opencode' ? toolLabel(p) : t(`provider.${p}`) }) })),
   ])
+  // the tray's dial (tray.rs `dial`) in its 24-unit box
+  const onDial = (angle: number, len: number) => `${(12 + Math.cos(angle) * len).toFixed(2)} ${(12.6 + Math.sin(angle) * len).toFixed(2)}`
+  const rad = (deg: number) => (deg * Math.PI) / 180
+  const dialArc = (share: number) => `M${onDial(rad(135), 8)}A8 8 0 ${share > 2 / 3 ? 1 : 0} 1 ${onDial(rad(135 + 270 * share), 8)}`
+  function dialNeedle(share: number): string {
+    const a = rad(135 + 270 * share)
+    const tip = (k: number) => onDial(a + (k * Math.PI) / 2, k % 4 === 0 ? 5.6 : 3)
+    let d = `M${tip(0)}`
+    for (let k = 1; k <= 4; k++) d += `Q${onDial(a + ((k - 0.5) * Math.PI) / 2, 0.9)} ${tip(k)}`
+    return `${d}Z`
+  }
   function setMark(v: string) {
     set('show_percent', v !== 'app')
     if (v !== 'app') set('mark', v as TrayMark)
@@ -410,7 +422,17 @@
       <div class="menubar" aria-hidden="true">
         <span class="spacer"></span>
         <span class="tray">
-          {#if showsIcon && preview?.icon}
+          {#if showsIcon && preview?.icon && preview.icon.dial !== null}
+            {@const icon = preview.icon}
+            {@const share = icon.dial ?? 0}
+            <span class="badge" style:background={icon.bg || 'transparent'}>
+              <svg width="16" height="16" viewBox={icon.bg ? '-2.3 -2.3 28.6 28.6' : '0 0 24 24'} fill="none" stroke-width="2.8" stroke-linecap="round">
+                <path d={dialArc(1)} stroke={icon.bg ? '#283256' : 'currentColor'} stroke-opacity={icon.bg ? 1 : 0.35} />
+                {#if share > 0}<path d={dialArc(share)} stroke={icon.fg || 'currentColor'} />{/if}
+                <path d={dialNeedle(share)} fill={icon.bg ? '#f2f5fa' : 'currentColor'} stroke="none" />
+              </svg>
+            </span>
+          {:else if showsIcon && preview?.icon}
             <span class="badge" style:background={preview.icon.bg} style:color={preview.icon.fg}>{#if preview.icon.logo}<BrandIcon provider={preview.icon.logo} size={12} always />{:else}{preview.icon.text}{/if}</span>
           {:else if showsIcon}<img src={mac ? '/menu-bar-template.png' : '/app-icon.png'} class:template={mac} alt="" width="16" height="16" />{/if}
           {#if !windows && preview?.title}<span class="title">{preview.title}</span>{/if}
@@ -626,7 +648,7 @@
     </div>
     <div class="item">
       <div><span>{t('settings.tray.toolColor')}</span><div class="subtle small">{t('settings.tray.toolColor.help')}</div></div>
-      <Toggle checked={tray.tool_color} disabled={!tray.show_percent} label={t('settings.tray.toolColor')} onchange={(v) => set('tool_color', v)} />
+      <Toggle checked={tray.tool_color} disabled={!tray.show_percent || tray.mark === 'dial'} label={t('settings.tray.toolColor')} onchange={(v) => set('tool_color', v)} />
     </div>
     <div class="item">
       <span>{t('settings.tray.limit')}</span>

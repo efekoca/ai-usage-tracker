@@ -40,7 +40,7 @@ export interface TrayItem {
   /** A Codex or Claude limit of this account (its digest); empty for the account in use. */
   account: string
 }
-export type TrayMark = 'number' | 'tool' | 'anthropic' | 'openai' | 'google' | 'opencode'
+export type TrayMark = 'number' | 'dial' | 'tool' | 'anthropic' | 'openai' | 'google' | 'opencode'
 export interface TraySettings {
   show_percent: boolean
   mark: TrayMark
@@ -64,7 +64,8 @@ export interface TrayPreview {
   parts: string[]
   catalog: string[]
   /** The badge the icon would draw; null keeps the app icon. */
-  icon: { text: string; logo: '' | Provider | 'opencode'; bg: string; fg: string } | null
+  /** `dial` is the dial's filled share (0–1); a dial macOS tints has no `bg` or `fg`. */
+  icon: { text: string; logo: '' | Provider | 'opencode'; bg: string; fg: string; dial: number | null } | null
 }
 
 export type PanelKind = 'limit' | 'provider' | 'usage' | 'forecast' | 'scan' | 'action'
