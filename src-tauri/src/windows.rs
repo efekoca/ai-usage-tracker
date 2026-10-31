@@ -98,6 +98,21 @@ pub fn show_main_at(app: &AppHandle, view: Option<&str>) {
     off_main(move || build_main(&app, view.as_deref()));
 }
 
+/// Windows show only the app's own pages: anything else, such as Tauri's IPC address, is refused
+/// and logged, so a window never ends up on a bare error page.
+pub(crate) fn app_page(url: &tauri::Url) -> bool {
+    let web = matches!(url.scheme(), "http" | "https");
+    // a new webview may pass through a blank page before its first one
+    let ours = url.scheme() == "tauri"
+        || url.as_str() == "about:blank"
+        || (web && url.host_str() == Some("tauri.localhost"))
+        || (tauri::is_dev() && web && url.host_str() == Some("localhost"));
+    if !ours {
+        log::warn!("refused to open {}://{}{}", url.scheme(), url.host_str().unwrap_or_default(), url.path());
+    }
+    ours
+}
+
 fn build_main(app: &AppHandle, view: Option<&str>) {
     if app.get_webview_window(MAIN).is_some() {
         return; // a concurrent request already built it
@@ -119,6 +134,7 @@ fn build_main(app: &AppHandle, view: Option<&str>) {
         // macOS otherwise spends the first click on an inactive window just activating it
         .accept_first_mouse(true)
         .theme(window_theme(&app.state::<AppState>().settings.read().unwrap()))
+        .on_navigation(app_page)
         .visible(true);
     if supports_mica() {
         b = b.transparent(true).effects(EffectsBuilder::new().effect(Effect::Mica).build());
@@ -176,6 +192,7 @@ pub fn ensure_widget(app: &AppHandle, s: &Settings) -> Option<WebviewWindow> {
     let (w, h) = widget_size(&s.widget.size);
     let b = WebviewWindowBuilder::new(app, WIDGET, WebviewUrl::App("widget.html".into()))
         .title("AI Usage Tracker widget")
+        .on_navigation(app_page)
         .inner_size(w, h)
         .resizable(false)
         .decorations(false)
@@ -761,6 +778,15 @@ fn fullscreen_app_active() -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn windows_open_only_the_apps_own_pages() {
+        let page = |u: &str| super::app_page(&u.parse().unwrap());
+        assert!(page("tauri://localhost/index.html#limits") && page("tauri://localhost") && page("http://tauri.localhost/widget.html"));
+        assert!(!page("ipc://localhost/plugin%3Aevent%7Cemit") && !page("ipc://tauri.localhost/x"), "Tauri's IPC address");
+        assert!(!page("https://example.com/") && !page("file:///etc/hosts") && page("about:blank"));
+        assert_eq!(page("http://localhost:5173/"), tauri::is_dev(), "the dev server only while developing");
+    }
 
     #[test]
     fn menu_items_change_only_their_own_setting() {

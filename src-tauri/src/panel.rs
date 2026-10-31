@@ -61,6 +61,7 @@ fn ensure(app: &AppHandle) -> Option<WebviewWindow> {
     let native = cfg!(target_os = "macos") || supports_mica();
     let mut b = WebviewWindowBuilder::new(app, PANEL, WebviewUrl::App("panel.html".into()))
         .title("AI Usage Tracker")
+        .on_navigation(crate::windows::app_page)
         .inner_size(WIDTH, 420.0)
         .resizable(false)
         .decorations(false)

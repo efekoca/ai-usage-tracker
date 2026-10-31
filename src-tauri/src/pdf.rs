@@ -26,6 +26,7 @@ pub fn render(app: &AppHandle, from: &str, to: &str, out: &Path) -> Result<(), S
     *app.state::<AppState>().report_ready.lock().unwrap() = Some(tx);
     let win = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App(format!("report.html?from={from}&to={to}").into()))
         .title("AI Usage Tracker report")
+        .on_navigation(crate::windows::app_page)
         .visible(false)
         .skip_taskbar(true)
         .inner_size(820.0, 1160.0)
