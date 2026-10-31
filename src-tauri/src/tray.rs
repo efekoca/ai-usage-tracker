@@ -15,7 +15,7 @@ use tracker_core::insights::ForecastKind;
 use tracker_core::model::{Provider, Tool};
 use tracker_core::store::EventRow;
 
-const ID: &str = "main-tray";
+pub(crate) const ID: &str = "main-tray";
 /// Reset times pass and readings age even when nothing new arrives.
 const REFRESH: Duration = Duration::from_secs(20);
 
