@@ -148,7 +148,7 @@
       {#if withToolbar.includes(app.view)}
         <Toolbar />
       {/if}
-      <div class="page" bind:this={page} aria-busy={app.loading}>
+      <div class="page" class:titled={!withToolbar.includes(app.view)} bind:this={page} aria-busy={app.loading}>
         {#if app.error}
           <div class="banner" role="alert"><Icon name="warning" size={16} />{t('common.error', { e: app.error })}</div>
         {/if}
@@ -371,6 +371,10 @@
   }
   .banner {
     margin-bottom: 16px;
+  }
+  /* a page with its own title starts it 16px down; a banner above it starts there too */
+  .titled > .banner:first-child {
+    margin-top: 16px;
   }
   .banner.update {
     align-items: center;
