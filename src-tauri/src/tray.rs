@@ -76,11 +76,21 @@ fn menu(app: &AppHandle, tr: bool, update: Option<&str>, hotkey: &str) -> tauri:
     Ok(menu)
 }
 
+/// The app's mark without a badge: on macOS a template image, which the menu bar tints for its
+/// light or dark look.
+fn plain_icon(app: &AppHandle) -> Option<Image<'static>> {
+    #[cfg(target_os = "macos")]
+    if let Ok(mark) = Image::from_bytes(include_bytes!("../icons/menu-bar-template.png")) {
+        return Some(mark);
+    }
+    app.default_window_icon().map(|i| i.clone().to_owned())
+}
+
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let s = app.state::<AppState>().settings.read().unwrap().clone();
     let mut b = TrayIconBuilder::with_id(ID).tooltip("AI Usage Tracker").menu(&menu(app, turkish(&s), None, &s.widget.hotkey)?).show_menu_on_left_click(false);
-    if let Some(icon) = app.default_window_icon() {
-        b = b.icon(icon.clone());
+    if let Some(icon) = plain_icon(app) {
+        b = b.icon(icon).icon_as_template(cfg!(target_os = "macos"));
     }
     b.on_menu_event(|app, e| handle_menu(app, e.id().as_ref()))
         .on_tray_icon_event(|tray, e| {
@@ -394,11 +404,13 @@ fn update(app: &AppHandle) {
         let image = match &next.icon {
             _ if next.icon_hidden => None,
             Some((b, size)) => Some(Image::new_owned(draw(b, *size), *size, *size)),
-            None => app.default_window_icon().cloned(),
+            None => plain_icon(app),
         };
         if let Err(e) = tray.set_icon(image) {
             log::warn!("tray icon: {e}");
         }
+        // setting an icon clears the template flag
+        let _ = tray.set_icon_as_template(cfg!(target_os = "macos") && next.icon.is_none());
     }
     // Windows has no text next to a tray icon
     #[cfg(not(windows))]
