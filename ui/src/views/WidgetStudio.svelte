@@ -10,9 +10,11 @@
   import Icon from '../components/Icon.svelte'
   import WidgetView from '../components/WidgetView.svelte'
 
-  // only Windows lets the app see a full-screen program; macOS always hides the widget then
+  // Windows sees a full-screen program; macOS lets the widget join one only without a Dock icon
   const behaviorKeys = $derived(
-    app.info?.platform === 'windows' ? (['visible', 'always_on_top', 'lock_position', 'auto_hide_fullscreen'] as const) : (['visible', 'always_on_top', 'lock_position'] as const),
+    app.info?.platform === 'windows' || (app.info?.platform === 'macos' && app.settings?.show_in_dock === false)
+      ? (['visible', 'always_on_top', 'lock_position', 'auto_hide_fullscreen'] as const)
+      : (['visible', 'always_on_top', 'lock_position'] as const),
   )
 
   let ws = $state<WidgetSettings>(structuredClone($state.snapshot(app.settings!.widget)) as WidgetSettings)

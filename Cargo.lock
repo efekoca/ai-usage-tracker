@@ -22,6 +22,8 @@ name = "ai-usage-tracker"
 version = "0.8.5"
 dependencies = [
  "chrono",
+ "core-foundation 0.10.1",
+ "core-graphics",
  "gtk",
  "kurbo",
  "libc",
