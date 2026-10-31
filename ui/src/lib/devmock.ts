@@ -1,7 +1,7 @@
 // Dev-only IPC mock for running the UI in a plain browser; never in production builds (see main.ts).
 import { mockIPC } from '@tauri-apps/api/mocks'
 import plansJson from '../../../config/plans.json'
-import type { DayPoint, Group, LimitView, Period, Report, Settings, Totals, PanelModule, TrayItem, TraySettings } from './api'
+import type { DayPoint, Group, LimitView, Period, Provider, Report, Settings, Totals, PanelModule, TrayItem, TraySettings } from './api'
 
 const scenario = new URLSearchParams(location.search)
 let claudeMode = scenario.get('claude')
@@ -55,6 +55,8 @@ const settings: Settings = {
   weekly_report_dir: '',
   tray: {
     show_percent: true,
+    mark: 'number',
+    tool_color: false,
     limit: 'auto',
     title: false,
     items: trayDefaults(),
@@ -604,7 +606,24 @@ function mockTrayPreview(tray: TraySettings) {
   const shown = parts.filter(Boolean)
   const bare = { ...tray, label: 'none' as const }
   const catalog = trayCatalog().map((it) => part(it, bare))
-  return { title: tray.title && shown.length && platform !== 'windows' ? `${tray.prefix}${shown.join(tray.separator)}${tray.suffix}` : '', parts, catalog }
+  const [p, w] = tray.limit.split(':')
+  const c = limits()
+    .filter((l) => l.active && l.used_pct !== null && (l.state === 'fresh' || l.state === 'behind') && (tray.limit === 'auto' || (l.provider === p && l.window === w)))
+    .sort((a, b) => b.used_pct! - a.used_pct!)[0]
+  const level = !c ? 'normal' : c.used_pct! >= settings.widget.high_at ? 'high' : c.used_pct! >= settings.widget.warn_at ? 'warn' : 'normal'
+  const used = c ? Math.round(c.used_pct!) : 0
+  const tool = tray.mark === 'number' || tray.mark === 'tool' ? c?.provider : tray.mark
+  const own: Record<string, string> = { anthropic: '#d97757', openai: '#10a37f', google: '#4285f4', opencode: '#52514e' }
+  const tint = tray.tool_color && tool ? settings.provider_colors[tool as Provider]?.toLowerCase() || own[tool] : ''
+  const [bg, fg] = level === 'high' ? ['#dc2626', '#ffffff'] : level === 'warn' ? ['#f59e0b', '#111111'] : tint ? [tint, '#ffffff'] : ['#334155', '#ffffff']
+  const icon = !tray.show_percent
+    ? null
+    : tray.mark === 'number'
+      ? c && { text: String(settings.limit_display === 'remaining' ? 100 - used : used), logo: '' as const, bg, fg }
+      : tray.mark === 'tool'
+        ? c && { text: '', logo: c.provider, bg, fg }
+        : { text: '', logo: tray.mark, bg, fg }
+  return { title: tray.title && shown.length && platform !== 'windows' ? `${tray.prefix}${shown.join(tray.separator)}${tray.suffix}` : '', parts, catalog, icon: icon || null }
 }
 
 function trayCatalog(): TrayItem[] {

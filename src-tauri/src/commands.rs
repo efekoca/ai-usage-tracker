@@ -618,6 +618,19 @@ pub struct TrayPreview {
     /// Each item's own text in `items` and in the catalog; empty when it has no value.
     parts: Vec<String>,
     catalog: Vec<String>,
+    /// The badge the icon would draw; `None` keeps the app icon.
+    icon: Option<TrayBadge>,
+}
+
+#[derive(Serialize)]
+pub struct TrayBadge {
+    /// The percent; empty for a logo.
+    text: String,
+    /// The logo's tool; empty for the percent.
+    logo: &'static str,
+    /// `#rrggbb` of the square and the mark.
+    bg: String,
+    fg: String,
 }
 
 /// What the text next to the tray icon would show with `tray`, before it is saved.
@@ -627,6 +640,15 @@ pub async fn tray_preview(app: AppHandle, tray: crate::settings::TraySettings) -
     tray.normalize();
     let s = app.state::<AppState>().settings.read().unwrap().clone();
     let readings = crate::tray::readings(&app, &s).unwrap_or_default();
+    let icon = crate::tray::badge(&s, &tray, &crate::tray::current_limits(&readings)).map(|b| {
+        let hex = |c: [u8; 3]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
+        let (bg, fg) = crate::tray::colors(&b);
+        let (text, logo) = match b.mark {
+            crate::tray::Mark::Number(text) => (text, ""),
+            crate::tray::Mark::Logo(logo) => (String::new(), logo),
+        };
+        TrayBadge { text, logo, bg: hex(bg), fg: hex(fg) }
+    });
     let mut data = crate::tray::data(&app, &s, &tray, readings);
     // the catalog shows every kind's value
     if data.usage.is_none() {
@@ -640,6 +662,7 @@ pub async fn tray_preview(app: AppHandle, tray: crate::settings::TraySettings) -
         title: if tray.title && !cfg!(windows) { f.title(&data) } else { String::new() },
         parts: tray.items.iter().map(|i| f.part(i, &data).unwrap_or_default()).collect(),
         catalog: crate::settings::tray_catalog().iter().map(|i| g.part(i, &data).unwrap_or_default()).collect(),
+        icon,
     })
 }
 
