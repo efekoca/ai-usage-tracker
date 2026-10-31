@@ -140,6 +140,14 @@ pub(crate) fn window_theme(s: &Settings) -> Option<tauri::Theme> {
     }
 }
 
+/// The app's icon in the Dock and ⌘Tab; its windows stay open either way.
+#[cfg(target_os = "macos")]
+pub fn apply_dock(app: &AppHandle, s: &Settings) {
+    if let Err(e) = app.set_dock_visibility(s.show_in_dock) {
+        log::warn!("dock: {e}");
+    }
+}
+
 pub fn apply_theme(app: &AppHandle, s: &Settings) {
     if let Some(w) = app.get_webview_window(MAIN) {
         let _ = w.set_theme(window_theme(s));

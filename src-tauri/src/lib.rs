@@ -361,6 +361,10 @@ pub fn run() {
             worker::start(app.handle().clone(), db_path, rx);
             tray::build(app.handle())?;
             tray::start(app.handle().clone());
+            #[cfg(target_os = "macos")]
+            if !settings.show_in_dock {
+                windows::apply_dock(app.handle(), &settings);
+            }
             // a combination another program owns is reported in settings, not fatal
             let _ = hotkey::apply(app.handle(), &settings.widget.hotkey, false);
             if !started_hidden || !settings.onboarded {

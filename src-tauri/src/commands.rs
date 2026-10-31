@@ -107,6 +107,10 @@ fn save_settings_inner(app: &AppHandle, state: &AppState, make: impl FnOnce(&Set
     if old.theme != settings.theme {
         windows::apply_theme(app, &settings);
     }
+    #[cfg(target_os = "macos")]
+    if old.show_in_dock != settings.show_in_dock {
+        windows::apply_dock(app, &settings);
+    }
     if settings.onboarded && !old.onboarded {
         crate::capture::resume(app);
     } else if settings.onboarded && old.enabled_sources != settings.enabled_sources {

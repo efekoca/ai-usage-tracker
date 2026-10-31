@@ -397,6 +397,7 @@ export interface Settings {
   widget: WidgetSettings
   capture: CaptureSettings
   autostart: boolean
+  show_in_dock: boolean
   allow_config_updates: boolean
   primary_metric: 'tokens' | 'cost'
   dismissed_unpriced: string[]
