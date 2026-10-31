@@ -17,6 +17,8 @@ const ocMissing = scenario.get('opencode') === 'missing'
 const platform = scenario.get('platform') ?? 'windows'
 // ?accounts=2: two Codex and two Claude accounts, the second one in use, plus requests of no known account
 const twoAccounts = scenario.get('accounts') === '2'
+// ?early=1: a Claude week that started again days early (another account's limit)
+const early = scenario.get('early') === '1'
 const ACCOUNT_A = '3f9c1a7e52b0d846'
 const ACCOUNT_B = 'b71e04c9a3d25f18'
 const CLAUDE_A = '5d2e8a14c07b9f63'
@@ -778,6 +780,8 @@ export function installMock() {
           return mockTips()
         case 'get_limit_history':
           return mockHistory()
+        case 'early_restart':
+          return early && !twoAccounts ? { at_ms: Date.now() - 2 * 86_400_000, resets_at_ms: Date.now() + 86_400_000, peak_pct: 100 } : null
         case 'get_day_detail':
           return mockDay(String(a.date))
         case 'hotkey_status':

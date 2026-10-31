@@ -328,6 +328,34 @@ fn full_ms(reads: &[(i64, f64)], end: i64) -> i64 {
 /// percentages, so a low peak would carry a large rounding error.
 const CAPACITY_MIN_PEAK: f64 = 10.0;
 
+/// A weekly window that ended a day or more before its reset, from when a window with a later
+/// reset was read instead. While one account is known, this is how a second account shows: the
+/// limit of an account the logs never name.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct EarlyRestart {
+    /// When the newer window was first read.
+    pub at_ms: i64,
+    /// When the older window would have reset.
+    pub resets_at_ms: i64,
+    pub peak_pct: f64,
+}
+
+/// The newest [`EarlyRestart`] of `provider` since `since_ms`, unless its accounts are told apart.
+pub fn early_restart(h: &LimitHistory, provider: Provider, since_ms: i64) -> Option<EarlyRestart> {
+    let mut found: Option<EarlyRestart> = None;
+    for s in h.series.iter().filter(|s| s.provider == provider && s.window == "seven_day" && !s.by_account) {
+        for (i, w) in s.windows.iter().enumerate() {
+            let (Some(end), Some(reset)) = (w.end_ms, w.resets_at_ms) else { continue };
+            // a reset moved by hours is the same account's window
+            let next = s.windows[i + 1..].iter().min_by_key(|n| n.first_ms).and_then(|n| n.resets_at_ms);
+            if reset - end >= DAY_MS && end >= since_ms && next.is_some_and(|r| r - reset >= DAY_MS) && found.as_ref().is_none_or(|f| end > f.at_ms) {
+                found = Some(EarlyRestart { at_ms: end, resets_at_ms: reset, peak_pct: w.peak_pct });
+            }
+        }
+    }
+    found
+}
+
 /// Sums this computer's logged use of each window's provider inside the window (start to its
 /// actual end, or first to last reading when the reset time is unknown), and estimates what a
 /// whole window holds from the windows watched to their end.

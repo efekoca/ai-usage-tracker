@@ -432,6 +432,7 @@ pub fn run() {
             commands::get_subagent_cache,
             commands::get_tips,
             commands::get_limit_history,
+            commands::early_restart,
             commands::get_accounts,
             commands::get_day_detail,
             commands::hotkey_status,

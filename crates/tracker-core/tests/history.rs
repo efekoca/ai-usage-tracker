@@ -1,4 +1,4 @@
-use tracker_core::history::{add_local_usage, build_windows, limit_history, plan_advice, AdviceKind, Reading};
+use tracker_core::history::{add_local_usage, build_windows, early_restart, limit_history, plan_advice, AdviceKind, EarlyRestart, Reading};
 use tracker_core::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool, UsageEvent};
 use tracker_core::pricing::PriceBook;
 use tracker_core::plans::PlansFile;
@@ -187,6 +187,38 @@ fn history_covers_both_windows_and_counts_observed_days() {
     assert_eq!(week.windows.len(), 4);
     assert!(week.windows.iter().all(|w| w.complete && w.peak_pct == 40.0));
     assert!(h.observed_days[&Provider::Anthropic] >= 27);
+}
+
+#[test]
+fn a_weekly_window_cut_short_by_a_later_one_is_an_early_restart() {
+    // one account's week filled up and stopped being read three days before its reset; another
+    // account's week, resetting two days later, was read from then on
+    let week = |old: i64, new: i64, switch: i64| {
+        vec![
+            snap(NOW - 4 * DAY, Provider::Anthropic, "seven_day", 70.0, old, None),
+            snap(NOW - 3 * DAY, Provider::Anthropic, "seven_day", 100.0, old, None),
+            snap(switch, Provider::Anthropic, "seven_day", 12.0, new, None),
+            snap(NOW - HOUR, Provider::Anthropic, "seven_day", 20.0, new, None),
+        ]
+    };
+    let (old, new) = (NOW + 2 * DAY, NOW + 4 * DAY);
+    let h = limit_history(&store_with(week(old, new, NOW - DAY)), NOW, 14).unwrap();
+    let since = NOW - 14 * DAY;
+    assert_eq!(early_restart(&h, Provider::Anthropic, since), Some(EarlyRestart { at_ms: NOW - DAY, resets_at_ms: old, peak_pct: 100.0 }));
+    assert_eq!(early_restart(&h, Provider::OpenAI, since), None);
+    assert_eq!(early_restart(&h, Provider::Anthropic, NOW - HOUR), None, "before the period asked for");
+    let mut apart = h.clone();
+    for s in &mut apart.series {
+        s.by_account = true;
+    }
+    assert_eq!(early_restart(&apart, Provider::Anthropic, since), None, "told-apart accounts never share a series");
+
+    let moved = limit_history(&store_with(week(old, old + 3 * HOUR, NOW - DAY)), NOW, 14).unwrap();
+    assert_eq!(early_restart(&moved, Provider::Anthropic, since), None, "a reset moved by hours");
+    let last_day = limit_history(&store_with(week(NOW - DAY + 20 * HOUR, new, NOW - DAY)), NOW, 14).unwrap();
+    assert_eq!(early_restart(&last_day, Provider::Anthropic, since), None, "cut short by less than a day");
+    let steady = limit_history(&store_with(claude_month(40.0, 30.0, &[])), NOW, 14).unwrap();
+    assert_eq!(early_restart(&steady, Provider::Anthropic, since), None);
 }
 
 #[test]
