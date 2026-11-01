@@ -416,8 +416,9 @@ fn tooltip(limits: &[Current], s: &Settings, update: Option<&str>) -> String {
 
 fn update(app: &AppHandle) {
     let s = app.state::<AppState>().settings.read().unwrap().clone();
-    let Some(tray) = app.tray_by_id(ID) else { return };
     let Some(readings) = readings(app, &s) else { return };
+    crate::alerts::check(app, &s, &readings);
+    let Some(tray) = app.tray_by_id(ID) else { return };
     let limits = current_limits(&readings);
     let update = app.state::<AppState>().updates.lock().unwrap().available.as_ref().map(|a| a.version.clone());
     let size = icon_size(app);

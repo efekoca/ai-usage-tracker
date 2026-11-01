@@ -1,3 +1,4 @@
+mod alerts;
 mod capture;
 mod commands;
 mod fonts;

@@ -383,6 +383,16 @@ export interface CaptureStatus {
   settings_file: string
 }
 
+export interface NotifySettings {
+  enabled: boolean
+  /** Before a limit fills: at the Caution threshold, at the Critical one, or not at all. */
+  early: 'warn' | 'high' | 'off'
+  full: boolean
+  reset: boolean
+  five_hour: boolean
+  seven_day: boolean
+}
+
 export interface Settings {
   onboarded: boolean
   language: 'system' | 'tr' | 'en'
@@ -400,6 +410,7 @@ export interface Settings {
   capture: CaptureSettings
   autostart: boolean
   show_in_dock: boolean
+  notify: NotifySettings
   allow_config_updates: boolean
   primary_metric: 'tokens' | 'cost'
   dismissed_unpriced: string[]

@@ -358,6 +358,25 @@ impl TraySettings {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct NotifySettings {
+    pub enabled: bool,
+    /// Before a limit fills: "warn" (at `widget.warn_at`), "high" (at `widget.high_at`) or "off".
+    pub early: String,
+    pub full: bool,
+    /// After a full limit starts again.
+    pub reset: bool,
+    pub five_hour: bool,
+    pub seven_day: bool,
+}
+
+impl Default for NotifySettings {
+    fn default() -> Self {
+        NotifySettings { enabled: true, early: "warn".into(), full: true, reset: true, five_hour: true, seven_day: true }
+    }
+}
+
 /// The panel of tiles the tray icon opens.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -562,6 +581,8 @@ pub struct Settings {
     pub dismissed_unpriced: Vec<String>,
     /// How limit percentages read: "used" (Claude's convention) or "remaining" (Codex's).
     pub limit_display: String,
+    /// System notifications about the limits in use.
+    pub notify: NotifySettings,
     /// Monthly USD price per provider, when it differs from the list price or the plan has none.
     pub plan_prices: std::collections::BTreeMap<String, f64>,
     pub weekly_report_auto: bool,
@@ -610,6 +631,7 @@ impl Default for Settings {
             capture: CaptureSettings::default(),
             autostart: false,
             show_in_dock: true,
+            notify: NotifySettings::default(),
             allow_config_updates: false,
             primary_metric: "tokens".into(),
             dismissed_unpriced: Vec::new(),
@@ -705,6 +727,9 @@ impl Settings {
         if self.accent != "system" {
             self.accent = "app".into();
         }
+        if !["warn", "high", "off"].contains(&self.notify.early.as_str()) {
+            self.notify.early = "warn".into();
+        }
         if !(self.fx_rate.is_finite() && self.fx_rate > 0.0) {
             self.fx_rate = 1.0;
         }
@@ -772,7 +797,7 @@ mod tests {
         assert!(s.capture.claude_poll && s.capture.antigravity_poll);
         assert!(!s.capture.codex_poll, "an explicit choice is kept");
         assert_eq!(s.limit_display, "used");
-        assert!(s.tray.show_percent && s.update_check && s.show_in_dock);
+        assert!(s.tray.show_percent && s.update_check && s.show_in_dock && s.notify.enabled);
         assert_eq!(s.accent, "app");
         assert_eq!(s.widget.hotkey, DEFAULT_HOTKEY);
     }
