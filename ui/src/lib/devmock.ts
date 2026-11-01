@@ -50,6 +50,7 @@ const settings: Settings = {
   capture: { codex_poll: true, codex_poll_minutes: 5, codex_path: '', statusline: false, otel: false, otel_port: 43180, claude_poll: true, claude_poll_minutes: 5, claude_path: '', antigravity_poll: true, antigravity_poll_minutes: 5, antigravity_path: '' },
   autostart: false,
   show_in_dock: true,
+  notify: { enabled: true, early: 'warn', full: true, reset: true, five_hour: true, seven_day: true },
   allow_config_updates: false,
   primary_metric: 'tokens',
   dismissed_unpriced: [],

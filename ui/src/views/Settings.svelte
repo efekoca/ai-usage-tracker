@@ -2,7 +2,7 @@
   import { ask, open, save } from '@tauri-apps/plugin-dialog'
   import { onMount } from 'svelte'
   import { app, refresh, saveSettings } from '../lib/store.svelte'
-  import { api, providersOf, type HotkeyStatus, type ModelPrice, type PricingFile, type Provider } from '../lib/api'
+  import { api, providersOf, type HotkeyStatus, type ModelPrice, type NotifySettings, type PricingFile, type Provider } from '../lib/api'
   import { fmtDate, fmtDateTime, fmtInput, fmtInt, fmtPct, localDate, parseNumber, t, windowLabel } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
   import Select from '../components/Select.svelte'
@@ -25,6 +25,7 @@
     })
   }
   // "Start with Windows" only on Windows; elsewhere it starts at login
+  const saveNotify = (patch: Partial<NotifySettings>) => saveSettings((c) => ({ notify: { ...c.notify, ...patch } }))
   const autostartKey = $derived(app.info && app.info.platform !== 'windows' ? 'settings.autostart.mac' : 'settings.autostart')
   let pricing: PricingFile | null = $state(null)
   let pricingOrigin = $state('bundled')
@@ -300,6 +301,45 @@
       {/if}
     </div>
   </div>
+</section>
+
+<section class="card group">
+  <h2>{t('settings.notify.title')}</h2>
+  <div class="item">
+    <div><span>{t('settings.notify')}</span><div class="subtle small">{t('settings.notify.help')}</div></div>
+    <Toggle checked={s.notify.enabled} label={t('settings.notify')} onchange={(v) => saveNotify({ enabled: v })} />
+  </div>
+  {#if s.notify.enabled}
+    <div class="item">
+      <div><span>{t('settings.notify.early')}</span><div class="subtle small">{t('settings.notify.early.help')}</div></div>
+      <Segmented
+        label={t('settings.notify.early')}
+        value={s.notify.early}
+        options={[
+          { value: 'warn', label: `${t('ws.warn')} ${fmtPct(s.widget.warn_at)}` },
+          { value: 'high', label: `${t('ws.high')} ${fmtPct(s.widget.high_at)}` },
+          { value: 'off', label: t('settings.notify.off') },
+        ]}
+        onchange={(v) => saveNotify({ early: v })}
+      />
+    </div>
+    <div class="item">
+      <span>{t('settings.notify.full')}</span>
+      <Toggle checked={s.notify.full} label={t('settings.notify.full')} onchange={(v) => saveNotify({ full: v })} />
+    </div>
+    <div class="item">
+      <span>{t('settings.notify.reset')}</span>
+      <Toggle checked={s.notify.reset} label={t('settings.notify.reset')} onchange={(v) => saveNotify({ reset: v })} />
+    </div>
+    <div class="item">
+      <span>{t('settings.notify.fiveHour')}</span>
+      <Toggle checked={s.notify.five_hour} label={t('settings.notify.fiveHour')} onchange={(v) => saveNotify({ five_hour: v })} />
+    </div>
+    <div class="item">
+      <span>{t('settings.notify.weekly')}</span>
+      <Toggle checked={s.notify.seven_day} label={t('settings.notify.weekly')} onchange={(v) => saveNotify({ seven_day: v })} />
+    </div>
+  {/if}
 </section>
 
 <section class="card group">

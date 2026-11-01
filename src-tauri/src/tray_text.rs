@@ -230,7 +230,7 @@ impl<Tz: TimeZone> Format<'_, Tz> {
     }
 
     /// "18:40" within a day of now, "Sun 08:53" further away.
-    fn clock(&self, at_secs: i64) -> Option<String> {
+    pub(crate) fn clock(&self, at_secs: i64) -> Option<String> {
         let at: DateTime<Tz> = self.tz.timestamp_opt(at_secs, 0).single()?;
         let hm = format!("{:02}:{:02}", at.hour(), at.minute());
         if (at_secs - self.now_ms / 1000).abs() < 86_400 {
@@ -313,7 +313,7 @@ fn provider(s: &str) -> Provider {
     Provider::parse(s).unwrap_or(Provider::Anthropic)
 }
 
-fn name(p: Provider, pool: &str, tr: bool) -> String {
+pub(crate) fn name(p: Provider, pool: &str, tr: bool) -> String {
     match (p, pool) {
         (Provider::Anthropic, _) => "Claude".into(),
         (Provider::OpenAI, _) => "Codex".into(),
