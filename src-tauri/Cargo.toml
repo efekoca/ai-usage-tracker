@@ -45,6 +45,9 @@ windows = "0.62"
 [target.'cfg(target_os = "macos")'.dependencies]
 # already in the tree; statfs tells a read-only disk image apart
 libc = "0.2"
+# the versions tao uses; the window list shows when a full-screen app is in front
+core-foundation = "0.10"
+core-graphics = "0.25"
 # the versions Tauri's own WKWebView binding uses (report printing, accent color, fonts, locale)
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSURL", "NSDictionary", "NSGeometry", "NSLocale", "NSArray"] }

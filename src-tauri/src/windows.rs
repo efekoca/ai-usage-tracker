@@ -352,7 +352,7 @@ pub fn apply_widget_settings(app: &AppHandle, s: &Settings) {
         }
         let _ = w.set_always_on_top(s.widget.always_on_top);
         #[cfg(target_os = "macos")]
-        join_all_spaces(w);
+        join_all_spaces(w, !s.show_in_dock);
     };
     match app.get_webview_window(WIDGET) {
         Some(w) => show(&w, s),
@@ -367,17 +367,20 @@ pub fn apply_widget_settings(app: &AppHandle, s: &Settings) {
     }
 }
 
-/// macOS keeps a window on the Space it opened on. Full-screen apps' Spaces stay off limits:
-/// showing there would need the app to give up its Dock icon, so the widget always hides there.
+/// macOS keeps a window on the Space it opened on. A full-screen app's Space takes only the helper
+/// windows of an app without a Dock icon, so the widget can show over full-screen apps only while
+/// `show_in_dock` is off; the full-screen watcher hides it there when asked to.
 #[cfg(target_os = "macos")]
-fn join_all_spaces(w: &WebviewWindow) {
+fn join_all_spaces(w: &WebviewWindow, over_full_screen: bool) {
     let Ok(ptr) = w.ns_window() else { return };
     let ptr = ptr as usize;
     let _ = w.run_on_main_thread(move || {
         use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
         // SAFETY: the widget's own NSWindow, used on the main thread.
         let win: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
-        win.setCollectionBehavior(win.collectionBehavior() | NSWindowCollectionBehavior::CanJoinAllSpaces);
+        let aux = NSWindowCollectionBehavior::FullScreenAuxiliary.0;
+        let rest = (win.collectionBehavior().0 | NSWindowCollectionBehavior::CanJoinAllSpaces.0) & !aux;
+        win.setCollectionBehavior(NSWindowCollectionBehavior(if over_full_screen { rest | aux } else { rest }));
     });
 }
 
@@ -403,9 +406,9 @@ pub fn popup_widget_menu(app: &AppHandle) {
         let hide = MenuItem::with_id(app, "w:hide", t("Hide widget", "Widget'ı gizle"), true, None::<&str>)?;
         let quit = MenuItem::with_id(app, "app:quit", t("Quit", "Çık"), true, None::<&str>)?;
         let sep = || PredefinedMenuItem::separator(app);
-        // only Windows can tell a full-screen app is in front; macOS always hides the widget then
-        // (see `join_all_spaces`)
-        if cfg!(windows) {
+        // Windows can tell a full-screen app is in front; macOS lets the widget show there only
+        // without a Dock icon (see `join_all_spaces`)
+        if cfg!(windows) || (cfg!(target_os = "macos") && !s.show_in_dock) {
             Menu::with_items(app, &[&open, &sep()?, &opacity, &size, &position, &autohide, &sep()?, &hide, &quit])
         } else {
             Menu::with_items(app, &[&open, &sep()?, &opacity, &size, &position, &sep()?, &hide, &quit])
@@ -728,7 +731,9 @@ pub fn start_fullscreen_watch(app: AppHandle) {
                 if !s.widget.visible || !s.onboarded {
                     continue;
                 }
-                let busy = s.widget.auto_hide_fullscreen && fullscreen_app_active();
+                // with a Dock icon macOS keeps the widget off full-screen Spaces by itself
+                let watch = s.widget.auto_hide_fullscreen && !(cfg!(target_os = "macos") && s.show_in_dock);
+                let busy = watch && fullscreen_app_active(&app);
                 let was = FULLSCREEN_HIDDEN.swap(busy, Ordering::SeqCst);
                 if busy != was
                     && let Some(w) = app.get_webview_window(WIDGET)
@@ -743,7 +748,7 @@ pub fn start_fullscreen_watch(app: AppHandle) {
 /// `QUNS_BUSY` is not trusted: always-on-top full-screen overlays (e.g. GPU overlays) report it
 /// permanently, so the foreground window's rect is checked instead.
 #[cfg(windows)]
-fn fullscreen_app_active() -> bool {
+fn fullscreen_app_active(_: &AppHandle) -> bool {
     use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST};
     use windows_sys::Win32::UI::Shell::{SHQueryUserNotificationState, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN};
@@ -786,8 +791,78 @@ fn fullscreen_app_active() -> bool {
     }
 }
 
-#[cfg(not(windows))]
-fn fullscreen_app_active() -> bool {
+/// The front app is full screen on the widget's display when one of its windows covers that display.
+/// Full-screen windows start under the menu bar strip (below a notch) and reach the bottom edge; a
+/// zoomed window stops short of the Dock, or of the edge strip a hidden Dock keeps.
+#[cfg(target_os = "macos")]
+fn fullscreen_app_active(app: &AppHandle) -> bool {
+    use core_foundation::base::{CFType, TCFType};
+    use core_foundation::dictionary::{CFDictionary, CFDictionaryRef};
+    use core_foundation::number::CFNumber;
+    use core_foundation::string::{CFString, CFStringRef};
+    use core_graphics::display::{CGDisplay, CGPoint, CGRect};
+    use core_graphics::window::{
+        copy_window_info, kCGNullWindowID, kCGWindowBounds, kCGWindowLayer, kCGWindowListExcludeDesktopElements,
+        kCGWindowListOptionOnScreenOnly, kCGWindowOwnerPID,
+    };
+    // kCGMainMenuWindowLevel
+    const MENU_BAR_LAYER: i64 = 24;
+
+    let Some(w) = app.get_webview_window(WIDGET) else { return false };
+    let (Ok(pos), Ok(size), Ok(scale)) = (w.outer_position(), w.outer_size(), w.scale_factor()) else {
+        return false;
+    };
+    let center = CGPoint::new(
+        (pos.x as f64 + size.width as f64 / 2.0) / scale,
+        (pos.y as f64 + size.height as f64 / 2.0) / scale,
+    );
+    let Ok((ids, n)) = CGDisplay::displays_with_point(center, 1) else { return false };
+    let Some(&id) = ids.first().filter(|_| n > 0) else { return false };
+    let display = CGDisplay::new(id).bounds();
+    let Some(list) = copy_window_info(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID) else {
+        return false;
+    };
+
+    // SAFETY: the keys are CoreGraphics constants, and the list holds one dictionary per window.
+    let key = |k: CFStringRef| unsafe { CFString::wrap_under_get_rule(k) };
+    let (layer_key, pid_key, bounds_key) = unsafe { (key(kCGWindowLayer), key(kCGWindowOwnerPID), key(kCGWindowBounds)) };
+    let me = i64::from(std::process::id());
+    let (mut front, mut menu_bar, mut windows) = (None, 0.0, Vec::new());
+    for item in list.iter() {
+        let info: CFDictionary<CFString, CFType> = unsafe { CFDictionary::wrap_under_get_rule(*item as CFDictionaryRef) };
+        let num = |k: &CFString| info.find(k).and_then(|v| v.downcast::<CFNumber>()).and_then(|n| n.to_i64());
+        let Some(rect) = info
+            .find(&bounds_key)
+            .and_then(|v| v.downcast::<CFDictionary>())
+            .and_then(|b| CGRect::from_dict_representation(&b))
+        else {
+            continue;
+        };
+        match (num(&layer_key), num(&pid_key)) {
+            (Some(0), Some(pid)) if pid != me => {
+                // the list runs front to back, so the first app window belongs to the front app
+                front.get_or_insert(pid);
+                windows.push((pid, rect));
+            }
+            (Some(MENU_BAR_LAYER), _) if rect.origin.x == display.origin.x && rect.origin.y == display.origin.y => {
+                menu_bar = rect.size.height;
+            }
+            _ => {}
+        }
+    }
+    windows.iter().any(|(pid, r)| Some(*pid) == front && covers_display(r, &display, menu_bar))
+}
+
+#[cfg(target_os = "macos")]
+fn covers_display(w: &core_graphics::display::CGRect, d: &core_graphics::display::CGRect, menu_bar: f64) -> bool {
+    w.origin.x <= d.origin.x
+        && w.origin.x + w.size.width >= d.origin.x + d.size.width
+        && w.origin.y <= d.origin.y + menu_bar
+        && w.origin.y + w.size.height >= d.origin.y + d.size.height
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn fullscreen_app_active(_: &AppHandle) -> bool {
     false
 }
 
@@ -801,6 +876,20 @@ mod tests {
         assert!(!page("ipc://localhost/plugin%3Aevent%7Cemit") && !page("ipc://tauri.localhost/x"), "Tauri's IPC address");
         assert!(!page("https://example.com/") && !page("file:///etc/hosts") && page("about:blank"));
         assert_eq!(page("http://localhost:5173/"), tauri::is_dev(), "the dev server only while developing");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn only_a_window_over_the_whole_display_counts_as_full_screen() {
+        use core_graphics::display::{CGPoint, CGRect, CGSize};
+        let r = |x, y, w, h| CGRect::new(&CGPoint::new(x, y), &CGSize::new(w, h));
+        let (laptop, monitor) = (r(0.0, 0.0, 1512.0, 982.0), r(1512.0, -200.0, 2560.0, 1440.0));
+        assert!(super::covers_display(&r(0.0, 33.0, 1512.0, 949.0), &laptop, 33.0), "below the notch");
+        assert!(super::covers_display(&r(1512.0, -200.0, 2560.0, 1440.0), &monitor, 25.0));
+        assert!(!super::covers_display(&r(0.0, 33.0, 1512.0, 867.0), &laptop, 33.0), "zoomed above the Dock");
+        assert!(!super::covers_display(&r(0.0, 33.0, 1512.0, 945.0), &laptop, 33.0), "zoomed above a hidden Dock");
+        assert!(!super::covers_display(&r(1516.0, -175.0, 2556.0, 1415.0), &monitor, 25.0), "zoomed beside a hidden Dock");
+        assert!(!super::covers_display(&r(0.0, 33.0, 1512.0, 949.0), &laptop, 0.0), "no menu bar seen");
     }
 
     #[test]
