@@ -16,7 +16,7 @@ A private app for Windows, macOS, and Linux that reads the usage logs your AI to
 
 - **Private by design.** Prompts and responses never enter the app's archive. Only counts and metadata are kept, in a local SQLite file, and your usage data never leaves the computer.
 - **Know where every number comes from.** Every figure is labeled: **Exact** from the tool's own log, **Estimated** by the app, or **Captured** live. Nothing is guessed silently.
-- **Stay ahead of your limits.** Five-hour and weekly percentages for Claude, Codex and Antigravity are read every few minutes, with a forecast of when each window fills.
+- **Stay ahead of your limits.** Five-hour and weekly percentages for Claude, Codex and Antigravity are read every few minutes, with a forecast of when each window fills and a notification before it does.
 
 ## What sets it apart
 
@@ -56,6 +56,8 @@ Providers publish how their limits work, not the numbers themselves. The app the
 ![Claude and Codex accounts on the Limits page, each named, with the account in use marked, its plan and monthly price, the dates each was seen, its requests, and the requests of no known account](assets/readme/accounts-en.webp)
 
 **Forecast.** Every current limit reading carries a forecast based on the window's **average pace since it started** (current % ÷ time since the window began). Every window starts at 0 % when it resets, so this pace is known and already includes idle hours: a burst of work is not extrapolated as if it never stopped. The app then says when the window would fill ("fills around Sun 21:12, 9 h before the reset") or where it would stand at the reset. If the provider resets a window early without moving its end, the pace is measured from that reset. No forecast is made in the first tenth of a window, and every forecast is labeled **Estimated**.
+
+**Notifications.** A system notification tells you when a limit you use passes your warning threshold, when it fills up, and when a full limit starts again. It shows when the limit resets and, at your current pace, roughly when it fills. In **Settings → Notifications**, choose an early warning at the **Caution** or **Critical** threshold or none, whether to hear when a limit fills up and when it resets, and which limits (5-hour, weekly) notify you. macOS asks once whether the app may send notifications. Opening the app never reports what happened while it was closed.
 
 ### Limit history
 
@@ -186,7 +188,7 @@ The **Widget studio** page changes what the widget shows and how it looks, with 
 - **Look:** theme, accent color, scale, background opacity, corner radius, border, shadow, labels, tool icons, and time until reset
 - **Text:** any font installed on the computer (searchable and shown in its own face), text size, main-number size, number weight, and fixed-width digits
 - **Thresholds:** caution and critical levels
-- **Behavior:** always on top, position lock, click action, hiding during full-screen apps, and snap to a corner
+- **Behavior:** always on top, position lock, click action, hiding during full-screen apps (on macOS while the app is out of the Dock), and snap to a corner
 
 The widget also comes with a tray icon and a shortcut:
 
@@ -260,7 +262,7 @@ macOS 11 or newer, on Apple silicon and Intel Macs.
 
 Run the app from Applications, not from the disk image. A copy opened from the disk image cannot start at login, keep the Claude Code status line, or update itself; the app tells you so when that happens.
 
-To keep the app out of the Dock and the ⌘Tab list, turn off **Settings → Show in the Dock**. You then open it from its menu bar icon or the widget shortcut.
+To keep the app out of the Dock and the ⌘Tab list, turn off **Settings → Show in the Dock**. You then open it from its menu bar icon or the widget shortcut. The widget can then stay over full-screen apps too: turn off **Hide during full-screen apps** in the **Widget studio**.
 
 **Uninstall.** macOS has no uninstaller, so first turn off the switches you turned on under **Sources → Live capture** and **Settings → Start at login**. Then drag the app to the Trash. Your data stays in `~/Library/Application Support/AIUsageTracker` until you delete it.
 

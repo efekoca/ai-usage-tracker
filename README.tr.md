@@ -16,7 +16,7 @@ AI Usage Tracker, Windows, macOS ve Linux'ta çalışan bir uygulamadır. Yapay 
 
 - **Verileriniz sizde kalır.** Prompt ve yanıtlarınız uygulamanın arşivine hiçbir zaman kaydedilmez. Uygulama yalnızca sayıları ve meta verileri bilgisayarınızdaki bir dosyada tutar ve hiçbir yere göndermez.
 - **Her sayının nereden geldiğini bilirsiniz.** Araçtan doğrudan okunan değerler **Kesin**, uygulamanın hesapladıkları **Tahmini**, canlı okunanlar **Yakalanan** etiketiyle gösterilir. Hiçbir değer sessizce tahmin edilmez.
-- **Limitinize takılmadan çalışın.** Claude, Codex ve Antigravity'nin 5 saatlik ve haftalık limitlerini birkaç dakikada bir güncel olarak görür, ne zaman dolacaklarını önceden öğrenirsiniz.
+- **Limitinize takılmadan çalışın.** Claude, Codex ve Antigravity'nin 5 saatlik ve haftalık limitlerini birkaç dakikada bir güncel olarak görür, ne zaman dolacaklarını önceden öğrenir, dolmadan bildirim alırsınız.
 
 ## Öne çıkan özellikler
 
@@ -56,6 +56,8 @@ Sağlayıcılar limitlerin sayısal karşılığını yayımlamıyor, yalnızca 
 ![Limitler sayfasında Claude ve Codex hesapları: her birinin adı, kullanımdaki hesap, planı ve aylık ücreti, görüldüğü tarihler, istek sayısı ve hesabı belirlenemeyen istekler](assets/readme/accounts-tr.webp)
 
 **Dolma tahmini.** Uygulama her güncel okumada, pencerenin **başından bu yana ortalama hızınıza** göre bir tahmin yapar (şu anki yüzde ÷ pencere başladığından bu yana geçen süre). Her pencere %0'dan başladığı için bu hız kesin olarak bilinir ve boşta geçen saatleri de içerir; kısa bir yoğunluk hiç bitmeyecekmiş gibi ileriye taşınmaz. Sonuçta pencerenin ne zaman dolacağını ("Paz 21:12 civarında dolacak, sıfırlanmadan 9 sa önce") ya da sıfırlandığında hangi seviyede olacağını görürsünüz. Sağlayıcı bir pencereyi bitiş zamanını değiştirmeden erkenden sıfırlarsa hız o sıfırlamadan itibaren ölçülür. Pencerenin ilk onda birinde tahmin yapılmaz. Tahminler **Tahmini** etiketi taşır.
+
+**Bildirimler.** Kullandığınız bir limit uyarı eşiğini geçince, dolunca ve dolan limit yenilenince sistem bildirimi alırsınız. Bildirimde limitin yenilenme saati ve bu hızla yaklaşık ne zaman dolacağı yazar. **Ayarlar → Bildirimler** bölümünden erken uyarının **Dikkat** ya da **Kritik** eşiğinde gelmesini veya hiç gelmemesini, limit dolunca ve yenilenince haber alıp almayacağınızı ve hangi limitler (5 saatlik, haftalık) için bildirim alacağınızı seçin. macOS, uygulamanın bildirim gönderip gönderemeyeceğini bir kez sorar. Uygulamayı açtığınızda, kapalıyken olanlar için bildirim gelmez.
 
 ### Geçmiş limit pencerelerinizi inceleyin
 
@@ -175,7 +177,7 @@ Widget her zaman üstte duran küçük bir penceredir. Varsayılan olarak ekran�
 - **Görünüm:** tema, vurgu rengi, ölçek, arka plan opaklığı, köşe yuvarlaklığı, kenarlık, gölge, etiketler, araç ikonları, sıfırlanmaya kalan süre.
 - **Yazı:** bilgisayarınızda yüklü herhangi bir yazı tipi (aranabilir; her biri kendi görünümüyle listelenir), yazı boyutu, ana sayı boyutu, sayı kalınlığı, sabit genişlikli rakamlar.
 - **Uyarı eşikleri:** dikkat ve kritik seviyeleri.
-- **Davranış:** her zaman üstte, konum kilidi, tıklayınca ne olacağı, tam ekran uygulamalarda gizlenme (Windows), köşeye yerleştirme.
+- **Davranış:** her zaman üstte, konum kilidi, tıklayınca ne olacağı, tam ekran uygulamalarda gizlenme (macOS'te uygulama Dock'ta değilken), köşeye yerleştirme.
 
 Widget boyutunu içeriğe göre kendisi ayarlar. Bir köşeye sabitlediyseniz büyüyüp küçülürken o köşede kalır; sürüklerseniz bıraktığınız yerde durur. Sağ tıklayarak hızlı ayarlara ulaşabilirsiniz. Sistem tepsisindeki simge her zaman görünür.
 
@@ -252,7 +254,7 @@ macOS 11 ve sonrası; Apple Silicon ve Intel Mac'lerde çalışır.
 
 Uygulamayı disk görüntüsünden değil, Uygulamalar klasöründen çalıştırın. Disk görüntüsünden açılan kopya oturum açılışında başlayamaz, Claude Code durum satırını koruyamaz ve kendini güncelleyemez; böyle açtığınızda uygulama sizi uyarır.
 
-Uygulamanın Dock'ta ve ⌘Tab listesinde görünmesini istemiyorsanız **Ayarlar → Dock'ta göster** seçeneğini kapatın. Uygulamayı o zaman menü çubuğundaki simgeden ya da widget kısayolundan açarsınız.
+Uygulamanın Dock'ta ve ⌘Tab listesinde görünmesini istemiyorsanız **Ayarlar → Dock'ta göster** seçeneğini kapatın. Uygulamayı o zaman menü çubuğundaki simgeden ya da widget kısayolundan açarsınız. Widget da tam ekran uygulamaların üstünde kalabilir: **Widget stüdyosu**'nda **Tam ekran uygulamalarda gizle** seçeneğini kapatın.
 
 **Kaldırma.** macOS'te uygulama silinirken bu değişiklikler geri alınamadığı için önce **Kaynaklar → Canlı yakalama** bölümünde açtığınız anahtarları ve **Ayarlar → Oturum açınca başlat** seçeneğini kapatın. Ardından uygulamayı Çöp Sepeti'ne sürükleyin. Verileriniz siz silene kadar `~/Library/Application Support/AIUsageTracker` klasöründe kalır.
 
