@@ -4,6 +4,7 @@
   import { clientLabel, fmtCompact, fmtDateTime, fmtInt, fmtSpan, fmtMoney, fmtPct, lower, searchKey, t, toolLabel } from '../lib/i18n.svelte'
   import StatTile from '../components/StatTile.svelte'
   import Icon from '../components/Icon.svelte'
+  import SessionTimeline from '../components/SessionTimeline.svelte'
 
   let data = $state<Sessions | null>(null)
   let failed = $state('')
@@ -26,6 +27,7 @@
   let shown = $state(50)
   let open = $state<string | null>(null)
   let copied = $state<string | null>(null)
+  let visibleW = $state(0)
 
   const prompt = (s: SessionRow) => s.totals.tokens.input + s.totals.tokens.cache_read + s.totals.tokens.cache_write
   const hit = (s: SessionRow) => (prompt(s) > 0 ? s.totals.tokens.cache_read / prompt(s) : 0)
@@ -140,7 +142,7 @@
     {:else if rows.length === 0}
       <p class="muted pad">{t('sessions.noMatch')}</p>
     {:else}
-      <div class="scroll">
+      <div class="scroll" bind:clientWidth={visibleW} style:--visible="{visibleW}px">
         <table>
           <thead>
             <tr>
@@ -212,6 +214,7 @@
                           <button class="btn ghost small" onclick={() => copy(s.session_id)}>{copied === s.session_id ? t('sessions.copied') : t('sessions.copy')}</button>
                         </dd>
                       </dl>
+                      <SessionTimeline session={s} />
                     </div>
                   </td>
                 </tr>
@@ -346,7 +349,11 @@
     padding-top: 4px;
     padding-bottom: 16px;
   }
+  /* a wide table scrolls sideways; the details keep to what is in view */
   .grid {
+    position: sticky;
+    left: 0;
+    max-width: calc(var(--visible, 100%) - 34px - 32px);
     display: grid;
     grid-template-columns: 1.2fr 1fr;
     gap: 24px;

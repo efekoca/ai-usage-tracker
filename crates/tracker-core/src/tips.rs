@@ -107,34 +107,35 @@ pub fn cache_rebuilds(events: &[EventRow], book: &PriceBook) -> Rebuilds {
         evs.sort_by_key(|e| e.ts_ms);
         for w in evs.windows(2) {
             let (prev, cur) = (w[0], w[1]);
-            let ttl = if prev.tokens.cache_write_1h > 0 || cur.tokens.cache_write_1h > 0 { 60 * MIN_MS } else { 5 * MIN_MS };
-            let t = &cur.tokens;
-            let prev_cached = (prev.tokens.cache_read + prev.tokens.cache_write).min(prev.request_input);
-            let rewritten = prev_cached.min(cur.request_input).saturating_sub(t.cache_read).min(t.cache_write);
-            let rebuilt = cur.ts_ms - prev.ts_ms >= ttl
-                && cur.request_input >= REBUILD_MIN_PROMPT
-                && rewritten * 5 >= cur.request_input * 2;
-            if !rebuilt {
-                continue;
-            }
-            let still_written = t.cache_write - rewritten;
-            let warm = Tokens {
-                cache_read: t.cache_read + rewritten,
-                cache_write: still_written,
-                cache_write_1h: t.cache_write_1h.min(still_written),
-                ..*t
-            };
-            let (Some(actual), Some(if_warm)) = (cost(book, &input_of(cur)), cost(book, &CostInput { tokens: &warm, ..input_of(cur) })) else {
-                continue;
-            };
+            let Some(rewritten) = rewritten_after_pause(prev, cur) else { continue };
+            let Some(extra) = rewrite_extra_usd(book, cur, rewritten) else { continue };
             r.requests += 1;
             r.tokens += rewritten;
-            r.extra_usd += actual - if_warm;
+            r.extra_usd += extra;
             sessions.insert(key.0);
         }
     }
     r.sessions = sessions.len() as u64;
     r
+}
+
+/// What `cur` wrote to the cache again when `prev`, the request before it in the same conversation
+/// and model, is older than the cache lifetime and the rewrite is a rebuilt context (see
+/// [`cache_rebuilds`]).
+pub fn rewritten_after_pause(prev: &EventRow, cur: &EventRow) -> Option<u64> {
+    let ttl = if prev.tokens.cache_write_1h > 0 || cur.tokens.cache_write_1h > 0 { 60 * MIN_MS } else { 5 * MIN_MS };
+    let t = &cur.tokens;
+    let prev_cached = (prev.tokens.cache_read + prev.tokens.cache_write).min(prev.request_input);
+    let rewritten = prev_cached.min(cur.request_input).saturating_sub(t.cache_read).min(t.cache_write);
+    (cur.ts_ms - prev.ts_ms >= ttl && cur.request_input >= REBUILD_MIN_PROMPT && rewritten * 5 >= cur.request_input * 2).then_some(rewritten)
+}
+
+/// What `cur` cost above the same request with its `rewritten` tokens still in the cache.
+pub fn rewrite_extra_usd(book: &PriceBook, cur: &EventRow, rewritten: u64) -> Option<f64> {
+    let t = &cur.tokens;
+    let still_written = t.cache_write - rewritten;
+    let warm = Tokens { cache_read: t.cache_read + rewritten, cache_write: still_written, cache_write_1h: t.cache_write_1h.min(still_written), ..*t };
+    Some(cost(book, &input_of(cur))? - cost(book, &CostInput { tokens: &warm, ..input_of(cur) })?)
 }
 
 pub fn tips(store: &Store, book: &PriceBook, range: Range, filter: &Filter) -> Result<Tips> {

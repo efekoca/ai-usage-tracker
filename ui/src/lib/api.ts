@@ -383,6 +383,34 @@ export interface CaptureStatus {
   settings_file: string
 }
 
+export interface TimelineRequest {
+  ts_ms: number
+  model: string
+  /** The subagent that sent it; null for the main conversation. */
+  agent: string | null
+  context: number
+  input: number
+  cache_read: number
+  cache_write: number
+  output: number
+  cost_usd: number | null
+  /** Claude: context written to the cache again after a pause. */
+  rewritten: number
+  /** What that rewrite cost above a warm cache. */
+  rewrite_extra_usd: number | null
+  compacted: boolean
+}
+export interface TimelineCall {
+  ts_ms: number
+  name: string
+  agent: string | null
+  failed: boolean | null
+}
+export interface SessionTimeline {
+  requests: TimelineRequest[]
+  calls: TimelineCall[]
+}
+
 export interface MonthSpend {
   /** The month's first day, `YYYY-MM-DD`. */
   month: string
@@ -851,6 +879,8 @@ export const api = {
   limits: () => invoke<LimitView[]>('get_limits'),
   accounts: () => invoke<Account[]>('get_accounts'),
   sessions: (period: Period, filter?: Filter) => invoke<Sessions>('get_sessions', { period, filter }),
+  sessionTimeline: (tool: Tool, sessionId: string, fromMs: number, toMs: number) =>
+    invoke<SessionTimeline>('get_session_timeline', { tool, sessionId, fromMs, toMs }),
   compareModels: (period: Period, filter?: Filter) => invoke<ModelCompare>('compare_models', { period, filter }),
   contextStats: (period: Period, filter?: Filter) => invoke<ContextStats>('context_stats', { period, filter }),
   planValue: () => invoke<PlanValue>('plan_value'),

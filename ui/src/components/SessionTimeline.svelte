@@ -1,0 +1,615 @@
+<script lang="ts">
+  import { api, type SessionRow, type SessionTimeline, type TimelineRequest } from '../lib/api'
+  import { fmtClock, fmtCompact, fmtDuration, fmtInt, fmtMoney, fmtPct, t } from '../lib/i18n.svelte'
+
+  let { session }: { session: SessionRow } = $props()
+
+  let data = $state<SessionTimeline | null>(null)
+  let failed = $state('')
+  $effect(() => {
+    let live = true
+    api.sessionTimeline(session.tool, session.session_id, session.started_ms, session.ended_ms).then(
+      (v) => live && (data = v),
+      (e) => live && (failed = String(e)),
+    )
+    return () => (live = false)
+  })
+
+  /** A pause this long lets Claude's cache lapse. */
+  const PAUSE_MS = 5 * 60_000
+  /** Room for the y labels, the notes above the columns, the columns, the time labels and the tool strip. */
+  const L = 44
+  const TOP = 34
+  const PLOT = 192
+  const BASE = TOP + PLOT
+  const H = BASE + 58
+  const NOTE_GAP = 150
+
+  let width = $state(0)
+  let hover = $state<number | null>(null)
+  let tipH = $state(0)
+
+  const reqs = $derived(data?.requests ?? [])
+  const calls = $derived(data?.calls ?? [])
+  const n = $derived(reqs.length)
+
+  const scale = $derived.by(() => {
+    const top = Math.max(1, ...reqs.map((r) => r.context))
+    const raw = top / 3
+    const mag = 10 ** Math.floor(Math.log10(raw))
+    const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw) ?? raw
+    return { step, max: step * 3 }
+  })
+  const hgt = (v: number) => Math.round((PLOT * v) / scale.max)
+
+  const geo = $derived.by(() => {
+    const pauses = new Set(reqs.map((r, i) => (i > 0 && r.ts_ms - reqs[i - 1].ts_ms >= PAUSE_MS ? i : -1)).filter((i) => i > 0))
+    const plotW = Math.max(0, width - L)
+    const gap = pauses.size ? Math.min(36, (plotW * 0.2) / pauses.size) : 0
+    const step = n ? (plotW - gap * pauses.size) / n : 0
+    const pad = step >= 8 ? 4 : step >= 4 ? 2 : step >= 2 ? 1 : 0
+    const bw = Math.max(1, Math.floor(step - pad))
+    const xs: number[] = []
+    let shift = 0
+    for (let i = 0; i < n; i++) {
+      if (pauses.has(i)) shift += gap
+      xs.push(Math.round(L + shift + step * i + pad / 2))
+    }
+    return { pauses: [...pauses], gap, bw, xs }
+  })
+
+  /** A column with only its top corners rounded. */
+  function column(x: number, top: number, bottom: number): string {
+    const w = geo.bw
+    const r = Math.min(2.5, (bottom - top) / 2, w / 2)
+    return `M${x} ${bottom}V${top + r}Q${x} ${top} ${x + r} ${top}H${x + w - r}Q${x + w} ${top} ${x + w} ${top + r}V${bottom}Z`
+  }
+
+  const bars = $derived(
+    reqs.map((r, i) => {
+      const x = geo.xs[i]
+      const top = BASE - Math.max(1, hgt(r.context))
+      if (r.rewritten <= 0) return { body: column(x, top, BASE), cap: '', agent: !!r.agent }
+      const split = Math.min(BASE - 2, top + Math.max(2, hgt(r.rewritten)))
+      return { body: `M${x} ${BASE}V${split + 1}H${x + geo.bw}V${BASE}Z`, cap: column(x, top, split), agent: !!r.agent }
+    }),
+  )
+
+  const grid = $derived([1, 2, 3].map((k) => ({ y: BASE - hgt(scale.step * k) + 0.5, label: fmtCompact(scale.step * k) })))
+
+  const breaks = $derived(
+    geo.pauses.map((i) => {
+      const from = geo.xs[i - 1] + geo.bw
+      return { x: from + 2, w: Math.max(0, geo.xs[i] - from - 4), cx: (from + geo.xs[i]) / 2, label: geo.gap >= 30 ? fmtDuration(reqs[i].ts_ms - reqs[i - 1].ts_ms) : '' }
+    }),
+  )
+
+  const ticks = $derived.by(() => {
+    if (!n) return []
+    const out: { x: number; label: string }[] = []
+    for (const i of [...new Set([0, 1, 2, 3, 4, 5].map((k) => Math.round((k * (n - 1)) / 5)))]) {
+      const x = geo.xs[i] + geo.bw / 2
+      if (out.length && x - out[out.length - 1].x < 64) continue
+      out.push({ x, label: fmtClock(reqs[i].ts_ms) })
+    }
+    return out
+  })
+
+  const notes = $derived.by(() => {
+    const out: { x: number; top: number; text: string; cls: string; anchor: string }[] = []
+    reqs.forEach((r, i) => {
+      const text = r.rewritten > 0 ? t('timeline.note.rewrite') : r.compacted ? t('timeline.note.compact') : ''
+      if (!text) return
+      const x = geo.xs[i] + geo.bw / 2
+      if (out.length && x - out[out.length - 1].x < NOTE_GAP) return
+      const anchor = x < L + 80 ? 'start' : x > width - 80 ? 'end' : 'middle'
+      out.push({ x, top: BASE - Math.max(1, hgt(r.context)), text, cls: r.rewritten > 0 ? 'rewrite' : 'compact', anchor })
+    })
+    return out
+  })
+
+  /** Each run of one subagent's requests in a row. */
+  const runs = $derived.by(() => {
+    const out: { agent: string; from: number; to: number }[] = []
+    reqs.forEach((r, i) => {
+      if (!r.agent) return
+      const last = out[out.length - 1]
+      if (last && last.agent === r.agent && last.to === i - 1) last.to = i
+      else out.push({ agent: r.agent, from: i, to: i })
+    })
+    return out
+  })
+  const brackets = $derived(
+    runs.map((run) => {
+      const a = geo.xs[run.from]
+      const b = geo.xs[run.to] + geo.bw
+      const y = Math.max(14, Math.min(...reqs.slice(run.from, run.to + 1).map((r) => BASE - hgt(r.context))) - 14)
+      return { d: `M${a} ${y + 5}V${y}H${b}V${y + 5}`, x: (a + b) / 2, y: y - 7, label: b - a >= 110 ? t('timeline.agentRun', { n: run.to - run.from + 1 }) : '' }
+    }),
+  )
+
+  /** The request each call belongs to: the last one sent before it. */
+  function slotOf(ms: number): number {
+    let lo = 0
+    let hi = n - 1
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2)
+      if (reqs[mid].ts_ms <= ms) lo = mid
+      else hi = mid - 1
+    }
+    return lo
+  }
+  const strip = $derived(calls.map((c) => ({ x: geo.xs[slotOf(c.ts_ms)] + geo.bw / 2, failed: c.failed === true })))
+  const failedCalls = $derived(calls.filter((c) => c.failed === true))
+
+  const prompt = $derived(reqs.reduce((a, r) => a + r.cache_read + r.cache_write + fresh(r), 0))
+  const sumOf = (f: (r: TimelineRequest) => number) => reqs.reduce((a, r) => a + f(r), 0)
+  function fresh(r: TimelineRequest): number {
+    return Math.max(0, r.context - r.cache_read - r.cache_write)
+  }
+  const costOf = (rs: TimelineRequest[]) => (rs.some((r) => r.cost_usd !== null) ? fmtMoney(rs.reduce((a, r) => a + (r.cost_usd ?? 0), 0)) : '—')
+  const share = (v: number) => t('timeline.unit.share', { p: fmtPct(prompt ? (v / prompt) * 100 : 0) })
+
+  const totals = $derived.by(() => {
+    const agents = reqs.filter((r) => r.agent)
+    const read = sumOf((r) => r.cache_read)
+    const write = sumOf((r) => r.cache_write)
+    const out = [
+      { cls: 'read', label: t('metric.cacheRead'), value: fmtCompact(read), unit: share(read), help: t('timeline.help.read') },
+      { cls: 'write', label: t('metric.cacheWrite'), value: fmtCompact(write), unit: share(write), help: t('timeline.help.write') },
+      { cls: 'fresh', label: t('timeline.fresh'), value: fmtCompact(sumOf(fresh)), unit: t('timeline.unit.tokens'), help: t('timeline.help.fresh') },
+    ]
+    out.push(
+      agents.length
+        ? { cls: 'agent', label: t('timeline.legend.agent'), value: fmtInt(agents.length), unit: t('timeline.unit.requests', { n: agents.length, cost: costOf(agents) }), help: t('timeline.help.agent') }
+        : { cls: 'output', label: t('metric.output'), value: fmtCompact(sumOf((r) => r.output)), unit: t('timeline.unit.tokens'), help: t('timeline.help.output') },
+    )
+    return out
+  })
+
+  const events = $derived.by(() => {
+    const out: { ms: number; cls: string; title: string; detail: string; value: string }[] = []
+    reqs.forEach((r, i) => {
+      if (r.rewritten > 0) {
+        out.push({
+          ms: r.ts_ms,
+          cls: 'rewrite',
+          title: t('timeline.ev.rewrite'),
+          detail: t('timeline.ev.rewrite.detail', { d: fmtDuration(r.ts_ms - reqs[i - 1].ts_ms), n: fmtCompact(r.rewritten) }),
+          value: r.rewrite_extra_usd === null ? '' : `+${fmtMoney(r.rewrite_extra_usd)}`,
+        })
+      }
+      if (r.compacted) {
+        const before = reqs.slice(0, i).findLast((p) => !p.agent)?.context ?? 0
+        out.push({ ms: r.ts_ms, cls: 'compact', title: t('timeline.ev.compact'), detail: `${fmtCompact(before)} → ${fmtCompact(r.context)}`, value: before ? `−${fmtPct((1 - r.context / before) * 100)}` : '' })
+      }
+    })
+    for (const run of runs) {
+      const rs = reqs.slice(run.from, run.to + 1)
+      out.push({
+        ms: rs[0].ts_ms,
+        cls: 'agent',
+        title: t('timeline.ev.agent', { a: run.agent }),
+        detail: t('timeline.ev.agent.detail', { n: rs.length, max: fmtCompact(Math.max(...rs.map((r) => r.context))) }),
+        value: costOf(rs),
+      })
+    }
+    out.sort((a, b) => a.ms - b.ms)
+    if (failedCalls.length) {
+      const byName = new Map<string, number>()
+      for (const c of failedCalls) byName.set(c.name, (byName.get(c.name) ?? 0) + 1)
+      const list = [...byName].sort((a, b) => b[1] - a[1]).map(([name, k]) => `${name} ${k}`).join(', ')
+      out.push({ ms: 0, cls: 'failed', title: t('timeline.ev.failed'), detail: t('timeline.ev.failed.detail', { f: fmtInt(failedCalls.length), n: fmtInt(calls.length), list }), value: fmtInt(failedCalls.length) })
+    }
+    return out
+  })
+  let allEvents = $state(false)
+
+  const hr = $derived(hover === null ? null : reqs[hover])
+  const tip = $derived.by(() => {
+    if (hover === null || !hr) return null
+    const cx = geo.xs[hover] + geo.bw / 2
+    const top = BASE - Math.max(1, hgt(hr.context))
+    const above = top - 14 - tipH
+    // above the column when it fits, else beside it
+    const left = above >= 0 ? Math.min(Math.max(cx - 106, 0), width - 212) : cx + 16 + 212 <= width ? cx + 16 : cx - 16 - 212
+    const note = hr.rewritten > 0 ? t('timeline.tip.rewrite', { d: fmtDuration(hr.ts_ms - reqs[hover - 1].ts_ms) }) : hr.agent ? t('timeline.ev.agent', { a: hr.agent }) : hr.compacted ? t('timeline.tip.compact') : ''
+    return { left, top: above >= 0 ? above : 4, note, cls: hr.rewritten > 0 ? 'rewrite' : hr.agent ? 'agent' : '' }
+  })
+
+  function move(e: PointerEvent) {
+    const box = (e.currentTarget as SVGElement).getBoundingClientRect()
+    const px = L + e.clientX - box.left
+    let lo = 0
+    let hi = n - 1
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2)
+      if (geo.xs[mid] + geo.bw / 2 < px) lo = mid + 1
+      else hi = mid
+    }
+    const i = lo > 0 && Math.abs(geo.xs[lo - 1] + geo.bw / 2 - px) < Math.abs(geo.xs[lo] + geo.bw / 2 - px) ? lo - 1 : lo
+    if (i !== hover) hover = i
+  }
+
+  const maxContext = $derived(Math.max(0, ...reqs.map((r) => r.context)))
+  const hit = $derived(prompt ? (sumOf((r) => r.cache_read) / prompt) * 100 : 0)
+</script>
+
+<div class="timeline">
+  <div class="head">
+    <h3>{t('timeline.title')}</h3>
+    {#if n}
+      <span class="key"><i class="read"></i>{t('timeline.legend.context')}</span>
+      {#if reqs.some((r) => r.rewritten > 0)}<span class="key"><i class="write"></i>{t('timeline.legend.rewrite')}</span>{/if}
+      {#if runs.length}<span class="key"><i class="agent"></i>{t('timeline.legend.agent')}</span>{/if}
+      <span class="stats">
+        <span>{t('timeline.stat.max')} <b>{fmtCompact(maxContext)}</b></span>
+        <span>{t('timeline.stat.hit')} <b>{fmtPct(hit, 1)}</b></span>
+      </span>
+    {/if}
+  </div>
+  {#if failed}
+    <p class="muted small">{t('common.error', { e: failed })}</p>
+  {:else if !data}
+    <p class="muted small">{t('common.loading')}</p>
+  {:else if !n}
+    <p class="muted small">{t('timeline.empty')}</p>
+  {:else}
+    <div class="chart" bind:clientWidth={width}>
+      {#if width}
+        <svg {width} height={calls.length ? H : BASE + 26} role="img" aria-label={t('timeline.aria', { n: fmtInt(n), max: fmtCompact(maxContext) })}>
+          {#each grid as g (g.label)}
+            <line class="grid" x1={L} x2={width} y1={g.y} y2={g.y} />
+            <text class="axis" x="0" y={g.y + 3.5}>{g.label}</text>
+          {/each}
+          {#each brackets as b, i (i)}
+            <path class="bracket" d={b.d} />
+            {#if b.label}<text class="bracket-label" x={b.x} y={b.y} text-anchor="middle">{b.label}</text>{/if}
+          {/each}
+          {#each bars as b, i (i)}
+            <g class:dim={hover !== null && hover !== i}>
+              <path class={b.agent ? 'agent' : 'read'} d={b.body} />
+              {#if b.cap}<path class="write" d={b.cap} />{/if}
+            </g>
+          {/each}
+          {#each notes as note (note.x)}
+            <line class="note-line {note.cls}" x1={note.x} x2={note.x} y1={note.top - 14} y2={note.top - 4} />
+            <text class="note {note.cls}" x={note.x} y={note.top - 20} text-anchor={note.anchor}>{note.text}</text>
+          {/each}
+          <line class="baseline" x1={L} x2={width} y1={BASE + 0.5} y2={BASE + 0.5} />
+          {#each breaks as b (b.x)}
+            <rect class="break" x={b.x} y={BASE - 1} width={b.w} height="3" />
+            {#if b.label}<text class="axis" x={b.cx} y={BASE - 8} text-anchor="middle">{b.label}</text>{/if}
+          {/each}
+          {#each ticks as tk (tk.x)}
+            <text class="axis" x={tk.x} y={BASE + 20} text-anchor="middle">{tk.label}</text>
+          {/each}
+          {#if calls.length}
+            <text class="axis" x="0" y={BASE + 47}>{t('timeline.tools')}</text>
+            {#each strip as c, i (i)}
+              <rect class="call" class:failed={c.failed} x={c.x - (c.failed ? 1.5 : 1)} y={BASE + (c.failed ? 36 : 39)} width={c.failed ? 3 : 2} height={c.failed ? 14 : 8} rx="1" />
+            {/each}
+          {/if}
+          <rect class="hit" x={L} y="0" width={Math.max(0, width - L)} height={BASE} role="presentation" onpointermove={move} onpointerleave={() => (hover = null)} />
+        </svg>
+        {#if tip && hr}
+          <div class="tip" style:left="{tip.left}px" style:top="{tip.top}px" bind:clientHeight={tipH}>
+            <div class="tip-head"><span>{fmtClock(hr.ts_ms)}</span><span>{hr.agent ? t('timeline.tip.agent') : t('timeline.tip.main')}</span></div>
+            <div class="tip-context"><span>{t('timeline.context')}</span><b>{fmtCompact(hr.context)}</b></div>
+            <div class="tip-row"><i class="read"></i><span>{t('metric.cacheRead')}</span><b>{fmtCompact(hr.cache_read)}</b></div>
+            <div class="tip-row"><i class="write"></i><span>{t('metric.cacheWrite')}</span><b>{fmtCompact(hr.cache_write)}</b></div>
+            <div class="tip-row"><i class="fresh"></i><span>{t('timeline.fresh')}</span><b>{fmtCompact(fresh(hr))}</b></div>
+            <div class="tip-cost"><span>{t('metric.cost')}</span><b>{hr.cost_usd === null ? '—' : fmtMoney(hr.cost_usd)}</b></div>
+            {#if tip.note}<div class="tip-note {tip.cls}">{tip.note}</div>{/if}
+          </div>
+        {/if}
+      {/if}
+    </div>
+
+    <div class="totals">
+      {#each totals as s (s.cls)}
+        <div class="total">
+          <span class="key"><i class={s.cls}></i>{s.label}</span>
+          <span class="amount">{s.value} <small>{s.unit}</small></span>
+          <span class="help">{s.help}</span>
+        </div>
+      {/each}
+    </div>
+
+    {#if events.length}
+      <ul class="events">
+        {#each allEvents ? events : events.slice(0, 6) as e, i (i)}
+          <li>
+            <span class="time">{e.ms ? fmtClock(e.ms) : ''}</span>
+            <i class={e.cls}></i>
+            <span class="title">{e.title}</span>
+            <span class="detail">{e.detail}</span>
+            <span class="value {e.cls}">{e.value}</span>
+          </li>
+        {/each}
+      </ul>
+      {#if events.length > 6 && !allEvents}
+        <button class="btn ghost small" onclick={() => (allEvents = true)}>{t('timeline.more', { n: events.length - 6 })}</button>
+      {/if}
+    {/if}
+  {/if}
+</div>
+
+<style>
+  .timeline {
+    /* the warning and subagent colors, deepened for text on a light surface */
+    --warn-text: color-mix(in srgb, var(--warning) 50%, var(--ink));
+    --agent-text: color-mix(in srgb, var(--s3) 64%, var(--ink));
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-top: 8px;
+    padding-top: 16px;
+    box-shadow: inset 0 1px 0 var(--hairline);
+    font-variant-numeric: tabular-nums;
+  }
+  .head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+  }
+  h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .key {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+  .stats {
+    display: inline-flex;
+    gap: 20px;
+    margin-left: auto;
+    font-size: 12px;
+    color: var(--ink-3);
+    white-space: nowrap;
+  }
+  .stats b {
+    font-weight: 500;
+    color: var(--ink);
+  }
+  i {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+  }
+  i.read,
+  path.read {
+    background: var(--s1);
+    fill: var(--s1);
+  }
+  i.write,
+  path.write {
+    background: var(--warning);
+    fill: var(--warning);
+  }
+  i.fresh,
+  i.output {
+    background: var(--ink-3);
+    opacity: 0.6;
+  }
+  i.agent,
+  path.agent {
+    background: var(--s3);
+    fill: var(--s3);
+  }
+  i.compact {
+    background: var(--ink-3);
+  }
+  i.failed {
+    background: var(--critical);
+  }
+  .chart {
+    position: relative;
+  }
+  svg {
+    display: block;
+    overflow: visible;
+  }
+  .grid {
+    stroke: var(--grid);
+    stroke-dasharray: 2 4;
+    shape-rendering: crispEdges;
+  }
+  .axis {
+    fill: var(--ink-3);
+    font-size: 11px;
+  }
+  .baseline {
+    stroke: var(--hairline-strong);
+    shape-rendering: crispEdges;
+  }
+  .break {
+    fill: var(--surface);
+  }
+  .dim {
+    opacity: 0.32;
+  }
+  .bracket {
+    fill: none;
+    stroke: var(--s3);
+    stroke-opacity: 0.7;
+    shape-rendering: crispEdges;
+  }
+  .bracket-label {
+    fill: var(--agent-text);
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .note {
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .note.rewrite {
+    fill: var(--warn-text);
+  }
+  .note.compact {
+    fill: var(--ink-2);
+  }
+  .note-line {
+    shape-rendering: crispEdges;
+  }
+  .note-line.rewrite {
+    stroke: var(--warning);
+  }
+  .note-line.compact {
+    stroke: var(--ink-3);
+  }
+  .call {
+    fill: var(--ink-3);
+    opacity: 0.55;
+  }
+  .call.failed {
+    fill: var(--critical);
+    opacity: 1;
+  }
+  .hit {
+    fill: transparent;
+  }
+  .tip {
+    position: absolute;
+    width: 212px;
+    box-sizing: border-box;
+    padding: 10px 12px 11px;
+    border-radius: 10px;
+    background: var(--surface-2);
+    box-shadow: 0 0 0 1px var(--hairline), var(--shadow-pop);
+    font-size: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    pointer-events: none;
+    z-index: 5;
+  }
+  .tip-head,
+  .tip-context,
+  .tip-row,
+  .tip-cost {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .tip-head {
+    justify-content: space-between;
+    color: var(--ink-3);
+  }
+  .tip-context {
+    justify-content: space-between;
+    color: var(--ink-2);
+    margin-bottom: 2px;
+  }
+  .tip-context b {
+    color: var(--ink);
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+  }
+  .tip-row span,
+  .tip-cost span {
+    color: var(--ink-2);
+  }
+  .tip-row b,
+  .tip-cost b {
+    margin-left: auto;
+    font-weight: 400;
+  }
+  .tip-cost {
+    padding-top: 6px;
+    margin-top: 2px;
+    box-shadow: inset 0 1px 0 var(--hairline);
+  }
+  .tip-note {
+    color: var(--ink-2);
+  }
+  .tip-note.rewrite {
+    color: var(--warn-text);
+  }
+  .tip-note.agent {
+    color: var(--agent-text);
+  }
+  .totals {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px 24px;
+    padding-top: 16px;
+    box-shadow: inset 0 1px 0 var(--hairline);
+  }
+  @container main (max-width: 900px) {
+    .totals {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  .total {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .amount {
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+  }
+  .amount small {
+    font-size: 12px;
+    font-weight: 400;
+    letter-spacing: 0;
+    color: var(--ink-3);
+  }
+  .help {
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: var(--ink-3);
+  }
+  .events {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .events li {
+    display: grid;
+    grid-template-columns: 44px 8px minmax(140px, 230px) minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 12px;
+    padding: 10px 0;
+    box-shadow: inset 0 1px 0 var(--hairline);
+    font-size: 13px;
+  }
+  .events .time {
+    color: var(--ink-3);
+  }
+  .events .title {
+    font-weight: 500;
+  }
+  .events .detail {
+    color: var(--ink-2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .events .value {
+    text-align: right;
+  }
+  .events .value.rewrite {
+    color: var(--warn-text);
+  }
+  .events .value.compact {
+    color: var(--ink-2);
+  }
+  .events .value.failed {
+    color: var(--critical);
+  }
+</style>
