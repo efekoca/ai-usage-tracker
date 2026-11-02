@@ -18,10 +18,20 @@
   import Sessions from './views/Sessions.svelte'
   import Context from './views/Context.svelte'
   import Tips from './views/Tips.svelte'
+  import CommandPalette from './components/CommandPalette.svelte'
+  import { NAV } from './lib/nav'
   import { ask } from '@tauri-apps/plugin-dialog'
   import { api } from './lib/api'
 
   let failed = $state('')
+  let palette = $state(false)
+  const paletteKeys = $derived(app.info?.platform === 'macos' ? '⌘K' : 'Ctrl K')
+  function globalKey(e: KeyboardEvent) {
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k' && app.settings?.onboarded) {
+      e.preventDefault()
+      palette = !palette
+    }
+  }
 
   // short incremental scans run every few seconds while a tool writes; only a long one is worth showing
   const scanning = $derived(!!(app.scan?.running && app.scan.total > 0))
@@ -43,25 +53,7 @@
     init().catch((e) => (failed = String(e)))
   })
 
-  const nav: { section: string; items: { id: View; icon: string }[] }[] = [
-    { section: 'nav.section.usage', items: [
-      { id: 'overview', icon: 'overview' },
-      { id: 'tips', icon: 'tips' },
-      { id: 'daily', icon: 'daily' },
-      { id: 'breakdown', icon: 'breakdown' },
-      { id: 'sessions', icon: 'sessions' },
-      { id: 'cache', icon: 'cache' },
-      { id: 'context', icon: 'context' },
-      { id: 'limits', icon: 'limits' },
-      { id: 'projects', icon: 'projects' },
-    ] },
-    { section: 'nav.section.manage', items: [
-      { id: 'sources', icon: 'sources' },
-      { id: 'widget', icon: 'widget' },
-      { id: 'menubar', icon: 'menubar' },
-      { id: 'settings', icon: 'settings' },
-    ] },
-  ]
+  const nav = NAV
   const withToolbar: View[] = ['overview', 'tips', 'daily', 'breakdown', 'sessions', 'cache', 'context', 'projects']
 
   // dismissed for this run only (not persisted)
@@ -91,6 +83,8 @@
   }
 </script>
 
+<svelte:window onkeydown={globalKey} />
+
 {#if failed}
   <main class="center"><p>{t('common.error', { e: failed })}</p></main>
 {:else if !app.ready || !app.settings}
@@ -104,6 +98,11 @@
         <img src="/app-icon.png" alt="" width="22" height="22" />
         <span class="label">{t('app.name')}</span>
       </div>
+      <button class="find" title="{t('palette.label')} ({paletteKeys})" aria-label={t('palette.label')} aria-keyshortcuts={app.info?.platform === 'macos' ? 'Meta+K' : 'Control+K'} onclick={() => (palette = true)}>
+        <Icon name="search" size={15} />
+        <span class="label">{t('palette.open')}</span>
+        <kbd class="label">{paletteKeys}</kbd>
+      </button>
       {#each nav as group (group.section)}
         <div class="section"><span class="label">{t(group.section)}</span></div>
         <ul role="list">
@@ -179,6 +178,7 @@
       </div>
     </main>
   </div>
+  <CommandPalette bind:open={palette} />
 {/if}
 
 <style>
@@ -211,6 +211,30 @@
   }
   .brand img {
     border-radius: 6px;
+  }
+  .find {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 32px;
+    margin-bottom: 4px;
+    padding: 0 10px;
+    border: 0.5px solid var(--hairline);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--ink-2);
+    font-size: 13px;
+    text-align: left;
+    transition: background var(--dur) var(--ease);
+  }
+  .find:hover {
+    background: var(--surface-hover);
+  }
+  .find kbd {
+    margin-left: auto;
+    font: inherit;
+    font-size: 11px;
+    color: var(--ink-3);
   }
   .section {
     font-size: 11px;
@@ -343,6 +367,10 @@
     .brand {
       justify-content: center;
       padding: 4px 0 10px;
+    }
+    .find {
+      justify-content: center;
+      padding: 0;
     }
     .section {
       height: 0;

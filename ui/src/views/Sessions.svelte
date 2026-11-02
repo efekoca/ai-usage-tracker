@@ -58,6 +58,16 @@
     void sortKey
     shown = 50
   })
+  $effect(() => {
+    const key = app.openSession
+    if (!key || !data) return
+    const s = data.sessions.find((x) => x.tool + x.session_id === key)
+    if (s) {
+      query = s.session_id
+      open = key
+    }
+    app.openSession = null
+  })
 
   const summary = $derived.by(() => {
     const list = data?.sessions ?? []

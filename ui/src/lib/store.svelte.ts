@@ -20,6 +20,8 @@ export const app = $state({
   scan: null as ScanStatus | null,
   update: null as UpdateStatus | null,
   limitsTab: 'current' as 'current' | 'history',
+  /** A session the Sessions page opens once it loads (`tool` + `session_id`), set from the command palette. */
+  openSession: null as string | null,
   /** bumps whenever backend data changes, so views can refetch their own data */
   tick: 0,
 })
