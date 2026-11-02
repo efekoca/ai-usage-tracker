@@ -356,6 +356,7 @@ pub fn run() {
                 started_hidden,
                 report_ready: Mutex::new(None),
                 last_report: Mutex::new(None),
+                last_image: Mutex::new(None),
                 updates: Mutex::new(updates::UpdateStatus::default()),
                 hotkey_error: Mutex::new(None),
             });
@@ -426,6 +427,8 @@ pub fn run() {
             commands::compare_models,
             commands::context_stats,
             commands::plan_value,
+            commands::save_image,
+            commands::open_last_image,
             commands::export_report,
             commands::report_ready,
             commands::open_last_report,

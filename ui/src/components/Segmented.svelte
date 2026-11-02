@@ -4,7 +4,7 @@
     value = $bindable(),
     label,
     onchange,
-  }: { options: { value: T; label: string }[]; value: T; label: string; onchange?: (v: T) => void } = $props()
+  }: { options: { value: T; label: string; swatch?: string }[]; value: T; label: string; onchange?: (v: T) => void } = $props()
 
   let buttons: HTMLButtonElement[] = $state([])
   let root: HTMLDivElement | undefined = $state()
@@ -60,7 +60,7 @@
       aria-checked={o.value === value}
       tabindex={o.value === value ? 0 : -1}
       class:on={o.value === value}
-      onclick={() => select(i)}>{o.label}</button
+      onclick={() => select(i)}>{#if o.swatch}<i class="swatch" style="background:{o.swatch}" aria-hidden="true"></i>{/if}{o.label}</button
     >
   {/each}
 </div>
@@ -97,6 +97,15 @@
     font-weight: 500;
     color: var(--ink-2);
     white-space: nowrap;
+  }
+  .swatch {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-right: 7px;
+    border-radius: 50%;
+    vertical-align: -1px;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 35%, transparent);
   }
   button.on {
     color: var(--ink);

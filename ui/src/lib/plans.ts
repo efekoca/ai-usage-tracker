@@ -1,4 +1,4 @@
-import type { Account, PlanDef, PlansFile, Provider, Settings } from './api'
+import type { Account, AccountValue, PlanDef, PlansFile, PlanValue, Provider, Settings } from './api'
 
 /** Whether a limit reading's plan name fits a plan, as `plans::fits` decides: Claude reports "max" for both Max plans and "team" for both Team plans, Codex "team" for Business and "edu" for Enterprise / Edu. */
 export function fits(p: Provider, id: string, read: string): boolean {
@@ -39,4 +39,87 @@ export function planPrice(s: Settings | null, p: Provider, plan: PlanDef | undef
   if ((!account || (plan && plan.id === s?.plans[p])) && typeof shared === 'number' && shared > 0) return { usd: shared, custom: true }
   const list = plan?.monthly_usd
   return { usd: typeof list === 'number' ? list : null, custom: false }
+}
+
+const DAYS_PER_MONTH = 365.25 / 12
+
+/** What a plan's value is worked out from. */
+export interface ValueInput {
+  plans: PlansFile | null
+  settings: Settings | null
+  accounts: Account[]
+  value: PlanValue | null
+}
+
+function planOf(v: ValueInput, p: Provider): PlanDef | undefined {
+  const id = v.settings?.plans[p]
+  return id ? v.plans?.providers[p]?.plans.find((x) => x.id === id) : undefined
+}
+
+const shareOf = (v: ValueInput, usd: number | null) => (usd !== null ? (usd * (v.value?.dates.length ?? 30)) / DAYS_PER_MONTH : null)
+
+/** A provider on one plan: its use against the plan's price for the period's days. */
+export function valueRow(v: ValueInput, p: Provider) {
+  const pv = v.value?.providers.find((x) => x.provider === p)
+  const plan = planOf(v, p)
+  const price = planPrice(v.settings, p, plan)
+  const cost = pv?.cost_usd ?? 0
+  const share = shareOf(v, price.usd)
+  const ratio = share && share > 0 ? cost / share : null
+  const day = share !== null && pv ? pv.cumulative.findIndex((c) => c >= share) : -1
+  return { pv, plan, price, cost, share, ratio, day }
+}
+
+/** A provider with several accounts: each account seen in the period on its own plan, against their prices together. */
+export function valueSplit(v: ValueInput, p: Provider) {
+  const pv = v.value?.providers.find((x) => x.provider === p)
+  const range = v.value?.range
+  const parts = v.accounts
+    .filter((a) => a.provider === p && a.id !== null && a.last_ms >= (range?.from_ms ?? 0) && a.first_ms < (range?.to_ms ?? Infinity))
+    .map((a) => {
+      const id = a.id as string
+      const plan = accountPlan(v.plans, v.settings, a)
+      const price = planPrice(v.settings, p, plan, id)
+      return { id, plan, price, share: shareOf(v, price.usd), use: pv?.accounts.find((x) => x.account === id) }
+    })
+  const unknown = pv?.accounts.find((x) => x.account === null)
+  // use billed at API rates, or on a free plan, is not paid for by the plans counted here
+  const counted = parts.filter((x) => x.plan?.id !== 'api' && x.price.usd !== 0)
+  const missing = counted.find((x) => !x.plan || x.share === null)
+  const uses = [...counted.map((x) => x.use), unknown].filter((u): u is AccountValue => !!u)
+  const cost = uses.reduce((t, u) => t + u.cost_usd, 0)
+  const cumulative = (v.value?.dates ?? []).map((_, i) => uses.reduce((t, u) => t + (u.cumulative[i] ?? 0), 0))
+  const share = counted.reduce((t, x) => t + (x.share ?? 0), 0)
+  return {
+    pv,
+    parts,
+    unknown,
+    missing,
+    cost,
+    cumulative,
+    share,
+    ratio: share > 0 ? cost / share : null,
+    day: share > 0 ? cumulative.findIndex((c) => c >= share) : -1,
+    monthly: counted.reduce((t, x) => t + (x.price.usd ?? 0), 0),
+    custom: counted.some((x) => x.price.custom),
+    accounts: counted.length,
+    events: uses.reduce((t, u) => t + u.events, 0),
+    unpriced: uses.reduce((t, u) => t + u.unpriced_events, 0),
+  }
+}
+
+/** API-equivalent use of `providers` over what their paid plans cost for the period. A provider whose plan or price is unknown is left out of both; `null` when no used provider is on a known paid plan. */
+export function planMultiple(v: ValueInput, providers: Provider[]): number | null {
+  let cost = 0
+  let share = 0
+  for (const p of providers) {
+    if ((v.value?.providers.find((x) => x.provider === p)?.events ?? 0) === 0) continue
+    const m = v.accounts.some((a) => a.provider === p) ? valueSplit(v, p) : null
+    const part = m && m.parts.length ? (m.missing ? null : m) : valueRow(v, p)
+    if (part?.share) {
+      cost += part.cost
+      share += part.share
+    }
+  }
+  return share > 0 ? cost / share : null
 }

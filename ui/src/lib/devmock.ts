@@ -144,13 +144,13 @@ function rangeDays(p: Period): number {
 
 function report(p: Period): Report {
   seed = 11
-  const n = rangeDays(p)
-  const end = new Date()
+  const end = p.kind === 'custom' ? new Date(p.to + 'T00:00:00') : new Date()
   end.setHours(0, 0, 0, 0)
+  const n = p.kind === 'custom' ? Math.round((end.getTime() - new Date(p.from + 'T00:00:00').getTime()) / day) + 1 : rangeDays(p)
   const daily: DayPoint[] = []
   for (let i = n - 1; i >= 0; i--) {
-    const d = new Date(end.getTime() - i * day)
-    const active = rnd() > 0.35 || i === 0
+    const d = new Date(end.getFullYear(), end.getMonth(), end.getDate() - i)
+    const active = d.getTime() <= Date.now() && (rnd() > 0.35 || i === 0)
     const cc = active ? Math.round(2e6 + rnd() * 30e6) : 0
     const cx = active && rnd() > 0.5 ? Math.round(rnd() * 8e6) : 0
     const ag = active && i % 3 === 0 ? Math.round(1e6 + rnd() * 3e6) : 0
@@ -340,16 +340,17 @@ function mockContext() {
   }
 }
 
-function mockPlanValue() {
-  const n = 30
-  const dates = Array.from({ length: n }, (_, i) => new Date(Date.now() - (n - 1 - i) * 86400e3).toISOString().slice(0, 10))
+function mockPlanValue(p?: Period) {
+  const last = p?.kind === 'custom' ? new Date(Math.min(new Date(p.to + 'T00:00:00').getTime(), Date.now())) : new Date()
+  const n = p?.kind === 'custom' ? Math.max(0, Math.round((last.getTime() - new Date(p.from + 'T00:00:00').getTime()) / 86400e3) + 1) : 30
+  const dates = Array.from({ length: n }, (_, i) => new Date(last.getTime() - (n - 1 - i) * 86400e3).toISOString().slice(0, 10))
   const run = (per: number) => { let r = 0; return dates.map((_, i) => (r += per * (0.4 + ((i * 37) % 10) / 8))) }
   const a = run(9.1)
   const o = run(1.2)
   const g = run(0.78)
   const part = (account: string | null, cum: number[], share: number, events: number, unpriced = 0) => {
     const c = cum.map((v) => v * share)
-    return { account, cost_usd: c[n - 1], events: Math.round(events * share), unpriced_events: Math.round(unpriced * share), cumulative: c }
+    return { account, cost_usd: c[n - 1] ?? 0, events: Math.round(events * share), unpriced_events: Math.round(unpriced * share), cumulative: c }
   }
   const claude = twoAccounts ? [part(CLAUDE_A, a, 0.32, 9000), part(CLAUDE_B, a, 0.6, 9000), part(null, a, 0.08, 9000)] : []
   const codex = twoAccounts ? [part(ACCOUNT_A, o, 0.7, 1200, 93), part(ACCOUNT_B, o, 0.3, 1200, 93)] : []
@@ -357,9 +358,9 @@ function mockPlanValue() {
     range: { from_ms: Date.now() - n * 86400e3, to_ms: Date.now() },
     dates,
     providers: [
-      { provider: 'anthropic', cost_usd: a[n - 1], events: 9000, unpriced_events: 0, cumulative: a, accounts: claude },
-      { provider: 'openai', cost_usd: o[n - 1], events: 1200, unpriced_events: 93, cumulative: o, accounts: codex },
-      { provider: 'google', cost_usd: g[n - 1], events: 640, unpriced_events: 0, cumulative: g, accounts: [] },
+      { provider: 'anthropic', cost_usd: a[n - 1] ?? 0, events: 9000, unpriced_events: 0, cumulative: a, accounts: claude },
+      { provider: 'openai', cost_usd: o[n - 1] ?? 0, events: 1200, unpriced_events: 93, cumulative: o, accounts: codex },
+      { provider: 'google', cost_usd: g[n - 1] ?? 0, events: 640, unpriced_events: 0, cumulative: g, accounts: [] },
     ],
   }
 }
@@ -738,7 +739,14 @@ export function installMock() {
           return { month: new Date(starts - d.getTimezoneOffset() * 60e3).toISOString().slice(0, 10), starts_ms: starts, ends_ms: ends, spent_usd: spent, projected_usd: share >= 0.1 ? spent / share : null }
         }
         case 'plan_value':
-          return mockPlanValue()
+          return mockPlanValue(a.period as Period | undefined)
+        case 'save_image':
+          console.info('save image', a.path, (a.bytes as number[]).length)
+          return null
+        case 'open_last_image':
+          return null
+        case 'plugin:dialog|save':
+          return `/Users/you/Desktop/${(a.options as { defaultPath?: string } | undefined)?.defaultPath ?? 'file'}`
         case 'get_limits':
           return limits()
         case 'get_accounts':

@@ -2,8 +2,8 @@
   // Chat use is not in local logs, so the figure is a lower bound.
   import { untrack } from 'svelte'
   import { accountName, app, latest, providerColor, saveSettings, tint, markTint } from '../lib/store.svelte'
-  import { api, providersOf, type AccountValue, type PlanDef, type PlansFile, type PlanValue, type Provider, type ProviderValue } from '../lib/api'
-  import { accountPlan, planPrice, priceKey } from '../lib/plans'
+  import { api, providersOf, type PlansFile, type PlanValue, type Provider, type ProviderValue } from '../lib/api'
+  import { priceKey, valueRow, valueSplit } from '../lib/plans'
   import { fmtDate, fmtDec, fmtInt, fmtMoney, i18n, parseNumber, t } from '../lib/i18n.svelte'
   import Icon from './Icon.svelte'
   import BrandIcon from './BrandIcon.svelte'
@@ -32,11 +32,6 @@
   // a tool without use in the period would only fill a column with "no use"
   const used = $derived(providers.filter((p) => (value?.providers.find((x) => x.provider === p)?.events ?? 0) > 0))
 
-  const DAYS_PER_MONTH = 365.25 / 12
-  function planOf(p: Provider): PlanDef | undefined {
-    const id = app.settings?.plans[p]
-    return id ? plans?.providers[p]?.plans.find((x) => x.id === id) : undefined
-  }
   function setPlan(p: Provider, id: string) {
     saveSettings((c) => ({ plans: { ...c.plans, [p]: id } }))
   }
@@ -61,54 +56,9 @@
     saveSettings((c) => ({ account_prices: { ...c.account_prices, [key]: v } }))
   }
 
-  const shareOf = (usd: number | null) => (usd !== null ? (usd * (value?.dates.length ?? 30)) / DAYS_PER_MONTH : null)
-  function row(p: Provider) {
-    const pv = value?.providers.find((x) => x.provider === p)
-    const plan = planOf(p)
-    const price = planPrice(app.settings, p, plan)
-    const cost = pv?.cost_usd ?? 0
-    const share = shareOf(price.usd)
-    const ratio = share && share > 0 ? cost / share : null
-    const day = share !== null && pv ? pv.cumulative.findIndex((c) => c >= share) : -1
-    return { pv, plan, price, cost, share, ratio, day }
-  }
-
-  /** A provider with several accounts: each account seen in the period on its own plan, against their prices together. */
-  function split(p: Provider) {
-    const pv = value?.providers.find((x) => x.provider === p)
-    const parts = app.accounts
-      .filter((a) => a.provider === p && a.id !== null && a.last_ms >= (value?.range.from_ms ?? 0))
-      .map((a) => {
-        const id = a.id as string
-        const plan = accountPlan(plans, app.settings, a)
-        const price = planPrice(app.settings, p, plan, id)
-        return { id, plan, price, share: shareOf(price.usd), use: pv?.accounts.find((x) => x.account === id) }
-      })
-    const unknown = pv?.accounts.find((x) => x.account === null)
-    // use billed at API rates, or on a free plan, is not paid for by the plans counted here
-    const counted = parts.filter((x) => x.plan?.id !== 'api' && x.price.usd !== 0)
-    const missing = counted.find((x) => !x.plan || x.share === null)
-    const uses = [...counted.map((x) => x.use), unknown].filter((u): u is AccountValue => !!u)
-    const cost = uses.reduce((t, u) => t + u.cost_usd, 0)
-    const cumulative = (value?.dates ?? []).map((_, i) => uses.reduce((t, u) => t + (u.cumulative[i] ?? 0), 0))
-    const share = counted.reduce((t, x) => t + (x.share ?? 0), 0)
-    return {
-      pv,
-      parts,
-      unknown,
-      missing,
-      cost,
-      cumulative,
-      share,
-      ratio: share > 0 ? cost / share : null,
-      day: share > 0 ? cumulative.findIndex((c) => c >= share) : -1,
-      monthly: counted.reduce((t, x) => t + (x.price.usd ?? 0), 0),
-      custom: counted.some((x) => x.price.custom),
-      accounts: counted.length,
-      events: uses.reduce((t, u) => t + u.events, 0),
-      unpriced: uses.reduce((t, u) => t + u.unpriced_events, 0),
-    }
-  }
+  const input = $derived({ plans, settings: app.settings, accounts: app.accounts, value })
+  const row = (p: Provider) => valueRow(input, p)
+  const split = (p: Provider) => valueSplit(input, p)
   const multiple = (r: number | null) => t('value.multiple', { n: fmtDec(r ?? 0, r !== null && r < 10 ? 1 : 0) })
 
   const W = 240

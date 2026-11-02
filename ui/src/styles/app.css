@@ -54,6 +54,8 @@
   --cc-tile-hover: rgba(255, 255, 255, 0.82);
   --cc-edge: rgba(14, 18, 32, 0.07);
   --cc-track: rgba(14, 18, 32, 0.1);
+  /* a recessed area that previews sit on */
+  --stage: rgba(14, 18, 32, 0.035);
 
   --radius: 14px;
   --radius-sm: 9px;
@@ -101,6 +103,8 @@
     --cc-tile-hover: rgba(255, 255, 255, 0.16);
     --cc-edge: rgba(255, 255, 255, 0.07);
     --cc-track: rgba(255, 255, 255, 0.15);
+  --stage: rgba(0, 0, 0, 0.3);
+    --stage: rgba(0, 0, 0, 0.3);
   }
 }
 :root[data-theme='dark'],

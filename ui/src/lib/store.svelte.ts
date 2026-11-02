@@ -1,7 +1,7 @@
 import { api, on, type Account, type AppInfo, type Filter, type LimitView, type Period, type Provider, type Report, type ScanStatus, type Settings, type UpdateStatus } from './api'
 import { i18n, resolveLang, t } from './i18n.svelte'
 
-const VIEWS = ['overview', 'tips', 'daily', 'breakdown', 'sessions', 'cache', 'context', 'limits', 'projects', 'sources', 'widget', 'menubar', 'settings'] as const
+const VIEWS = ['overview', 'tips', 'daily', 'breakdown', 'sessions', 'cache', 'context', 'limits', 'projects', 'cards', 'sources', 'widget', 'menubar', 'settings'] as const
 export type View = (typeof VIEWS)[number]
 
 export const app = $state({
