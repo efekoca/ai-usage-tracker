@@ -429,7 +429,7 @@
               <svg width="16" height="16" viewBox={icon.bg ? '-2.3 -2.3 28.6 28.6' : '0 0 24 24'} fill="none" stroke-width="2.8" stroke-linecap="round">
                 <path d={dialArc(1)} stroke={icon.bg ? '#283256' : 'currentColor'} stroke-opacity={icon.bg ? 1 : 0.35} />
                 {#if share > 0}<path d={dialArc(share)} stroke={icon.fg || 'currentColor'} />{/if}
-                <path d={dialNeedle(share)} fill={icon.bg ? '#f2f5fa' : 'currentColor'} stroke="none" />
+                <path d={dialNeedle(share)} fill={icon.bg ? '#f2f5fa' : icon.fg || 'currentColor'} stroke="none" />
               </svg>
             </span>
           {:else if showsIcon && preview?.icon}

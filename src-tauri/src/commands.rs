@@ -632,7 +632,7 @@ pub struct TrayBadge {
     text: String,
     /// The logo's tool; empty for the percent.
     logo: &'static str,
-    /// `#rrggbb` of the square and the mark; a dial macOS tints has neither.
+    /// `#rrggbb` of the square and the mark; a dial on macOS has no square, and none at all while macOS tints it.
     bg: String,
     fg: String,
     /// The dial's filled share, 0–1.
@@ -657,7 +657,7 @@ pub async fn tray_preview(app: AppHandle, tray: crate::settings::TraySettings) -
                 TrayBadge {
                     text: String::new(),
                     logo: "",
-                    bg: if tinted { String::new() } else { hex(crate::tray::NAVY) },
+                    bg: if crate::tray::dial_on_square(&b) { hex(crate::tray::NAVY) } else { String::new() },
                     fg: if tinted { String::new() } else { hex(crate::tray::arc_color(b.level)) },
                     dial: Some(used),
                 }
@@ -957,6 +957,14 @@ pub fn update_status(app: AppHandle) -> crate::updates::UpdateStatus {
 pub async fn check_update(window: WebviewWindow, app: AppHandle) -> Res<crate::updates::UpdateStatus> {
     main_only(&window)?;
     crate::updates::check(&app).await
+}
+
+/// On a Mac it waits until the user answers whether the app may send notifications.
+#[tauri::command]
+pub async fn test_notification(window: WebviewWindow, app: AppHandle, state: State<'_, AppState>) -> Res<crate::alerts::Sent> {
+    main_only(&window)?;
+    let s = state.settings.read().unwrap().clone();
+    tauri::async_runtime::spawn_blocking(move || crate::alerts::test(&app, &s)).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]

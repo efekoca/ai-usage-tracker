@@ -1,5 +1,5 @@
 //! System notifications when a limit in use passes the warning threshold, fills up, and starts
-//! again after filling.
+//! again after filling. Clicking one opens the Limits page.
 
 use crate::settings::{NotifySettings, Settings};
 use crate::tray_text::{name, shown_value, Format, Reading};
@@ -13,6 +13,17 @@ use tracker_core::model::Provider;
 const MOVED_SECS: i64 = 15 * 60;
 
 static SEEN: LazyLock<Mutex<HashMap<Limit, Seen>>> = LazyLock::new(Default::default);
+
+/// What became of a notification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum Sent {
+    Shown,
+    /// macOS: the user did not allow the app's notifications.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    Denied,
+    Failed,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct Limit {
@@ -76,8 +87,27 @@ pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading]) {
     for a in alerts.iter().filter(|a| wanted(a, n)) {
         let (title, body) = text(a, &f);
         log::info!("limit notification: {}", a.limit().tag());
-        send(app, &a.limit().tag(), &title, &body);
+        send(app, &a.limit().tag(), &title, &body, |_| {});
     }
+}
+
+/// Sends a sample notification and waits for how it went; on a Mac, until the user answers
+/// whether the app may send notifications.
+pub(crate) fn test(app: &AppHandle, s: &Settings) -> Sent {
+    let (title, body) = if crate::tray::turkish(s) {
+        ("Bildirimler açık", "Limitleriniz dolmaya yaklaşınca böyle bir bildirim alırsınız.")
+    } else {
+        ("Notifications are on", "You'll get a notification like this when a limit gets close.")
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    send(app, "test", title, body, move |r| {
+        let _ = tx.send(r);
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(300)).unwrap_or(Sent::Failed)
+}
+
+fn open_limits(app: &AppHandle) {
+    crate::windows::show_main_at(app, Some("limits"));
 }
 
 fn wanted(a: &Alert, n: &NotifySettings) -> bool {
@@ -183,18 +213,78 @@ fn text<Tz: TimeZone>(a: &Alert, f: &Format<'_, Tz>) -> (String, String) {
     }
 }
 
+/// Lets notifications show while the app is in front too, and opens the Limits page on a click.
+#[cfg(target_os = "macos")]
+pub(crate) fn init(app: &AppHandle) {
+    use objc2::rc::Retained;
+    use objc2::runtime::{NSObject, NSObjectProtocol, ProtocolObject};
+    use objc2::{define_class, msg_send, AllocAnyThread, DefinedClass};
+    use objc2_user_notifications::{
+        UNNotification, UNNotificationPresentationOptions, UNNotificationResponse, UNUserNotificationCenter, UNUserNotificationCenterDelegate,
+    };
+
+    define_class!(
+        // SAFETY: NSObject has no subclassing requirements, and Delegate does not implement Drop.
+        #[unsafe(super(NSObject))]
+        #[name = "AIUsageTrackerNotificationDelegate"]
+        #[ivars = AppHandle]
+        struct Delegate;
+
+        unsafe impl NSObjectProtocol for Delegate {}
+
+        unsafe impl UNUserNotificationCenterDelegate for Delegate {
+            #[unsafe(method(userNotificationCenter:willPresentNotification:withCompletionHandler:))]
+            fn will_present(&self, _: &UNUserNotificationCenter, _: &UNNotification, done: &block2::DynBlock<dyn Fn(UNNotificationPresentationOptions)>) {
+                done.call((UNNotificationPresentationOptions::Banner | UNNotificationPresentationOptions::List,));
+            }
+
+            #[unsafe(method(userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler:))]
+            fn did_receive(&self, _: &UNUserNotificationCenter, _: &UNNotificationResponse, done: &block2::DynBlock<dyn Fn()>) {
+                open_limits(self.ivars());
+                done.call(());
+            }
+        }
+    );
+
+    if !in_bundle() {
+        return;
+    }
+    let this = Delegate::alloc().set_ivars(app.clone());
+    let delegate: Retained<Delegate> = unsafe { msg_send![super(this), init] };
+    UNUserNotificationCenter::currentNotificationCenter().setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+    // the center holds its delegate weakly
+    std::mem::forget(delegate);
+}
+
+/// The notification center throws outside an app bundle, e.g. in a development build.
+#[cfg(target_os = "macos")]
+fn in_bundle() -> bool {
+    objc2_foundation::NSBundle::mainBundle().bundlePath().to_string().ends_with(".app")
+}
+
+/// macOS answers in callbacks; the first answer counts.
+#[cfg(target_os = "macos")]
+type Done = std::sync::Arc<Mutex<Option<Box<dyn FnOnce(Sent) + Send>>>>;
+
+#[cfg(target_os = "macos")]
+fn finish(done: &Done, r: Sent) {
+    if let Some(f) = done.lock().unwrap().take() {
+        f(r);
+    }
+}
+
 /// A newer notification of the same limit replaces the older one.
 #[cfg(target_os = "macos")]
-fn send(_: &AppHandle, tag: &str, title: &str, body: &str) {
+fn send(_: &AppHandle, tag: &str, title: &str, body: &str, done: impl FnOnce(Sent) + Send + 'static) {
     use block2::RcBlock;
     use objc2::runtime::Bool;
-    use objc2_foundation::{NSBundle, NSError, NSString};
+    use objc2_foundation::{NSError, NSString};
     use objc2_user_notifications::{UNAuthorizationOptions, UNMutableNotificationContent, UNNotificationRequest, UNUserNotificationCenter};
 
-    // the notification center throws outside an app bundle, e.g. in a development build
-    if !NSBundle::mainBundle().bundlePath().to_string().ends_with(".app") {
+    let done: Done = std::sync::Arc::new(Mutex::new(Some(Box::new(done))));
+    if !in_bundle() {
         log::info!("notifications need the app bundle");
-        return;
+        return finish(&done, Sent::Failed);
     }
     let (tag, title, body) = (tag.to_owned(), title.to_owned(), body.to_owned());
     // macOS asks once; later calls answer at once
@@ -203,16 +293,21 @@ fn send(_: &AppHandle, tag: &str, title: &str, body: &str) {
             // SAFETY: an error macOS hands over lives for this call
             let why = unsafe { error.as_ref() }.map(|e| e.localizedDescription().to_string());
             log::info!("notifications not allowed: {}", why.unwrap_or_default());
-            return;
+            return finish(&done, Sent::Denied);
         }
         let content = UNMutableNotificationContent::new();
         content.setTitle(&NSString::from_str(&title));
         content.setBody(&NSString::from_str(&body));
         let request = UNNotificationRequest::requestWithIdentifier_content_trigger(&NSString::from_str(&tag), &content, None);
-        let added = RcBlock::new(|error: *mut NSError| {
+        let done = done.clone();
+        let added = RcBlock::new(move |error: *mut NSError| {
             // SAFETY: as above
-            if let Some(e) = unsafe { error.as_ref() } {
-                log::warn!("notification: {}", e.localizedDescription());
+            match unsafe { error.as_ref() } {
+                Some(e) => {
+                    log::warn!("notification: {}", e.localizedDescription());
+                    finish(&done, Sent::Failed);
+                }
+                None => finish(&done, Sent::Shown),
             }
         });
         UNUserNotificationCenter::currentNotificationCenter().addNotificationRequest_withCompletionHandler(&request, Some(&added));
@@ -220,11 +315,16 @@ fn send(_: &AppHandle, tag: &str, title: &str, body: &str) {
     UNUserNotificationCenter::currentNotificationCenter().requestAuthorizationWithOptions_completionHandler(UNAuthorizationOptions::Alert, &then);
 }
 
+/// Toasts kept so a click on one still reaches the app while it is on screen.
+#[cfg(windows)]
+static TOASTS: LazyLock<Mutex<HashMap<String, windows::UI::Notifications::ToastNotification>>> = LazyLock::new(Default::default);
+
 /// Shown under the app's name through the Start menu shortcut, which carries the app's identifier.
 #[cfg(windows)]
-fn send(app: &AppHandle, tag: &str, title: &str, body: &str) {
-    use windows::core::HSTRING;
+fn send(app: &AppHandle, tag: &str, title: &str, body: &str, done: impl FnOnce(Sent) + Send + 'static) {
+    use windows::core::{IInspectable, HSTRING};
     use windows::Data::Xml::Dom::XmlDocument;
+    use windows::Foundation::TypedEventHandler;
     use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
 
     let show = || -> windows::core::Result<()> {
@@ -236,10 +336,21 @@ fn send(app: &AppHandle, tag: &str, title: &str, body: &str) {
         )))?;
         let toast = ToastNotification::CreateToastNotification(&xml)?;
         toast.SetTag(&HSTRING::from(tag))?;
-        ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app.config().identifier.as_str()))?.Show(&toast)
+        let clicked = app.clone();
+        toast.Activated(&TypedEventHandler::<ToastNotification, IInspectable>::new(move |_, _| {
+            open_limits(&clicked);
+            Ok(())
+        }))?;
+        ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app.config().identifier.as_str()))?.Show(&toast)?;
+        TOASTS.lock().unwrap().insert(tag.to_owned(), toast);
+        Ok(())
     };
-    if let Err(e) = show() {
-        log::warn!("notification: {e}");
+    match show() {
+        Ok(()) => done(Sent::Shown),
+        Err(e) => {
+            log::warn!("notification: {e}");
+            done(Sent::Failed);
+        }
     }
 }
 
@@ -249,22 +360,61 @@ fn escape(s: &str) -> String {
 }
 
 #[cfg(target_os = "linux")]
-fn send(_: &AppHandle, _: &str, title: &str, body: &str) {
+const BUS: &str = "org.freedesktop.Notifications";
+#[cfg(target_os = "linux")]
+const BUS_PATH: &str = "/org/freedesktop/Notifications";
+
+/// The server's id for each limit's newest notification, which the next one replaces.
+#[cfg(target_os = "linux")]
+static IDS: LazyLock<Mutex<HashMap<String, u32>>> = LazyLock::new(Default::default);
+
+#[cfg(target_os = "linux")]
+fn send(app: &AppHandle, tag: &str, title: &str, body: &str, done: impl FnOnce(Sent) + Send + 'static) {
     use zbus::zvariant::Value;
-    let show = || -> zbus::Result<()> {
+    static LISTENING: std::sync::Once = std::sync::Once::new();
+
+    let replaces = IDS.lock().unwrap().get(tag).copied().unwrap_or(0);
+    let show = || -> zbus::Result<u32> {
         let hints = HashMap::from([("desktop-entry", Value::from("ai-usage-tracker"))]);
-        zbus::blocking::Connection::session()?.call_method(
-            Some("org.freedesktop.Notifications"),
-            "/org/freedesktop/Notifications",
-            Some("org.freedesktop.Notifications"),
+        let reply = zbus::blocking::Connection::session()?.call_method(
+            Some(BUS),
+            BUS_PATH,
+            Some(BUS),
             "Notify",
-            &("AI Usage Tracker", 0u32, "ai-usage-tracker", title, body, Vec::<&str>::new(), hints, -1i32),
+            &("AI Usage Tracker", replaces, "ai-usage-tracker", title, body, vec!["default", ""], hints, -1i32),
         )?;
-        Ok(())
+        reply.body().deserialize::<u32>()
     };
-    if let Err(e) = show() {
-        log::warn!("notification: {e}");
+    match show() {
+        Ok(id) => {
+            IDS.lock().unwrap().insert(tag.to_owned(), id);
+            LISTENING.call_once(|| listen_for_clicks(app.clone()));
+            done(Sent::Shown);
+        }
+        Err(e) => {
+            log::warn!("notification: {e}");
+            done(Sent::Failed);
+        }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn listen_for_clicks(app: AppHandle) {
+    let _ = std::thread::Builder::new().name("notification-clicks".into()).spawn(move || {
+        let run = || -> zbus::Result<()> {
+            let c = zbus::blocking::Connection::session()?;
+            for m in zbus::blocking::Proxy::new(&c, BUS, BUS_PATH, BUS)?.receive_signal("ActionInvoked")? {
+                let (id, key): (u32, String) = m.body().deserialize()?;
+                if key == "default" && IDS.lock().unwrap().values().any(|v| *v == id) {
+                    open_limits(&app);
+                }
+            }
+            Ok(())
+        };
+        if let Err(e) = run() {
+            log::warn!("notification clicks: {e}");
+        }
+    });
 }
 
 #[cfg(test)]
