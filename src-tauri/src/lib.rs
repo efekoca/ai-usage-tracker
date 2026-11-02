@@ -448,6 +448,7 @@ pub fn run() {
             commands::check_update,
             commands::test_notification,
             commands::get_month_spend,
+            commands::get_session_timeline,
             commands::install_update,
         ])
         .build(tauri::generate_context!())

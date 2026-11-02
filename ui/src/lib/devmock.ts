@@ -1,7 +1,7 @@
 // Dev-only IPC mock for running the UI in a plain browser; never in production builds (see main.ts).
 import { mockIPC } from '@tauri-apps/api/mocks'
 import plansJson from '../../../config/plans.json'
-import type { DayPoint, Group, LimitView, Period, Provider, Report, Settings, Totals, PanelModule, TrayItem, TraySettings } from './api'
+import type { DayPoint, Group, LimitView, Period, Provider, Report, Settings, Totals, PanelModule, TimelineRequest, TrayItem, TraySettings } from './api'
 
 const scenario = new URLSearchParams(location.search)
 let claudeMode = scenario.get('claude')
@@ -257,6 +257,33 @@ function allLimits(): LimitView[] {
       return { ...l, resets_at: Math.round(now / 1000 + 3.2 * 86400), observed_ms: now - 20 * 60000, state: 'fresh', window_start_ms: now - 3.8 * 86400e3, window_usage: totals(52e6, 13.3), forecast: { ...all[2].forecast!, rate_per_hour: 0.3, at_reset_pct: 56 }, projects: [share('website', 0.58, 31), share('data-pipeline', 0.42, 31)] }
     return l
   })
+}
+
+/** A working session: context grows, a pause lets the cache lapse, a subagent runs, the context is compacted. */
+function mockTimeline(from: number, to: number) {
+  const n = 46
+  const span = Math.max(to - from, 40 * 60e3)
+  const requests: TimelineRequest[] = []
+  let ctx = 24_000
+  for (let i = 0; i < n; i++) {
+    const pause = i >= 18 ? 12 * 60e3 : 0
+    const ts = from + (i / n) * (span - 12 * 60e3) + pause
+    const agent = i >= 26 && i < 31 ? 'general-purpose' : null
+    const compacted = i === 38
+    if (compacted) ctx = 31_000
+    const context = agent ? 9_000 + (i - 26) * 2_500 : ctx
+    const rebuilt = i === 18
+    const write = rebuilt ? Math.round(context * 0.86) : agent && i === 26 ? context : Math.round(3_000 + (i % 3) * 900)
+    const read = Math.max(0, context - write - 400)
+    requests.push({ ts_ms: ts, model: 'claude-opus-5-5', agent, context, input: 400, cache_read: read, cache_write: write, output: 600 + (i % 5) * 300, cost_usd: (read * 0.5 + write * 6.25 + 400 * 5 + 900 * 25) / 1e6, rewritten: rebuilt ? Math.round(context * 0.8) : 0, rewrite_extra_usd: rebuilt ? Math.round(context * 0.8) * 5.75e-6 : null, compacted })
+    if (!agent) ctx += 2_400 + (i % 4) * 900
+  }
+  const names = ['Read', 'Edit', 'Bash', 'Grep', 'Bash', 'Read']
+  const calls = Array.from({ length: 70 }, (_, k) => {
+    const r = requests[Math.min(n - 1, Math.floor((k / 70) * n))]
+    return { ts_ms: r.ts_ms + 4_000, name: names[k % names.length], agent: r.agent, failed: k % 17 === 5 ? true : k % 9 === 0 ? null : false }
+  })
+  return { requests, calls }
 }
 
 function mockSessions() {
@@ -696,6 +723,8 @@ export function installMock() {
           return report(a.period as Period)
         case 'get_sessions':
           return mockSessions()
+        case 'get_session_timeline':
+          return mockTimeline(Number(a.fromMs), Number(a.toMs))
         case 'compare_models':
           return mockCompare()
         case 'context_stats':

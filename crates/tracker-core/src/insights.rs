@@ -246,6 +246,97 @@ pub fn compare_models(store: &Store, book: &PriceBook, range: Range, filter: &Fi
     })
 }
 
+/// A main-conversation prompt that falls under half of the one before, from at least this size, is
+/// a compacted context.
+pub const COMPACT_MIN_PROMPT: u64 = 20_000;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TimelineRequest {
+    pub ts_ms: i64,
+    pub model: String,
+    /// The subagent that sent it; none for the main conversation.
+    pub agent: Option<String>,
+    /// The prompt: uncached input, cache read and cache write.
+    pub context: u64,
+    pub input: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+    pub output: u64,
+    pub cost_usd: Option<f64>,
+    /// Claude: context written to the cache again after a pause longer than the cache lifetime.
+    pub rewritten: u64,
+    /// What that rewrite cost above a warm cache.
+    pub rewrite_extra_usd: Option<f64>,
+    pub compacted: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TimelineCall {
+    pub ts_ms: i64,
+    pub name: String,
+    pub agent: Option<String>,
+    pub failed: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionTimeline {
+    pub requests: Vec<TimelineRequest>,
+    pub calls: Vec<TimelineCall>,
+}
+
+/// One session's requests and tool calls between `from_ms` and `to_ms`, oldest first.
+pub fn session_timeline(store: &Store, book: &PriceBook, tool: Tool, session_id: &str, from_ms: i64, to_ms: i64) -> Result<SessionTimeline> {
+    let ours = |t: Tool, s: Option<&str>| t == tool && s == Some(session_id);
+    let mut events: Vec<EventRow> = store.events_between(from_ms, to_ms + 1)?.into_iter().filter(|e| ours(e.tool, e.session_id.as_deref())).collect();
+    events.sort_by_key(|e| e.ts_ms);
+    let prompt = |e: &EventRow| if e.request_input > 0 { e.request_input } else { e.tokens.input + e.tokens.cache_read + e.tokens.cache_write };
+
+    let mut rewritten = vec![0; events.len()];
+    if tool.provider() == Some(Provider::Anthropic) {
+        // the cache is per conversation and model, as in `tips::cache_rebuilds`
+        let mut last: HashMap<(Option<&str>, &str), usize> = HashMap::new();
+        for (i, e) in events.iter().enumerate() {
+            if let Some(&p) = last.get(&(e.thread_id.as_deref(), e.model.as_str())) {
+                rewritten[i] = crate::tips::rewritten_after_pause(&events[p], e).unwrap_or(0);
+            }
+            last.insert((e.thread_id.as_deref(), e.model.as_str()), i);
+        }
+    }
+    let mut compacted = vec![false; events.len()];
+    let mut before: Option<u64> = None;
+    for (i, e) in events.iter().enumerate().filter(|(_, e)| e.agent.is_none() && prompt(e) > 0) {
+        compacted[i] = before.is_some_and(|b| b >= COMPACT_MIN_PROMPT && prompt(e) * 2 < b);
+        before = Some(prompt(e));
+    }
+
+    let requests = events
+        .iter()
+        .enumerate()
+        .map(|(i, e)| TimelineRequest {
+            ts_ms: e.ts_ms,
+            model: e.model.clone(),
+            agent: e.agent.clone(),
+            context: prompt(e),
+            input: e.tokens.input,
+            cache_read: e.tokens.cache_read,
+            cache_write: e.tokens.cache_write,
+            output: e.tokens.output,
+            cost_usd: book.cost(&input_of(e)).map(|c| c.total()),
+            rewritten: rewritten[i],
+            rewrite_extra_usd: (rewritten[i] > 0).then(|| crate::tips::rewrite_extra_usd(book, e, rewritten[i])).flatten(),
+            compacted: compacted[i],
+        })
+        .collect();
+    let mut calls: Vec<TimelineCall> = store
+        .tool_calls_between(from_ms, to_ms + 1)?
+        .into_iter()
+        .filter(|c| ours(c.tool, c.session_id.as_deref()))
+        .map(|c| TimelineCall { ts_ms: c.ts_ms, name: c.name, agent: c.agent, failed: c.failed })
+        .collect();
+    calls.sort_by_key(|c| c.ts_ms);
+    Ok(SessionTimeline { requests, calls })
+}
+
 /// Bucket edges for prompt sizes. 100K, 200K and 272K are where long-context pricing starts for
 /// Claude Haiku 5.5, Gemini Pro and current OpenAI models.
 pub const CONTEXT_EDGES: [u64; 7] = [10_000, 50_000, 100_000, 200_000, 272_000, 500_000, 1_000_000];

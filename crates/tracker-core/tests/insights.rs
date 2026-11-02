@@ -1,6 +1,6 @@
 use chrono::{FixedOffset, TimeZone};
 use tracker_core::analytics::{Filter, Range};
-use tracker_core::insights::{agents_tools, branches, compare_models, context_stats, day_detail, forecast, plan_value, restarted, sessions, subagent_cache, ForecastKind, PromptShare};
+use tracker_core::insights::{agents_tools, branches, compare_models, context_stats, day_detail, forecast, plan_value, restarted, session_timeline, sessions, subagent_cache, ForecastKind, PromptShare};
 use tracker_core::tips::{cache_rebuilds, tips, Tip, Tips};
 use tracker_core::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
 use tracker_core::pricing::{CostInput, PriceBook};
@@ -589,4 +589,49 @@ fn a_day_is_split_by_local_hour_with_its_sessions_and_limit_peaks() {
     // a filter narrows the day like every other view
     let only_codex = Filter { tools: vec![Tool::Codex], ..Default::default() };
     assert_eq!(day_detail(&s, &PriceBook::default_book(), date, &only_codex, &tz).unwrap().totals.events, 1);
+}
+
+#[test]
+fn a_session_timeline_marks_rebuilt_caches_compactions_subagents_and_failed_calls() {
+    let t0 = ms(2026, 10, 2, 9, 0);
+    let m = |n: i64| t0 + n * 60_000;
+    let mut store = store_with(&[
+        ev("t1", m(0), Tool::ClaudeCode, "claude-sonnet-4-6", Some("s1"), "C:/w/app", 0, 0, 100).cache_write(30_000, 0),
+        ev("t2", m(1), Tool::ClaudeCode, "claude-sonnet-4-6", Some("s1"), "C:/w/app", 0, 30_000, 100).cache_write(30_000, 0),
+        ev("t3", m(2), Tool::ClaudeCode, "claude-sonnet-4-6", Some("s1"), "C:/w/app", 10_000, 0, 100).agent("general-purpose", "a1"),
+        // 18 minutes later only the shared start is still cached
+        ev("t4", m(20), Tool::ClaudeCode, "claude-sonnet-4-6", Some("s1"), "C:/w/app", 0, 5_000, 100).cache_write(65_000, 0),
+        ev("t5", m(21), Tool::ClaudeCode, "claude-sonnet-4-6", Some("s1"), "C:/w/app", 20_000, 0, 100),
+        ev("other", m(3), Tool::ClaudeCode, "claude-sonnet-4-6", Some("s2"), "C:/w/app", 50_000, 0, 100),
+    ]);
+    let calls: Vec<ToolCall> = [("c1", m(1), "Bash", Some(true)), ("c2", m(2), "Read", Some(false)), ("c3", m(2), "Read", None)]
+        .iter()
+        .map(|(key, ts, name, failed)| ToolCall {
+            key: (*key).into(),
+            ts_ms: *ts,
+            tool: Tool::ClaudeCode,
+            session_id: Some(if *key == "c3" { "s2" } else { "s1" }.into()),
+            project_path: Some("C:/w/app".into()),
+            agent: None,
+            name: (*name).into(),
+            failed: *failed,
+        })
+        .collect();
+    let mut tx = store.transaction().unwrap();
+    tx.upsert_tool_calls(&calls).unwrap();
+    tx.commit().unwrap();
+
+    let t = session_timeline(&store, &PriceBook::default_book(), Tool::ClaudeCode, "s1", m(0), m(21)).unwrap();
+    let contexts: Vec<u64> = t.requests.iter().map(|r| r.context).collect();
+    assert_eq!(contexts, [30_000, 60_000, 10_000, 70_000, 20_000], "only this session, oldest first");
+    assert_eq!(t.requests[2].agent.as_deref(), Some("general-purpose"));
+    let rewritten: Vec<u64> = t.requests.iter().map(|r| r.rewritten).collect();
+    assert_eq!(rewritten, [0, 0, 0, 55_000, 0], "the main conversation's cache, rebuilt after the pause");
+    let extra = t.requests[3].rewrite_extra_usd.unwrap();
+    assert!(extra > 0.0 && t.requests.iter().filter(|r| r.rewrite_extra_usd.is_some()).count() == 1, "{extra}");
+    let compacted: Vec<bool> = t.requests.iter().map(|r| r.compacted).collect();
+    assert_eq!(compacted, [false, false, false, false, true], "the subagent's small prompt is not a compaction");
+    assert!(t.requests.iter().all(|r| r.cost_usd.is_some()));
+    let calls: Vec<(&str, Option<bool>)> = t.calls.iter().map(|c| (c.name.as_str(), c.failed)).collect();
+    assert_eq!(calls, [("Bash", Some(true)), ("Read", Some(false))]);
 }
