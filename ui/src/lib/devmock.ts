@@ -799,6 +799,8 @@ export function installMock() {
           return { hotkey: settings.widget.hotkey, error: null, desktop: false }
         case 'update_status':
           return update
+        case 'test_notification':
+          return 'shown'
         case 'check_update':
           update.last_check_ms = Date.now()
           update.available = new URLSearchParams(location.search).get('update') === '1' ? { version: '0.3.1', notes: 'Bug fixes', date: null } : null

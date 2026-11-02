@@ -363,6 +363,8 @@ pub fn run() {
             tray::build(app.handle())?;
             tray::start(app.handle().clone());
             #[cfg(target_os = "macos")]
+            alerts::init(app.handle());
+            #[cfg(target_os = "macos")]
             if !settings.show_in_dock {
                 windows::apply_dock(app.handle(), &settings);
             }
@@ -444,6 +446,7 @@ pub fn run() {
             commands::set_hotkey,
             commands::update_status,
             commands::check_update,
+            commands::test_notification,
             commands::install_update,
         ])
         .build(tauri::generate_context!())

@@ -119,6 +119,20 @@
           : 'settings.hotkey.err.hotkey_needs_modifier.linux',
     )
 
+  let testing = $state(false)
+  let testResult = $state<'shown' | 'denied' | 'failed' | null>(null)
+  async function sendTest() {
+    testing = true
+    testResult = null
+    try {
+      testResult = await api.testNotification()
+    } catch {
+      testResult = 'failed'
+    } finally {
+      testing = false
+    }
+  }
+
   const upd = $derived(app.update)
   let checking = $state(false)
   async function checkNow() {
@@ -338,6 +352,10 @@
     <div class="item">
       <span>{t('settings.notify.weekly')}</span>
       <Toggle checked={s.notify.seven_day} label={t('settings.notify.weekly')} onchange={(v) => saveNotify({ seven_day: v })} />
+    </div>
+    <div class="item">
+      <div><span>{t('settings.notify.test')}</span><div class="subtle small">{testResult ? t(`settings.notify.test.${testResult}`) : t('settings.notify.test.help')}</div></div>
+      <button class="btn" onclick={sendTest} disabled={testing}>{testing ? t('settings.notify.test.sending') : t('settings.notify.test.send')}</button>
     </div>
   {/if}
 </section>

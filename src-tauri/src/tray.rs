@@ -701,17 +701,29 @@ fn fill(px: &mut [u8], s: i64, path: &kurbo::BezPath, rgb: [u8; 3], alpha: f64) 
 pub(crate) const NAVY: [u8; 3] = [0x16, 0x1E, 0x3E];
 const TRACK: [u8; 3] = [0x28, 0x32, 0x56];
 const NEEDLE: [u8; 3] = [0xF2, 0xF5, 0xFA];
+/// A gray that reads on a light and on a dark menu bar.
+const MENU_BAR_GRAY: [u8; 3] = [0x8E, 0x8E, 0x93];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum DialLook {
     /// macOS tints a template image for its light or dark menu bar.
     Template,
+    /// macOS past the warning threshold: the warning color, still without a square.
+    Colored,
     /// On the icon's navy square: taskbars may be light or dark, and a warning needs its color.
     Square,
 }
 
 fn dial_look(level: Level) -> DialLook {
-    if cfg!(target_os = "macos") && level == Level::Normal { DialLook::Template } else { DialLook::Square }
+    match (cfg!(target_os = "macos"), level) {
+        (true, Level::Normal) => DialLook::Template,
+        (true, _) => DialLook::Colored,
+        _ => DialLook::Square,
+    }
+}
+
+pub(crate) fn dial_on_square(b: &Badge) -> bool {
+    matches!(b.mark, Mark::Dial(_)) && dial_look(b.level) == DialLook::Square
 }
 
 /// The badge is drawn for macOS to tint.
@@ -735,6 +747,7 @@ fn dial(px: &mut [u8], s: i64, used: f64, level: Level, look: DialLook) {
     let used = used.clamp(0.0, 1.0);
     let (unit, track, track_alpha, arc, needle) = match look {
         DialLook::Template => (side / 24.0, [0; 3], 0.35, [0; 3], [0; 3]),
+        DialLook::Colored => (side / 24.0, MENU_BAR_GRAY, 0.45, arc_color(level), arc_color(level)),
         DialLook::Square => (side * 0.84 / 24.0, TRACK, 1.0, arc_color(level), NEEDLE),
     };
     // the gap at the bottom leaves the ring looking high, so it sits a little lower
@@ -935,6 +948,8 @@ mod tests {
         let solid = |px: &[u8]| px.chunks(4).filter(|p| p[3] == 255).count();
         assert!(solid(&drawn(0.25, DialLook::Template)) < solid(&drawn(0.75, DialLook::Template)), "the opaque arc grows");
         assert_eq!(drawn(0.5, DialLook::Template)[3], 0, "a template has no square");
+        assert_eq!(drawn(0.5, DialLook::Colored)[3], 0, "nor does a warning on a Mac");
+        assert!(count(&drawn(0.5, DialLook::Colored), blue) > 0 && count(&drawn(0.5, DialLook::Colored), NEEDLE) == 0, "the needle takes the arc's color");
         let needle_x = |used: f64| {
             let on = lit(&drawn(used, DialLook::Square), size, NEEDLE);
             on.iter().map(|p| p.0 as f64).sum::<f64>() / on.len() as f64

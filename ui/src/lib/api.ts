@@ -885,6 +885,7 @@ export const api = {
   updateStatus: () => invoke<UpdateStatus>('update_status'),
   checkUpdate: () => invoke<UpdateStatus>('check_update'),
   installUpdate: () => invoke<void>('install_update'),
+  testNotification: () => invoke<'shown' | 'denied' | 'failed'>('test_notification'),
 }
 
 export function on<T>(event: string, cb: (payload: T) => void): Promise<UnlistenFn> {
