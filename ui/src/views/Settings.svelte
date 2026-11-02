@@ -25,6 +25,13 @@
     })
   }
   // "Start with Windows" only on Windows; elsewhere it starts at login
+  const fx = $derived(s.currency === 'USD' ? 1 : s.fx_rate)
+  function setBudget(el: HTMLInputElement) {
+    if (!el.value.trim()) return saveSettings({ monthly_budget_usd: 0 })
+    const n = num(el.value)
+    if (n !== null) saveSettings({ monthly_budget_usd: n / fx })
+    else el.value = s.monthly_budget_usd > 0 ? fmtInput(Math.round(s.monthly_budget_usd * fx * 100) / 100) : ''
+  }
   const saveNotify = (patch: Partial<NotifySettings>) => saveSettings((c) => ({ notify: { ...c.notify, ...patch } }))
   const autostartKey = $derived(app.info && app.info.platform !== 'windows' ? 'settings.autostart.mac' : 'settings.autostart')
   let pricing: PricingFile | null = $state(null)
@@ -315,6 +322,19 @@
       {/if}
     </div>
   </div>
+  <div class="item">
+    <div><span>{t('settings.budget')}</span><div class="subtle small">{t('settings.budget.help')}</div></div>
+    <label class="row small muted">
+      <input
+        class="field rate"
+        inputmode="decimal"
+        aria-label={t('settings.budget')}
+        placeholder={t('settings.budget.off')}
+        value={s.monthly_budget_usd > 0 ? fmtInput(Math.round(s.monthly_budget_usd * fx * 100) / 100) : ''}
+        onchange={(e) => setBudget(e.currentTarget)}
+      />
+      {s.currency}</label>
+  </div>
 </section>
 
 <section class="card group">
@@ -353,6 +373,12 @@
       <span>{t('settings.notify.weekly')}</span>
       <Toggle checked={s.notify.seven_day} label={t('settings.notify.weekly')} onchange={(v) => saveNotify({ seven_day: v })} />
     </div>
+    {#if s.monthly_budget_usd > 0}
+      <div class="item">
+        <span>{t('settings.notify.budget')}</span>
+        <Toggle checked={s.notify.budget} label={t('settings.notify.budget')} onchange={(v) => saveNotify({ budget: v })} />
+      </div>
+    {/if}
     <div class="item">
       <div><span>{t('settings.notify.test')}</span><div class="subtle small">{testResult ? t(`settings.notify.test.${testResult}`) : t('settings.notify.test.help')}</div></div>
       <button class="btn" onclick={sendTest} disabled={testing}>{testing ? t('settings.notify.test.sending') : t('settings.notify.test.send')}</button>

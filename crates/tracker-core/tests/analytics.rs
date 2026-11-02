@@ -2,7 +2,7 @@ mod common;
 
 use chrono::{FixedOffset, TimeZone};
 use common::*;
-use tracker_core::analytics::{limits_view, period_range, report, Filter, LimitState, Period, Range, Threshold};
+use tracker_core::analytics::{limits_view, month_spend, period_range, report, Filter, LimitState, Period, Range, Threshold};
 use tracker_core::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool, UsageEvent};
 use tracker_core::pricing::PriceBook;
 use tracker_core::store::Store;
@@ -863,4 +863,23 @@ fn daily_export_keeps_two_folders_of_the_same_name_apart() {
     let inputs: Vec<u64> = v.as_array().unwrap().iter().map(|r| r["input"].as_u64().unwrap()).collect();
     assert_eq!(inputs.len(), 2, "{v}");
     assert_eq!(inputs.iter().sum::<u64>(), 3_000);
+}
+
+#[test]
+fn the_month_spend_counts_the_calendar_month_and_projects_only_after_its_first_tenth() {
+    let (_m, store) = loaded();
+    let book = PriceBook::default_book();
+    let early = month_spend(&store, &book, &tz(), ms(2026, 9, 3, 13, 0)).unwrap();
+    assert_eq!(early.month, "2026-09-01");
+    assert!(close(early.spent_usd, 0.0404965), "every fixture is in September: {}", early.spent_usd);
+    assert_eq!(early.projected_usd, None, "day 3 of 30 is too early");
+
+    let now = ms(2026, 9, 16, 9, 0);
+    let mid = month_spend(&store, &book, &tz(), now).unwrap();
+    let share = (now - mid.starts_ms) as f64 / (mid.ends_ms - mid.starts_ms) as f64;
+    assert!((share - 15.5 / 30.0).abs() < 1e-9, "{share}");
+    assert!(close(mid.projected_usd.unwrap(), mid.spent_usd / share));
+
+    let october = month_spend(&store, &book, &tz(), ms(2026, 10, 2, 9, 0)).unwrap();
+    assert_eq!((october.month.as_str(), october.spent_usd), ("2026-10-01", 0.0));
 }

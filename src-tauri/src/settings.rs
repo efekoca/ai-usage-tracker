@@ -369,11 +369,13 @@ pub struct NotifySettings {
     pub reset: bool,
     pub five_hour: bool,
     pub seven_day: bool,
+    /// At 80 % of `Settings::monthly_budget_usd` and past it.
+    pub budget: bool,
 }
 
 impl Default for NotifySettings {
     fn default() -> Self {
-        NotifySettings { enabled: true, early: "warn".into(), full: true, reset: true, five_hour: true, seven_day: true }
+        NotifySettings { enabled: true, early: "warn".into(), full: true, reset: true, five_hour: true, seven_day: true, budget: true }
     }
 }
 
@@ -568,6 +570,8 @@ pub struct Settings {
     pub currency: String,
     /// Manual USD → `currency` rate (no network lookup).
     pub fx_rate: f64,
+    /// A limit on every tool's API-equivalent cost per calendar month; 0 is off.
+    pub monthly_budget_usd: f64,
     pub widget: WidgetSettings,
     pub capture: CaptureSettings,
     pub autostart: bool,
@@ -627,6 +631,7 @@ impl Default for Settings {
             hide_project_names: false,
             currency: "USD".into(),
             fx_rate: 1.0,
+            monthly_budget_usd: 0.0,
             widget: WidgetSettings::default(),
             capture: CaptureSettings::default(),
             autostart: false,
@@ -726,6 +731,9 @@ impl Settings {
         self.panel.normalize();
         if self.accent != "system" {
             self.accent = "app".into();
+        }
+        if !(self.monthly_budget_usd.is_finite() && self.monthly_budget_usd > 0.0) {
+            self.monthly_budget_usd = 0.0;
         }
         if !["warn", "high", "off"].contains(&self.notify.early.as_str()) {
             self.notify.early = "warn".into();
@@ -930,10 +938,10 @@ mod tests {
     #[test]
     fn saving_normalizes_the_object_that_is_kept() {
         let store = Store::open_in_memory().unwrap();
-        let mut s = Settings { fx_rate: f64::NAN, ..Settings::default() };
+        let mut s = Settings { fx_rate: f64::NAN, monthly_budget_usd: -5.0, ..Settings::default() };
         s.widget.opacity = 5.0;
         s.save(&store).unwrap();
-        assert_eq!(s.fx_rate, 1.0);
+        assert_eq!((s.fx_rate, s.monthly_budget_usd), (1.0, 0.0));
         assert_eq!(s.widget.opacity, 1.0);
         let stored = Settings::load(&store);
         assert_eq!(serde_json::to_value(&stored).unwrap(), serde_json::to_value(&s).unwrap());

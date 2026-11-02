@@ -11,6 +11,7 @@
   import AccuracyBadge from '../components/AccuracyBadge.svelte'
   import Icon from '../components/Icon.svelte'
   import PlanValue from '../components/PlanValue.svelte'
+  import BudgetCard from '../components/BudgetCard.svelte'
   import LimitNotices from '../components/LimitNotices.svelte'
 
   let metric: 'tokens' | 'cost' = $state(app.settings?.primary_metric ?? 'tokens')
@@ -103,6 +104,7 @@
   </section>
 
   <div class="plan"><PlanValue /></div>
+  {#if (app.settings?.monthly_budget_usd ?? 0) > 0}<BudgetCard />{/if}
 
   {#snippet byTool()}
     <section class="card" bind:offsetHeight={hTools}>

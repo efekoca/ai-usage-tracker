@@ -1,18 +1,24 @@
 //! System notifications when a limit in use passes the warning threshold, fills up, and starts
-//! again after filling. Clicking one opens the Limits page.
+//! again after filling, and when the monthly budget gets close or is exceeded. Clicking one opens
+//! the Limits page.
 
 use crate::settings::{NotifySettings, Settings};
 use crate::tray_text::{name, shown_value, Format, Reading};
 use chrono::TimeZone;
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tracker_core::model::Provider;
 
 /// Readings round their reset time differently; a larger move is a window that started again.
 const MOVED_SECS: i64 = 15 * 60;
 
 static SEEN: LazyLock<Mutex<HashMap<Limit, Seen>>> = LazyLock::new(Default::default);
+static BUDGET: Mutex<Option<BudgetSeen>> = Mutex::new(None);
+
+/// The budget sums the whole month, so it is checked only every few minutes.
+const BUDGET_EVERY_MS: i64 = 5 * 60_000;
+const BUDGET_CLOSE_PCT: f64 = 80.0;
 
 /// What became of a notification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -52,6 +58,21 @@ struct Seen {
     resets_at: Option<i64>,
 }
 
+struct BudgetSeen {
+    month: String,
+    step: Step,
+    checked_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct BudgetAlert {
+    over: bool,
+    used_pct: f64,
+    spent_usd: f64,
+    budget_usd: f64,
+    projected_usd: Option<f64>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum Alert {
     Close { limit: Limit, used: f64, fills_at_ms: Option<i64>, resets_at: Option<i64> },
@@ -79,7 +100,9 @@ pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading]) {
     };
     // every limit is followed even while its notifications are off, so turning them on never
     // reports what happened before
-    let alerts = changes(&mut SEEN.lock().unwrap(), readings, early_at, chrono::Utc::now().timestamp());
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let alerts = changes(&mut SEEN.lock().unwrap(), readings, early_at, now_ms / 1000);
+    let budget = budget(app, s, now_ms);
     if !n.enabled {
         return;
     }
@@ -89,6 +112,61 @@ pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading]) {
         log::info!("limit notification: {}", a.limit().tag());
         send(app, &a.limit().tag(), &title, &body, |_| {});
     }
+    if let Some(b) = budget.filter(|_| n.budget) {
+        let (title, body) = budget_text(&b, &f);
+        log::info!("budget notification");
+        send(app, "budget", &title, &body, |_| {});
+    }
+}
+
+fn budget(app: &AppHandle, s: &Settings, now_ms: i64) -> Option<BudgetAlert> {
+    let mut seen = BUDGET.lock().unwrap();
+    if s.monthly_budget_usd <= 0.0 {
+        // a budget set later starts from where the month stands then
+        *seen = None;
+        return None;
+    }
+    if seen.as_ref().is_some_and(|b| now_ms - b.checked_ms < BUDGET_EVERY_MS) {
+        return None;
+    }
+    let state = app.state::<crate::state::AppState>();
+    let spend = {
+        let store = state.db();
+        let book = state.book.read().unwrap();
+        tracker_core::analytics::month_spend(&store, &book, &chrono::Local, now_ms).ok()?
+    };
+    let used_pct = spend.spent_usd / s.monthly_budget_usd * 100.0;
+    let step = budget_change(&mut seen, &spend.month, used_pct, now_ms)?;
+    Some(BudgetAlert {
+        over: step == Step::Full,
+        used_pct,
+        spent_usd: spend.spent_usd,
+        budget_usd: s.monthly_budget_usd,
+        projected_usd: spend.projected_usd,
+    })
+}
+
+/// Like a limit, the budget is first only recorded, and a new month starts from below.
+fn budget_change(seen: &mut Option<BudgetSeen>, month: &str, used_pct: f64, now_ms: i64) -> Option<Step> {
+    let now_step = if used_pct >= 100.0 {
+        Step::Full
+    } else if used_pct >= BUDGET_CLOSE_PCT {
+        Step::Close
+    } else {
+        Step::Below
+    };
+    let Some(b) = seen else {
+        *seen = Some(BudgetSeen { month: month.into(), step: now_step, checked_ms: now_ms });
+        return None;
+    };
+    b.checked_ms = now_ms;
+    if b.month != month {
+        (b.month, b.step) = (month.into(), Step::Below);
+    }
+    (now_step > b.step).then(|| {
+        b.step = now_step;
+        now_step
+    })
 }
 
 /// Sends a sample notification and waits for how it went; on a Mac, until the user answers
@@ -260,6 +338,27 @@ pub(crate) fn init(app: &AppHandle) {
 #[cfg(target_os = "macos")]
 fn in_bundle() -> bool {
     objc2_foundation::NSBundle::mainBundle().bundlePath().to_string().ends_with(".app")
+}
+
+fn budget_text<Tz: TimeZone>(b: &BudgetAlert, f: &Format<'_, Tz>) -> (String, String) {
+    let (spent, budget) = (f.money(b.spent_usd), f.money(b.budget_usd));
+    if b.over {
+        return if f.tr {
+            ("Aylık bütçenizi aştınız".into(), format!("Bu ay {spent} / {budget}."))
+        } else {
+            ("You are over your monthly budget".into(), format!("{spent} of {budget} this month."))
+        };
+    }
+    let pct = (b.used_pct.round() as u32).min(99);
+    let title = if f.tr { format!("Aylık bütçe: %{pct} kullanıldı") } else { format!("Monthly budget: {pct}% used") };
+    let pace = b.projected_usd.map(|p| f.money(p));
+    let body = match (f.tr, pace) {
+        (true, Some(p)) => format!("Bu ay {spent} / {budget}. Bu hızla ay sonunda {p}."),
+        (true, None) => format!("Bu ay {spent} / {budget}."),
+        (false, Some(p)) => format!("{spent} of {budget} this month. At this pace: {p} by the month's end."),
+        (false, None) => format!("{spent} of {budget} this month."),
+    };
+    (title, body)
 }
 
 /// macOS answers in callbacks; the first answer counts.
@@ -503,6 +602,17 @@ mod tests {
     }
 
     #[test]
+    fn the_budget_notifies_once_at_80_percent_and_once_past_it_each_month() {
+        let mut seen = None;
+        assert_eq!(budget_change(&mut seen, "2026-11-01", 85.0, 0), None, "the first check only records");
+        assert_eq!(budget_change(&mut seen, "2026-11-01", 90.0, 1), None);
+        assert_eq!(budget_change(&mut seen, "2026-11-01", 101.0, 2), Some(Step::Full));
+        assert_eq!(budget_change(&mut seen, "2026-11-01", 120.0, 3), None);
+        assert_eq!(budget_change(&mut seen, "2026-12-01", 2.0, 4), None, "a new month starts from below");
+        assert_eq!(budget_change(&mut seen, "2026-12-01", 80.0, 5), Some(Step::Close));
+    }
+
+    #[test]
     fn texts_name_the_limit_and_avoid_suffixes_after_numbers() {
         let tz = FixedOffset::east_opt(3 * 3600).unwrap();
         let cfg = TraySettings::default();
@@ -517,5 +627,10 @@ mod tests {
         assert_eq!(text(&Alert::Full { limit: week.clone(), resets_at: None }, &f(true, false)), ("Codex haftalık limitiniz doldu".into(), String::new()));
         assert_eq!(text(&Alert::Reset { limit: week }, &f(false, false)).0, "Your Codex weekly limit has reset");
         assert_eq!(escape(r#"<a & "b">"#), "&lt;a &amp; &quot;b&quot;&gt;");
+
+        let b = BudgetAlert { over: false, used_pct: 82.4, spent_usd: 412.0, budget_usd: 500.0, projected_usd: Some(610.0) };
+        assert_eq!(budget_text(&b, &f(true, false)), ("Aylık bütçe: %82 kullanıldı".into(), "Bu ay $412,00 / $500,00. Bu hızla ay sonunda $610,00.".into()));
+        let over = BudgetAlert { over: true, used_pct: 103.0, spent_usd: 515.0, projected_usd: None, ..b };
+        assert_eq!(budget_text(&over, &f(false, false)), ("You are over your monthly budget".into(), "$515.00 of $500.00 this month.".into()));
     }
 }

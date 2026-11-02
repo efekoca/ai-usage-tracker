@@ -778,6 +778,39 @@ pub fn today<Tz: TimeZone>(tz: &Tz, now_ms: i64) -> Range {
     period_range(Period::Today, tz, now_ms, None)
 }
 
+/// API-equivalent spend in the current calendar month, for the monthly budget.
+#[derive(Debug, Clone, Serialize)]
+pub struct MonthSpend {
+    /// The month's first day, `YYYY-MM-DD`.
+    pub month: String,
+    pub starts_ms: i64,
+    pub ends_ms: i64,
+    /// Every tool, as an unfiltered report counts it.
+    pub spent_usd: f64,
+    /// At the average pace since the 1st, as limit forecasts work; none in the month's first tenth.
+    pub projected_usd: Option<f64>,
+}
+
+pub fn month_spend<Tz: TimeZone>(store: &Store, book: &PriceBook, tz: &Tz, now_ms: i64) -> Result<MonthSpend> {
+    let first = local_date(tz, now_ms).with_day(1).expect("every month has a first day");
+    let next = first.checked_add_months(Months::new(1)).unwrap_or(first + Days::new(31));
+    let (starts_ms, ends_ms) = (start_of_day(tz, first), start_of_day(tz, next));
+    let events = store.events_between(starts_ms, now_ms + 1)?;
+    let writers = cache_writers(events.iter());
+    let mut totals = Totals::default();
+    for e in &events {
+        totals.add_counted(e, cost_of(book, e).as_ref(), savings_of(book, e), writers(e));
+    }
+    let share = (now_ms - starts_ms) as f64 / (ends_ms - starts_ms) as f64;
+    Ok(MonthSpend {
+        month: first.format("%Y-%m-%d").to_string(),
+        starts_ms,
+        ends_ms,
+        spent_usd: totals.cost_usd,
+        projected_usd: (share >= 0.1).then(|| totals.cost_usd / share),
+    })
+}
+
 pub fn age_minutes(now_ms: i64, ts_ms: i64) -> i64 {
     (now_ms - ts_ms).max(0) / 60_000
 }
