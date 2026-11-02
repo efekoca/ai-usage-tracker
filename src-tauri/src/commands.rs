@@ -774,12 +774,45 @@ pub async fn context_stats(app: AppHandle, period: Period, filter: Option<Filter
     insights::context_stats(&store, &book, range_for(&store, period)?, &filter.unwrap_or_default(), &chrono::Local).map_err(err)
 }
 
+/// Without a period, the last 30 days. A period is cut to the days that have begun since the
+/// archive's first request, so a plan is not counted for days nothing could have been logged.
 #[tauri::command]
-pub async fn plan_value(app: AppHandle) -> Res<insights::PlanValue> {
+pub async fn plan_value(app: AppHandle, period: Option<Period>) -> Res<insights::PlanValue> {
     let state = app.state::<AppState>();
     let store = state.db();
     let book = state.book.read().unwrap();
-    insights::plan_value(&store, &book, range_for(&store, Period::Month1)?, &chrono::Local).map_err(err)
+    let mut range = range_for(&store, period.unwrap_or(Period::Month1))?;
+    if period.is_some() {
+        let tz = chrono::Local;
+        let day_of = |ms: i64| analytics::start_of_day(&tz, analytics::local_date(&tz, ms));
+        let tomorrow = analytics::start_of_day(&tz, analytics::local_date(&tz, now_ms()) + chrono::Days::new(1));
+        if let Some(first) = store.first_event_ms().map_err(err)? {
+            range.from_ms = range.from_ms.max(day_of(first));
+        }
+        range.to_ms = range.to_ms.min(tomorrow).max(range.from_ms);
+    }
+    insights::plan_value(&store, &book, range, &chrono::Local).map_err(err)
+}
+
+/// Writes a summary card the page drew. Only PNG data to a `.png` path, so the page cannot
+/// write anything else.
+#[tauri::command]
+pub async fn save_image(window: WebviewWindow, state: State<'_, AppState>, path: PathBuf, bytes: Vec<u8>) -> Res<()> {
+    main_only(&window)?;
+    if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("png")) || !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err("not_png".into());
+    }
+    export::write_atomically(&path, |f| std::io::Write::write_all(f, &bytes).map_err(err))?;
+    *state.last_image.lock().unwrap() = Some(path);
+    Ok(())
+}
+
+/// Opens only the card this app saved last, never an arbitrary path.
+#[tauri::command]
+pub fn open_last_image(window: WebviewWindow, state: State<AppState>) -> Res<()> {
+    main_only(&window)?;
+    let path = state.last_image.lock().unwrap().clone().ok_or("no image yet")?;
+    crate::open_path(&path).map_err(err)
 }
 
 /// `from` and `to` are inclusive local days.

@@ -12,6 +12,7 @@ export const NAV: { section: string; items: { id: View; icon: string }[] }[] = [
     { id: 'context', icon: 'context' },
     { id: 'limits', icon: 'limits' },
     { id: 'projects', icon: 'projects' },
+    { id: 'cards', icon: 'share' },
   ] },
   { section: 'nav.section.manage', items: [
     { id: 'sources', icon: 'sources' },

@@ -18,6 +18,7 @@
   import Sessions from './views/Sessions.svelte'
   import Context from './views/Context.svelte'
   import Tips from './views/Tips.svelte'
+import Cards from './views/Cards.svelte'
   import CommandPalette from './components/CommandPalette.svelte'
   import { NAV } from './lib/nav'
   import { ask } from '@tauri-apps/plugin-dialog'
@@ -174,6 +175,7 @@
         {:else if app.view === 'context'}<Context />
         {:else if app.view === 'widget'}<WidgetStudio />
         {:else if app.view === 'menubar'}<MenuBar />
+        {:else if app.view === 'cards'}<Cards />
         {/if}
       </div>
     </main>

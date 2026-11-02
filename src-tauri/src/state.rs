@@ -38,6 +38,7 @@ pub struct AppState {
     pub started_hidden: bool,
     pub report_ready: Mutex<Option<std::sync::mpsc::Sender<bool>>>,
     pub last_report: Mutex<Option<PathBuf>>,
+    pub last_image: Mutex<Option<PathBuf>>,
     pub updates: Mutex<crate::updates::UpdateStatus>,
     pub hotkey_error: Mutex<Option<String>>,
 }
