@@ -228,6 +228,13 @@ pub(crate) fn enabled_providers(s: &Settings) -> HashSet<Provider> {
 }
 
 #[tauri::command]
+pub async fn get_month_spend(state: State<'_, AppState>) -> Res<analytics::MonthSpend> {
+    let store = state.db();
+    let book = state.book.read().unwrap();
+    analytics::month_spend(&store, &book, &chrono::Local, now_ms()).map_err(err)
+}
+
+#[tauri::command]
 pub async fn get_limits(state: State<'_, AppState>) -> Res<Vec<LimitView>> {
     let settings = state.settings.read().unwrap().clone();
     let store = state.db();

@@ -383,6 +383,16 @@ export interface CaptureStatus {
   settings_file: string
 }
 
+export interface MonthSpend {
+  /** The month's first day, `YYYY-MM-DD`. */
+  month: string
+  starts_ms: number
+  ends_ms: number
+  spent_usd: number
+  /** At the pace since the 1st; null in the month's first tenth. */
+  projected_usd: number | null
+}
+
 export interface NotifySettings {
   enabled: boolean
   /** Before a limit fills: at the Caution threshold, at the Critical one, or not at all. */
@@ -391,6 +401,7 @@ export interface NotifySettings {
   reset: boolean
   five_hour: boolean
   seven_day: boolean
+  budget: boolean
 }
 
 export interface Settings {
@@ -406,6 +417,8 @@ export interface Settings {
   hide_project_names: boolean
   currency: string
   fx_rate: number
+  /** API-equivalent USD per calendar month for every tool; 0 is off. */
+  monthly_budget_usd: number
   widget: WidgetSettings
   capture: CaptureSettings
   autostart: boolean
@@ -841,6 +854,7 @@ export const api = {
   compareModels: (period: Period, filter?: Filter) => invoke<ModelCompare>('compare_models', { period, filter }),
   contextStats: (period: Period, filter?: Filter) => invoke<ContextStats>('context_stats', { period, filter }),
   planValue: () => invoke<PlanValue>('plan_value'),
+  monthSpend: () => invoke<MonthSpend>('get_month_spend'),
   exportReport: (from: string, to: string, path: string) => invoke<void>('export_report', { from, to, path }),
   openLastReport: () => invoke<void>('open_last_report'),
   widgetData: () => invoke<WidgetData>('get_widget_data'),

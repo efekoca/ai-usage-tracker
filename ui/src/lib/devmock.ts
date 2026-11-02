@@ -40,6 +40,7 @@ const settings: Settings = {
   hide_project_names: false,
   currency: 'USD',
   fx_rate: 1,
+  monthly_budget_usd: 0,
   widget: {
     visible: true, opacity: showcase ? 1 : 0.85, size: 'm', scale: 1, x: null, y: null, anchor: 'bottom-right', auto_hide_fullscreen: true, layout: 'horizontal',
     items: (['primary', 'cost', 'limit_five_hour', 'limit_seven_day', 'opencode', 'tools', 'week_tokens', 'week_cost', 'month_cost', 'updated'] as const).map((k, i) => ({ kind: k, enabled: i < 5 })),
@@ -50,7 +51,7 @@ const settings: Settings = {
   capture: { codex_poll: true, codex_poll_minutes: 5, codex_path: '', statusline: false, otel: false, otel_port: 43180, claude_poll: true, claude_poll_minutes: 5, claude_path: '', antigravity_poll: true, antigravity_poll_minutes: 5, antigravity_path: '' },
   autostart: false,
   show_in_dock: true,
-  notify: { enabled: true, early: 'warn', full: true, reset: true, five_hour: true, seven_day: true },
+  notify: { enabled: true, early: 'warn', full: true, reset: true, five_hour: true, seven_day: true, budget: true },
   allow_config_updates: false,
   primary_metric: 'tokens',
   dismissed_unpriced: [],
@@ -699,6 +700,14 @@ export function installMock() {
           return mockCompare()
         case 'context_stats':
           return mockContext()
+        case 'get_month_spend': {
+          const d = new Date()
+          const starts = new Date(d.getFullYear(), d.getMonth(), 1).getTime()
+          const ends = new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime()
+          const share = (Date.now() - starts) / (ends - starts)
+          const spent = 412.37 * Math.min(1, share / 0.55)
+          return { month: new Date(starts - d.getTimezoneOffset() * 60e3).toISOString().slice(0, 10), starts_ms: starts, ends_ms: ends, spent_usd: spent, projected_usd: share >= 0.1 ? spent / share : null }
+        }
         case 'plan_value':
           return mockPlanValue()
         case 'get_limits':
