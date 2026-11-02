@@ -179,14 +179,49 @@ Widget her zaman üstte duran küçük bir penceredir. Varsayılan olarak ekran�
 - **Uyarı eşikleri:** dikkat ve kritik seviyeleri.
 - **Davranış:** her zaman üstte, konum kilidi, tıklayınca ne olacağı, tam ekran uygulamalarda gizlenme (macOS'te uygulama Dock'ta değilken), köşeye yerleştirme.
 
-Widget boyutunu içeriğe göre kendisi ayarlar. Bir köşeye sabitlediyseniz büyüyüp küçülürken o köşede kalır; sürüklerseniz bıraktığınız yerde durur. Sağ tıklayarak hızlı ayarlara ulaşabilirsiniz. Sistem tepsisindeki simge her zaman görünür.
+Widget boyutunu içeriğe göre kendisi ayarlar. Bir köşeye sabitlediyseniz büyüyüp küçülürken o köşede kalır; sürüklerseniz bıraktığınız yerde durur. Sağ tıklayarak hızlı ayarlara ulaşabilirsiniz.
 
-- **Tepsi simgesi, kontrol paneli ve menü çubuğu** (Windows'ta saatin yanında, macOS'te menü çubuğunda, Linux'ta sistem tepsisinde): Simgeye tıklayınca bir kontrol paneli açılır. Panelde limitleriniz (halka ya da çubuk, tek pencere ya da ikisi birden), bu hızla bir limitin ne zaman dolacağı, bugün, son 7 ya da 30 günün kullanımı (tüm araçlar ya da yalnızca OpenCode), son tarama ve uygulamayı açma, widget'ı gösterme ve şimdi tarama düğmeleri yer alır. Sağ tık küçük bir menü açar; Linux'ta panel bu menüden açılır. Simge ayrıca bir limitin yüzdesini, o kadar dolan uygulama göstergesini ya da bir aracın logosunu (Claude, Codex, Antigravity veya OpenCode), aracın renginde ya da o limitin durumuna göre widget'ın uyarı renklerinde bir karenin içinde gösterebilir; macOS ve Linux'ta yanına `Cl 5s %42 · Cl H ▰▰▰▱▱` gibi bir metin de koyabilirsiniz.
-  - Hepsini **Menü çubuğu** sayfasından ayarlayın: kutucukları galeriden panelin canlı önizlemesine sürükleyin, sürükleyerek sıralayın, galeriye geri sürükleyerek kaldırın. Bir kutucuğa tıklayıp boyutunu (küçük, geniş, büyük, tam genişlik) ve halka ya da çubuk görünümünü seçin.
-  - Simgenin yanındaki metne istediğiniz limitleri, tahminleri, kullanım değerlerini (tüm araçlar ya da yalnızca OpenCode) ya da son taramayı istediğiniz sırayla ekleyin. Ayrıca şunları belirleyebilirsiniz: tam ad, kısa ad ya da etiketsiz; kullanılan ya da kalan; yüzde, çubuk, ikisi birden ya da daire; sıfırlanmaya kalan süre ya da saati; ayraç, metnin iki ucuna eklenecek işaretler ve uyarı eşiğini geçen değerde ⚠︎. macOS'te simgeyi gizleyip yalnızca metni bırakabilirsiniz.
 - **Kısayol:** Sistem genelinde bir tuş kısayoluyla widget'ı gösterip gizleyebilirsiniz (varsayılan **Ctrl+Alt+Shift+W**, macOS'te **⌃⌥⇧W**). Değiştirmek için **Ayarlar → Widget** bölümünü kullanabilirsiniz. Başka bir programın kullandığı kısayol kabul edilmez.
+- **Tepsi simgesi:** Windows'ta saatin yanında, macOS'te menü çubuğunda, Linux'ta sistem tepsisinde durur. Kontrol panelini açar ve limitlerinizi simgede de gösterebilir (bkz. [Limitlerinizi menü çubuğunda ve tepside görün](#limitlerinizi-menü-çubuğunda-ve-tepside-görün)).
+
+### Limitlerinizi menü çubuğunda ve tepside görün
+
+Uygulamanın simgesi Windows'ta saatin yanında, macOS'te menü çubuğunda, Linux'ta sistem tepsisinde durur. Simgeye tıklayınca kontrol paneli açılır. Sağ tıklayınca kısa bir menü açılır: uygulamayı açma, widget'ı gösterip gizleme, şimdi tarama, hazır güncellemeyi kurma ve çıkış. Windows ve macOS'te simgenin üzerine gelince güncel limitlerin hepsini görürsünüz. Linux'ta tepsi tıklamaları bildirmediği için panel bu menüden açılır.
+
+![Mac'te menü çubuğunun altında açık kontrol paneli: saatin yanında kullanım göstergesi ve Claude ile Codex limitlerini çubuk ve yüzdeyle gösteren, Claude'un haftalık limitinde uyarı işareti olan metin; altında Claude ve Codex için 5 saatlik ve haftalık limit halkaları, bugünkü kullanım, OpenCode kullanımı, Claude'un 5 saatlik limiti için tahmin ve dört düğme](assets/readme/panel-tr.webp)
+
+**Kontrol paneli.** Panelde seçtiğiniz kutucuklar görünür:
+
+- **Limitler:** Claude, Codex ya da Antigravity için tek pencere ya da ikisi birden (5 saatlik ve haftalık); halka ya da çubuk olarak, sıfırlanmaya kalan süreyle. Birden fazla Claude ya da Codex hesabınız varsa her hesabın limitlerine ayrı kutucuk ekleyebilirsiniz.
+- **Tahminler:** bu hızla bir limitin ne zaman dolacağı ya da sıfırlandığında nerede olacağı.
+- **Kullanım:** bugün, son 7 ya da 30 günün token sayısı ve API eşdeğeri maliyeti; tüm araçlar ya da yalnızca OpenCode için. Büyük kutucukta oturum sayısı ve önbellek isabet oranı da görünür.
+- **Son tarama:** kayıtların en son ne zaman okunduğu. Tıklayınca yeniden tarar.
+- **Düğmeler:** uygulamayı açma, widget'ı gösterip gizleme, şimdi tarama ve Ayarlar.
+
+Panel ayrıca güncelleme hazır olduğunda ve bir aracın oturumu kapandığı için limitleri okunamadığında sizi uyarır.
+
+**Menü çubuğu sayfası.** Paneli **Menü çubuğu** sayfasından ayarlayın. Kutucukları galeriden panelin canlı önizlemesine sürükleyin, sürükleyerek sıralayın, galeriye geri sürükleyerek kaldırın. Bir kutucuğa tıklayıp boyutunu (küçük, geniş, büyük, tam genişlik) ve limitlerde halka ya da çubuk görünümünü seçin. Panele en fazla 16 kutucuk ekleyebilirsiniz. Limitler panelde kullanılan ya da kalan olarak görünür; uygulamadaki seçimi izleyebilir ya da panel için ayrı seçebilirsiniz.
 
 ![Menü çubuğu sayfasında canlı önizleme: Claude logosunu Claude renginde bir karede gösteren simge ve altında Claude ve Codex limit halkaları, bugünkü kullanım, OpenCode kullanımı, tahmin ve düğmeler içeren kontrol paneli; yanında her hesabı içeren kutucuk galerisi](assets/readme/menubar-tr.webp)
+
+**Simge.** Simgede ne görüneceğini ve hangi limiti izleyeceğini seçin (varsayılan: en dolu limitinizin yüzdesi):
+
+- **Uygulama simgesi.** macOS'te menü çubuğunun açık ya da koyu görünümüne uyar; Windows'ta açık ya da koyu görev çubuğuna göre çizilir.
+- **Bir limitin yüzdesi ya da bir aracın logosu** (Claude, Codex, Antigravity, OpenCode ya da limitin ait olduğu aracın logosu), bir karenin içinde. Kare koyu gridir; isterseniz aracın rengini alır. Limit widget'ın uyarı eşiklerini geçince (varsayılan %70 ve %90) önce turuncu, sonra kırmızı olur.
+- **Kullanım göstergesi**, limit kadar dolu. macOS'te menü çubuğunun görünümüne uyan sade bir işarettir; uyarı eşiği geçilince kare olmadan uyarı rengini alır. Windows ve Linux'ta uygulamanın lacivert karesinde durur; yayı mavi, turuncu ya da kırmızı olur.
+
+**Simgenin yanındaki metin.** macOS ve Linux'ta simgenin yanına `Cl 5s ▰▰▱▱▱ %46 · Cl H ⚠︎▰▰▰▰▱ %73` gibi bir metin koyabilirsiniz. Windows, tepsi simgelerinin yanında metin göstermez. Metindeki öğeleri ve sıralarını seçin: herhangi bir limit (her Claude ve Codex hesabınızınki de) ve o limitin tahmini; bugün, son 7 ya da 30 günün token, API eşdeğeri, oturum sayısı ya da önbellek isabeti (tüm araçlar ya da yalnızca OpenCode); son taramanın saati. Sonra şunları belirleyin:
+
+- **Etiket:** tam ad (`Claude 5 sa`), kısa ad (`Cl 5s`) ya da etiketsiz
+- **Değer:** kullanılan ya da kalan
+- **Gösterim:** yüzde, çubuk, ikisi birden ya da daire
+- **Sıfırlanma:** gösterme, kalan süre (`↻2sa14dk`) ya da saat (`↻18:40`)
+- **Ayraç** ve metnin başına ve sonuna eklenecek yazı
+- **Uyarı işareti:** uyarı eşiğini geçen değerin önünde ⚠︎
+
+macOS'te simgeyi gizleyip yalnızca metni bırakabilirsiniz; gösterilecek değer olmadığında simge geri gelir.
+
+![Mac'te Menü çubuğu sayfasının metin ve simge ayarları: Claude'un 5 saatlik ve haftalık limiti ile Codex'in haftalık limitinden oluşan üç öğe ve güncel değerleri; etiket, değer, gösterim, sıfırlanma, ayraç, baş ve son, uyarı işareti ve simgeyi gizleme seçenekleri; Claude'un 5 saatlik limiti için kullanım göstergesine ayarlı simge](assets/readme/trayoptions-tr.webp)
 
 ### Haftalık rapor alın, verilerinizi yönetin
 

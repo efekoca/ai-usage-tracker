@@ -190,14 +190,49 @@ The **Widget studio** page changes what the widget shows and how it looks, with 
 - **Thresholds:** caution and critical levels
 - **Behavior:** always on top, position lock, click action, hiding during full-screen apps (on macOS while the app is out of the Dock), and snap to a corner
 
-The widget also comes with a tray icon and a shortcut:
+The widget also comes with a shortcut and a tray icon:
 
-- **Tray icon, control panel and menu bar** (next to the clock on Windows, in the menu bar on macOS, in the system tray on Linux): click the icon to open a control panel with tiles for your limits (rings or bars, one window or both), when a limit will fill at your current pace, usage for today, 7 or 30 days (for every tool or OpenCode alone), the last scan, and one-click buttons to open the app, show the widget or scan now. Right-click opens a small menu; on Linux the panel opens from that menu. The icon can also show a limit's percentage, the app's dial filled to it, or a tool's logo (Claude, Codex, Antigravity or OpenCode) on a square in the tool's color or in the widget's warning colors for that limit, and on macOS and Linux text next to it, such as `Cl 5h 42% · Cl W ▰▰▰▱▱`.
-  - Set it all up on the **Menu bar** page: drag tiles from a gallery into a live preview of the panel, drag them to reorder or back to the gallery to remove them, and click a tile to pick its size (small, wide, large or full width) and whether it shows a ring or a bar.
-  - The text next to the icon takes any limit, forecast, usage figure (for every tool or OpenCode alone) or the last scan, in the order you choose, with full names, short ones or none; used or left; percent, a bar, both, or a circle; the reset as a countdown or a clock time; a separator, text at both ends, and a ⚠︎ past the warning threshold. On macOS the icon can be hidden so only the text shows.
 - **Shortcut:** a system-wide key combination shows or hides the widget (default **Ctrl+Alt+Shift+W**, on macOS **⌃⌥⇧W**). To change it, open **Settings → Widget** and press the new combination. A combination that another program owns is refused.
+- **Tray icon:** next to the clock on Windows, in the menu bar on macOS, in the system tray on Linux. It opens a control panel and can show your limits itself (see [Limits in the menu bar and tray](#limits-in-the-menu-bar-and-tray)).
+
+### Limits in the menu bar and tray
+
+The app's icon sits next to the clock on Windows, in the menu bar on macOS, and in the system tray on Linux. Click it to open the control panel. Right-click it for a short menu: open the app, show or hide the widget, scan now, install a ready update, or quit. On Windows and macOS, hovering over the icon lists every current limit. Linux trays report no clicks, so there the panel opens from the menu.
+
+![The control panel open under the menu bar on a Mac: next to the clock, the usage dial and the text with Claude's and Codex's limits as bars and percentages, with a warning mark on Claude's weekly limit; below, rings for Claude's and Codex's 5-hour and weekly limits, today's usage, OpenCode usage, a forecast for Claude's 5-hour limit, and four buttons](assets/readme/panel-en.webp)
+
+**Control panel.** The panel shows the tiles you choose:
+
+- **Limits:** one window or both (5-hour and weekly) of Claude, Codex, or Antigravity, as a ring or a bar, with the time until the reset. With several Claude or Codex accounts, each account's limits can have their own tiles.
+- **Forecasts:** when a limit will fill at your current pace, or where it will stand at the reset.
+- **Usage:** tokens and API-equivalent cost for today, 7 or 30 days, for every tool or OpenCode alone. A large tile adds sessions and the cache hit rate.
+- **Last scan:** when the logs were last read; click it to scan again.
+- **Buttons:** open the app, show or hide the widget, scan now, or open Settings.
+
+The panel also tells you when an update is ready and when a signed-out tool keeps its limits from being read.
+
+**Menu bar page.** Set up the panel on the **Menu bar** page. Drag tiles from the gallery into a live preview of the panel, drag them to reorder, or drag them back to the gallery to remove them. Click a tile to pick its size (small, wide, large, or full width) and, for limits, a ring or a bar. The panel holds up to 16 tiles and shows used or remaining limits, as in the app or as you set it for the panel.
 
 ![Menu bar page with a live preview: the icon showing the Claude logo on a square in Claude's color, and under it the control panel with Claude and Codex limit rings, today's usage, OpenCode usage, a forecast and buttons, next to the gallery of tiles with every account](assets/readme/menubar-en.webp)
+
+**Icon.** Choose what the icon shows and which limit it follows (by default, the percentage of your fullest limit):
+
+- **The app icon.** On macOS it takes the menu bar's light or dark look; on Windows it is drawn for a light or a dark taskbar.
+- **A limit's percentage or a tool's logo** (Claude, Codex, Antigravity, OpenCode, or the logo of the limit's tool) on a square. The square is slate, or the tool's color if you turn that on, and turns amber, then red, as the limit passes the widget's warning thresholds (70% and 90% by default).
+- **The usage dial**, filled to the limit. On macOS it is a plain mark that follows the menu bar's look; past the warning threshold it takes the warning color, still without a square. On Windows and Linux it sits on the app's navy square, with a blue, amber, or red arc.
+
+**Text next to the icon.** On macOS and Linux, text can sit next to the icon, such as `Cl 5h ▰▰▱▱▱ 46% · Cl W ⚠︎▰▰▰▰▱ 73%`. Windows shows no text next to tray icons. Pick the items and their order: any limit (of every Claude or Codex account too), its forecast, tokens, API-equivalent cost, sessions or cache hit rate for today, 7 or 30 days (for every tool or OpenCode alone), and the time of the last scan. Then choose:
+
+- **Labels:** full names (`Claude 5h`), short ones (`Cl 5h`), or none
+- **Value:** used or left
+- **Display:** percent, a bar, both, or a circle
+- **Reset:** hidden, as time left (`↻2h14m`), or as a clock time (`↻18:40`)
+- **Separator** and text at the start and end
+- **Warning mark:** a ⚠︎ before a value past the warning threshold
+
+On macOS you can also hide the icon so only the text shows; the icon comes back while there is nothing to show.
+
+![The Menu bar page's settings for the text and the icon on a Mac: three items (Claude's 5-hour and weekly limits and Codex's weekly limit) with their current values, the label, value, display, reset, separator, start and end, warning mark and hide-the-icon options, and the icon set to the usage dial for Claude's 5-hour limit](assets/readme/trayoptions-en.webp)
 
 ### Weekly PDF, export, and your own prices
 
