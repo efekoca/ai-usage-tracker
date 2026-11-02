@@ -258,7 +258,7 @@
   {#if notice}<span class="notice" role="status"><Icon name="check" size={14} />{notice}</span>{/if}
 </header>
 
-<section class="card group">
+<section class="card group" id="settings-general">
   <h2>{t('settings.general')}</h2>
   <div class="item">
     <span>{t('settings.language')}</span>
@@ -337,7 +337,7 @@
   </div>
 </section>
 
-<section class="card group">
+<section class="card group" id="settings-notify">
   <h2>{t('settings.notify.title')}</h2>
   <div class="item">
     <div><span>{t('settings.notify')}</span><div class="subtle small">{t('settings.notify.help')}</div></div>
@@ -386,7 +386,7 @@
   {/if}
 </section>
 
-<section class="card group">
+<section class="card group" id="settings-widget">
   <h2>{t('settings.widget')}</h2>
   <div class="item">
     <span>{t('settings.widget.show')}</span>
@@ -423,7 +423,7 @@
   </div>
 </section>
 
-<section class="card group">
+<section class="card group" id="settings-updates">
   <h2>{t('settings.updates')}</h2>
   {#if upd && !upd.configured}
     <p class="subtle small prose">{t('settings.updates.notConfigured')} {t('settings.updates.version', { v: upd.current })}</p>
@@ -462,7 +462,7 @@
   {/if}
 </section>
 
-<section class="card group">
+<section class="card group" id="settings-privacy">
   <h2>{t('settings.privacy')}</h2>
   <div class="item">
     <span>{t('settings.hideProjects')}</span>
@@ -476,7 +476,7 @@
 </section>
 
 {#if pricing}
-  <section class="card group">
+  <section class="card group" id="settings-pricing">
     <div class="row">
       <h2>{t('settings.pricing')}</h2>
       <span class="spacer"></span>
@@ -595,7 +595,7 @@
 
 <ReportCard />
 
-<section class="card group">
+<section class="card group" id="settings-data">
   <h2>{t('settings.data')}</h2>
   <div class="item">
     <span>{t('settings.data.export')}</span>
@@ -623,7 +623,7 @@
   </div>
 </section>
 
-<section class="card group">
+<section class="card group" id="settings-about">
   <h2>{t('settings.about')}</h2>
   <div class="item">
     <span>{t('app.name')} · {t('settings.version', { v: app.info?.version ?? '' })}</span>
@@ -683,6 +683,9 @@
   .prose {
     max-width: 720px;
     margin: 6px 0 8px;
+  }
+  section[id] {
+    scroll-margin-top: 12px;
   }
   .rate {
     width: 90px;
