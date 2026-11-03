@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { tick } from 'svelte'
-  import { app, saveSettings, setFilter } from '../lib/store.svelte'
-  import { api, type SessionRow } from '../lib/api'
+  import { tick, untrack } from 'svelte'
+  import { app, latest, saveSettings, setFilter } from '../lib/store.svelte'
+  import { api, type ProjectRow, type SessionRow } from '../lib/api'
   import { NAV } from '../lib/nav'
   import { fmtDateTime, searchKey, t, toolLabel } from '../lib/i18n.svelte'
   import Icon from './Icon.svelte'
@@ -21,7 +21,9 @@
   let input: HTMLInputElement | undefined = $state()
   let list: HTMLUListElement | undefined = $state()
   let sessions = $state<SessionRow[]>([])
-  let returnTo: HTMLElement | null = null
+  // every project and model, not only those in the current period and filter
+  let projects = $state<ProjectRow[]>([])
+  let models = $state<string[]>([])
 
   // "bütçe", "butce" and "BÜTÇE" all match
   const norm = (s: string) => searchKey(s).normalize('NFD').replace(/\p{M}/gu, '')
@@ -69,7 +71,17 @@
       }
     }
     const autostart = app.info && app.info.platform !== 'windows' ? 'settings.autostart.mac' : 'settings.autostart'
-    const settingKeys: [string, string][] = [...SETTINGS, [autostart, 'general'], ...(app.info?.platform === 'macos' ? ([['settings.dock', 'general']] as [string, string][]) : [])]
+    // only rows the Settings page shows now
+    const absent = new Set([
+      ...(app.info?.accent_color ? [] : ['settings.accent']),
+      ...(app.settings?.notify.enabled ? [] : ['settings.notify.test']),
+      ...(app.update?.configured ? [] : ['settings.updates.auto']),
+    ])
+    const settingKeys: [string, string][] = [
+      ...SETTINGS.filter(([key]) => !absent.has(key)),
+      [autostart, 'general'],
+      ...(app.info?.platform === 'macos' ? ([['settings.dock', 'general']] as [string, string][]) : []),
+    ]
     for (const [key, section] of settingKeys) {
       const label = t(key)
       const isSection = sectionName[section] === key
@@ -100,32 +112,32 @@
       api.checkUpdate().then((u) => (app.update = u)).catch(() => {})
     })
     const hideAll = !!s?.hide_project_names
-    for (const p of app.report?.by_project ?? []) {
-      if (p.key === 'none') continue
-      const label = hideAll || p.hidden ? `${t('projects.hidden')} #${p.key}` : p.label
+    for (const p of projects) {
+      const hidden = hideAll || p.hidden
+      const label = hidden ? `${t('projects.hidden')} #${p.id}` : p.name
       out.push({
-        id: `project:${p.key}`,
+        id: `project:${p.id}`,
         group: 'projects',
         label,
         detail: t('palette.filterProject'),
         icon: 'projects',
-        keys: hideAll || p.hidden ? label : `${label} ${p.label}`,
+        keys: hidden ? label : `${label} ${p.path}`,
         run: () => {
-          setFilter({ ...app.filter, projects: [Number(p.key)] })
+          setFilter({ ...app.filter, projects: [p.id] })
           go('overview')
         },
       })
     }
-    for (const m of app.report?.by_model ?? []) {
+    for (const m of models) {
       out.push({
-        id: `model:${m.key}`,
+        id: `model:${m}`,
         group: 'models',
-        label: m.label,
+        label: m,
         detail: t('palette.filterModel'),
         icon: 'breakdown',
-        keys: m.label,
+        keys: m,
         run: () => {
-          setFilter({ ...app.filter, models: [m.key] })
+          setFilter({ ...app.filter, models: [m] })
           go('overview')
         },
       })
@@ -174,18 +186,26 @@
 
   $effect(() => {
     if (!open) return
-    returnTo = document.activeElement as HTMLElement | null
+    // however the palette closes, focus goes back to where it was
+    const back = document.activeElement as HTMLElement | null
     query = ''
+    active = 0
+    sessions = []
     tick().then(() => input?.focus())
-    api
-      .sessions($state.snapshot(app.period), $state.snapshot(app.filter))
-      .then((r) => (sessions = r.sessions.sort((a, b) => b.started_ms - a.started_ms).slice(0, 300)))
-      .catch(() => (sessions = []))
+    const [period, filter] = untrack(() => [$state.snapshot(app.period), $state.snapshot(app.filter)])
+    const stop = [
+      latest(() => api.sessions(period, filter), (r) => (sessions = r.sessions.sort((a, b) => b.started_ms - a.started_ms).slice(0, 300))),
+      latest(() => api.projects(), (p) => (projects = p)),
+      latest(() => api.models(), (m) => (models = m)),
+    ]
+    return () => {
+      stop.forEach((f) => f())
+      back?.focus()
+    }
   })
 
   function close() {
     open = false
-    returnTo?.focus()
   }
 
   function choose(i: Item | undefined) {
@@ -195,6 +215,8 @@
   }
 
   function keydown(e: KeyboardEvent) {
+    // keys that finish an IME composition belong to the input method
+    if (e.isComposing) return
     const n = shown.length
     if (e.key === 'ArrowDown' && n) {
       e.preventDefault()
@@ -229,7 +251,8 @@
 {#if open}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <div class="backdrop" onclick={close}></div>
-  <div class="palette" role="dialog" aria-modal="true" aria-label={t('palette.label')}>
+  <!-- a click inside keeps the focus in the search field, so the keys keep working -->
+  <div class="palette" role="dialog" tabindex="-1" aria-modal="true" aria-label={t('palette.label')} onmousedown={(e) => e.target !== input && e.preventDefault()}>
     <div class="search">
       <Icon name="search" size={16} />
       <input

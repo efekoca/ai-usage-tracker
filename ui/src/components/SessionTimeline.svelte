@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, type SessionRow, type SessionTimeline, type TimelineRequest } from '../lib/api'
+  import { app } from '../lib/store.svelte'
   import { fmtClock, fmtCompact, fmtDuration, fmtInt, fmtMoney, fmtPct, t } from '../lib/i18n.svelte'
 
   let { session }: { session: SessionRow } = $props()
@@ -8,8 +9,13 @@
   let failed = $state('')
   $effect(() => {
     let live = true
-    api.sessionTimeline(session.tool, session.session_id, session.started_ms, session.ended_ms).then(
-      (v) => live && (data = v),
+    // the same filter as the session list, so the chart shows the requests the row counts
+    api.sessionTimeline(session.tool, session.session_id, session.started_ms, session.ended_ms, $state.snapshot(app.filter)).then(
+      (v) => {
+        if (!live) return
+        data = v
+        failed = ''
+      },
       (e) => live && (failed = String(e)),
     )
     return () => (live = false)
@@ -37,10 +43,13 @@
     const top = Math.max(1, ...reqs.map((r) => r.context))
     const raw = top / 3
     const mag = 10 ** Math.floor(Math.log10(raw))
-    const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw) ?? raw
+    const step = Math.max(1, [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw) ?? raw)
     return { step, max: step * 3 }
   })
   const hgt = (v: number) => Math.round((PLOT * v) / scale.max)
+  /** A subagent may have no name, but always has its own thread. */
+  const sub = (r: TimelineRequest) => !!r.agent || !!r.thread
+  const agentOf = (r: TimelineRequest) => r.agent ?? 'subagent'
 
   const geo = $derived.by(() => {
     const pauses = new Set(reqs.map((r, i) => (i > 0 && r.ts_ms - reqs[i - 1].ts_ms >= PAUSE_MS ? i : -1)).filter((i) => i > 0))
@@ -69,9 +78,9 @@
     reqs.map((r, i) => {
       const x = geo.xs[i]
       const top = BASE - Math.max(1, hgt(r.context))
-      if (r.rewritten <= 0) return { body: column(x, top, BASE), cap: '', agent: !!r.agent }
+      if (r.rewritten <= 0) return { body: column(x, top, BASE), cap: '', agent: sub(r) }
       const split = Math.min(BASE - 2, top + Math.max(2, hgt(r.rewritten)))
-      return { body: `M${x} ${BASE}V${split + 1}H${x + geo.bw}V${BASE}Z`, cap: column(x, top, split), agent: !!r.agent }
+      return { body: `M${x} ${BASE}V${split + 1}H${x + geo.bw}V${BASE}Z`, cap: column(x, top, split), agent: sub(r) }
     }),
   )
 
@@ -108,23 +117,28 @@
     return out
   })
 
-  /** Each run of one subagent's requests in a row. */
+  /** Each subagent run: the requests of its thread, which can interleave with others; without a thread, one agent's requests in a row. */
   const runs = $derived.by(() => {
-    const out: { agent: string; from: number; to: number }[] = []
+    const out: { agent: string; thread: string | null; idx: number[] }[] = []
+    const byThread = new Map<string, (typeof out)[number]>()
     reqs.forEach((r, i) => {
-      if (!r.agent) return
+      if (!sub(r)) return
+      const known = r.thread ? byThread.get(r.thread) : undefined
+      if (known) return known.idx.push(i)
       const last = out[out.length - 1]
-      if (last && last.agent === r.agent && last.to === i - 1) last.to = i
-      else out.push({ agent: r.agent, from: i, to: i })
+      if (!r.thread && last && !last.thread && last.agent === agentOf(r) && last.idx[last.idx.length - 1] === i - 1) return last.idx.push(i)
+      const run = { agent: agentOf(r), thread: r.thread, idx: [i] }
+      if (r.thread) byThread.set(r.thread, run)
+      out.push(run)
     })
     return out
   })
   const brackets = $derived(
     runs.map((run) => {
-      const a = geo.xs[run.from]
-      const b = geo.xs[run.to] + geo.bw
-      const y = Math.max(14, Math.min(...reqs.slice(run.from, run.to + 1).map((r) => BASE - hgt(r.context))) - 14)
-      return { d: `M${a} ${y + 5}V${y}H${b}V${y + 5}`, x: (a + b) / 2, y: y - 7, label: b - a >= 110 ? t('timeline.agentRun', { n: run.to - run.from + 1 }) : '' }
+      const a = geo.xs[run.idx[0]]
+      const b = geo.xs[run.idx[run.idx.length - 1]] + geo.bw
+      const y = Math.max(14, Math.min(...run.idx.map((i) => BASE - hgt(reqs[i].context))) - 14)
+      return { d: `M${a} ${y + 5}V${y}H${b}V${y + 5}`, x: (a + b) / 2, y: y - 7, label: b - a >= 110 ? t('timeline.agentRun', { n: run.idx.length }) : '' }
     }),
   )
 
@@ -151,7 +165,7 @@
   const share = (v: number) => t('timeline.unit.share', { p: fmtPct(prompt ? (v / prompt) * 100 : 0) })
 
   const totals = $derived.by(() => {
-    const agents = reqs.filter((r) => r.agent)
+    const agents = reqs.filter(sub)
     const read = sumOf((r) => r.cache_read)
     const write = sumOf((r) => r.cache_write)
     const out = [
@@ -175,17 +189,17 @@
           ms: r.ts_ms,
           cls: 'rewrite',
           title: t('timeline.ev.rewrite'),
-          detail: t('timeline.ev.rewrite.detail', { d: fmtDuration(r.ts_ms - reqs[i - 1].ts_ms), n: fmtCompact(r.rewritten) }),
+          detail: t('timeline.ev.rewrite.detail', { d: fmtDuration(r.pause_ms ?? 0), n: fmtCompact(r.rewritten) }),
           value: r.rewrite_extra_usd === null ? '' : `+${fmtMoney(r.rewrite_extra_usd)}`,
         })
       }
       if (r.compacted) {
-        const before = reqs.slice(0, i).findLast((p) => !p.agent)?.context ?? 0
+        const before = reqs.slice(0, i).findLast((p) => !sub(p))?.context ?? 0
         out.push({ ms: r.ts_ms, cls: 'compact', title: t('timeline.ev.compact'), detail: `${fmtCompact(before)} → ${fmtCompact(r.context)}`, value: before ? `−${fmtPct((1 - r.context / before) * 100)}` : '' })
       }
     })
     for (const run of runs) {
-      const rs = reqs.slice(run.from, run.to + 1)
+      const rs = run.idx.map((i) => reqs[i])
       out.push({
         ms: rs[0].ts_ms,
         cls: 'agent',
@@ -213,8 +227,8 @@
     const above = top - 14 - tipH
     // above the column when it fits, else beside it
     const left = above >= 0 ? Math.min(Math.max(cx - 106, 0), width - 212) : cx + 16 + 212 <= width ? cx + 16 : cx - 16 - 212
-    const note = hr.rewritten > 0 ? t('timeline.tip.rewrite', { d: fmtDuration(hr.ts_ms - reqs[hover - 1].ts_ms) }) : hr.agent ? t('timeline.ev.agent', { a: hr.agent }) : hr.compacted ? t('timeline.tip.compact') : ''
-    return { left, top: above >= 0 ? above : 4, note, cls: hr.rewritten > 0 ? 'rewrite' : hr.agent ? 'agent' : '' }
+    const note = hr.rewritten > 0 ? t('timeline.tip.rewrite', { d: fmtDuration(hr.pause_ms ?? 0) }) : sub(hr) ? t('timeline.ev.agent', { a: agentOf(hr) }) : hr.compacted ? t('timeline.tip.compact') : ''
+    return { left, top: above >= 0 ? above : 4, note, cls: hr.rewritten > 0 ? 'rewrite' : sub(hr) ? 'agent' : '' }
   })
 
   function move(e: PointerEvent) {
@@ -258,7 +272,7 @@
     <div class="chart" bind:clientWidth={width}>
       {#if width}
         <svg {width} height={calls.length ? H : BASE + 26} role="img" aria-label={t('timeline.aria', { n: fmtInt(n), max: fmtCompact(maxContext) })}>
-          {#each grid as g (g.label)}
+          {#each grid as g, k (k)}
             <line class="grid" x1={L} x2={width} y1={g.y} y2={g.y} />
             <text class="axis" x="0" y={g.y + 3.5}>{g.label}</text>
           {/each}
@@ -277,7 +291,7 @@
             <text class="note {note.cls}" x={note.x} y={note.top - 20} text-anchor={note.anchor}>{note.text}</text>
           {/each}
           <line class="baseline" x1={L} x2={width} y1={BASE + 0.5} y2={BASE + 0.5} />
-          {#each breaks as b (b.x)}
+          {#each breaks as b, k (k)}
             <rect class="break" x={b.x} y={BASE - 1} width={b.w} height="3" />
             {#if b.label}<text class="axis" x={b.cx} y={BASE - 8} text-anchor="middle">{b.label}</text>{/if}
           {/each}
@@ -294,7 +308,7 @@
         </svg>
         {#if tip && hr}
           <div class="tip" style:left="{tip.left}px" style:top="{tip.top}px" bind:clientHeight={tipH}>
-            <div class="tip-head"><span>{fmtClock(hr.ts_ms)}</span><span>{hr.agent ? t('timeline.tip.agent') : t('timeline.tip.main')}</span></div>
+            <div class="tip-head"><span>{fmtClock(hr.ts_ms)}</span><span>{sub(hr) ? t('timeline.tip.agent') : t('timeline.tip.main')}</span></div>
             <div class="tip-context"><span>{t('timeline.context')}</span><b>{fmtCompact(hr.context)}</b></div>
             <div class="tip-row"><i class="read"></i><span>{t('metric.cacheRead')}</span><b>{fmtCompact(hr.cache_read)}</b></div>
             <div class="tip-row"><i class="write"></i><span>{t('metric.cacheWrite')}</span><b>{fmtCompact(hr.cache_write)}</b></div>

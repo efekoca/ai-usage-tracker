@@ -1,11 +1,11 @@
 //! System notifications when a limit in use passes the warning threshold, fills up, and starts
 //! again after filling, and when the monthly budget gets close or is exceeded. Clicking one opens
-//! the Limits page.
+//! the page it is about.
 
 use crate::settings::{NotifySettings, Settings};
 use crate::tray_text::{name, shown_value, Format, Reading};
 use chrono::TimeZone;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, Mutex};
 use tauri::{AppHandle, Manager};
 use tracker_core::model::Provider;
@@ -36,6 +36,8 @@ struct Limit {
     provider: Provider,
     pool: String,
     window: String,
+    /// Each account's limits are followed apart, so switching accounts is not a reset.
+    account: Option<String>,
 }
 
 impl Limit {
@@ -61,6 +63,7 @@ struct Seen {
 struct BudgetSeen {
     month: String,
     step: Step,
+    budget_usd: f64,
     checked_ms: i64,
 }
 
@@ -136,7 +139,7 @@ fn budget(app: &AppHandle, s: &Settings, now_ms: i64) -> Option<BudgetAlert> {
         tracker_core::analytics::month_spend(&store, &book, &chrono::Local, now_ms).ok()?
     };
     let used_pct = spend.spent_usd / s.monthly_budget_usd * 100.0;
-    let step = budget_change(&mut seen, &spend.month, used_pct, now_ms)?;
+    let step = budget_change(&mut seen, &spend.month, s.monthly_budget_usd, used_pct, now_ms)?;
     Some(BudgetAlert {
         over: step == Step::Full,
         used_pct,
@@ -147,7 +150,7 @@ fn budget(app: &AppHandle, s: &Settings, now_ms: i64) -> Option<BudgetAlert> {
 }
 
 /// Like a limit, the budget is first only recorded, and a new month starts from below.
-fn budget_change(seen: &mut Option<BudgetSeen>, month: &str, used_pct: f64, now_ms: i64) -> Option<Step> {
+fn budget_change(seen: &mut Option<BudgetSeen>, month: &str, budget_usd: f64, used_pct: f64, now_ms: i64) -> Option<Step> {
     let now_step = if used_pct >= 100.0 {
         Step::Full
     } else if used_pct >= BUDGET_CLOSE_PCT {
@@ -156,12 +159,16 @@ fn budget_change(seen: &mut Option<BudgetSeen>, month: &str, used_pct: f64, now_
         Step::Below
     };
     let Some(b) = seen else {
-        *seen = Some(BudgetSeen { month: month.into(), step: now_step, checked_ms: now_ms });
+        *seen = Some(BudgetSeen { month: month.into(), step: now_step, budget_usd, checked_ms: now_ms });
         return None;
     };
     b.checked_ms = now_ms;
     if b.month != month {
         (b.month, b.step) = (month.into(), Step::Below);
+    }
+    // a raised budget can be reached again; a lowered one notifies at once
+    if b.budget_usd != budget_usd {
+        (b.budget_usd, b.step) = (budget_usd, b.step.min(now_step));
     }
     (now_step > b.step).then(|| {
         b.step = now_step;
@@ -184,8 +191,9 @@ pub(crate) fn test(app: &AppHandle, s: &Settings) -> Sent {
     rx.recv_timeout(std::time::Duration::from_secs(300)).unwrap_or(Sent::Failed)
 }
 
-fn open_limits(app: &AppHandle) {
-    crate::windows::show_main_at(app, Some("limits"));
+/// The budget is on the Overview; every other notification is about the Limits page.
+fn open(app: &AppHandle, tag: &str) {
+    crate::windows::show_main_at(app, Some(if tag == "budget" { "overview" } else { "limits" }));
 }
 
 fn wanted(a: &Alert, n: &NotifySettings) -> bool {
@@ -212,19 +220,21 @@ fn step(used: f64, early_at: f64) -> Step {
 }
 
 /// A limit seen for the first time only records where it stands, so starting the app or a new
-/// account never notifies. Readings from before a reset are left out.
+/// account never notifies. Readings from before a reset are left out. An account not in use
+/// resets quietly: its notification would read as if the limit in use were free again.
 fn changes(seen: &mut HashMap<Limit, Seen>, readings: &[Reading], early_at: f64, now: i64) -> Vec<Alert> {
     let mut out = Vec::new();
+    let in_use: HashSet<(Provider, Option<&str>)> = readings.iter().filter(|r| r.active).map(|r| (r.provider, r.account.as_deref())).collect();
     for (limit, s) in seen.iter_mut() {
         if s.resets_at.is_some_and(|at| at <= now) {
-            if s.step == Step::Full {
+            if s.step == Step::Full && in_use.contains(&(limit.provider, limit.account.as_deref())) {
                 out.push(Alert::Reset { limit: limit.clone() });
             }
             *s = Seen { step: Step::Below, resets_at: None };
         }
     }
     for r in readings.iter().filter(|r| r.active && r.resets_at.is_none_or(|at| at > now)) {
-        let limit = Limit { provider: r.provider, pool: r.pool.clone(), window: r.window.clone() };
+        let limit = Limit { provider: r.provider, pool: r.pool.clone(), window: r.window.clone(), account: r.account.clone() };
         let now_step = step(r.used, early_at);
         let Some(s) = seen.get_mut(&limit) else {
             seen.insert(limit, Seen { step: now_step, resets_at: r.resets_at });
@@ -291,7 +301,7 @@ fn text<Tz: TimeZone>(a: &Alert, f: &Format<'_, Tz>) -> (String, String) {
     }
 }
 
-/// Lets notifications show while the app is in front too, and opens the Limits page on a click.
+/// Lets notifications show while the app is in front too, and opens their page on a click.
 #[cfg(target_os = "macos")]
 pub(crate) fn init(app: &AppHandle) {
     use objc2::rc::Retained;
@@ -317,8 +327,8 @@ pub(crate) fn init(app: &AppHandle) {
             }
 
             #[unsafe(method(userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler:))]
-            fn did_receive(&self, _: &UNUserNotificationCenter, _: &UNNotificationResponse, done: &block2::DynBlock<dyn Fn()>) {
-                open_limits(self.ivars());
+            fn did_receive(&self, _: &UNUserNotificationCenter, response: &UNNotificationResponse, done: &block2::DynBlock<dyn Fn()>) {
+                open(self.ivars(), &response.notification().request().identifier().to_string());
                 done.call(());
             }
         }
@@ -435,9 +445,9 @@ fn send(app: &AppHandle, tag: &str, title: &str, body: &str, done: impl FnOnce(S
         )))?;
         let toast = ToastNotification::CreateToastNotification(&xml)?;
         toast.SetTag(&HSTRING::from(tag))?;
-        let clicked = app.clone();
+        let (clicked, page) = (app.clone(), tag.to_owned());
         toast.Activated(&TypedEventHandler::<ToastNotification, IInspectable>::new(move |_, _| {
-            open_limits(&clicked);
+            open(&clicked, &page);
             Ok(())
         }))?;
         ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app.config().identifier.as_str()))?.Show(&toast)?;
@@ -467,6 +477,22 @@ const BUS_PATH: &str = "/org/freedesktop/Notifications";
 #[cfg(target_os = "linux")]
 static IDS: LazyLock<Mutex<HashMap<String, u32>>> = LazyLock::new(Default::default);
 
+/// One connection for every notification and for the clicks: GNOME takes an app's
+/// notifications away as soon as the connection that sent them closes.
+#[cfg(target_os = "linux")]
+static SESSION: Mutex<Option<zbus::blocking::Connection>> = Mutex::new(None);
+
+#[cfg(target_os = "linux")]
+fn session() -> zbus::Result<zbus::blocking::Connection> {
+    let mut held = SESSION.lock().unwrap();
+    if let Some(c) = held.as_ref() {
+        return Ok(c.clone());
+    }
+    let c = zbus::blocking::Connection::session()?;
+    *held = Some(c.clone());
+    Ok(c)
+}
+
 #[cfg(target_os = "linux")]
 fn send(app: &AppHandle, tag: &str, title: &str, body: &str, done: impl FnOnce(Sent) + Send + 'static) {
     use zbus::zvariant::Value;
@@ -475,7 +501,7 @@ fn send(app: &AppHandle, tag: &str, title: &str, body: &str, done: impl FnOnce(S
     let replaces = IDS.lock().unwrap().get(tag).copied().unwrap_or(0);
     let show = || -> zbus::Result<u32> {
         let hints = HashMap::from([("desktop-entry", Value::from("ai-usage-tracker"))]);
-        let reply = zbus::blocking::Connection::session()?.call_method(
+        let reply = session()?.call_method(
             Some(BUS),
             BUS_PATH,
             Some(BUS),
@@ -501,11 +527,12 @@ fn send(app: &AppHandle, tag: &str, title: &str, body: &str, done: impl FnOnce(S
 fn listen_for_clicks(app: AppHandle) {
     let _ = std::thread::Builder::new().name("notification-clicks".into()).spawn(move || {
         let run = || -> zbus::Result<()> {
-            let c = zbus::blocking::Connection::session()?;
+            let c = session()?;
             for m in zbus::blocking::Proxy::new(&c, BUS, BUS_PATH, BUS)?.receive_signal("ActionInvoked")? {
                 let (id, key): (u32, String) = m.body().deserialize()?;
-                if key == "default" && IDS.lock().unwrap().values().any(|v| *v == id) {
-                    open_limits(&app);
+                let tag = IDS.lock().unwrap().iter().find(|(_, v)| **v == id).map(|(t, _)| t.clone());
+                if let (Some(tag), "default") = (tag, key.as_str()) {
+                    open(&app, &tag);
                 }
             }
             Ok(())
@@ -574,6 +601,18 @@ mod tests {
     }
 
     #[test]
+    fn switching_to_another_account_is_not_a_reset() {
+        let mut seen = HashMap::new();
+        let on = |account: &str, used, resets_in| Reading { account: Some(account.into()), ..read(Provider::Anthropic, "five_hour", used, resets_in) };
+        changes(&mut seen, &[on("a", 90.0, 3600)], 70.0, NOW);
+        assert_eq!(kinds(&changes(&mut seen, &[on("a", 100.0, 3600)], 70.0, NOW)), ["full"]);
+        assert!(changes(&mut seen, &[on("b", 75.0, 9000)], 70.0, NOW).is_empty(), "b is only recorded");
+        assert_eq!(kinds(&changes(&mut seen, &[on("b", 100.0, 9000)], 70.0, NOW)), ["full"]);
+        assert!(changes(&mut seen, &[on("b", 100.0, 9000)], 70.0, NOW + 3601).is_empty(), "a's reset while b is in use and full stays quiet");
+        assert_eq!(kinds(&changes(&mut seen, &[on("a", 100.0, 20_000)], 70.0, NOW + 3700)), ["full"], "a fills again after switching back");
+    }
+
+    #[test]
     fn only_limits_in_use_and_readings_from_the_current_window_count() {
         let mut seen = HashMap::new();
         let mut other = read(Provider::OpenAI, "five_hour", 10.0, 3600);
@@ -594,7 +633,7 @@ mod tests {
         assert_eq!(kinds(&changes(&mut seen, &at(100.0, "five_hour"), f64::INFINITY, NOW)), ["full"]);
 
         let n = NotifySettings { full: false, seven_day: false, ..Default::default() };
-        let limit = |window: &str| Limit { provider: Provider::Anthropic, pool: String::new(), window: window.into() };
+        let limit = |window: &str| Limit { provider: Provider::Anthropic, pool: String::new(), window: window.into(), account: None };
         assert!(wanted(&Alert::Close { limit: limit("five_hour"), used: 80.0, fills_at_ms: None, resets_at: None }, &n));
         assert!(!wanted(&Alert::Full { limit: limit("five_hour"), resets_at: None }, &n));
         assert!(wanted(&Alert::Reset { limit: limit("five_hour") }, &n));
@@ -604,12 +643,24 @@ mod tests {
     #[test]
     fn the_budget_notifies_once_at_80_percent_and_once_past_it_each_month() {
         let mut seen = None;
-        assert_eq!(budget_change(&mut seen, "2026-11-01", 85.0, 0), None, "the first check only records");
-        assert_eq!(budget_change(&mut seen, "2026-11-01", 90.0, 1), None);
-        assert_eq!(budget_change(&mut seen, "2026-11-01", 101.0, 2), Some(Step::Full));
-        assert_eq!(budget_change(&mut seen, "2026-11-01", 120.0, 3), None);
-        assert_eq!(budget_change(&mut seen, "2026-12-01", 2.0, 4), None, "a new month starts from below");
-        assert_eq!(budget_change(&mut seen, "2026-12-01", 80.0, 5), Some(Step::Close));
+        assert_eq!(budget_change(&mut seen, "2026-11-01", 500.0, 85.0, 0), None, "the first check only records");
+        assert_eq!(budget_change(&mut seen, "2026-11-01", 500.0, 90.0, 1), None);
+        assert_eq!(budget_change(&mut seen, "2026-11-01", 500.0, 101.0, 2), Some(Step::Full));
+        assert_eq!(budget_change(&mut seen, "2026-11-01", 500.0, 120.0, 3), None);
+        assert_eq!(budget_change(&mut seen, "2026-12-01", 500.0, 2.0, 4), None, "a new month starts from below");
+        assert_eq!(budget_change(&mut seen, "2026-12-01", 500.0, 80.0, 5), Some(Step::Close));
+    }
+
+    #[test]
+    fn a_raised_budget_notifies_again_and_a_lowered_one_at_once() {
+        let mut seen = None;
+        budget_change(&mut seen, "2026-11-01", 500.0, 50.0, 0);
+        assert_eq!(budget_change(&mut seen, "2026-11-01", 500.0, 102.0, 1), Some(Step::Full));
+        assert_eq!(budget_change(&mut seen, "2026-11-01", 1000.0, 51.0, 2), None, "raised: $510 of $1000");
+        assert_eq!(budget_change(&mut seen, "2026-11-01", 1000.0, 80.0, 3), Some(Step::Close));
+        assert_eq!(budget_change(&mut seen, "2026-11-01", 1000.0, 100.0, 4), Some(Step::Full));
+        assert_eq!(budget_change(&mut seen, "2026-11-01", 2000.0, 60.0, 5), None);
+        assert_eq!(budget_change(&mut seen, "2026-11-01", 1000.0, 120.0, 6), Some(Step::Full), "lowered under the spend");
     }
 
     #[test]
@@ -617,13 +668,13 @@ mod tests {
         let tz = FixedOffset::east_opt(3 * 3600).unwrap();
         let cfg = TraySettings::default();
         let f = |tr, remaining| Format { cfg: &cfg, tr, app_remaining: remaining, warn_at: 70.0, currency: "USD", fx: 1.0, now_ms: NOW * 1000, tz: &tz };
-        let claude = Limit { provider: Provider::Anthropic, pool: String::new(), window: "five_hour".into() };
+        let claude = Limit { provider: Provider::Anthropic, pool: String::new(), window: "five_hour".into(), account: None };
         let close = Alert::Close { limit: claude.clone(), used: 72.0, fills_at_ms: Some((NOW + 1800) * 1000), resets_at: Some(NOW + 3600) };
         let clock = |secs| f(true, false).clock(NOW + secs).unwrap();
         let (half, hour) = (clock(1800), clock(3600));
         assert_eq!(text(&close, &f(true, false)), ("Claude 5 saatlik limit: %72 kullanıldı".into(), format!("Bu hızla {half} civarında dolacak. Yenilenme: {hour}.")));
         assert_eq!(text(&close, &f(false, true)), ("Claude 5-hour limit: 28% left".into(), format!("At this pace it will fill around {half}. Resets: {hour}.")));
-        let week = Limit { provider: Provider::OpenAI, pool: "codex".into(), window: "seven_day".into() };
+        let week = Limit { provider: Provider::OpenAI, pool: "codex".into(), window: "seven_day".into(), account: None };
         assert_eq!(text(&Alert::Full { limit: week.clone(), resets_at: None }, &f(true, false)), ("Codex haftalık limitiniz doldu".into(), String::new()));
         assert_eq!(text(&Alert::Reset { limit: week }, &f(false, false)).0, "Your Codex weekly limit has reset");
         assert_eq!(escape(r#"<a & "b">"#), "&lt;a &amp; &quot;b&quot;&gt;");

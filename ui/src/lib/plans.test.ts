@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { Account, PlansFile, Settings } from './api'
-import { accountPlan, autoPlan, planPrice } from './plans'
+import type { Account, PlansFile, PlanValue, Settings } from './api'
+import { accountPlan, autoPlan, planMultiple, planPrice } from './plans'
 
 const plans = {
   providers: {
@@ -71,5 +71,31 @@ describe('planPrice', () => {
     const free = { id: 'free', name: 'Free', windows: [], source: '', monthly_usd: 0 }
     const left = settings({ plans: { anthropic: 'free' }, plan_prices: { anthropic: 24 } })
     expect(planPrice(left, 'anthropic', free), 'a price left from another plan').toEqual({ usd: 0, custom: false })
+  })
+})
+
+describe('planMultiple', () => {
+  const dates = Array.from({ length: 30 }, (_, i) => `2026-10-${String(i + 1).padStart(2, '0')}`)
+  const range = { from_ms: new Date(2026, 9, 1).getTime(), to_ms: new Date(2026, 9, 31).getTime() }
+  const value = (cost: number, accounts: PlanValue['providers'][number]['accounts'] = []): PlanValue => ({
+    range,
+    dates,
+    providers: [{ provider: 'anthropic', cost_usd: cost, events: 10, unpriced_events: 0, cumulative: [], accounts }],
+  })
+
+  it('leaves out a provider without a plan, even with a price kept from an earlier one', () => {
+    const v = { plans, settings: settings({ plan_prices: { anthropic: 150 } }), accounts: [], value: value(300) }
+    expect(planMultiple(v, ['anthropic'])).toBeNull()
+    const pro = { ...v, settings: settings({ plans: { anthropic: 'pro' } }) }
+    expect(planMultiple(pro, ['anthropic'])).toBeCloseTo(300 / ((20 * 30) / (365.25 / 12)))
+  })
+
+  it('counts a later account only from the day it was first seen', () => {
+    const seen = (id: string, day: number) => ({ provider: 'anthropic', id, read_plan: null, first_ms: new Date(2026, 9, day).getTime(), last_ms: range.to_ms - 1, requests: 1, active: true }) as Account
+    const use = (account: string, cost: number) => ({ account, cost_usd: cost, events: 5, unpriced_events: 0, cumulative: [] })
+    const v = { plans, settings: settings({ account_plans: { a1: 'pro', a2: 'max5x' } }), accounts: [seen('a1', 1), seen('a2', 20)], value: value(160, [use('a1', 60), use('a2', 100)]) }
+    const month = 365.25 / 12
+    expect(planMultiple({ ...v, fromFirstSeen: true }, ['anthropic'])).toBeCloseTo(160 / ((20 * 30) / month + (100 * 11) / month))
+    expect(planMultiple(v, ['anthropic'])).toBeCloseTo(160 / ((20 * 30) / month + (100 * 30) / month))
   })
 })

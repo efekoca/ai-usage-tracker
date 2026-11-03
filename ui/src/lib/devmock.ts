@@ -275,7 +275,7 @@ function mockTimeline(from: number, to: number) {
     const rebuilt = i === 18
     const write = rebuilt ? Math.round(context * 0.86) : agent && i === 26 ? context : Math.round(3_000 + (i % 3) * 900)
     const read = Math.max(0, context - write - 400)
-    requests.push({ ts_ms: ts, model: 'claude-opus-5-5', agent, context, input: 400, cache_read: read, cache_write: write, output: 600 + (i % 5) * 300, cost_usd: (read * 0.5 + write * 6.25 + 400 * 5 + 900 * 25) / 1e6, rewritten: rebuilt ? Math.round(context * 0.8) : 0, rewrite_extra_usd: rebuilt ? Math.round(context * 0.8) * 5.75e-6 : null, compacted })
+    requests.push({ ts_ms: ts, model: 'claude-opus-5-5', agent, thread: agent ? 'a1' : null, context, input: 400, cache_read: read, cache_write: write, output: 600 + (i % 5) * 300, cost_usd: (read * 0.5 + write * 6.25 + 400 * 5 + 900 * 25) / 1e6, rewritten: rebuilt ? Math.round(context * 0.8) : 0, rewrite_extra_usd: rebuilt ? Math.round(context * 0.8) * 5.75e-6 : null, pause_ms: rebuilt ? 12 * 60e3 : null, compacted })
     if (!agent) ctx += 2_400 + (i % 4) * 900
   }
   const names = ['Read', 'Edit', 'Bash', 'Grep', 'Bash', 'Read']

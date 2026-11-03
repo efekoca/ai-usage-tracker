@@ -57,7 +57,7 @@ Sağlayıcılar limitlerin sayısal karşılığını yayımlamıyor, yalnızca 
 
 **Dolma tahmini.** Uygulama her güncel okumada, pencerenin **başından bu yana ortalama hızınıza** göre bir tahmin yapar (şu anki yüzde ÷ pencere başladığından bu yana geçen süre). Her pencere %0'dan başladığı için bu hız kesin olarak bilinir ve boşta geçen saatleri de içerir; kısa bir yoğunluk hiç bitmeyecekmiş gibi ileriye taşınmaz. Sonuçta pencerenin ne zaman dolacağını ("Paz 21:12 civarında dolacak, sıfırlanmadan 9 sa önce") ya da sıfırlandığında hangi seviyede olacağını görürsünüz. Sağlayıcı bir pencereyi bitiş zamanını değiştirmeden erkenden sıfırlarsa hız o sıfırlamadan itibaren ölçülür. Pencerenin ilk onda birinde tahmin yapılmaz. Tahminler **Tahmini** etiketi taşır.
 
-**Bildirimler.** Kullandığınız bir limit uyarı eşiğini geçince, dolunca ve dolan limit yenilenince sistem bildirimi alırsınız. Bildirimde limitin yenilenme saati ve bu hızla yaklaşık ne zaman dolacağı yazar. **Ayarlar → Bildirimler** bölümünden erken uyarının **Dikkat** ya da **Kritik** eşiğinde gelmesini veya hiç gelmemesini, limit dolunca ve yenilenince haber alıp almayacağınızı ve hangi limitler (5 saatlik, haftalık) için bildirim alacağınızı seçin. macOS, uygulamanın bildirim gönderip gönderemeyeceğini bir kez sorar. Uygulamayı açtığınızda, kapalıyken olanlar için bildirim gelmez.
+**Bildirimler.** Kullandığınız bir limit uyarı eşiğini geçince, dolunca ve dolan limit yenilenince sistem bildirimi alırsınız. Bildirimde limitin yenilenme saati ve bu hızla yaklaşık ne zaman dolacağı yazar. **Ayarlar → Bildirimler** bölümünden erken uyarının **Dikkat** ya da **Kritik** eşiğinde gelmesini veya hiç gelmemesini, limit dolunca ve yenilenince haber alıp almayacağınızı ve hangi limitler (5 saatlik, haftalık) için bildirim alacağınızı seçin. macOS, uygulamanın bildirim gönderip gönderemeyeceğini bir kez sorar. Uygulamayı açtığınızda, kapalıyken olanlar için bildirim gelmez. Bildirime tıklayınca **Limitler** sayfası açılır. Bildirimlerin bu bilgisayarda görünüp görünmediğini **Ayarlar → Bildirimler → Deneme bildirimi** ile kontrol edin.
 
 ### Geçmiş limit pencerelerinizi inceleyin
 
@@ -104,6 +104,8 @@ Tutarlar API eşdeğeridir. Abonelikle kullanıyorsanız bu tutarları ödemezsi
 - **Birden fazla hesap:** Bu 30 günde görülen her Codex ve Claude hesabı kendi planı ve fiyatıyla hesaba katılır; fiyatlar toplanır. Kart her hesabın API eşdeğeri kullanımını planıyla birlikte listeler. Ücretsiz plandaki ya da API fiyatıyla ödenen kullanım toplama girmez; hiçbir hesaba bağlanamayan kullanım ise yalnızca toplama girer. Bir hesaba girdiğiniz fiyat, yalnızca o hesabın o anki planı için geçerlidir.
 - **Alt sınır:** Claude ve ChatGPT'deki sohbet kullanımı yerel kayıtlarda olmadığı için gerçek değer daha yüksek olabilir.
 
+**Aylık bütçe.** **Ayarlar → Aylık bütçe** bölümünden tüm araçların API eşdeğeri maliyeti için aylık bir sınır belirleyin. **Genel bakış** bu ayki harcamanızı, kalan tutarı ve günleri, ayın ilk günlerinden sonra da bu hızla ay sonunda nereye varacağınızı gösterir. Bütçenin %80'ine ulaştığınızda ve bütçeyi aştığınızda bildirim alırsınız; bunu **Ayarlar → Bildirimler** bölümünden kapatabilirsiniz.
+
 ### Kullanımınızı gün gün görün
 
 **Günlük** sayfası seçtiğiniz dönemi gün gün gösterir. Kısa dönemlerde sütunlar, uzun dönemlerde takvim görürsünüz; değerleri token, API eşdeğeri ya da istek sayısı olarak seçebilirsiniz.
@@ -139,7 +141,7 @@ Model aileleri aynı metni farklı sayıda token'a böler (Claude 4.7 ve sonras�
 | --------------------------------------------------------------------- | --------------------------------------------------- |
 | **Bağlam**: istemlerinizin ne kadar büyüdüğü ve uzun bağlam ek ücreti | **Projeler**: proje ve git dalı bazında kullanım   |
 
-**Oturumlar** sayfası dönemdeki her oturumunuzu listeler: başlangıç, proje, modeller, süre (ilk ve son istek arası), istek, token, API eşdeğeri, önbellek isabeti ve en büyük bağlam. Listeyi sıralayabilir ve içinde arama yapabilirsiniz; bir satırı açınca model bazında ayrıntısını görürsünüz. Alt ajan kayıtları ait oldukları oturuma sayılır.
+**Oturumlar** sayfası dönemdeki her oturumunuzu listeler: başlangıç, proje, modeller, süre (ilk ve son istek arası), istek, token, API eşdeğeri, önbellek isabeti ve en büyük bağlam. Listeyi sıralayabilir ve içinde arama yapabilirsiniz; bir satırı açınca model bazında ayrıntısını ve oturumun **zaman çizelgesini** görürsünüz. Zaman çizelgesinde her istek bir sütundur ve bağlamın büyüklüğünü, ne kadarının önbellekten geldiğini gösterir. Önbelleğin bir aradan sonra yeniden yazıldığı ve bağlamın küçüldüğü yerler, alt ajan istekleri ve çağrılan araçlar da işaretlidir. Alt ajan kayıtları ait oldukları oturuma sayılır.
 
 **Bağlam** sayfası her istekte gönderilen bağlamın büyüklüğünü gösterir (önbellekten okunan ve önbelleğe yazılanlar dahil tüm girdi token'ları):
 
@@ -160,6 +162,10 @@ Model aileleri aynı metni farklı sayıda token'a böler (Claude 4.7 ve sonras�
 Net tasarruf eksi çıkıyorsa, yazılan önbellek maliyetini karşılayacak kadar okunmamış demektir.
 
 **Projeler** sayfası her projenin kullanımını git dalına göre ayırır. Claude Code dalı her istekte, Codex ise oturum bir depoda başladığında kaydeder. Depo dışındaki istekler "dal yok" olarak görünür.
+
+### Her şeyi tek kısayolla bulun
+
+Mac'te **Cmd+K**, Windows ve Linux'ta **Ctrl+K** tuşlarına basın ya da kenar çubuğundaki **Ara** düğmesine tıklayın. Birkaç harf yazarak istediğiniz sayfaya, ayar bölümüne, projeye, modele ya da oturuma geçin. Buradan temayı değiştirebilir, widget'ı gösterip gizleyebilir ve güncellemeleri denetleyebilirsiniz.
 
 ### Limitlerinizi masaüstünde görün
 
@@ -222,6 +228,16 @@ Panel ayrıca güncelleme hazır olduğunda ve bir aracın oturumu kapandığı 
 macOS'te simgeyi gizleyip yalnızca metni bırakabilirsiniz; gösterilecek değer olmadığında simge geri gelir.
 
 ![Mac'te Menü çubuğu sayfasının metin ve simge ayarları: Claude'un 5 saatlik ve haftalık limiti ile Codex'in haftalık limitinden oluşan üç öğe ve güncel değerleri; etiket, değer, gösterim, sıfırlanma, ayraç, baş ve son, uyarı işareti ve simgeyi gizleme seçenekleri; Claude'un 5 saatlik limiti için kullanım göstergesine ayarlı simge](assets/readme/trayoptions-tr.webp)
+
+### Özet kartı paylaşın
+
+**Özet kartları** sayfası bir gününüzü, ayınızı ya da yılınızı paylaşabileceğiniz bir görsele dönüştürür: 1080 × 1920 bir Instagram hikâyesi ve 1080 × 1080 bir kare, yan yana, lacivert ya da açık temada. Oklarla günler, aylar ya da yıllar arasında geçin ve istediğiniz kartı PNG olarak kaydedin.
+
+- **Yıl:** token, API eşdeğeri maliyet, aboneliğinizin kaç kat değer kattığı, yılın her gününü gösteren bir takvim, en yoğun ay ve gün, en uzun seri ve en çok kullandığınız model.
+- **Ay:** aynı toplamlar; her gün için bir sütun ve günlük ortalama, aktif gün, oturum ve önbellek isabeti.
+- **Gün:** aynı toplamlar; her saat için bir sütun, günün önceki 30 gündeki ortalama bir günle karşılaştırması, oturum, istek ve önbellek isabeti.
+
+Kartta yalnızca toplamlar ve model adları yer alır, proje adları ya da yazdıklarınız asla yer almaz. Aboneliğin değeri yalnızca fiyatı bilinen planlarla hesaplanır; hiçbir planın fiyatı bilinmiyorsa kartta yer almaz.
 
 ### Haftalık rapor alın, verilerinizi yönetin
 
