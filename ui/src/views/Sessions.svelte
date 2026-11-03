@@ -209,7 +209,7 @@
                           <div class="used">
                             {#each s.models as m (m.model)}
                               <span class="model">
-                                <span class="chip">{m.model}</span>
+                                <span class="chip" title={m.model}>{m.model}</span>
                                 <span class="subtle">{fmtInt(m.events)} {lower(t('sessions.requests'))}</span>
                                 <span class="num">{fmtCompact(m.total_tokens)}</span>
                                 <b class="num">{m.unpriced ? '—' : fmtMoney(m.cost_usd)}</b>
@@ -431,6 +431,7 @@
     line-height: 26px;
   }
   .used {
+    flex: 1;
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
@@ -445,9 +446,19 @@
     border: 0.5px solid var(--hairline);
     background: var(--surface-2);
     white-space: nowrap;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
   }
+  /* a long name gives way, so its requests, tokens and cost stay in view */
   .model .chip {
     margin-right: 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .model > :not(.chip) {
+    flex: none;
   }
   .model .subtle {
     font-size: 12px;

@@ -50,9 +50,10 @@
       if (m === last) return
       last = m
       const p = pos(i)
-      out.push({ c: p.r === 0 ? p.c : p.c + 1, label: fmtMonth(d.date) })
+      // a month that starts inside the last column has no later one to take its name
+      out.push({ c: p.r === 0 ? p.c : Math.min(p.c + 1, cols - 1), label: fmtMonth(d.date) })
     })
-    return out.filter((m, i, a) => m.c < cols && (i === 0 || m.c - a[i - 1].c >= 3))
+    return out.filter((m, i, a) => i === 0 || m.c - a[i - 1].c >= 3)
   })
 
   const gridW = $derived(36 + cols * (CELL + GAP))

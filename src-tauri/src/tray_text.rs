@@ -23,6 +23,8 @@ pub struct Reading {
     pub at_reset: Option<f64>,
     /// The Codex or Claude account it belongs to, while there are several.
     pub account: Option<String>,
+    /// When the reading was taken.
+    pub observed_ms: Option<i64>,
     /// The provider's account in use.
     pub active: bool,
 }
@@ -347,7 +349,7 @@ mod tests {
     const NOW: i64 = 1_793_000_000_000; // a Monday, 07:33 UTC
 
     fn read(p: Provider, pool: &str, window: &str, used: f64, in_secs: i64) -> Reading {
-        Reading { provider: p, pool: pool.into(), window: window.into(), used, behind: false, resets_at: Some(NOW / 1000 + in_secs), fills_at_ms: None, at_reset: None, account: None, active: true }
+        Reading { provider: p, pool: pool.into(), window: window.into(), used, behind: false, resets_at: Some(NOW / 1000 + in_secs), fills_at_ms: None, at_reset: None, account: None, observed_ms: None, active: true }
     }
 
     fn data() -> Data {

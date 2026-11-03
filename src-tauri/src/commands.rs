@@ -836,18 +836,38 @@ pub async fn save_images(window: WebviewWindow, state: State<'_, AppState>, dir:
     Ok(written)
 }
 
-/// Writes `bytes` to `name` in `dir`, or to `name (2)`, `name (3)`… when that is taken. Each name is
-/// claimed by creating the file only if it does not exist, so a file that appears meanwhile is kept too.
+/// Writes `bytes` to `name` in `dir`, or to `name (2)`, `name (3)`… when that is taken. The name is
+/// given to a finished file, and only if nothing has it, so neither a crash nor a file that appears
+/// meanwhile can cost an image.
 fn write_new(dir: &std::path::Path, name: &str, bytes: &[u8]) -> Res<PathBuf> {
-    use std::io::Write;
+    use std::io::{ErrorKind, Write};
     let (stem, ext) = name.rsplit_once('.').unwrap_or((name, ""));
+    let named = |n: u32| dir.join(if n == 1 { name.to_owned() } else { format!("{stem} ({n}).{ext}") });
+    let mut draft = tempfile::Builder::new();
+    draft.prefix(".card-").suffix(".tmp");
+    // the rights of any file the user saves, not a temporary file's private ones
+    #[cfg(unix)]
+    draft.permissions(std::os::unix::fs::PermissionsExt::from_mode(0o666));
+    let mut tmp = draft.tempfile_in(dir).map_err(|e| e.to_string())?;
+    tmp.write_all(bytes).and_then(|_| tmp.as_file().sync_all()).map_err(|e| e.to_string())?;
     let mut n = 1;
     loop {
-        let path = dir.join(if n == 1 { name.to_owned() } else { format!("{stem} ({n}).{ext}") });
+        match tmp.persist_noclobber(named(n)) {
+            Ok(_) => return Ok(named(n)),
+            Err(e) if e.error.kind() == ErrorKind::AlreadyExists => {
+                tmp = e.file;
+                n += 1;
+            }
+            Err(_) => break,
+        }
+    }
+    // FAT disks and some network shares cannot refuse to replace, so the name is claimed first
+    loop {
+        let path = named(n);
         n += 1;
         let mut f = match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(f) => f,
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e.to_string()),
         };
         // the file is this call's own, so a failed write leaves no half image behind
@@ -1157,6 +1177,29 @@ mod tests {
         let path = write_new(dir.path(), "card.png", b"ours").unwrap();
         assert_eq!((std::fs::read(&file).unwrap(), path), (b"theirs".to_vec(), dir.path().join("card (2).png")));
         assert!(write_new(&dir.path().join("missing"), "card.png", b"ours").is_err(), "a folder that is gone is an error, not a loop");
+    }
+
+    #[test]
+    fn only_a_finished_card_gets_its_name() {
+        let dir = tempfile::tempdir().unwrap();
+        // what a save that was killed leaves behind: a draft, and no half image under the name
+        std::fs::write(dir.path().join(".card-killed.tmp"), b"\x89PNG").unwrap();
+        let path = write_new(dir.path(), "card.png", b"whole").unwrap();
+        assert_eq!((path, std::fs::read(dir.path().join("card.png")).unwrap()), (dir.path().join("card.png"), b"whole".to_vec()), "the name is free for the next try");
+        let drafts = std::fs::read_dir(dir.path()).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().ends_with(".tmp")).count();
+        assert_eq!(drafts, 1, "a save leaves no draft of its own");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_card_has_the_rights_of_any_saved_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let other = dir.path().join("other.png");
+        std::fs::write(&other, b"x").unwrap();
+        let card = write_new(dir.path(), "card.png", b"x").unwrap();
+        let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode();
+        assert_eq!(mode(&card), mode(&other));
     }
 
     #[test]

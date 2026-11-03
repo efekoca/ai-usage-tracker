@@ -2,12 +2,14 @@
 //! again after filling, when the monthly budget gets close or is exceeded, and when a signed-out
 //! CLI leaves the limits unread. Clicking one opens the page it is about.
 
+use crate::capture::SignIn;
 use crate::settings::{NotifySettings, Settings};
 use crate::tray_text::{name, shown_value, Format, Reading};
 use chrono::TimeZone;
 use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, Mutex};
 use tauri::{AppHandle, Manager};
+use tracker_core::analytics::LIVE_READING_MS;
 use tracker_core::model::Provider;
 
 /// Readings round their reset time differently; a larger move is a window that started again.
@@ -107,8 +109,8 @@ pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading]) {
     let now_ms = chrono::Utc::now().timestamp_millis();
     let alerts = changes(&mut SEEN.lock().unwrap(), readings, early_at, now_ms / 1000);
     let budget = budget(app, s, now_ms);
-    let out = crate::capture::signed_out(app, s).into_iter().filter(|&p| !readings.iter().any(|r| r.active && r.provider == p)).collect();
-    let signed_out = newly_out(&mut SIGNED_OUT.lock().unwrap(), out);
+    let live = |p| readings.iter().any(|r| r.active && r.provider == p && r.observed_ms.is_some_and(|t| now_ms - t < LIVE_READING_MS));
+    let signed_out = newly_out(&mut SIGNED_OUT.lock().unwrap(), &crate::capture::sign_ins(app, s), live);
     if !n.enabled {
         return;
     }
@@ -131,11 +133,19 @@ pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading]) {
 }
 
 /// Unlike a limit, a sign-out is told at the first read after a start too: it is something to do
-/// now. It is told again only after a sign-in.
-fn newly_out(seen: &mut HashSet<Provider>, now: HashSet<Provider>) -> Vec<Provider> {
-    let mut new: Vec<Provider> = now.difference(seen).copied().collect();
-    new.sort_by_key(|p| p.as_str());
-    *seen = now;
+/// now. It is told again only after a read that worked, so a read that failed some other way in
+/// between changes nothing.
+fn newly_out(seen: &mut HashSet<Provider>, states: &[(Provider, SignIn)], live: impl Fn(Provider) -> bool) -> Vec<Provider> {
+    let mut new = Vec::new();
+    for &(p, state) in states {
+        match state {
+            SignIn::Clear => {
+                seen.remove(&p);
+            }
+            SignIn::Out if !live(p) && seen.insert(p) => new.push(p),
+            _ => {}
+        }
+    }
     new
 }
 
@@ -470,9 +480,8 @@ fn send(_: &AppHandle, tag: &str, title: &str, body: &str, done: impl FnOnce(Sen
 #[cfg(windows)]
 static TOASTS: LazyLock<Mutex<HashMap<String, windows::UI::Notifications::ToastNotification>>> = LazyLock::new(Default::default);
 
-/// Windows shows a toast only for an app id it knows. The Start menu shortcut names one, but an
-/// update never rewrites the shortcut, so one made before 0.2.8 still names the old id; this
-/// registry entry works with any shortcut or none.
+/// Gives Windows the name and icon of the app id its toasts carry. The Start menu shortcut names
+/// that id, which the installer keeps up to date (see `installer-hooks.nsh`).
 #[cfg(windows)]
 pub(crate) fn init(app: &AppHandle) {
     use windows_sys::Win32::System::Registry::{RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
@@ -633,6 +642,7 @@ mod tests {
             fills_at_ms: None,
             at_reset: None,
             account: None,
+            observed_ms: None,
             active: true,
         }
     }
@@ -743,12 +753,31 @@ mod tests {
     #[test]
     fn a_sign_out_is_told_at_once_and_again_only_after_a_sign_in() {
         let mut seen = HashSet::new();
-        let set = |p: &[Provider]| p.iter().copied().collect::<HashSet<_>>();
-        assert_eq!(newly_out(&mut seen, set(&[Provider::OpenAI, Provider::Anthropic])), vec![Provider::Anthropic, Provider::OpenAI], "the first read after a start");
-        assert_eq!(newly_out(&mut seen, set(&[Provider::OpenAI, Provider::Anthropic])), vec![]);
-        assert_eq!(newly_out(&mut seen, set(&[Provider::Anthropic])), vec![], "signed in to Codex");
-        assert_eq!(newly_out(&mut seen, set(&[Provider::OpenAI, Provider::Anthropic])), vec![Provider::OpenAI], "signed out of Codex again");
+        let codex = |state| [(Provider::Anthropic, SignIn::Out), (Provider::OpenAI, state)];
+        let told = |seen: &mut HashSet<Provider>, state| newly_out(seen, &codex(state), |_| false);
+        assert_eq!(told(&mut seen, SignIn::Out), vec![Provider::Anthropic, Provider::OpenAI], "the first read after a start");
+        assert_eq!(told(&mut seen, SignIn::Out), vec![]);
+        assert_eq!(told(&mut seen, SignIn::Unknown), vec![], "a read that timed out says nothing");
+        assert_eq!(told(&mut seen, SignIn::Out), vec![], "still the same sign-out");
+        assert_eq!(told(&mut seen, SignIn::Clear), vec![], "signed in to Codex");
+        assert_eq!(told(&mut seen, SignIn::Out), vec![Provider::OpenAI], "signed out of Codex again");
         assert_eq!(sign_in_text(Provider::OpenAI, true).0, "Codex'te oturum açın");
+    }
+
+    #[test]
+    fn only_a_recent_reading_of_the_account_in_use_holds_a_sign_out_back() {
+        let at = |age_ms: i64, active| Reading { observed_ms: Some(NOW * 1000 - age_ms), active, ..read(Provider::OpenAI, "seven_day", 33.0, 86_400) };
+        let told = |r: Reading| {
+            let live = |p| r.active && r.provider == p && r.observed_ms.is_some_and(|t| NOW * 1000 - t < LIVE_READING_MS);
+            newly_out(&mut HashSet::new(), &[(Provider::OpenAI, SignIn::Out)], live)
+        };
+        assert_eq!(told(at(60_000, true)), vec![], "a minute old: the limits still arrive");
+        assert_eq!(told(at(5 * 86_400_000, true)), vec![Provider::OpenAI], "five days old, its week still running");
+        assert_eq!(told(at(60_000, false)), vec![Provider::OpenAI], "another account's");
+
+        let mut seen = HashSet::new();
+        newly_out(&mut seen, &[(Provider::OpenAI, SignIn::Out)], |_| true);
+        assert_eq!(newly_out(&mut seen, &[(Provider::OpenAI, SignIn::Out)], |_| false), vec![Provider::OpenAI], "told once the reading ages");
     }
 
     #[test]

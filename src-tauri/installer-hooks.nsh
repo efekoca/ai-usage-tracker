@@ -6,6 +6,11 @@
   ; logs and WebView cache left from before the bundle id became io.aiusagetracker.desktop (0.2.8)
   RMDir /r "$LOCALAPPDATA\io.aiusagetracker.app"
   RMDir /r "$APPDATA\io.aiusagetracker.app"
+  ; Windows shows notifications through the id on this shortcut, and an update never recreates
+  ; it, so one made before 0.2.8 still names the old id
+  ${If} ${FileExists} "$SMPROGRAMS\${PRODUCTNAME}.lnk"
+    !insertmacro SetLnkAppUserModelId "$SMPROGRAMS\${PRODUCTNAME}.lnk"
+  ${EndIf}
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL

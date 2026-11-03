@@ -173,6 +173,8 @@ pub fn parse_result(result: &Value, now_ms: i64) -> Vec<LimitSnapshot> {
 
 /// Codex answers `codex account authentication required to read rate limits` without a sign-in.
 pub const NOT_SIGNED_IN: &str = "codex_not_signed_in";
+/// An answer without limits: only a ChatGPT sign-in has them, so an API key gets none.
+pub const NO_PLAN_LIMITS: &str = "codex_no_plan_limits";
 
 pub fn query(bin: &Path, timeout: Duration, now_ms: i64) -> Result<Vec<LimitSnapshot>, String> {
     let mut cmd = Command::new(bin);
@@ -223,8 +225,7 @@ pub fn query(bin: &Path, timeout: Duration, now_ms: i64) -> Result<Vec<LimitSnap
     let result = result?;
     let snaps = parse_result(&result, now_ms);
     if snaps.is_empty() {
-        // signed in with an API key: only a ChatGPT sign-in has plan limits
-        return Err(NOT_SIGNED_IN.into());
+        return Err(NO_PLAN_LIMITS.into());
     }
     Ok(snaps)
 }
@@ -312,6 +313,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(query(&bin, Duration::from_secs(5), 0), Err(NOT_SIGNED_IN.to_owned()), "an expired sign-in");
+
+        std::fs::write(&bin, "#!/bin/sh\nread l; echo '{\"id\":0,\"result\":{}}'\nread l; read l\necho '{\"id\":1,\"result\":{}}'\nsleep 1\n").unwrap();
+        assert_eq!(query(&bin, Duration::from_secs(5), 0), Err(NO_PLAN_LIMITS.to_owned()), "an answer without limits is no sign-out");
     }
 
     #[test]

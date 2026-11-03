@@ -15,6 +15,9 @@
 
   const sources = $derived(app.settings?.enabled_sources ?? [])
   const live = (provider: string) => app.limits.some((l) => l.provider === provider && l.source !== 'user_threshold')
+  // as LIVE_READING_MS: an older reading, even of a week still running, does not hide a sign-out
+  const arriving = (provider: string) =>
+    app.limits.some((l) => l.provider === provider && l.active && l.source !== 'user_threshold' && l.observed_ms !== null && Date.now() - l.observed_ms < 15 * 60_000)
   // a CLI that is installed and switched on but signed out reads no limits
   const signedOut = $derived(
     !st
@@ -28,12 +31,12 @@
               st.claude.last_error === 'claude_no_plan_limits' &&
               app.settings?.plans.anthropic !== 'api' &&
               sources.some((s) => ['claude_code', 'cowork', 'claude_desktop'].includes(s)) &&
-              !live('anthropic'),
+              !arriving('anthropic'),
             binary: st.claude.binary,
           },
           {
             kind: 'codex' as const,
-            on: st.codex_poll && st.codex_candidates_found && st.codex.last_error === 'codex_not_signed_in' && sources.includes('codex') && !live('openai'),
+            on: st.codex_poll && st.codex_candidates_found && st.codex.last_error === 'codex_not_signed_in' && sources.includes('codex') && !arriving('openai'),
             binary: st.codex.binary,
           },
           {
@@ -43,7 +46,7 @@
               st.antigravity_candidates_found &&
               st.antigravity.last_error === 'agy_not_signed_in' &&
               sources.includes('antigravity') &&
-              !live('google'),
+              !arriving('google'),
             binary: st.antigravity.binary,
           },
         ].filter((x) => x.on),

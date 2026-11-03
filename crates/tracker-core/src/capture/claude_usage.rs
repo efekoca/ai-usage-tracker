@@ -87,12 +87,18 @@ pub fn config_dir(env: &Env, extra: &ExtraPaths) -> Option<PathBuf> {
     claude_config_roots(env, extra).into_iter().find(|p| p.is_dir())
 }
 
+/// What Claude Code answers without a plan (see [`UsageError::NotAvailable`]).
+pub const NOT_SIGNED_IN: &str = "claude_no_plan_limits";
+
 /// Why a read produced no limits, in words the UI can map.
 #[derive(Debug, Clone, PartialEq)]
 pub enum UsageError {
-    /// Claude Code answered but has no plan limits: not signed in, signed in with an API key,
-    /// or the login expired.
+    /// Claude Code answered that it has no plan and no limits: not signed in, signed in with an
+    /// API key, or the login expired.
     NotAvailable,
+    /// An answer this version cannot read, such as a plan with only windows it does not know.
+    /// It says nothing about the sign-in.
+    Unreadable,
     /// Plan limits apply but the usage service gave no numbers this time (it limits how often
     /// it is asked); the last reading stays valid and a later read succeeds.
     Throttled,
@@ -102,7 +108,8 @@ pub enum UsageError {
 impl std::fmt::Display for UsageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            UsageError::NotAvailable => f.write_str("claude_no_plan_limits"),
+            UsageError::NotAvailable => f.write_str(NOT_SIGNED_IN),
+            UsageError::Unreadable => f.write_str("claude_limits_unreadable"),
             UsageError::Throttled => f.write_str("claude_throttled"),
             UsageError::Failed(e) => f.write_str(e),
         }
@@ -110,14 +117,15 @@ impl std::fmt::Display for UsageError {
 }
 
 pub fn parse_response(resp: &Value, now_ms: i64) -> Result<Vec<LimitSnapshot>, UsageError> {
-    let available = resp.get("rate_limits_available").and_then(Value::as_bool).unwrap_or(false);
-    if !available {
-        return Err(UsageError::NotAvailable);
+    let plan = str_at(resp, "subscription_type").map(str::to_owned);
+    match resp.get("rate_limits_available").and_then(Value::as_bool) {
+        Some(true) => {}
+        Some(false) if plan.is_none() => return Err(UsageError::NotAvailable),
+        _ => return Err(UsageError::Unreadable),
     }
     let Some(limits) = resp.get("rate_limits").filter(|v| v.is_object()) else {
         return Err(UsageError::Throttled);
     };
-    let plan = str_at(resp, "subscription_type").map(str::to_owned);
     let mut out = Vec::new();
     for w in WINDOWS {
         let Some(win) = limits.get(w).filter(|v| v.is_object()) else { continue };
@@ -138,7 +146,7 @@ pub fn parse_response(resp: &Value, now_ms: i64) -> Result<Vec<LimitSnapshot>, U
         });
     }
     if out.is_empty() {
-        return Err(UsageError::NotAvailable);
+        return Err(UsageError::Unreadable);
     }
     Ok(out)
 }
@@ -229,7 +237,15 @@ mod tests {
         // what an expired login or an API-key session answers
         let r = json!({"subscription_type": null, "rate_limits_available": false, "rate_limits": null});
         assert_eq!(parse_response(&r, 1), Err(UsageError::NotAvailable));
-        assert_eq!(parse_response(&json!({}), 1), Err(UsageError::NotAvailable));
+    }
+
+    #[test]
+    fn an_answer_that_cannot_be_read_says_nothing_about_the_sign_in() {
+        let unknown = json!({"subscription_type": "max", "rate_limits_available": true, "rate_limits": {"ten_day": {"utilization": 3}}});
+        assert_eq!(parse_response(&unknown, 1), Err(UsageError::Unreadable), "a window this version does not know");
+        let plan = json!({"subscription_type": "max", "rate_limits_available": false, "rate_limits": null});
+        assert_eq!(parse_response(&plan, 1), Err(UsageError::Unreadable), "a plan, so not signed out");
+        assert_eq!(parse_response(&json!({}), 1), Err(UsageError::Unreadable));
     }
 
     #[test]
