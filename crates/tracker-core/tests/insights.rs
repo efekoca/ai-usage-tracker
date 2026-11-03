@@ -1,5 +1,5 @@
 use chrono::{FixedOffset, TimeZone};
-use tracker_core::analytics::{Filter, Range};
+use tracker_core::analytics::{account_key, Filter, Range};
 use tracker_core::insights::{agents_tools, branches, compare_models, context_stats, day_detail, forecast, plan_value, restarted, session_timeline, sessions, subagent_cache, ForecastKind, PromptShare};
 use tracker_core::tips::{cache_rebuilds, tips, Tip, Tips};
 use tracker_core::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
@@ -689,4 +689,53 @@ fn a_compaction_keeps_the_context_before_it_when_a_filter_hides_that_request() {
     let last = t.requests.last().unwrap();
     assert!(last.compacted);
     assert_eq!(last.compacted_from, Some(80_000), "the hidden request before it, not the visible 10K");
+}
+
+/// Another group's message that began before the row and sent a tool call inside the row's span.
+fn a_call_from_before_the_row() -> (Store, i64, i64) {
+    let t = ms(2026, 10, 2, 9, 0);
+    let s = 1_000;
+    let mut store = store_with(&[
+        ev("b1", t, Tool::ClaudeCode, "claude-opus-5-5", Some("s1"), "C:/w/app", 1_000, 0, 100),
+        ev("a1", t + 10 * s, Tool::ClaudeCode, "claude-sonnet-5-5", Some("s1"), "C:/w/app", 2_000, 0, 100),
+        ev("a2", t + 30 * s, Tool::ClaudeCode, "claude-sonnet-5-5", Some("s1"), "C:/w/app", 3_000, 0, 100),
+        ev("b2", t + 60 * s, Tool::ClaudeCode, "claude-opus-5-5", Some("s1"), "C:/w/app", 4_000, 0, 100),
+    ]);
+    let call = ToolCall {
+        key: "b1-read".into(),
+        ts_ms: t + 20 * s,
+        tool: Tool::ClaudeCode,
+        session_id: Some("s1".into()),
+        project_path: Some("C:/w/app".into()),
+        agent: None,
+        name: "Read".into(),
+        failed: Some(true),
+    };
+    let mut tx = store.transaction().unwrap();
+    tx.upsert_tool_calls(&[call]).unwrap();
+    tx.commit().unwrap();
+    store.conn().execute_batch("UPDATE usage_event SET owner = 'b' WHERE key IN ('b1', 'b2'); UPDATE usage_event SET owner = 'a' WHERE key IN ('a1', 'a2');").unwrap();
+    // the filtered row starts at a1 and ends at a2, as the session list gives it
+    (store, t + 10 * s, t + 30 * s)
+}
+
+#[test]
+fn a_call_from_a_message_that_began_before_the_row_is_not_shown_for_the_model() {
+    let (store, from, to) = a_call_from_before_the_row();
+    let book = PriceBook::default_book();
+    let sonnet = Filter { models: vec!["claude-sonnet-5-5".into()], ..Default::default() };
+    let t = session_timeline(&store, &book, Tool::ClaudeCode, "s1", from, to, &sonnet).unwrap();
+    assert_eq!(t.requests.len(), 2);
+    assert!(t.calls.is_empty() && t.calls_hidden, "the session has opus requests, even if none falls in the row");
+    let all = session_timeline(&store, &book, Tool::ClaudeCode, "s1", from, to, &Filter::default()).unwrap();
+    assert_eq!((all.calls.len(), all.calls_hidden), (1, false), "without a filter the call stays");
+}
+
+#[test]
+fn a_call_from_another_accounts_message_does_not_show_for_the_account() {
+    let (store, from, to) = a_call_from_before_the_row();
+    let only_a = Filter { accounts: vec![account_key(Provider::Anthropic, Some("a"))], ..Default::default() };
+    let t = session_timeline(&store, &PriceBook::default_book(), Tool::ClaudeCode, "s1", from, to, &only_a).unwrap();
+    assert_eq!(t.requests.len(), 2);
+    assert!(t.calls.is_empty() && t.calls_hidden);
 }

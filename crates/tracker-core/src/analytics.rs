@@ -119,6 +119,11 @@ pub fn account_key(provider: Provider, id: Option<&str>) -> String {
 }
 
 impl Filter {
+    /// Whether the filter lets every request through.
+    pub fn is_empty(&self) -> bool {
+        self.tools.is_empty() && self.clients.is_empty() && self.models.is_empty() && self.projects.is_empty() && self.accounts.is_empty()
+    }
+
     pub fn matches(&self, e: &EventRow) -> bool {
         (self.tools.is_empty() || self.tools.contains(&e.tool))
             && (self.clients.is_empty() || e.client.as_ref().is_some_and(|c| self.clients.contains(c)))

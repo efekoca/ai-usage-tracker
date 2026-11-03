@@ -298,6 +298,41 @@ fn import_signins(conn: &Connection, now_ms: i64) -> Result<()> {
 pub(crate) const NOT_SUPERSEDED: &str = "NOT (u.accuracy = 'captured' AND u.request_id IS NOT NULL AND EXISTS (
         SELECT 1 FROM usage_event x WHERE x.request_id = u.request_id AND x.accuracy = 'exact'))";
 
+/// The columns `event_row` reads, in its order.
+const ROW_COLUMNS: &str = "ts_ms, tool, client, model, project_id, session_id, input, cache_read, cache_write,
+    cache_write_1h, output, reasoning, request_input, web_search, speed, inference_geo, accuracy,
+    branch, agent, thread_id, owner";
+
+fn event_row(r: &rusqlite::Row) -> rusqlite::Result<EventRow> {
+    let tool: String = r.get(1)?;
+    let acc: String = r.get(16)?;
+    Ok(EventRow {
+        ts_ms: r.get(0)?,
+        tool: Tool::parse(&tool).unwrap_or(Tool::ClaudeCode),
+        client: r.get(2)?,
+        model: r.get(3)?,
+        project_id: r.get(4)?,
+        session_id: r.get(5)?,
+        tokens: Tokens {
+            input: r.get::<_, i64>(6)? as u64,
+            cache_read: r.get::<_, i64>(7)? as u64,
+            cache_write: r.get::<_, i64>(8)? as u64,
+            cache_write_1h: r.get::<_, i64>(9)? as u64,
+            output: r.get::<_, i64>(10)? as u64,
+            reasoning: r.get::<_, i64>(11)? as u64,
+        },
+        request_input: r.get::<_, i64>(12)? as u64,
+        web_search: u32::try_from(r.get::<_, i64>(13)?).unwrap_or(0),
+        speed: r.get(14)?,
+        inference_geo: r.get(15)?,
+        accuracy: Accuracy::parse(&acc),
+        branch: r.get(17)?,
+        agent: r.get(18)?,
+        thread_id: r.get(19)?,
+        account: r.get(20)?,
+    })
+}
+
 const EVENT_COLUMNS: &str = "key, ts_ms, tool, client, model, project_id, session_id, input, cache_read, cache_write,
     cache_write_1h, output, reasoning, request_input, web_search, speed, service_tier, inference_geo, accuracy, source,
     request_id, branch, agent, thread_id, limit_reset, creator";
@@ -456,43 +491,15 @@ impl Store {
 
     /// Events with `from_ms <= ts < to_ms`.
     pub fn events_between(&self, from_ms: i64, to_ms: i64) -> Result<Vec<EventRow>> {
-        let mut st = self.conn.prepare_cached(
-            &format!(
-                "SELECT ts_ms, tool, client, model, project_id, session_id, input, cache_read, cache_write,
-                        cache_write_1h, output, reasoning, request_input, web_search, speed, inference_geo, accuracy,
-                        branch, agent, thread_id, owner
-                 FROM usage_event u WHERE ts_ms >= ?1 AND ts_ms < ?2 AND {NOT_SUPERSEDED} ORDER BY ts_ms"
-            ),
-        )?;
-        let rows = st.query_map(params![from_ms, to_ms], |r| {
-            let tool: String = r.get(1)?;
-            let acc: String = r.get(16)?;
-            Ok(EventRow {
-                ts_ms: r.get(0)?,
-                tool: Tool::parse(&tool).unwrap_or(Tool::ClaudeCode),
-                client: r.get(2)?,
-                model: r.get(3)?,
-                project_id: r.get(4)?,
-                session_id: r.get(5)?,
-                tokens: Tokens {
-                    input: r.get::<_, i64>(6)? as u64,
-                    cache_read: r.get::<_, i64>(7)? as u64,
-                    cache_write: r.get::<_, i64>(8)? as u64,
-                    cache_write_1h: r.get::<_, i64>(9)? as u64,
-                    output: r.get::<_, i64>(10)? as u64,
-                    reasoning: r.get::<_, i64>(11)? as u64,
-                },
-                request_input: r.get::<_, i64>(12)? as u64,
-                web_search: u32::try_from(r.get::<_, i64>(13)?).unwrap_or(0),
-                speed: r.get(14)?,
-                inference_geo: r.get(15)?,
-                accuracy: Accuracy::parse(&acc),
-                branch: r.get(17)?,
-                agent: r.get(18)?,
-                thread_id: r.get(19)?,
-                account: r.get(20)?,
-            })
-        })?;
+        let mut st = self.conn.prepare_cached(&format!("SELECT {ROW_COLUMNS} FROM usage_event u WHERE ts_ms >= ?1 AND ts_ms < ?2 AND {NOT_SUPERSEDED} ORDER BY ts_ms"))?;
+        let rows = st.query_map(params![from_ms, to_ms], event_row)?;
+        rows.collect()
+    }
+
+    /// Every event of one session, of any tool, oldest first.
+    pub fn session_events(&self, session_id: &str) -> Result<Vec<EventRow>> {
+        let mut st = self.conn.prepare_cached(&format!("SELECT {ROW_COLUMNS} FROM usage_event u WHERE session_id = ?1 AND {NOT_SUPERSEDED} ORDER BY ts_ms"))?;
+        let rows = st.query_map(params![session_id], event_row)?;
         rows.collect()
     }
 
