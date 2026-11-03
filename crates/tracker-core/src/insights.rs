@@ -353,7 +353,9 @@ pub fn session_timeline(store: &Store, book: &PriceBook, tool: Tool, session_id:
         .filter(|c| ours(c.tool, c.session_id.as_deref()))
         .map(|c| TimelineCall { ts_ms: c.ts_ms, name: c.name, agent: c.agent, failed: c.failed })
         .collect();
-    let calls_hidden = !calls.is_empty() && events.iter().any(|e| !filter.matches(e));
+    // decided over the whole session, not the row's span: a request that began before the row's
+    // first one can still send a tool call inside it
+    let calls_hidden = !calls.is_empty() && !filter.is_empty() && store.session_events(session_id)?.iter().any(|e| e.tool == tool && !filter.matches(e));
     if calls_hidden {
         calls.clear();
     }
