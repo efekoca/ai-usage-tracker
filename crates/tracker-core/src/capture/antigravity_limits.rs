@@ -92,8 +92,25 @@ fn json_document(stdout: &str) -> Option<Value> {
     stdout.lines().rev().filter_map(|l| serde_json::from_str::<Value>(l.trim()).ok()).find(Value::is_object)
 }
 
-/// Without a Google sign-in agy prints no usage document.
+/// Without a Google sign-in agy prints `authentication required` to stderr.
 pub const NOT_SIGNED_IN: &str = "agy_not_signed_in";
+/// It ended with no limits and no word on why: no network, an option it no longer takes, an empty
+/// answer. Nothing here says the sign-in is gone.
+pub const NO_USAGE: &str = "agy_no_usage";
+
+fn read_output(stdout: &str, stderr: &str, now_ms: i64) -> Result<Vec<LimitSnapshot>, String> {
+    let doc = json_document(stdout);
+    let failed = doc.as_ref().and_then(|d| str_at(d, "status")).filter(|s| !s.eq_ignore_ascii_case("success"));
+    let snaps = doc.as_ref().filter(|_| failed.is_none()).map(|d| parse_output(d, now_ms)).unwrap_or_default();
+    if !snaps.is_empty() {
+        return Ok(snaps);
+    }
+    let told = doc.as_ref().and_then(|d| str_at(d, "error")).filter(|e| !e.is_empty());
+    if [Some(stderr), told].into_iter().flatten().any(|t| t.to_ascii_lowercase().contains("authentication required")) {
+        return Err(NOT_SIGNED_IN.into());
+    }
+    Err(failed.map_or(NO_USAGE.into(), |status| format!("agy reported {}", told.unwrap_or(status))))
+}
 
 pub fn query(bin: &Path, work_dir: &Path, timeout: Duration, now_ms: i64) -> Result<Vec<LimitSnapshot>, String> {
     let mut cmd = Command::new(bin);
@@ -104,7 +121,7 @@ pub fn query(bin: &Path, work_dir: &Path, timeout: Duration, now_ms: i64) -> Res
         .env("AGY_CLI_DISABLE_AUTO_UPDATE", "true")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -118,24 +135,24 @@ pub fn query(bin: &Path, work_dir: &Path, timeout: Duration, now_ms: i64) -> Res
     std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
     let mut child = cmd.spawn().map_err(|e| format!("cannot start agy: {e}"))?;
     let mut stdout = child.stdout.take().ok_or("no stdout")?;
+    let mut stderr = child.stderr.take().ok_or("no stderr")?;
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let mut buf = Vec::new();
         let _ = (&mut stdout).take(4 << 20).read_to_end(&mut buf);
         let _ = tx.send(buf);
     });
+    let (err_tx, err_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = (&mut stderr).take(1 << 16).read_to_end(&mut buf);
+        let _ = err_tx.send(buf);
+    });
     let out = rx.recv_timeout(timeout + Duration::from_secs(5));
     super::kill_tree(&mut child);
     let out = out.map_err(|_| "agy did not answer in time".to_string())?;
-    let doc = json_document(&String::from_utf8_lossy(&out)).ok_or(NOT_SIGNED_IN)?;
-    if let Some(status) = str_at(&doc, "status").filter(|s| !s.eq_ignore_ascii_case("success")) {
-        return Err(format!("agy reported {status}"));
-    }
-    let snaps = parse_output(&doc, now_ms);
-    if snaps.is_empty() {
-        return Err(NOT_SIGNED_IN.into());
-    }
-    Ok(snaps)
+    let errors = err_rx.recv_timeout(Duration::from_secs(1)).unwrap_or_default();
+    read_output(&String::from_utf8_lossy(&out), &String::from_utf8_lossy(&errors), now_ms)
 }
 
 #[cfg(test)]
@@ -180,6 +197,31 @@ mod tests {
         assert_eq!(s.len(), 1);
         assert_eq!((s[0].limit_id.as_str(), s[0].used_pct), ("new_pool", Some(100.0)));
         assert!(parse_output(&json!({"status": "SUCCESS"}), 1).is_empty());
+    }
+
+    #[test]
+    fn only_agys_own_words_count_as_a_sign_out() {
+        // what agy 2026-11 prints without a sign-in
+        let out = r#"{"conversation_id":"","status":"ERROR","response":"","error":"authentication failed or timed out"}"#;
+        let err = "Error: authentication required. Run 'agy' to log in, then retry.\nerror: authentication failed or timed out\n";
+        assert_eq!(read_output(out, err, 1), Err(NOT_SIGNED_IN.to_owned()));
+        assert_eq!(read_output(out, "error: authentication failed or timed out\n", 1), Err("agy reported authentication failed or timed out".to_owned()), "it may have timed out");
+        assert_eq!(read_output("", "error: unknown flag: --output-format\n", 1), Err(NO_USAGE.to_owned()));
+        assert_eq!(read_output("", "", 1), Err(NO_USAGE.to_owned()), "no network, no word on why");
+        assert_eq!(read_output(r#"{"status":"SUCCESS","command":{"data":{"groups":[]}}}"#, "", 1), Err(NO_USAGE.to_owned()), "signed in with no limits to show");
+        assert_eq!(read_output(r#"{"status":"QUOTA"}"#, "", 1), Err("agy reported QUOTA".to_owned()));
+        assert_eq!(read_output(&sample().to_string(), "Error: authentication required", 1).map(|s| s.len()), Ok(4), "limits win over a stray line");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_cli_that_says_so_on_stderr_is_signed_out() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("agy");
+        std::fs::write(&bin, "#!/bin/sh\necho 'Error: authentication required.' >&2\necho '{\"status\":\"ERROR\"}'\n").unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(query(&bin, dir.path(), Duration::from_secs(5), 0), Err(NOT_SIGNED_IN.to_owned()));
     }
 
     #[test]

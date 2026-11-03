@@ -284,9 +284,11 @@ function painter(ctx: CanvasRenderingContext2D, family: string, c: Colors) {
 
 function dial(P: Painter, d: { x: number; y: number; r: number; w: number }, share: number) {
   const { ctx, c } = P
-  // it ends high in the corner, well clear of the title
+  // it starts high in the corner, well clear of the title, and runs off the top of the card
   const a0 = (160 * Math.PI) / 180
-  const sweep = (245 * Math.PI) / 180
+  const sweep = Math.PI + Math.asin((d.y + d.w / 2) / d.r) - a0
+  // the fill has only what can be seen to tell the share with: its round end meets the top edge there
+  const reach = Math.PI + Math.asin((d.y - d.w / 2) / d.r) - a0
   ctx.lineCap = 'round'
   ctx.lineWidth = d.w
   ctx.strokeStyle = c.track
@@ -297,7 +299,7 @@ function dial(P: Painter, d: { x: number; y: number; r: number; w: number }, sha
     ctx.globalAlpha = 0.9
     ctx.strokeStyle = c.accent
     ctx.beginPath()
-    ctx.arc(d.x, d.y, d.r, a0, a0 + Math.min(1, share) * sweep)
+    ctx.arc(d.x, d.y, d.r, a0, a0 + (share >= 1 ? sweep : share * reach))
     ctx.stroke()
     ctx.globalAlpha = 1
   }

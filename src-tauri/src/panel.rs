@@ -232,8 +232,11 @@ pub async fn panel_data(app: AppHandle) -> Result<PanelData, String> {
         let limits = analytics::limits_view(&store, &book, now_ms(), &s.thresholds).map_err(|e| e.to_string())?.into_iter().filter(|l| l.active || l.account.is_some()).collect::<Vec<_>>();
         (limits, crate::commands::known_accounts(&store)?)
     };
-    let live = |p: Provider| limits.iter().any(|l| l.active && l.provider == p && l.used_pct.is_some() && matches!(l.state, LimitState::Fresh | LimitState::Behind));
-    let signed_out: Vec<Provider> = crate::capture::signed_out(&app, &s).into_iter().filter(|&p| !live(p)).collect();
+    let live = |p: Provider| {
+        let recent = |t: i64| now_ms() - t < analytics::LIVE_READING_MS;
+        limits.iter().any(|l| l.active && l.provider == p && l.used_pct.is_some() && matches!(l.state, LimitState::Fresh | LimitState::Behind) && l.observed_ms.is_some_and(recent))
+    };
+    let signed_out: Vec<Provider> = crate::capture::sign_ins(&app, &s).into_iter().filter(|&(p, st)| st == crate::capture::SignIn::Out && !live(p)).map(|(p, _)| p).collect();
     let limits = limits
         .into_iter()
         .filter(|l| providers.contains(&l.provider) && (l.window == "five_hour" || l.window == "seven_day"))

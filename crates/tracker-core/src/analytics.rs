@@ -406,6 +406,9 @@ pub enum LimitState {
 pub const BEHIND_GRACE_MS: i64 = 10 * 60_000;
 /// Use on another device or the web fills the same limit without reaching the local logs.
 pub const MAX_FRESH_AGE_MS: i64 = 24 * 3_600_000;
+/// A reading this recent shows the limits still arrive some other way than the CLI that says it
+/// is signed out; an older one, even of a window still running, shows nothing of the kind.
+pub const LIVE_READING_MS: i64 = 15 * 60_000;
 
 /// User-defined budget for a window, used only when no real limit reading exists.
 #[derive(Debug, Clone, Serialize, Deserialize)]

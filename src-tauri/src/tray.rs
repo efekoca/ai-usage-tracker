@@ -222,6 +222,7 @@ pub(crate) fn readings(app: &AppHandle, s: &Settings) -> Option<Vec<Reading>> {
                     fills_at_ms,
                     at_reset,
                     account: v.account,
+                    observed_ms: v.observed_ms,
                     active: v.active,
                 })
             })

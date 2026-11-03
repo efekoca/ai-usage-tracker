@@ -13,6 +13,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tracker_core::capture::claude_settings::{self as cs, RevertOutcome};
 use tracker_core::capture::{antigravity_limits, claude_signin, claude_usage, codex_limits, otlp, statusline, Cli};
 use tracker_core::discovery::{self, Env, SourceId};
+use tracker_core::model::Provider;
 use tracker_core::store::Store;
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -450,21 +451,35 @@ pub fn status(app: &AppHandle) -> CaptureStatus {
     }
 }
 
-/// The providers whose limits go unread because their CLI is signed out; an API plan has none to read.
-pub(crate) fn signed_out(app: &AppHandle, s: &Settings) -> Vec<tracker_core::model::Provider> {
-    use tracker_core::model::Provider;
+/// What the last limit read says about a provider's sign-in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SignIn {
+    Out,
+    /// The last read worked, or the provider's limits are not being read.
+    Clear,
+    /// No read yet, or one that failed some other way, which says nothing either way.
+    Unknown,
+}
+
+pub(crate) fn sign_ins(app: &AppHandle, s: &Settings) -> [(Provider, SignIn); 3] {
     let rt = &app.state::<AppState>().capture;
-    let says = |m: &Mutex<PollStatus>, code: &str| m.lock().unwrap().last_error.as_deref() == Some(code);
     let providers = crate::commands::enabled_providers(s);
+    let of = |p: Provider, reads: bool, poll: &Mutex<PollStatus>, out: &str| {
+        let poll = poll.lock().unwrap();
+        let state = match (reads && providers.contains(&p), poll.last_error.as_deref(), poll.last_ok_ms) {
+            (false, ..) => SignIn::Clear,
+            (true, Some(e), _) if e == out => SignIn::Out,
+            (true, None, Some(_)) => SignIn::Clear,
+            _ => SignIn::Unknown,
+        };
+        (p, state)
+    };
     [
-        (Provider::Anthropic, s.capture.claude_poll && says(&rt.claude, "claude_no_plan_limits") && s.plans.get("anthropic").map(String::as_str) != Some("api")),
-        (Provider::OpenAI, s.capture.codex_poll && says(&rt.codex, codex_limits::NOT_SIGNED_IN)),
-        (Provider::Google, s.capture.antigravity_poll && says(&rt.antigravity, antigravity_limits::NOT_SIGNED_IN)),
+        // an API plan has no limits to read
+        of(Provider::Anthropic, s.capture.claude_poll && s.plans.get("anthropic").map(String::as_str) != Some("api"), &rt.claude, claude_usage::NOT_SIGNED_IN),
+        of(Provider::OpenAI, s.capture.codex_poll, &rt.codex, codex_limits::NOT_SIGNED_IN),
+        of(Provider::Google, s.capture.antigravity_poll, &rt.antigravity, antigravity_limits::NOT_SIGNED_IN),
     ]
-    .into_iter()
-    .filter(|&(p, out)| out && providers.contains(&p))
-    .map(|(p, _)| p)
-    .collect()
 }
 
 fn codex_binary(s: &Settings) -> Option<PathBuf> {
@@ -556,11 +571,16 @@ fn read_claude(state: &AppState, s: &Settings, bin: &Path) -> Result<Vec<tracker
     let file = root.as_deref().map(|r| claude_signin::config_file(&env, r));
     let signed_in = || file.as_deref().and_then(|f| claude_signin::signed_in(f).ok().flatten());
     let before = signed_in();
-    let mut snaps = claude_usage::query(bin, &work, cfg.as_deref(), Duration::from_secs(30), now_ms()).map_err(|e| e.to_string())?;
     // a token or key the CLI is given wins over the folder's sign-in
     let mut docs = managed_settings();
     docs.extend(root.as_deref().and_then(|r| cs::read_settings(&cs::settings_path(r))));
-    if !cs::own_sign_in_env() && !cs::own_sign_in(&docs) && before.is_some() && before == signed_in() {
+    let own = cs::own_sign_in_env() || cs::own_sign_in(&docs);
+    let mut snaps = match claude_usage::query(bin, &work, cfg.as_deref(), Duration::from_secs(30), now_ms()) {
+        // signing in would change nothing for a key the CLI is handed
+        Err(claude_usage::UsageError::NotAvailable) if own => return Err("claude_own_key".into()),
+        read => read.map_err(|e| e.to_string())?,
+    };
+    if !own && before.is_some() && before == signed_in() {
         snaps.iter_mut().for_each(|l| l.account = before.clone());
     }
     Ok(snaps)

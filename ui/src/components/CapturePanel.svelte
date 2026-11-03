@@ -100,9 +100,10 @@
     codex: 'https://learn.chatgpt.com/docs/codex/cli',
     antigravity: 'https://antigravity.google/docs/getting-started?tab=cli',
   }
-  const SIGNED_OUT = { claude: 'claude_no_plan_limits', codex: 'codex_not_signed_in', antigravity: 'agy_not_signed_in' } as const
+  // a Codex with an API key has no limits until it signs in with ChatGPT
+  const SIGN_IN = { claude: ['claude_no_plan_limits'], codex: ['codex_not_signed_in', 'codex_no_plan_limits'], antigravity: ['agy_not_signed_in'] } as const
   const signIn = (kind: string) =>
-    !!st && (kind === 'claude' || kind === 'codex' || kind === 'antigravity') && !missing(kind) && st[kind].last_error === SIGNED_OUT[kind]
+    !!st && (kind === 'claude' || kind === 'codex' || kind === 'antigravity') && !missing(kind) && (SIGN_IN[kind] as readonly (string | null)[]).includes(st[kind].last_error)
   const missing = (kind: string) =>
     !!st && ((kind === 'claude' && !st.claude_candidates_found) || (kind === 'codex' && !st.codex_candidates_found) || (kind === 'antigravity' && !st.antigravity_candidates_found))
   const ago = (ms: number | null | undefined) => (ms ? t('cap.ago', { t: fmtDuration(now - ms) }) : t('cap.never'))
