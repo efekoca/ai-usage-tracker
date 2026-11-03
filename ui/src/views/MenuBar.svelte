@@ -425,7 +425,7 @@
           {#if showsIcon && preview?.icon && preview.icon.dial !== null}
             {@const icon = preview.icon}
             {@const share = icon.dial ?? 0}
-            <span class="badge" style:background={icon.bg || 'transparent'}>
+            <span class="badge" style:background={icon.bg || 'transparent'} style:opacity={icon.opacity}>
               <svg width="16" height="16" viewBox={icon.bg ? '-2.3 -2.3 28.6 28.6' : '0 0 24 24'} fill="none" stroke-width="2.8" stroke-linecap="round">
                 <path d={dialArc(1)} stroke={icon.bg ? '#283256' : 'currentColor'} stroke-opacity={icon.bg ? 1 : 0.35} />
                 {#if share > 0}<path d={dialArc(share)} stroke={icon.fg || 'currentColor'} />{/if}
@@ -433,7 +433,7 @@
               </svg>
             </span>
           {:else if showsIcon && preview?.icon}
-            <span class="badge" style:background={preview.icon.bg} style:color={preview.icon.fg}>{#if preview.icon.logo}<BrandIcon provider={preview.icon.logo} size={12} always />{:else}{preview.icon.text}{/if}</span>
+            <span class="badge" style:background={preview.icon.bg} style:color={preview.icon.fg} style:opacity={preview.icon.opacity}>{#if preview.icon.logo}<BrandIcon provider={preview.icon.logo} size={12} always />{:else}{preview.icon.text}{/if}</span>
           {:else if showsIcon}<img src={mac ? '/menu-bar-template.png' : windows ? `/tray-windows-${backdrop}.png` : '/app-icon.png'} class:template={mac} alt="" width="16" height="16" />{/if}
           {#if !windows && preview?.title}<span class="title">{preview.title}</span>{/if}
         </span>

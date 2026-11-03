@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "report",
-  "description": "The hidden page the PDF summary is printed from: local IPC only.",
+  "description": "The hidden page the PDF summary is printed from: the app's own commands only.",
   "windows": ["report"],
-  "permissions": ["core:default"]
+  "permissions": []
 }

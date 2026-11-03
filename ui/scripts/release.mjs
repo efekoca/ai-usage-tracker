@@ -52,6 +52,16 @@ const signing = hasKey && (!mac || notarized)
 if (hasKey && !signing) console.log('Without Apple signing and notarization the Mac build gets no update artifacts.')
 const conf = JSON.parse(readFileSync(join(repo, 'src-tauri', 'tauri.conf.json'), 'utf8'))
 const version = conf.version
+// a notarized Mac build is what people install, so it comes from the release tag (CODE_SIGNING.md)
+if (notarized) {
+  const git = (...a) => spawnSync('git', a, { cwd: repo, encoding: 'utf8' })
+  const tag = git('describe', '--tags', '--exact-match', 'HEAD').stdout?.trim() ?? ''
+  const changed = git('diff', '--quiet', 'HEAD').status !== 0
+  if (tag !== `v${version}` || changed) {
+    console.error(`A signed release is built from the v${version} tag with no changes to tracked files (HEAD is ${tag || 'not tagged'}${changed ? ', with changes' : ''}).`)
+    process.exit(1)
+  }
+}
 const args = ['build', ...cliArgs]
 const scratch = mkdtempSync(join(tmpdir(), 'ai-usage-tracker-'))
 const extra = { bundle: {} }

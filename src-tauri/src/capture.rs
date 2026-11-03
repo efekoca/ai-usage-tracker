@@ -470,10 +470,12 @@ pub fn install_cli(app: &AppHandle, kind: &str) -> Result<String, String> {
         _ => return Err(format!("unknown capture kind {kind}")),
     };
     let state = app.state::<AppState>();
-    if find(&state.settings.read().unwrap()).is_none() {
+    // a copy: looking for the binary can run it for up to 10 s, which must not hold the settings
+    let settings = || state.settings.read().unwrap().clone();
+    if find(&settings()).is_none() {
         tracker_core::capture::install(cli, Duration::from_secs(15 * 60))?;
     }
-    find(&state.settings.read().unwrap()).ok_or(format!("{code}_not_found"))?;
+    find(&settings()).ok_or(format!("{code}_not_found"))?;
     persist(app, |s| match cli {
         Cli::Claude => s.capture.claude_poll = true,
         Cli::Codex => s.capture.codex_poll = true,
@@ -555,6 +557,10 @@ type SeenSignin = std::collections::HashMap<PathBuf, ((u64, Option<std::time::Sy
 /// requests were tied anew (see `Store::note_signin`).
 fn note_claude_signins(state: &AppState, s: &Settings, seen: &mut SeenSignin) -> bool {
     let _writing = state.writers.read().unwrap_or_else(|e| e.into_inner());
+    // `s` may be from before "Delete all my data"; nothing is written into the emptied archive
+    if !state.settings.read().unwrap().onboarded {
+        return false;
+    }
     let env = Env::from_system();
     let now = now_ms();
     let mut store: Option<Store> = None;
@@ -712,18 +718,24 @@ pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
         ("claude", true) => {
             let bin = claude_binary(&settings).ok_or("claude_not_found")?;
             let epoch = state.capture.wipes.load(Ordering::SeqCst);
-            match read_claude(&state, &settings, &bin) {
-                Ok(snaps) => store_limits(&state, epoch, &snaps)?,
-                // signed in, just asked too soon: the next cycle reads the limits
-                Err(e) if e == "claude_throttled" => {}
+            let read = match read_claude(&state, &settings, &bin) {
+                Ok(snaps) => {
+                    store_limits(&state, epoch, &snaps)?;
+                    true
+                }
+                // too soon to ask, so nothing is known yet about the sign-in: the status stays
+                // as it was and the next cycle reads the limits
+                Err(e) if e == "claude_throttled" => false,
                 Err(e) => return Err(e),
+            };
+            if read {
+                *state.capture.claude.lock().unwrap() =
+                    PollStatus { binary: Some(bin.to_string_lossy().into_owned()), last_ok_ms: Some(now_ms()), last_error: None };
             }
-            *state.capture.claude.lock().unwrap() =
-                PollStatus { binary: Some(bin.to_string_lossy().into_owned()), last_ok_ms: Some(now_ms()), last_error: None };
             persist(app, |s| s.capture.claude_poll = true)?;
             wake_claude(app);
             let _ = app.emit("data-changed", ());
-            Ok("enabled".into())
+            Ok(if read { "enabled" } else { "claude_wait" }.into())
         }
         ("claude", false) => {
             persist(app, |s| s.capture.claude_poll = false)?;
@@ -1041,12 +1053,15 @@ fn start_claude_poller(app: &AppHandle) {
         let mut seen_event_ms: Option<i64> = None;
         let mut forced = false;
         let mut signins = SeenSignin::new();
+        let mut first = true;
         loop {
-            match rx.recv_timeout(if last_try_ms == 0 { FIRST_READ[2] } else { TICK }) {
+            // soon after start, then on the tick: with reads off, `last_try_ms` stays 0
+            match rx.recv_timeout(if first && last_try_ms == 0 { FIRST_READ[2] } else { TICK }) {
                 Ok(()) => forced = true,
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return,
             }
+            first = false;
             let state = app.state::<AppState>();
             if state.quitting.load(Ordering::SeqCst) {
                 return;

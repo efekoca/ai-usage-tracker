@@ -73,10 +73,34 @@ pub struct ModelPrice {
     pub web_search_per_1k: Option<f64>,
     #[serde(default)]
     pub off_peak: Option<OffPeak>,
+    /// Rates that take over from a day on (UTC), oldest first, e.g. when an introductory price
+    /// ends; requests before it keep the rates above, so a price change never reprices the past.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub later: Vec<LaterRates>,
     #[serde(default)]
     pub verified_at: Option<String>,
     #[serde(default)]
     pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LaterRates {
+    pub from: chrono::NaiveDate,
+    #[serde(flatten)]
+    pub rates: Rates,
+}
+
+impl ModelPrice {
+    /// The rates for one request: the long-context tier when its prompt is over the threshold,
+    /// else those in force on its day. A request without a time takes today's.
+    fn rates_for(&self, c: &CostInput) -> &Rates {
+        if let Some(lc) = self.long_context.as_ref().filter(|lc| c.request_input > lc.threshold) {
+            return &lc.rates;
+        }
+        let ms = c.ts_ms.unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
+        let Some(day) = chrono::DateTime::from_timestamp_millis(ms).map(|t| t.date_naive()) else { return &self.rates };
+        self.later.iter().rev().find(|l| l.from <= day).map_or(&self.rates, |l| &l.rates)
+    }
 }
 
 /// A lower price outside the vendor's busy hours (DeepSeek halves it).
@@ -188,6 +212,12 @@ fn validate(file: &PricingFile) -> Result<(), PricingError> {
         if let Some(v) = m.web_search_per_1k {
             check_rate(&format!("{id}.web_search_per_1k"), v)?;
         }
+        for (i, l) in m.later.iter().enumerate() {
+            check_rates(&format!("{id}.later[{i}]"), &l.rates)?;
+            if i > 0 && m.later[i - 1].from >= l.from {
+                return Err(PricingError::Invalid(format!("{id}.later must be in date order")));
+            }
+        }
         if let Some(op) = &m.off_peak {
             check_rate(&format!("{id}.off_peak.multiplier"), op.multiplier)?;
             if op.peak_hours_utc.iter().any(|[start, end]| start >= end || *end > 24) {
@@ -242,12 +272,21 @@ pub fn catalog_prices(json: &str) -> HashMap<String, ModelPrice> {
                 geo_multipliers: HashMap::new(),
                 web_search_per_1k: None,
                 off_peak: None,
+                later: Vec::new(),
                 verified_at: None,
                 notes: Some("OpenCode model catalog".into()),
             });
         }
     }
     out
+}
+
+/// What a saved price list needs to keep: the models whose rates differ from the bundled list
+/// and the models it does not have. The rest follows the bundled list on every load.
+pub fn user_changes(mut file: PricingFile) -> Result<PricingFile, PricingError> {
+    let bundled: PricingFile = serde_json::from_str(DEFAULT_PRICING_JSON)?;
+    file.models.retain(|m| bundled.models.iter().find(|b| b.id.eq_ignore_ascii_case(&m.id)).is_none_or(|b| b.rates != m.rates));
+    Ok(file)
 }
 
 impl PriceBook {
@@ -272,7 +311,9 @@ impl PriceBook {
     }
 
     /// A saved price list keeps its edits but still learns models and aliases added to the
-    /// bundled list after it was saved; a name it already uses keeps its meaning.
+    /// bundled list after it was saved; a name it already uses keeps its meaning. A saved model
+    /// whose rates the user never changed takes the bundled entry, so later corrections and
+    /// dated price changes reach it.
     pub fn from_user_json(s: &str) -> Result<PriceBook, PricingError> {
         let mut file: PricingFile = serde_json::from_str(s)?;
         let bundled: PricingFile = serde_json::from_str(DEFAULT_PRICING_JSON)?;
@@ -282,6 +323,10 @@ impl PriceBook {
         for b in bundled.models {
             let mut names = known(&file);
             if let Some(m) = file.models.iter_mut().find(|m| m.id.eq_ignore_ascii_case(&b.id)) {
+                if m.rates == b.rates {
+                    let aliases = std::mem::take(&mut m.aliases);
+                    *m = ModelPrice { aliases, ..b.clone() };
+                }
                 for a in b.aliases {
                     if names.insert(a.to_ascii_lowercase()) {
                         m.aliases.push(a);
@@ -346,10 +391,7 @@ impl PriceBook {
     /// `None` when the model has no known price.
     pub fn cost(&self, c: &CostInput) -> Option<Cost> {
         let p = self.lookup(c.model)?;
-        let rates = match &p.long_context {
-            Some(lc) if c.request_input > lc.threshold => &lc.rates,
-            _ => &p.rates,
-        };
+        let rates = p.rates_for(c);
         let mult = multiplier(p, c);
         let per = |tokens: u64, rate: f64| tokens as f64 * rate / 1_000_000.0 * mult;
         let cw5_rate = rates.cache_write_5m.unwrap_or(rates.input);
@@ -381,10 +423,7 @@ impl PriceBook {
     /// never re-used enough to pay off. `None` for unpriced models.
     pub fn cache_savings(&self, c: &CostInput) -> Option<f64> {
         let p = self.lookup(c.model)?;
-        let rates = match &p.long_context {
-            Some(lc) if c.request_input > lc.threshold => &lc.rates,
-            _ => &p.rates,
-        };
+        let rates = p.rates_for(c);
         let mult = multiplier(p, c);
         let per = |tokens: u64, rate: f64| tokens as f64 * rate / 1_000_000.0 * mult;
         let read_rate = rates.cache_read.unwrap_or(rates.input);
@@ -708,5 +747,43 @@ mod tests {
         .is_err());
         // a file without a unit (older copies) is per million tokens
         assert!(PriceBook::from_json(r#"{"schema_version":1,"updated_at":"x","models":[]}"#).is_ok());
+        assert!(edit(&|f| {
+            let later = |day| LaterRates { from: chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").unwrap(), rates: Rates { input: 1.0, output: 2.0, ..Default::default() } };
+            f.models[0].later = vec![later("2027-02-01"), later("2027-01-01")];
+        })
+        .is_err());
+    }
+
+    #[test]
+    fn a_dated_price_starts_on_its_day_and_never_reprices_the_past() {
+        let b = PriceBook::default_book();
+        let t = tokens(1_000_000, 0, 0, 0, 1_000_000);
+        let at = |rfc: &str| {
+            let ms = chrono::DateTime::parse_from_rfc3339(rfc).unwrap().timestamp_millis();
+            b.cost(&CostInput { model: "gemini-3.8-flash", tokens: &t, request_input: 0, web_search_requests: 0, speed: None, inference_geo: None, ts_ms: Some(ms) }).unwrap().total()
+        };
+        assert!((at("2026-12-31T23:59:00Z") - 4.5).abs() < 1e-9, "introductory 0.75 + 3.75");
+        assert!((at("2027-01-01T00:00:00Z") - 9.0).abs() < 1e-9, "1.50 + 7.50 from the first day");
+    }
+
+    #[test]
+    fn a_saved_list_keeps_edits_and_follows_the_bundled_list_elsewhere() {
+        let mut saved: PricingFile = serde_json::from_str(DEFAULT_PRICING_JSON).unwrap();
+        // a list saved before dated prices existed, with one model edited
+        for m in &mut saved.models {
+            m.later.clear();
+        }
+        let edited = saved.models.iter_mut().find(|m| m.id == "gemini-3.7-flash").unwrap();
+        edited.rates.input = 0.5;
+        let book = PriceBook::from_user_json(&serde_json::to_string(&saved).unwrap()).unwrap();
+        let t = tokens(1_000_000, 0, 0, 0, 0);
+        let ms = chrono::DateTime::parse_from_rfc3339("2027-03-01T00:00:00Z").unwrap().timestamp_millis();
+        let cost = |model| book.cost(&CostInput { model, tokens: &t, request_input: 0, web_search_requests: 0, speed: None, inference_geo: None, ts_ms: Some(ms) }).unwrap().total();
+        assert!((cost("gemini-3.8-flash") - 1.5).abs() < 1e-9, "unedited: the bundled later price");
+        assert!((cost("gemini-3.7-flash") - 0.5).abs() < 1e-9, "edited: the user's price");
+
+        let kept = user_changes(saved).unwrap();
+        let ids: Vec<&str> = kept.models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["gemini-3.7-flash"], "only the edited model is saved");
     }
 }

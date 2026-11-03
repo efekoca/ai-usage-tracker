@@ -153,8 +153,12 @@ export function drawCard(canvas: HTMLCanvasElement, card: Card, shape: Shape, th
   y += L.hero * 0.9
 
   y += L.lineGap
+  // a long amount in another currency shrinks the line rather than run past the margin
+  const lineWidth = (size: number) => card.line.reduce((sum, item, i) => sum + width(item, size) + (i ? L.itemGap : 0), 0)
+  let lineSize = L.line
+  while (lineSize > 20 && lineWidth(lineSize) > W - 2 * L.pad) lineSize -= 1
   let x = L.pad
-  for (const item of card.line) x = line(item, x, base(y, L.line), L.line, c.ink2, c.ink) + L.itemGap
+  for (const item of card.line) x = line(item, x, base(y, L.line), lineSize, c.ink2, c.ink) + L.itemGap
   y += L.line * 1.2
 
   y += L.chartGap

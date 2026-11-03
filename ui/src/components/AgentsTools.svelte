@@ -48,7 +48,9 @@
   let which: 'all' | Tool = $state('all')
   let showAll = $state(false)
   const toolTools = $derived([...new Set((data?.tools ?? []).map((x) => x.tool))] as Tool[])
-  const rows = $derived((data?.tools ?? []).filter((x) => which === 'all' || x.tool === which))
+  // a tool the new period no longer has falls back to all, which the control then shows
+  const pick = $derived(which !== 'all' && toolTools.includes(which) ? which : 'all')
+  const rows = $derived((data?.tools ?? []).filter((x) => pick === 'all' || x.tool === pick))
   const totalCalls = $derived(rows.reduce((s, x) => s + x.calls, 0))
   const visible = $derived(showAll ? rows : rows.slice(0, 15))
 
@@ -120,7 +122,7 @@
           <p class="subtle small lead">{t('tools.lead')}</p>
         </div>
         {#if toolTools.length > 1}
-          <Segmented label={t('tools.title')} bind:value={which} options={[{ value: 'all', label: t('tools.all') }, ...toolTools.map((x) => ({ value: x, label: toolLabel(x) }))]} />
+          <Segmented label={t('tools.title')} value={pick} onchange={(v) => (which = v)} options={[{ value: 'all', label: t('tools.all') }, ...toolTools.map((x) => ({ value: x, label: toolLabel(x) }))]} />
         {/if}
       </div>
       {#if rows.length === 0}

@@ -81,7 +81,7 @@
           <tr><td>{t('metric.output')}</td><td class="num">{fmtMoney(r.totals.cost.output)}</td></tr>
           <tr><td>{t('metric.cacheRead')}</td><td class="num">{fmtMoney(r.totals.cost.cache_read)}</td></tr>
           <tr><td>{t('metric.cacheWrite')}</td><td class="num">{fmtMoney(r.totals.cost.cache_write)}</td></tr>
-          {#if r.totals.cost.web_search > 0}<tr><td>Web search</td><td class="num">{fmtMoney(r.totals.cost.web_search)}</td></tr>{/if}
+          {#if r.totals.cost.web_search > 0}<tr><td>{t('metric.webSearch')}</td><td class="num">{fmtMoney(r.totals.cost.web_search)}</td></tr>{/if}
           <tr class="sum"><td>{t('metric.apiEq')}</td><td class="num">{fmtMoney(r.totals.cost_usd)}</td></tr>
         </tbody>
       </table>

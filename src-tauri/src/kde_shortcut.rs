@@ -28,11 +28,13 @@ pub fn available() -> bool {
 
 pub fn clear() {
     GENERATION.fetch_add(1, Ordering::SeqCst);
-    if let Some(conn) = CONN.lock().unwrap().take()
-        && let Ok(p) = accel(&conn)
-    {
-        // keeps the entry in System Settings but frees the keys
-        let _ = p.call_method("setShortcut", &(action_id(), Vec::<i32>::new(), SET_PRESENT | NO_AUTOLOADING));
+    if let Some(conn) = CONN.lock().unwrap().take() {
+        if let Ok(p) = accel(&conn) {
+            // keeps the entry in System Settings but frees the keys
+            let _ = p.call_method("setShortcut", &(action_id(), Vec::<i32>::new(), SET_PRESENT | NO_AUTOLOADING));
+        }
+        // ends the listener, which holds a copy of the connection
+        let _ = conn.close();
     }
 }
 
@@ -49,7 +51,10 @@ pub fn bind(hotkey: &str, chosen: bool, on_press: impl Fn() + Send + 'static) ->
     let path: OwnedObjectPath = p.call("getComponent", &(COMPONENT,)).map_err(err)?;
     let component = Proxy::new(&conn, DEST, path, "org.kde.kglobalaccel.Component").map_err(err)?;
     let pressed = component.receive_signal("globalShortcutPressed").map_err(err)?;
-    *CONN.lock().unwrap() = Some(conn);
+    // the previous binding's listener ends with its connection
+    if let Some(old) = CONN.lock().unwrap().replace(conn) {
+        let _ = old.close();
+    }
     std::thread::Builder::new()
         .name("kde-shortcut".into())
         .spawn(move || {

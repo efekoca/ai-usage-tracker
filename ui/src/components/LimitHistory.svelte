@@ -41,7 +41,9 @@
   })
 
   const enabled = $derived(providersOf(app.settings?.enabled_sources ?? []).filter((p) => (view?.advice ?? []).some((a) => a.provider === p) || (view?.history.series ?? []).some((x) => x.provider === p)))
-  const providers = $derived(provider === 'all' ? enabled : [provider])
+  // a provider no longer shown falls back to all, which the control then shows
+  const chosen = $derived(provider !== 'all' && enabled.includes(provider) ? provider : 'all')
+  const providers = $derived(chosen === 'all' ? enabled : [chosen])
   const series = $derived(
     (view?.history.series ?? []).filter((s) => s.window === win && providers.includes(s.provider) && (acct === 'all' || accountKey(s.provider, s.account) === acct)),
   )
@@ -88,7 +90,7 @@
   })
   const buckets = $derived.by(() => {
     const edges = [
-      { label: '1–20', test: (p: number) => p < 20 },
+      { label: '0–20', test: (p: number) => p < 20 },
       { label: '20–40', test: (p: number) => p >= 20 && p < 40 },
       { label: '40–60', test: (p: number) => p >= 40 && p < 60 },
       { label: '60–80', test: (p: number) => p >= 60 && p < 80 },
@@ -115,7 +117,7 @@
   {#if enabled.length > 1}
     <div class="f">
       <span class="small muted">{t('history.filter.provider')}</span>
-      <Segmented label={t('history.filter.provider')} bind:value={provider} options={[{ value: 'all', label: t('history.filter.all') }, ...enabled.map((p) => ({ value: p, label: t(`provider.${p}`) }))]} />
+      <Segmented label={t('history.filter.provider')} value={chosen} onchange={(v) => (provider = v)} options={[{ value: 'all', label: t('history.filter.all') }, ...enabled.map((p) => ({ value: p, label: t(`provider.${p}`) }))]} />
     </div>
   {/if}
   {#if accountChoices.length}

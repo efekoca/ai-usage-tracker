@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { save } from '@tauri-apps/plugin-dialog'
   import { app, latest } from '../lib/store.svelte'
   import { api, providersOf, type Period, type PlansFile } from '../lib/api'
+  import { saveAs } from '../lib/dialogs'
   import { fmtDate, i18n, localDate, t } from '../lib/i18n.svelte'
   import { planMultiple } from '../lib/plans'
   import { buildDay, buildMonth, buildYear, type Card, type CardKind } from '../lib/cards'
@@ -97,10 +97,7 @@
     const canvas = canvases[shape]
     if (!canvas || !card) return
     status = null
-    const filters = [{ name: 'PNG', extensions: ['png'] }]
-    let chosen = await save({ defaultPath: `AI-Usage_${stem}${shape === 'square' ? '_square' : ''}.png`, filters })
-    // some dialogs leave the extension off; asking again with it lets the dialog warn before replacing a file
-    if (chosen && !/\.png$/i.test(chosen)) chosen = await save({ defaultPath: `${chosen}.png`, filters })
+    const chosen = await saveAs(`AI-Usage_${stem}${shape === 'square' ? '_square' : ''}.png`, 'PNG', 'png')
     if (!chosen) return
     busy = shape
     try {

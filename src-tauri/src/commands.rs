@@ -128,13 +128,14 @@ pub struct SourceInfo {
     enabled: bool,
 }
 
+// walks every log folder, so it stays off the event loop
 #[tauri::command]
-pub fn detect_sources(state: State<AppState>) -> Vec<SourceInfo> {
+pub async fn detect_sources(state: State<'_, AppState>) -> Res<Vec<SourceInfo>> {
     let s = state.settings.read().unwrap().clone();
-    discovery::detect(&Env::from_system(), &s.extra_paths)
+    Ok(discovery::detect(&Env::from_system(), &s.extra_paths)
         .into_iter()
         .map(|st| SourceInfo { enabled: s.enabled_sources.contains(&st.id), status: st })
-        .collect()
+        .collect())
 }
 
 #[tauri::command]
@@ -452,11 +453,12 @@ pub fn catalog_prices(state: State<AppState>, models: Vec<String>) -> Vec<tracke
     state.book.read().unwrap().catalog_entries(models.iter().map(String::as_str))
 }
 
+/// Keeps only what differs from the bundled list, so every other price follows the app's updates.
 #[tauri::command]
-pub fn save_pricing(window: WebviewWindow, app: AppHandle, state: State<AppState>, file: PricingFile) -> Res<()> {
+pub async fn save_pricing(window: WebviewWindow, app: AppHandle, state: State<'_, AppState>, file: PricingFile) -> Res<()> {
     main_only(&window)?;
-    let json = serde_json::to_string_pretty(&file).map_err(err)?;
-    let book = PriceBook::from_json(&json).map_err(err)?.with_catalog(crate::state::opencode_catalog()); // validate before writing
+    let json = serde_json::to_string_pretty(&tracker_core::pricing::user_changes(file).map_err(err)?).map_err(err)?;
+    let book = PriceBook::from_user_json(&json).map_err(err)?.with_catalog(crate::state::opencode_catalog()); // validate before writing
     export::write_atomically(&state.user_pricing_path(), |f| std::io::Write::write_all(f, json.as_bytes()).map_err(|e| e.to_string()))?;
     *state.book.write().unwrap() = book;
     *state.pricing_origin.write().unwrap() = "user".into();
@@ -465,7 +467,7 @@ pub fn save_pricing(window: WebviewWindow, app: AppHandle, state: State<AppState
 }
 
 #[tauri::command]
-pub fn reset_pricing(window: WebviewWindow, app: AppHandle, state: State<AppState>) -> Res<()> {
+pub async fn reset_pricing(window: WebviewWindow, app: AppHandle, state: State<'_, AppState>) -> Res<()> {
     main_only(&window)?;
     let p = state.user_pricing_path();
     if p.exists() {
@@ -503,7 +505,7 @@ pub async fn export_data(
     crate::pdf::not_the_archive(&store, &path)?;
     export::write_atomically(&path, |f| {
         // UTF-8 BOM so Excel opens Turkish characters correctly
-        if format == Format::Csv {
+        if format != Format::Json {
             std::io::Write::write_all(f, b"\xEF\xBB\xBF").map_err(err)?;
         }
         export::export(&store, &book, range, &filter.unwrap_or_default(), &chrono::Local, granularity, format, hide, f).map_err(err)
@@ -602,7 +604,7 @@ pub fn open_main(app: AppHandle) {
 }
 
 #[tauri::command]
-pub fn set_widget_visible(window: WebviewWindow, app: AppHandle, state: State<AppState>, visible: bool) -> Res<()> {
+pub async fn set_widget_visible(window: WebviewWindow, app: AppHandle, state: State<'_, AppState>, visible: bool) -> Res<()> {
     main_only(&window)?;
     save_settings_inner(&app, &state, |old| {
         let mut s = old.clone();
@@ -651,6 +653,8 @@ pub struct TrayBadge {
     fg: String,
     /// The dial's filled share, 0–1.
     dial: Option<f64>,
+    /// The reading is behind: the icon is drawn at this opacity.
+    opacity: f64,
 }
 
 /// What the text next to the tray icon would show with `tray`, before it is saved.
@@ -663,9 +667,10 @@ pub async fn tray_preview(app: AppHandle, tray: crate::settings::TraySettings) -
     let icon = crate::tray::badge(&s, &tray, &crate::tray::current_limits(&readings)).map(|b| {
         let hex = |c: [u8; 3]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
         let (bg, fg) = crate::tray::colors(&b);
+        let opacity = if b.behind { crate::tray::BEHIND_ALPHA } else { 1.0 };
         match b.mark {
-            crate::tray::Mark::Number(text) => TrayBadge { text, logo: "", bg: hex(bg), fg: hex(fg), dial: None },
-            crate::tray::Mark::Logo(logo) => TrayBadge { text: String::new(), logo, bg: hex(bg), fg: hex(fg), dial: None },
+            crate::tray::Mark::Number(text) => TrayBadge { text, logo: "", bg: hex(bg), fg: hex(fg), dial: None, opacity },
+            crate::tray::Mark::Logo(logo) => TrayBadge { text: String::new(), logo, bg: hex(bg), fg: hex(fg), dial: None, opacity },
             crate::tray::Mark::Dial(used) => {
                 let tinted = crate::tray::is_template(&b);
                 TrayBadge {
@@ -674,6 +679,7 @@ pub async fn tray_preview(app: AppHandle, tray: crate::settings::TraySettings) -
                     bg: if crate::tray::dial_on_square(&b) { hex(crate::tray::NAVY) } else { String::new() },
                     fg: if tinted { String::new() } else { hex(crate::tray::arc_color(b.level)) },
                     dial: Some(used),
+                    opacity,
                 }
             }
         }
@@ -819,6 +825,10 @@ pub fn open_last_image(window: WebviewWindow, state: State<AppState>) -> Res<()>
 #[tauri::command]
 pub async fn export_report(window: WebviewWindow, app: AppHandle, from: String, to: String, path: PathBuf) -> Res<()> {
     main_only(&window)?;
+    // "Open" hands the file to the system, which would run it under another extension
+    if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf")) {
+        return Err("not_pdf".into());
+    }
     // rendering blocks for seconds while the report page calls async commands of its own
     let handle = app.clone();
     let out = path.clone();

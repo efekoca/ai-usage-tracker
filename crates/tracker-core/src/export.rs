@@ -14,6 +14,9 @@ use std::path::Path;
 #[serde(rename_all = "snake_case")]
 pub enum Format {
     Csv,
+    /// Semicolons and a decimal comma, which Excel expects where the comma is the decimal mark
+    /// (Turkish, German…), so the file opens in the right columns.
+    CsvSemicolon,
     Json,
 }
 
@@ -160,40 +163,41 @@ where
 
     match format {
         Format::Json => serde_json::to_writer_pretty(&mut *out, &rows)?,
-        Format::Csv => {
-            writeln!(out, "time,tool,client,model,project,input,output,cache_read,cache_write,reasoning,total_tokens,api_equivalent_usd,accuracy,events")?;
+        Format::Csv | Format::CsvSemicolon => {
+            let (sep, decimal) = if format == Format::Csv { (',', '.') } else { (';', ',') };
+            let header = ["time", "tool", "client", "model", "project", "input", "output", "cache_read", "cache_write", "reasoning", "total_tokens", "api_equivalent_usd", "accuracy", "events"];
+            writeln!(out, "{}", header.join(&sep.to_string()))?;
             for r in &rows {
-                writeln!(
-                    out,
-                    "{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
-                    csv(&r.time),
-                    csv(&r.tool),
-                    csv(&r.client),
-                    csv(&r.model),
-                    csv(&r.project),
-                    r.input,
-                    r.output,
-                    r.cache_read,
-                    r.cache_write,
-                    r.reasoning,
-                    r.total_tokens,
-                    r.api_equivalent_usd.map(|c| format!("{c:.6}")).unwrap_or_default(),
-                    r.accuracy,
-                    r.events
-                )?;
+                let cells = [
+                    csv(&r.time, sep),
+                    csv(&r.tool, sep),
+                    csv(&r.client, sep),
+                    csv(&r.model, sep),
+                    csv(&r.project, sep),
+                    r.input.to_string(),
+                    r.output.to_string(),
+                    r.cache_read.to_string(),
+                    r.cache_write.to_string(),
+                    r.reasoning.to_string(),
+                    r.total_tokens.to_string(),
+                    r.api_equivalent_usd.map(|c| format!("{c:.6}").replace('.', &decimal.to_string())).unwrap_or_default(),
+                    csv(&r.accuracy, sep),
+                    r.events.to_string(),
+                ];
+                writeln!(out, "{}", cells.join(&sep.to_string()))?;
             }
         }
     }
     Ok(rows.len())
 }
 
-/// RFC 4180 quoting; also neutralises spreadsheet formula injection.
-fn csv(s: &str) -> String {
+/// RFC 4180 quoting with `sep` as the separator; also neutralises spreadsheet formula injection.
+fn csv(s: &str, sep: char) -> String {
     // spreadsheets skip leading blanks and accept full-width operators before a formula
     let lead = s.trim_start_matches(|c: char| c.is_whitespace() || c.is_control());
     let formula = s.starts_with(['\t', '\r']) || lead.starts_with(['=', '+', '-', '@', '＝', '＋', '－', '＠']);
     let s = if formula { format!("'{s}") } else { s.to_owned() };
-    if s.contains([',', '"', '\n', '\r']) { format!("\"{}\"", s.replace('"', "\"\"")) } else { s }
+    if s.contains([sep, '"', '\n', '\r']) { format!("\"{}\"", s.replace('"', "\"\"")) } else { s }
 }
 
 #[cfg(test)]
@@ -202,16 +206,16 @@ mod tests {
 
     #[test]
     fn csv_quotes_and_defuses_formulas() {
-        assert_eq!(csv("a,b"), "\"a,b\"");
-        assert_eq!(csv("say \"hi\""), "\"say \"\"hi\"\"\"");
-        assert_eq!(csv("=cmd()"), "'=cmd()");
-        assert_eq!(csv("plain"), "plain");
-        assert_eq!(csv("  =1+1"), "'  =1+1");
-        assert_eq!(csv("\u{1}@SUM(A1)"), "'\u{1}@SUM(A1)");
-        assert_eq!(csv("＝cmd()"), "'＝cmd()");
-        assert_eq!(csv("－1"), "'－1");
-        assert_eq!(csv("\tx"), "'\tx");
-        assert_eq!(csv("\rx"), "\"'\rx\"");
-        assert_eq!(csv("a-b"), "a-b");
+        assert_eq!(csv("a,b", ','), "\"a,b\"");
+        assert_eq!(csv("say \"hi\"", ','), "\"say \"\"hi\"\"\"");
+        assert_eq!(csv("=cmd()", ','), "'=cmd()");
+        assert_eq!(csv("plain", ','), "plain");
+        assert_eq!(csv("  =1+1", ','), "'  =1+1");
+        assert_eq!(csv("\u{1}@SUM(A1)", ','), "'\u{1}@SUM(A1)");
+        assert_eq!(csv("＝cmd()", ','), "'＝cmd()");
+        assert_eq!(csv("－1", ','), "'－1");
+        assert_eq!(csv("\tx", ','), "'\tx");
+        assert_eq!(csv("\rx", ','), "\"'\rx\"");
+        assert_eq!(csv("a-b", ','), "a-b");
     }
 }

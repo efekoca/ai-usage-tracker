@@ -57,9 +57,11 @@ function inkOn(hex: string): string {
 
 let refreshTimer: ReturnType<typeof setTimeout> | undefined
 let refreshGen = 0
+let refreshedAt = 0
 
 export async function refresh() {
   if (!app.settings?.onboarded) return
+  refreshedAt = Date.now()
   const gen = ++refreshGen
   app.loading = true
   try {
@@ -79,9 +81,17 @@ export async function refresh() {
   }
 }
 
+/** A period this long reads the whole archive again on every refresh. */
+function longPeriod(p: Period): boolean {
+  if (p.kind === 'custom') return Date.parse(p.to) - Date.parse(p.from) > 92 * 86_400_000
+  return p.kind === 'months6' || p.kind === 'year1' || p.kind === 'all'
+}
+
+/** While a tool writes, data changes every second or two; a long period then refreshes at most every 15 s. */
 export function refreshSoon() {
   clearTimeout(refreshTimer)
-  refreshTimer = setTimeout(refresh, 250)
+  const wait = longPeriod(app.period) ? Math.max(250, refreshedAt + 15_000 - Date.now()) : 250
+  refreshTimer = setTimeout(refresh, wait)
 }
 
 /** Runs `load` and passes its result on only while the caller still wants it; returns the cancel. */

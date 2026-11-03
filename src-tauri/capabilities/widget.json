@@ -1,10 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "widget",
-  "description": "The widget: local IPC, and moving and sizing its own window. No dialogs, network or shell access.",
+  "description": "The widget: local IPC, listening to the app's events, and moving and sizing its own window. Nothing else, so a page that went wrong could not reach the other windows, the tray or menus.",
   "windows": ["widget"],
   "permissions": [
-    "core:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
     "core:window:allow-start-dragging",
     "core:window:allow-set-size"
   ]
