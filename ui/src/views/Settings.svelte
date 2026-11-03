@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { ask, open, save } from '@tauri-apps/plugin-dialog'
+  import { ask, open } from '@tauri-apps/plugin-dialog'
+  import { saveAs } from '../lib/dialogs'
   import { onMount } from 'svelte'
   import { app, refresh, saveSettings } from '../lib/store.svelte'
   import { api, providersOf, type HotkeyStatus, type ModelPrice, type NotifySettings, type PricingFile, type Provider } from '../lib/api'
@@ -44,7 +45,7 @@
   let cataloged: ModelPrice[] = $state([])
   let aliasFrom = $state('')
   let aliasTo = $state('')
-  let exportFormat: 'csv' | 'json' = $state('csv')
+  let exportFormat: 'csv' | 'csv_semicolon' | 'json' = $state('csv')
   let exportGran: 'events' | 'daily' = $state('daily')
 
   async function loadPricing() {
@@ -223,8 +224,8 @@
   }
 
   async function doExport() {
-    const ext = exportFormat
-    const path = await save({ defaultPath: `ai-usage-${exportGran}.${ext}`, filters: [{ name: ext.toUpperCase(), extensions: [ext] }] })
+    const ext = exportFormat === 'json' ? 'json' : 'csv'
+    const path = await saveAs(`ai-usage-${exportGran}.${ext}`, ext.toUpperCase(), ext)
     if (!path) return
     await guard(async () => {
       const n = await api.exportData(path, $state.snapshot(app.period), $state.snapshot(app.filter), exportGran, exportFormat)
@@ -233,7 +234,7 @@
   }
   async function doBackup() {
     const stamp = localDate()
-    const path = await save({ defaultPath: `ai-usage-tracker-${stamp}.db`, filters: [{ name: 'SQLite', extensions: ['db'] }] })
+    const path = await saveAs(`ai-usage-tracker-${stamp}.db`, 'SQLite', 'db')
     if (!path) return
     await guard(async () => {
       await api.backup(path)
@@ -599,10 +600,10 @@
 <section class="card group" id="settings-data">
   <h2>{t('settings.data')}</h2>
   <div class="item">
-    <span>{t('settings.data.export')}</span>
+    <div><span>{t('settings.data.export')}</span>{#if exportFormat === 'csv_semicolon'}<div class="subtle small">{t('settings.data.csvSemicolon.help')}</div>{/if}</div>
     <div class="row">
       <Segmented label={t('settings.data.export')} bind:value={exportGran} options={[{ value: 'daily', label: t('settings.data.exportDaily') }, { value: 'events', label: t('settings.data.exportEvents') }]} />
-      <Segmented label={t('settings.data.format')} bind:value={exportFormat} options={[{ value: 'csv', label: 'CSV' }, { value: 'json', label: 'JSON' }]} />
+      <Segmented label={t('settings.data.format')} bind:value={exportFormat} options={[{ value: 'csv', label: 'CSV' }, { value: 'csv_semicolon', label: t('settings.data.csvSemicolon') }, { value: 'json', label: 'JSON' }]} />
       <button class="btn" onclick={doExport}><Icon name="download" size={15} />{t('settings.data.export')}</button>
     </div>
   </div>

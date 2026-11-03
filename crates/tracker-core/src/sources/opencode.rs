@@ -219,6 +219,11 @@ fn read_session(conn: &Connection, sessions: &HashMap<String, Session>, id: &str
                 });
             }
             Some("tool") => {
+                // a call whose input is still streaming has no start time yet, and its key would
+                // differ once it starts; the step that ends it brings the session back
+                if row.status.as_deref() == Some("pending") {
+                    continue;
+                }
                 let Some(name) = row.tool.clone().filter(|n| !n.is_empty()) else { continue };
                 out.lines_recognised += 1;
                 let ts_ms = row.tool_start.or(row.part_ms).unwrap_or_default();

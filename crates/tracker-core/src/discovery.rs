@@ -248,6 +248,14 @@ fn opencode_dbs(env: &Env) -> Vec<PathBuf> {
     v
 }
 
+/// When a SQLite database was last written: the file itself or its write-ahead log.
+fn last_write(db: &Path) -> std::time::SystemTime {
+    let at = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+    let mut wal = db.as_os_str().to_owned();
+    wal.push("-wal");
+    at(db).max(at(Path::new(&wal)))
+}
+
 fn files_with_ext(dir: &Path, ext: &str) -> Vec<PathBuf> {
     let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
     let mut v: Vec<PathBuf> =
@@ -333,15 +341,21 @@ pub fn enumerate_files(env: &Env, extra: &ExtraPaths, enabled: &HashSet<SourceId
     }
 
     if enabled.contains(&SourceId::Antigravity) {
-        // a conversation copied into another surface keeps its id: the first copy is read
-        let mut ids = HashSet::new();
+        // a conversation copied into another surface keeps its id: only the copy written last is
+        // read, so one that goes on in its new place is followed (its steps merge by key)
+        let mut newest: Vec<(std::ffi::OsString, std::time::SystemTime, PathBuf)> = Vec::new();
         for dir in antigravity_dirs(env) {
             for p in files_with_ext(&dir.join("conversations"), "db") {
-                if p.file_stem().is_some_and(|id| ids.insert(id.to_ascii_lowercase())) {
-                    candidates.push((p, ParserKind::AntigravityDb, SourceId::Antigravity));
+                let Some(id) = p.file_stem().map(|s| s.to_ascii_lowercase()) else { continue };
+                let written = last_write(&p);
+                match newest.iter_mut().find(|n| n.0 == id) {
+                    Some(n) if written > n.1 => (n.1, n.2) = (written, p),
+                    Some(_) => {}
+                    None => newest.push((id, written, p)),
                 }
             }
         }
+        candidates.extend(newest.into_iter().map(|(_, _, p)| (p, ParserKind::AntigravityDb, SourceId::Antigravity)));
     }
 
     if enabled.contains(&SourceId::OpenCode) {

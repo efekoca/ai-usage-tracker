@@ -49,7 +49,7 @@ export interface ValueInput {
   settings: Settings | null
   accounts: Account[]
   value: PlanValue | null
-  /** Count each account's plan only from the day it was first seen, for periods longer than its use. */
+  /** Count each account's plan only from the day it was first seen, for periods longer than its use. It runs on to the period's end: a plan can be paid while unused, so the value stays a lower bound. */
   fromFirstSeen?: boolean
 }
 

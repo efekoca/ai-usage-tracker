@@ -347,7 +347,9 @@ pub fn apply_widget_settings(app: &AppHandle, s: &Settings) {
     }
     // the widget page sizes its own window to fit its content
     let show = |w: &WebviewWindow, s: &Settings| {
-        if !FULLSCREEN_HIDDEN.load(Ordering::SeqCst) {
+        // showing it again on a Mac makes it the key window, which takes the keyboard from the
+        // dashboard on every settings save
+        if !FULLSCREEN_HIDDEN.load(Ordering::SeqCst) && !w.is_visible().unwrap_or(false) {
             let _ = w.show();
         }
         let _ = w.set_always_on_top(s.widget.always_on_top);

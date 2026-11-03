@@ -1,6 +1,7 @@
 [package]
 name = "tracker-core"
-version = "0.1.0"
+# the app's version, which the Codex limit read reports as its client version
+version.workspace = true
 edition = "2024"
 
 [dependencies]

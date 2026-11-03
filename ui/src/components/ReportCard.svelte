@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { open as openDialog, save } from '@tauri-apps/plugin-dialog'
+  import { open as openDialog } from '@tauri-apps/plugin-dialog'
+  import { saveAs } from '../lib/dialogs'
   import { app, saveSettings } from '../lib/store.svelte'
   import { api } from '../lib/api'
   import { fmtDate, has, localDate, t } from '../lib/i18n.svelte'
@@ -31,7 +32,7 @@
     status = null
     // the page may have stayed open past midnight: take the dates now, not when it was drawn
     const r = rangeOf(which)
-    const path = await save({ defaultPath: `AI-Usage_${r.from}_${r.to}.pdf`, filters: [{ name: 'PDF', extensions: ['pdf'] }] })
+    const path = await saveAs(`AI-Usage_${r.from}_${r.to}.pdf`, 'PDF', 'pdf')
     if (!path) return
     busy = true
     try {

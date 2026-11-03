@@ -389,6 +389,8 @@ fn backups_and_copies_of_a_conversation_are_not_read_again() {
     copy_dir(&g.gemini.join("antigravity"), &g.gemini.join("antigravity-backup"));
     let copy = g._dir.path().join("elsewhere");
     copy_dir(&g.gemini.join("antigravity-ide"), &copy);
+    // a copy no newer than the conversation it was made from
+    written_at(&copy, std::time::UNIX_EPOCH + std::time::Duration::from_secs(86_400));
     let env = Env { antigravity_data_dir: Some(copy.to_string_lossy().into_owned()), ..g.env.clone() };
     let files = enumerate_files(&env, &ExtraPaths::default(), &antigravity_only());
     assert_eq!(files.len(), 4);
@@ -461,6 +463,30 @@ fn the_full_machine_scan_includes_antigravity_next_to_the_other_tools() {
         .map(Result::unwrap)
         .collect();
     assert_eq!(tools, ["antigravity", "claude_code", "codex"]);
+}
+
+/// Sets when every file under `dir` was last written.
+fn written_at(dir: &Path, t: std::time::SystemTime) {
+    for e in fs::read_dir(dir).unwrap().flatten() {
+        if e.file_type().unwrap().is_dir() {
+            written_at(&e.path(), t);
+        } else {
+            fs::File::options().write(true).open(e.path()).unwrap().set_modified(t).unwrap();
+        }
+    }
+}
+
+#[test]
+fn a_conversation_that_goes_on_in_another_copy_is_read_there() {
+    let g = gemini();
+    let moved = g._dir.path().join("moved");
+    copy_dir(&g.gemini.join("antigravity-ide"), &moved);
+    written_at(&g.gemini.join("antigravity-ide"), std::time::UNIX_EPOCH + std::time::Duration::from_secs(86_400));
+    let env = Env { antigravity_data_dir: Some(moved.to_string_lossy().into_owned()), ..g.env.clone() };
+    let files = enumerate_files(&env, &ExtraPaths::default(), &antigravity_only());
+    assert_eq!(files.len(), 4, "each conversation once");
+    assert!(files.iter().any(|f| f.path.starts_with(&moved)), "the copy written last is read");
+    assert!(files.iter().all(|f| !f.path.starts_with(g.gemini.join("antigravity-ide"))));
 }
 
 fn copy_dir(from: &Path, to: &Path) {

@@ -415,6 +415,9 @@ pub struct ProjectShare {
     pub share: f64,
     /// `share × used_pct` — always an estimate.
     pub estimated_pct: Option<f64>,
+    /// The share of requests no evidence ties to an account, shown apart (not as a project) on
+    /// the view of the account in use: they may be its use, but are never claimed for it.
+    pub unknown_account: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -551,6 +554,15 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
         .map(|((_, owner, _, _), s)| (owner, s))
         .collect();
 
+    // these reads list every window the provider reports, so a window a newer read leaves out is
+    // no longer reported (Claude's Opus week): once it is over, it goes
+    let full_read = |s: &LimitSnapshot| [crate::capture::claude_usage::SOURCE, crate::capture::codex_limits::SOURCE, crate::capture::antigravity_limits::SOURCE].contains(&s.source.as_str());
+    let mut last_read: HashMap<(Provider, Option<String>, String), i64> = HashMap::new();
+    for (owner, s) in snaps.iter().filter(|(_, s)| full_read(s)) {
+        let t = last_read.entry((s.provider, owner.clone(), s.source.clone())).or_insert(s.ts_ms);
+        *t = (*t).max(s.ts_ms);
+    }
+
     let projects: HashMap<i64, ProjectRow> = store.projects()?.into_iter().map(|p| (p.id, p)).collect();
     let mut out = Vec::new();
     for (owner, s) in &snaps {
@@ -558,6 +570,9 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
         // another account's view counts only that account's requests; a provider without
         // accounts counts all of its own
         let account = several.contains(&s.provider).then_some(owner.as_deref());
+        // requests of no known account may be the account in use's, so its reading is not taken
+        // as current after them, and their share is shown apart rather than as use from elsewhere
+        let unowned = is_active && account.is_some_and(|a| a.is_some());
         let minutes = window_minutes(&s.window);
         let dur_ms = minutes.map(|m| m * 60_000);
         let reset_ms = s.resets_at_ms();
@@ -569,11 +584,17 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
         if !is_active && (now_ms - s.ts_ms > OTHER_ACCOUNT_MS || (owner.is_none() && matches!(state, LimitState::Reset | LimitState::Stale))) {
             continue;
         }
+        if matches!(state, LimitState::Reset | LimitState::Stale)
+            && full_read(s)
+            && last_read.get(&(s.provider, owner.clone(), s.source.clone())).is_some_and(|&t| t > s.ts_ms)
+        {
+            continue;
+        }
         let mut usage_since = Totals::default();
         if state == LimitState::Fresh {
             let age = now_ms.saturating_sub(s.ts_ms);
             if age >= BEHIND_GRACE_MS {
-                for e in store.events_between(s.ts_ms + 1, now_ms + 1)?.iter().filter(|e| counts_toward(s.provider, &s.limit_id, &s.window, e) && of_account(e, account)) {
+                for e in store.events_between(s.ts_ms + 1, now_ms + 1)?.iter().filter(|e| counts_toward(s.provider, &s.limit_id, &s.window, e) && (of_account(e, account) || (unowned && e.account.is_none()))) {
                     usage_since.add(e, cost_of(book, e).as_ref(), savings_of(book, e));
                 }
             }
@@ -596,7 +617,7 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
             _ => None,
         };
         let (usage, shares, unlogged) = match start {
-            Some(st) => window_usage(store, book, &projects, s.provider, &s.limit_id, &s.window, account, st, now_ms, used, &reads)?,
+            Some(st) => window_usage(store, book, &projects, s.provider, &s.limit_id, &s.window, account, unowned, st, now_ms, used, &reads)?,
             None => (Totals::default(), Vec::new(), None),
         };
         out.push(LimitView {
@@ -632,7 +653,7 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
         let Some(minutes) = window_minutes(&t.window) else { continue };
         let start = now_ms - minutes * 60_000;
         let account = active.get(&t.provider).map(Option::as_deref);
-        let (usage, mut shares, _) = window_usage(store, book, &projects, t.provider, "", &t.window, account, start, now_ms, None, &[])?;
+        let (usage, mut shares, _) = window_usage(store, book, &projects, t.provider, "", &t.window, account, false, start, now_ms, None, &[])?;
         let pct = match (t.cost_usd, t.tokens) {
             (Some(c), _) if c > 0.0 => Some(usage.cost_usd / c * 100.0),
             (_, Some(n)) if n > 0 => Some(usage.total_tokens as f64 / n as f64 * 100.0),
@@ -692,33 +713,44 @@ fn window_usage(
     limit_id: &str,
     window: &str,
     account: Option<Option<&str>>,
+    unowned: bool,
     from_ms: i64,
     to_ms: i64,
     used_pct: Option<f64>,
     reads: &[(i64, f64)],
 ) -> Result<(Totals, Vec<ProjectShare>, Option<f64>)> {
     let mut total = Totals::default();
-    let mut per: HashMap<Option<i64>, Totals> = HashMap::new();
+    let mut weighed = Totals::default();
+    // keyed by (no known account, project); the unknown account's requests form one share
+    let mut per: HashMap<(bool, Option<i64>), Totals> = HashMap::new();
     let mut requests = Vec::new();
-    for e in store.events_between(from_ms, to_ms + 1)?.iter().filter(|e| counts_toward(provider, limit_id, window, e) && of_account(e, account)) {
+    for e in store.events_between(from_ms, to_ms + 1)?.iter().filter(|e| counts_toward(provider, limit_id, window, e)) {
+        let unknown = !of_account(e, account) && unowned && e.account.is_none();
+        if !of_account(e, account) && !unknown {
+            continue;
+        }
         let c = cost_of(book, e);
         let sv = savings_of(book, e);
-        total.add(e, c.as_ref(), sv);
-        per.entry(e.project_id).or_default().add(e, c.as_ref(), sv);
-        requests.push((e.ts_ms, e.project_id, c.map_or(0.0, |c| c.total()), e.tokens.total()));
+        if !unknown {
+            total.add(e, c.as_ref(), sv);
+        }
+        weighed.add(e, c.as_ref(), sv);
+        let key = if unknown { (true, None) } else { (false, e.project_id) };
+        per.entry(key).or_default().add(e, c.as_ref(), sv);
+        requests.push((e.ts_ms, key, c.map_or(0.0, |c| c.total()), e.tokens.total()));
     }
-    let by_cost = total.cost_usd > 0.0 && total.unpriced_events == 0;
-    let requests: Vec<_> = requests.into_iter().map(|(ts, pid, cost, tokens)| (ts, pid, if by_cost { cost } else { tokens as f64 })).collect();
+    let by_cost = weighed.cost_usd > 0.0 && weighed.unpriced_events == 0;
+    let requests: Vec<_> = requests.into_iter().map(|(ts, key, cost, tokens)| (ts, key, if by_cost { cost } else { tokens as f64 })).collect();
     let rises = used_pct.filter(|&u| u > 0.0).and_then(|_| split_rises(&requests, reads, from_ms));
     let mut shares: Vec<ProjectShare> = per
         .into_iter()
-        .map(|(pid, t)| {
+        .map(|((unknown_account, pid), t)| {
             let share = if let Some((parts, _)) = &rises {
-                parts.get(&pid).copied().unwrap_or(0.0)
+                parts.get(&(unknown_account, pid)).copied().unwrap_or(0.0)
             } else if by_cost {
-                t.cost_usd / total.cost_usd
-            } else if total.total_tokens > 0 {
-                t.total_tokens as f64 / total.total_tokens as f64
+                t.cost_usd / weighed.cost_usd
+            } else if weighed.total_tokens > 0 {
+                t.total_tokens as f64 / weighed.total_tokens as f64
             } else {
                 0.0
             };
@@ -730,6 +762,7 @@ fn window_usage(
                 totals: t,
                 share,
                 estimated_pct: used_pct.map(|u| u * share),
+                unknown_account,
             }
         })
         .collect();
@@ -744,12 +777,12 @@ fn window_usage(
 /// request in that span is use the local logs do not show (the web, a phone, cloud tasks, another
 /// computer): the second value. Counting starts again after a reset granted inside the window, and
 /// a dip between readings is ignored. `requests` are (time, project, weight), oldest first.
-fn split_rises(requests: &[(i64, Option<i64>, f64)], reads: &[(i64, f64)], from_ms: i64) -> Option<(HashMap<Option<i64>, f64>, f64)> {
+fn split_rises<K: Copy + Eq + std::hash::Hash>(requests: &[(i64, K, f64)], reads: &[(i64, f64)], from_ms: i64) -> Option<(HashMap<K, f64>, f64)> {
     let restart = crate::insights::restarted(reads);
     let first = restart.map_or(0, |t| reads.partition_point(|r| r.0 <= t));
     let mut since = restart.unwrap_or(from_ms);
     let (mut level, mut unlogged) = (0.0, 0.0);
-    let mut per: HashMap<Option<i64>, f64> = HashMap::new();
+    let mut per: HashMap<K, f64> = HashMap::new();
     for &(ts, pct) in &reads[first..] {
         if pct <= level {
             continue;

@@ -272,6 +272,9 @@ pub struct TimelineRequest {
     /// With a rewrite: the pause since the previous request of the same conversation and model.
     pub pause_ms: Option<i64>,
     pub compacted: bool,
+    /// With a compaction: the context of the main conversation's request before, which a filter
+    /// may have left out of the list.
+    pub compacted_from: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -286,12 +289,15 @@ pub struct TimelineCall {
 pub struct SessionTimeline {
     pub requests: Vec<TimelineRequest>,
     pub calls: Vec<TimelineCall>,
+    /// The filter left out some of the session's requests, so its tool calls are not shown: a
+    /// call does not record which request it came from, and the nearest one in time can be
+    /// another account's, an advisor's or a subagent's.
+    pub calls_hidden: bool,
 }
 
 /// One session's requests and tool calls between `from_ms` and `to_ms`, oldest first, kept to
 /// the requests `filter` allows, as in the session list. Cache rewrites and compactions are found
-/// over the whole session, since the cache and the context are shared by all of it. A tool call
-/// carries no account, so it goes with the request sent right before it.
+/// over the whole session, since the cache and the context are shared by all of it.
 pub fn session_timeline(store: &Store, book: &PriceBook, tool: Tool, session_id: &str, from_ms: i64, to_ms: i64, filter: &Filter) -> Result<SessionTimeline> {
     let ours = |t: Tool, s: Option<&str>| t == tool && s == Some(session_id);
     let mut events: Vec<EventRow> = store.events_between(from_ms, to_ms + 1)?.into_iter().filter(|e| ours(e.tool, e.session_id.as_deref())).collect();
@@ -311,11 +317,11 @@ pub fn session_timeline(store: &Store, book: &PriceBook, tool: Tool, session_id:
             last.insert((e.thread_id.as_deref(), e.model.as_str()), i);
         }
     }
-    let mut compacted = vec![false; events.len()];
+    let mut compacted_from = vec![None; events.len()];
     let mut before: Option<u64> = None;
     // a subagent without a name still has its own thread
     for (i, e) in events.iter().enumerate().filter(|(_, e)| e.agent.is_none() && e.thread_id.is_none() && prompt(e) > 0) {
-        compacted[i] = before.is_some_and(|b| b >= COMPACT_MIN_PROMPT && prompt(e) * 2 < b);
+        compacted_from[i] = before.filter(|&b| b >= COMPACT_MIN_PROMPT && prompt(e) * 2 < b);
         before = Some(prompt(e));
     }
 
@@ -337,21 +343,22 @@ pub fn session_timeline(store: &Store, book: &PriceBook, tool: Tool, session_id:
             rewritten: rewritten[i],
             rewrite_extra_usd: (rewritten[i] > 0).then(|| crate::tips::rewrite_extra_usd(book, e, rewritten[i])).flatten(),
             pause_ms: pause[i],
-            compacted: compacted[i],
+            compacted: compacted_from[i].is_some(),
+            compacted_from: compacted_from[i],
         })
         .collect();
     let mut calls: Vec<TimelineCall> = store
         .tool_calls_between(from_ms, to_ms + 1)?
         .into_iter()
         .filter(|c| ours(c.tool, c.session_id.as_deref()))
-        .filter(|c| {
-            let before = events.partition_point(|e| e.ts_ms <= c.ts_ms);
-            events.get(before.saturating_sub(1)).is_none_or(|e| filter.matches(e))
-        })
         .map(|c| TimelineCall { ts_ms: c.ts_ms, name: c.name, agent: c.agent, failed: c.failed })
         .collect();
+    let calls_hidden = !calls.is_empty() && events.iter().any(|e| !filter.matches(e));
+    if calls_hidden {
+        calls.clear();
+    }
     calls.sort_by_key(|c| c.ts_ms);
-    Ok(SessionTimeline { requests, calls })
+    Ok(SessionTimeline { requests, calls, calls_hidden })
 }
 
 /// Bucket edges for prompt sizes. 100K, 200K and 272K are where long-context pricing starts for

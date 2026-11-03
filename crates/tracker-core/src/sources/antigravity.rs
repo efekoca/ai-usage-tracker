@@ -192,8 +192,9 @@ fn remove_stale_snapshots() {
 
 impl Snapshot {
     fn open(db: &Path) -> std::io::Result<Snapshot> {
-        static CLEANED: std::sync::Once = std::sync::Once::new();
-        CLEANED.call_once(remove_stale_snapshots);
+        // before every read, so a copy left by a crash goes once it is old enough, even when the
+        // app was started again soon after
+        remove_stale_snapshots();
         let mut builder = tempfile::Builder::new();
         builder.prefix(SNAPSHOT_PREFIX);
         #[cfg(unix)]

@@ -46,7 +46,7 @@ Sağlayıcılar limitlerin sayısal karşılığını yayımlamıyor, yalnızca 
 - Son okumadan sonra aracı kullandıysanız güncel değer bilinemez. Bu durumda "?" görürsünüz; yanında son okuma ve ne kadar önce yapıldığı yazar. Eski bir değer hiçbir zaman güncelmiş gibi gösterilmez. Panelde ve menü çubuğu metninde bu son okuma "~" ile işaretlenir: güncel değer genellikle daha yüksektir, ama sağlayıcı arada limitinizi sıfırladıysa daha düşük olabilir.
 - Yüzdeleri **kullanılan** ("%15 kullanıldı", Claude'daki gibi) ya da **kalan** ("%85 kaldı", Codex'teki gibi) olarak görebilirsiniz. Bu tercihi **Ayarlar**'dan, **Limitler** sayfasından ya da **Widget stüdyosu**'ndan değiştirirsiniz. Uyarı renkleri her iki durumda da kullanıma göre değişir.
 - Okuma yoksa her pencere için kendi bütçenizi belirleyebilirsiniz, örneğin "5 saatte 50 $ API eşdeğeri". Bu bütçeye göre hesaplanan yüzde **Tahmini** olarak gösterilir.
-- Limitler hesabınızın tamamı için geçerlidir. Yüzde her arttığında artış, o arada istek gönderen projelere API eşdeğeri maliyetleri oranında bölünür. Başka yerde yaptığınız kullanım (web, telefon, bulut görevleri, başka bir bilgisayar) projelerinize yazılmaz, **Kayıtlarda görünmeyen kullanım** satırında ayrı görünür. Bu paylar **Tahmini** olarak gösterilir.
+- Limitler hesabınızın tamamı için geçerlidir. Yüzde her arttığında artış, o arada istek gönderen projelere API eşdeğeri maliyetleri oranında bölünür. Başka yerde yaptığınız kullanım (web, telefon, bulut görevleri, başka bir bilgisayar) projelerinize yazılmaz, **Kayıtlarda görünmeyen kullanım** satırında ayrı görünür. Birden çok Claude ya da Codex hesabınız varsa hangi hesaba ait olduğu bilinmeyen istekler **Tanımlanmamış hesap** adlı ayrı bir pay alır; bu isteklerden önce alınmış bir okuma güncel diye gösterilmez. Bu paylar **Tahmini** olarak gösterilir.
 - Her araç kendi tek renkli ikonuyla gösterilir. **Ayarlar → Genel → Araç renkleri** bölümünden Claude, Codex ve Antigravity'ye limit çubuklarında ve widget halkalarında kullanılacak kendi rengini verebilir, isterseniz ikonları da renklendirebilirsiniz. Limit dolmaya yaklaştığında uyarı renkleri yine gösterilir. Yalnızca adları görmek isterseniz ikonları **Ayarlar → Genel → Araç ikonlarını göster** ile kapatın.
 
 **Birden fazla Codex hesabı.** Codex hesapları arasında geçiş yapıyorsanız her hesabın limiti, geçmişi ve dolma tahmini ayrı görünür. Codex her isteğin hangi hesaptan gittiğini kaydetmez. Bu yüzden uygulama her isteği, bildirdiği limit penceresine bakarak hesabına bağlar. Hesabın kim olduğunu Codex'in verdiği bilgilerden öğrenir: oturumu açan hesap (oturumun ilk istekleri için) ve Codex limit okumasındaki giriş yapılmış hesap (Codex 0.163 ve sonrası). Erken sıfırlamalar, şirketin verdiği sıfırlama hakları dahil, hesap değişimiyle karıştırılmaz. Herkese verilen bir sıfırlama iki hesabın penceresini aynı anda başlatırsa o pencere hiçbir hesaba yazılmaz. Kanıtı olmayan istekler tahmin edilmez; **Tanımlanmamış hesap** altında kalır. Widget, panel ve menü çubuğu kullanımdaki hesabı gösterir. Diğer hesaplarınızı da yanına ekleyebilirsiniz: **Widget stüdyosu**'ndan ya da **Menü çubuğu** sayfasındaki listelerden. **Limitler** sayfasında tüm hesapları görür, her birine ad verip planını seçebilirsiniz. Kullanımı hesaba göre de filtreleyebilirsiniz. Tek hesap kullanıyorsanız hiçbir şey değişmez.
@@ -104,7 +104,7 @@ Tutarlar API eşdeğeridir. Abonelikle kullanıyorsanız bu tutarları ödemezsi
 - **Birden fazla hesap:** Bu 30 günde görülen her Codex ve Claude hesabı kendi planı ve fiyatıyla hesaba katılır; fiyatlar toplanır. Kart her hesabın API eşdeğeri kullanımını planıyla birlikte listeler. Ücretsiz plandaki ya da API fiyatıyla ödenen kullanım toplama girmez; hiçbir hesaba bağlanamayan kullanım ise yalnızca toplama girer. Bir hesaba girdiğiniz fiyat, yalnızca o hesabın o anki planı için geçerlidir.
 - **Alt sınır:** Claude ve ChatGPT'deki sohbet kullanımı yerel kayıtlarda olmadığı için gerçek değer daha yüksek olabilir.
 
-**Aylık bütçe.** **Ayarlar → Aylık bütçe** bölümünden tüm araçların API eşdeğeri maliyeti için aylık bir sınır belirleyin. **Genel bakış** bu ayki harcamanızı, kalan tutarı ve günleri, ayın ilk günlerinden sonra da bu hızla ay sonunda nereye varacağınızı gösterir. Bütçenin %80'ine ulaştığınızda ve bütçeyi aştığınızda bildirim alırsınız; bunu **Ayarlar → Bildirimler** bölümünden kapatabilirsiniz.
+**Aylık bütçe.** **Ayarlar → Aylık bütçe** bölümünden tüm araçların API eşdeğeri maliyeti için aylık bir sınır belirleyin. **Genel bakış** bu ayki harcamanızı bütçeyle birlikte, kalan günleri ve ayın ilk günlerinden sonra bu hızla ay sonunda nereye varacağınızı gösterir. Bütçenin %80'ine ulaştığınızda ve bütçeyi aştığınızda bildirim alırsınız; bunu **Ayarlar → Bildirimler** bölümünden kapatabilirsiniz.
 
 ### Kullanımınızı gün gün görün
 
@@ -185,7 +185,7 @@ Widget her zaman üstte duran küçük bir penceredir. Varsayılan olarak ekran�
 - **Uyarı eşikleri:** dikkat ve kritik seviyeleri.
 - **Davranış:** her zaman üstte, konum kilidi, tıklayınca ne olacağı, tam ekran uygulamalarda gizlenme (macOS'te uygulama Dock'ta değilken), köşeye yerleştirme.
 
-Widget boyutunu içeriğe göre kendisi ayarlar. Bir köşeye sabitlediyseniz büyüyüp küçülürken o köşede kalır; sürüklerseniz bıraktığınız yerde durur. Sağ tıklayarak hızlı ayarlara ulaşabilirsiniz.
+Widget boyutunu içeriğe göre kendisi ayarlar. Bir köşeye sabitlediyseniz büyüyüp küçülürken o köşede kalır; sürüklerseniz bıraktığınız yerde durur. Sağ tıklayarak paneli açabilir, saydamlığını, boyutunu ve konumunu değiştirebilirsiniz.
 
 - **Kısayol:** Sistem genelinde bir tuş kısayoluyla widget'ı gösterip gizleyebilirsiniz (varsayılan **Ctrl+Alt+Shift+W**, macOS'te **⌃⌥⇧W**). Değiştirmek için **Ayarlar → Widget** bölümünü kullanabilirsiniz. Başka bir programın kullandığı kısayol kabul edilmez.
 - **Tepsi simgesi:** Windows'ta saatin yanında, macOS'te menü çubuğunda, Linux'ta sistem tepsisinde durur. Kontrol panelini açar ve limitlerinizi simgede de gösterebilir (bkz. [Limitlerinizi menü çubuğunda ve tepside görün](#limitlerinizi-menü-çubuğunda-ve-tepside-görün)).
@@ -216,6 +216,8 @@ Panel ayrıca güncelleme hazır olduğunda ve bir aracın oturumu kapandığı 
 - **Bir limitin yüzdesi ya da bir aracın logosu** (Claude, Codex, Antigravity, OpenCode ya da limitin ait olduğu aracın logosu), bir karenin içinde. Kare koyu gridir; isterseniz aracın rengini alır. Limit widget'ın uyarı eşiklerini geçince (varsayılan %70 ve %90) önce turuncu, sonra kırmızı olur.
 - **Kullanım göstergesi**, limit kadar dolu. macOS'te menü çubuğunun görünümüne uyan sade bir işarettir; uyarı eşiği geçilince kare olmadan uyarı rengini alır. Windows ve Linux'ta uygulamanın lacivert karesinde durur; yayı mavi, turuncu ya da kırmızı olur.
 
+Limit en son okumadan sonra kullanıldıysa, yani gerçek değer daha yüksek olabilirse, simge soluk çizilir; metinde de böyle bir değerin başında "~" durur.
+
 **Simgenin yanındaki metin.** macOS ve Linux'ta simgenin yanına `Cl 5s ▰▰▱▱▱ %46 · Cl H ⚠︎▰▰▰▰▱ %73` gibi bir metin koyabilirsiniz. Windows, tepsi simgelerinin yanında metin göstermez. Metindeki öğeleri ve sıralarını seçin: herhangi bir limit (her Claude ve Codex hesabınızınki de) ve o limitin tahmini; bugün, son 7 ya da 30 günün token, API eşdeğeri, oturum sayısı ya da önbellek isabeti (tüm araçlar ya da yalnızca OpenCode); son taramanın saati. Sonra şunları belirleyin:
 
 - **Etiket:** tam ad (`Claude 5 sa`), kısa ad (`Cl 5s`) ya da etiketsiz
@@ -234,7 +236,7 @@ macOS'te simgeyi gizleyip yalnızca metni bırakabilirsiniz; gösterilecek değe
 **Özet kartları** sayfası bir gününüzü, ayınızı ya da yılınızı paylaşabileceğiniz bir görsele dönüştürür: 1080 × 1920 bir Instagram hikâyesi ve 1080 × 1080 bir kare, yan yana, lacivert ya da açık temada. Oklarla günler, aylar ya da yıllar arasında geçin ve istediğiniz kartı PNG olarak kaydedin.
 
 - **Yıl:** token, API eşdeğeri maliyet, aboneliğinizin kaç kat değer kattığı, yılın her gününü gösteren bir takvim, en yoğun ay ve gün, en uzun seri ve en çok kullandığınız model.
-- **Ay:** aynı toplamlar; her gün için bir sütun ve günlük ortalama, aktif gün, oturum ve önbellek isabeti.
+- **Ay:** aynı toplamlar; her gün için bir sütun ve aktif gün ortalaması, aktif gün, oturum ve önbellek isabeti.
 - **Gün:** aynı toplamlar; her saat için bir sütun, günün önceki 30 gündeki ortalama bir günle karşılaştırması, oturum, istek ve önbellek isabeti.
 
 Kartta yalnızca toplamlar ve model adları yer alır, proje adları ya da yazdıklarınız asla yer almaz. Aboneliğin değeri yalnızca fiyatı bilinen planlarla hesaplanır; hiçbir planın fiyatı bilinmiyorsa kartta yer almaz.
@@ -245,21 +247,21 @@ Haftalık kullanımınızı PDF olarak kaydedebilir, verilerinizi dışa aktarı
 
 **Kullanım özeti (PDF).** **Ayarlar → Kullanım özeti (PDF)** bölümünden geçen haftayı, bu haftayı, son 7 günü, geçen ayı, bu ayı, geçen yılı ya da bu yılı A4 PDF olarak kaydedebilirsiniz. Özette şunlar yer alır: önceki döneme göre değişimiyle toplamlar, günlük grafik (üç aydan uzun dönemlerde aylık), araçlar, abonelik değeri, tahminleriyle güncel limitler, bağlam, modeller, projeler (gizlediğiniz adlar gizli kalır), en maliyetli oturumlar ve notlar. Yazdırma penceresi açılmaz. İsterseniz son tam haftanın (pazartesi–pazar) özeti, ilk tarama haftanın kayıtlarını okuduktan sonra her hafta bir kez kendiliğinden kaydedilir. Bilgisayar kapalıyken kaçırılan hafta bir sonraki açılışta kaydedilir; taşıdığınız ya da sildiğiniz özet yeniden kaydedilmez (varsayılan olarak Belgeler klasörünün içindeki **AI Usage Tracker** klasörüne kaydedilir).
 
-**Kalıcı arşiv.** Araçlar kendi kayıtlarını zamanla silebilir. Örneğin Claude Code CLI eski oturumları varsayılan olarak **30 gün** sonra siler; Claude Desktop/Cowork oturumları bunun dışındadır. Uygulama içe aldığı her kaydı kendi veri tabanında tuttuğu için geçmişiniz kaybolmaz. Hiçbir kayıt iki kez sayılmaz (bkz. [Nasıl çalışır](#nasıl-çalışır)).
+**Kalıcı arşiv.** Araçlar kendi kayıtlarını zamanla silebilir. Örneğin Claude Code CLI eski oturumları varsayılan olarak **30 gün** sonra siler. Uygulama içe aldığı her kaydı kendi veri tabanında tuttuğu için geçmişiniz kaybolmaz. Hiçbir kayıt iki kez sayılmaz (bkz. [Nasıl çalışır](#nasıl-çalışır)).
 
 **Dışa aktarma ve yedek.** **Ayarlar → Veriler** bölümünde şunları yapabilirsiniz:
 
-- CSV ya da JSON olarak dışa aktarma (istek bazında ya da günlük özet),
+- CSV ya da JSON olarak dışa aktarma (istek bazında ya da günlük özet); **CSV (;)** noktalı virgül ve ondalık virgül kullanır, Türkçe Excel'de çift tıklayınca doğru sütunlarla açılır,
 - veri tabanını yedekleme,
 - bir yedeği mevcut verilerle birleştirerek içe aktarma,
 - **Tüm verilerimi sil:** Veri tabanını boşaltır ve yeniden onaylayana kadar kayıt almayı durdurur. Başka bir yere kaydettiğiniz yedeklere ve dışa aktarımlara dokunmaz.
 
 **Fiyatlar.**
 
-- Fiyatlar [`config/pricing.json`](config/pricing.json) dosyasındadır ve 2026-10-02 ile 2026-10-10 arasında resmi sayfalardan doğrulanmıştır: [Anthropic](https://platform.claude.com/docs/en/about-claude/pricing), [OpenAI](https://developers.openai.com/api/docs/pricing), [Google Gemini](https://ai.google.dev/gemini-api/docs/pricing), [Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/pricing).
-- Hesaba katılan fiyat kalemleri: önbelleğe yazma (5 dk / 1 sa), önbellekten okuma, OpenAI uzun bağlam katmanı (>272K), hızlı mod (fast mode) ve ABD veri yerleşimi çarpanları, web araması ücreti.
+- Fiyatlar [`config/pricing.json`](config/pricing.json) dosyasındadır ve 2026-10-02 ile 2026-10-28 arasında resmi sayfalardan doğrulanmıştır: [Anthropic](https://platform.claude.com/docs/en/about-claude/pricing), [OpenAI](https://developers.openai.com/api/docs/pricing), [Google Gemini](https://ai.google.dev/gemini-api/docs/pricing), [Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/pricing); OpenCode'un kullanabildiği modeller için de [DeepSeek](https://api-docs.deepseek.com/quick_start/pricing/), [Moonshot AI](https://platform.kimi.ai/docs/pricing/chat), [Z.ai](https://docs.z.ai/guides/overview/pricing), [Alibaba Cloud](https://www.alibabacloud.com/help/en/model-studio/model-pricing), [xAI](https://docs.x.ai/developers/pricing), [Mistral](https://docs.mistral.ai/inference/pricing) ve [MiniMax](https://platform.minimax.io/docs/guides/pricing-paygo).
+- Hesaba katılan fiyat kalemleri: önbelleğe yazma (5 dk / 1 sa), önbellekten okuma, OpenAI uzun bağlam katmanı (>272K), hızlı mod (fast mode) ve ABD veri yerleşimi çarpanları, web araması ücreti ve biten bir tanıtım fiyatı gibi belli bir tarihte değişen fiyatlar. Her istek kendi gününün fiyatıyla hesaplanır.
 - Fiyatı bilinmeyen modeller **maliyete eklenmez** ve "fiyat tanımsız" uyarısıyla listelenir. Ad benzerliğine bakılarak tahmini fiyat atanmaz. **Genel bakış**'taki bu uyarıyı kapatabilirsiniz; yalnızca başka bir model fiyatsız kalırsa yeniden çıkar. Uyarıyı **Ayarlar → Fiyatlar → Uyarıyı tekrar göster** ile de geri getirebilirsiniz.
-- Fiyatları **Ayarlar → Fiyatlar** ekranında düzenleyebilirsiniz. Listede önce kayıtlarınızda geçen modeller görünür; fiyatı tanımlı bütün modelleri görmek için **Tüm modelleri göster**'e basın. Düzenlemeleriniz uygulamanın veri klasöründeki `pricing.json` dosyasına kaydedilir (bkz. [Gizlilik](#gizlilik)). Sonraki sürümlerde eklenen modeller bu dosyaya kendiliğinden eklenir, düzenlemeleriniz korunur. Aynı ekranda fiyatsız bir modeli başka bir modelin fiyatıyla hesaplatabilir ya da varsayılan fiyatlara dönebilirsiniz.
+- Fiyatları **Ayarlar → Fiyatlar** ekranında düzenleyebilirsiniz. Listede önce kayıtlarınızda geçen modeller görünür; fiyatı tanımlı bütün modelleri görmek için **Tüm modelleri göster**'e basın. Uygulamanın veri klasöründeki `pricing.json` dosyasına (bkz. [Gizlilik](#gizlilik)) yalnızca değiştirdiğiniz fiyatlar kaydedilir; diğer bütün modeller, düzeltmeler ve sonraki sürümlerde eklenen modeller dahil, uygulamanın listesini izler. Aynı ekranda fiyatsız bir modeli başka bir modelin fiyatıyla hesaplatabilir ya da varsayılan fiyatlara dönebilirsiniz.
 
 ## Desteklenen kaynaklar
 
@@ -338,13 +340,13 @@ Her sürümde, her dosyanın sağlama değerini içeren bir `SHA256SUMS` dosyas�
 
 > **Prompt ve yanıtlarınız arşive alınmaz.** Uygulama kayıtlardan yalnızca token sayısı, model ve zaman gibi bilgileri alır; prompt ve yanıt metinleri uygulamanın arşivine kaydedilmez. Kullanım verileriniz bilgisayarınızdan hiçbir yere gönderilmez ve uygulamada telemetri yoktur.
 
-- **Okunanlar:** Araçların kendi kayıtlarındaki zaman damgası, model adı, proje klasörü, oturum kimliği, token sayıları ve limit yüzdeleri.
+- **Okunanlar:** Araçların kendi kayıtlarındaki zaman damgası, model adı, proje klasörü, git dalı, oturum kimliği, alt ajan adı, token sayıları, araç çağrılarının adı ve sonucu (girdisi ya da çıktısı asla) ve limit yüzdeleri.
 - **Saklananlar:** Yalnızca bu sayılar ve meta veriler. Hepsi uygulamanın veri klasöründeki `tracker.db` (SQLite) dosyasında durur: Windows'ta `%LOCALAPPDATA%\AIUsageTracker`, macOS'te `~/Library/Application Support/AIUsageTracker`, Linux'ta `~/.local/share/AIUsageTracker`. Proje adları bu bilgisayardan çıkmaz. İsterseniz adları tek tek ya da toplu olarak gizleyebilirsiniz; gizlenen adlar dışa aktarımlarda da maskelenir.
 - **Uygulamanın arşivinde hiçbir zaman tutulmayanlar:** Prompt ve yanıtlar, dosya içerikleri, kimlik bilgileri ve erişim token'ları. Uygulama, araçların oturum anahtarlarını tutan dosyaları (`.credentials.json`, `auth.json`) **okumaz**.
 - **Codex ve Claude hesapları:** Uygulama hesapları ayırt etmek için Codex hesap kimliğinin ve Claude planının bağlı olduğu kuruluş kimliğinin yalnızca geri çözülemeyen bir özetini saklar. Claude'da yalnızca bu kimliği okur: `~/.claude.json` dosyasından, telemetri kayıtlarından ve Claude masaüstünün Code sekmesi oturum listesindeki klasör adları ile oturum kimliklerinden. Hesap adları sizin verdiğiniz adlardır; e-posta adresi hiç okunmaz.
 - **Antigravity'nin geçici kopyası:** Antigravity, sohbetlerini metinleriyle birlikte bir veri tabanında tutar. Uygulama bu dosyaya dokunmamak için onu, yalnızca sizin erişebildiğiniz geçici bir klasöre kopyalar, sayıları okur ve kopyayı hemen siler. Uygulama zorla kapatılırsa kalan kopyalar, Antigravity bir sonraki okunduğunda 10 dakikadan eskiyse silinir. Sohbet metni uygulamanın arşivine hiçbir zaman alınmaz.
 - **OpenCode'un veritabanı:** OpenCode, oturumlarını metinleriyle birlikte tek bir veritabanında tutar. Uygulama bu dosyayı salt okunur açar ve yalnızca token sayılarını, modeli, sağlayıcıyı, ajanı, proje klasörünü ve araç çağrılarının adını, sonucunu ve zamanını sorar; metin hiç okunmaz.
-- **İnternet bağlantısı:** Uygulamanın kendisi internete yalnızca güncelleme denetimi için bağlanır. Bu denetimde yalnızca sürüm dosyası indirilir, hiçbir veri gönderilmez (**Ayarlar → Güncellemeler**). Varsayılan olarak açık gelen limit okumaları bilgisayarınızdaki Claude Code, Codex ve Antigravity CLI'ı çalıştırır; bu araçlar limit yüzdenizi kendi servislerinden sorar. Uygulama onları telemetri ve hata raporlaması kapalı olarak başlatır. Limit okumalarını **Kaynaklar → Canlı yakalama** bölümünden kapatabilirsiniz. Bir aracı uygulamadan kurarsanız kurulum dosyası üreticinin sitesinden indirilir. Fiyat ve plan dosyaları uygulamayla birlikte gelir. Döviz kuru için de internetten veri çekilmez; kuru kendiniz girersiniz.
+- **İnternet bağlantısı:** Uygulamanın kendisi internete yalnızca güncelleme denetimi için bağlanır. Bu denetimde yalnızca sürüm dosyası indirilir, hiçbir veri gönderilmez (**Ayarlar → Güncellemeler**). Varsayılan olarak açık gelen limit okumaları bilgisayarınızdaki Claude Code, Codex ve Antigravity CLI'ı çalıştırır; bu araçlar limit yüzdenizi kendi servislerinden sorar. Uygulama Claude Code'u telemetri ve hata raporlaması kapalı, Codex'i analitik kapalı olarak başlatır; Antigravity CLI'da böyle bir ayar yoktur. Limit okumalarını **Kaynaklar → Canlı yakalama** bölümünden kapatabilirsiniz. Bir aracı uygulamadan kurarsanız kurulum dosyası üreticinin sitesinden indirilir. Fiyat ve plan dosyaları uygulamayla birlikte gelir. Döviz kuru için de internetten veri çekilmez; kuru kendiniz girersiniz.
 
 ### Canlı yakalama
 
@@ -399,10 +401,10 @@ Uygulama açılışta ve 6 saatte bir yeni sürüm olup olmadığına bakar. Bun
 
 ## Kaynaktan derleme
 
-Gereksinimler: Rust 1.99+ (CI'ın ve sürüm derlemelerinin kullandığı sürüm) ve Node 20.19+ veya 22.12+; bunlara ek olarak:
+Gereksinimler: Rust 1.99+ (CI'ın ve sürüm derlemelerinin kullandığı sürüm) ve Node 22.12+; bunlara ek olarak:
 
 - **Windows:** Visual Studio Build Tools (C++)
-- **macOS:** Xcode Command Line Tools
+- **macOS:** Xcode Command Line Tools; universal sürüm derlemesi için ayrıca `rustup target add aarch64-apple-darwin x86_64-apple-darwin`
 - **Linux:** WebKitGTK 4.1 ve geliştirme dosyaları; örneğin Debian ve Ubuntu'da `sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev`
 
 ```bash

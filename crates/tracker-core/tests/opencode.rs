@@ -223,6 +223,33 @@ fn only_sessions_with_new_rows_are_read_again_and_nothing_counts_twice() {
     assert_eq!(events(&store).len(), 6);
 }
 
+#[test]
+fn a_tool_call_read_while_its_input_streams_counts_once() {
+    let db = opencode();
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &db.env);
+    step(&db.conn, 9, MAIN, "anthropic", "claude-sonnet-4-5", "build", [10, 20, 0, 30, 0], "");
+    // OpenCode writes the part while the input streams, with no start time, then updates it
+    db.conn
+        .execute(
+            "INSERT INTO part VALUES('prt_009_tool', 'msg_009', ?1, ?2, ?2, ?3)",
+            params![MAIN, T0 + 9_200, r#"{"type":"tool","tool":"edit","callID":"c9","state":{"status":"pending","input":{},"raw":""}}"#],
+        )
+        .unwrap();
+    run(&mut store, &db.env);
+    db.conn
+        .execute(
+            "UPDATE part SET data = ?1 WHERE id = 'prt_009_tool'",
+            params![format!(r#"{{"type":"tool","tool":"edit","callID":"c9","state":{{"status":"completed","input":{{}},"time":{{"start":{},"end":{}}}}}}}"#, T0 + 9_700, T0 + 9_900)],
+        )
+        .unwrap();
+    step(&db.conn, 10, MAIN, "anthropic", "claude-sonnet-4-5", "build", [10, 20, 0, 30, 0], "");
+    run(&mut store, &db.env);
+    let edits: Vec<_> = store.tool_calls_between(0, i64::MAX).unwrap().into_iter().filter(|c| c.name == "edit").collect();
+    assert_eq!(edits.len(), 1, "{edits:?}");
+    assert_eq!(edits[0].failed, Some(false));
+}
+
 /// What OpenCode's `Session.fork` does: every message and part copied under new ids into a new
 /// top-level session, their data (times, model, step tokens, call ids) unchanged.
 fn fork(c: &Connection, from: &str, to: &str, version: &str) {

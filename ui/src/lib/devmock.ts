@@ -239,7 +239,7 @@ function limits(): LimitView[] {
 
 function allLimits(): LimitView[] {
   const now = Date.now()
-  const share = (p: string, s: number, used: number | null) => ({ project_id: projects.indexOf(p) + 1, name: p, hidden: false, totals: totals(Math.round(s * 5e7), s * 30), share: s, estimated_pct: used === null ? null : used * s })
+  const share = (p: string, s: number, used: number | null) => ({ project_id: projects.indexOf(p) + 1, name: p, hidden: false, totals: totals(Math.round(s * 5e7), s * 30), share: s, estimated_pct: used === null ? null : used * s, unknown_account: false })
   const all: LimitView[] = ([
     { provider: 'anthropic', limit_id: '', window: 'five_hour', window_minutes: 300, used_pct: 46, resets_at: Math.round(now / 1000 + 2.3 * 3600), observed_ms: now - 192 * 60000, source: 'cowork_audit', status: 'allowed', plan: null, accuracy: 'exact', state: 'behind', window_start_ms: now - 2.7 * 3600e3, window_usage: totals(41e6, 31.2), usage_since: totals(190e6, 65.9), forecast: null, projects: [share('demo-app', 0.62, 46), share('notes', 0.38, 46)] },
     { provider: 'anthropic', limit_id: '', window: 'seven_day', window_minutes: 10080, used_pct: 73, resets_at: Math.round(now / 1000 + 2.6 * 86400), observed_ms: now - 4 * 60000, source: 'cowork_audit', status: 'allowed_warning', plan: null, accuracy: 'exact', state: 'fresh', window_start_ms: now - 4.4 * 86400e3, window_usage: totals(612e6, 402.5), usage_since: totals(0, 0), forecast: { kind: 'fills', rate_per_hour: 0.9, fills_at_ms: now + 30 * 3600e3, at_reset_pct: null, basis_minutes: 5760 }, projects: [share('demo-app', 0.42, 73), share('website', 0.26, 73), share('notes', 0.17, 73)], unlogged_pct: 10.95 },
@@ -270,12 +270,13 @@ function mockTimeline(from: number, to: number) {
     const ts = from + (i / n) * (span - 12 * 60e3) + pause
     const agent = i >= 26 && i < 31 ? 'general-purpose' : null
     const compacted = i === 38
+    const prevCtx = ctx
     if (compacted) ctx = 31_000
     const context = agent ? 9_000 + (i - 26) * 2_500 : ctx
     const rebuilt = i === 18
     const write = rebuilt ? Math.round(context * 0.86) : agent && i === 26 ? context : Math.round(3_000 + (i % 3) * 900)
     const read = Math.max(0, context - write - 400)
-    requests.push({ ts_ms: ts, model: 'claude-opus-5-5', agent, thread: agent ? 'a1' : null, context, input: 400, cache_read: read, cache_write: write, output: 600 + (i % 5) * 300, cost_usd: (read * 0.5 + write * 6.25 + 400 * 5 + 900 * 25) / 1e6, rewritten: rebuilt ? Math.round(context * 0.8) : 0, rewrite_extra_usd: rebuilt ? Math.round(context * 0.8) * 5.75e-6 : null, pause_ms: rebuilt ? 12 * 60e3 : null, compacted })
+    requests.push({ ts_ms: ts, model: 'claude-opus-5-5', agent, thread: agent ? 'a1' : null, context, input: 400, cache_read: read, cache_write: write, output: 600 + (i % 5) * 300, cost_usd: (read * 0.5 + write * 6.25 + 400 * 5 + 900 * 25) / 1e6, rewritten: rebuilt ? Math.round(context * 0.8) : 0, rewrite_extra_usd: rebuilt ? Math.round(context * 0.8) * 5.75e-6 : null, pause_ms: rebuilt ? 12 * 60e3 : null, compacted, compacted_from: compacted ? prevCtx : null })
     if (!agent) ctx += 2_400 + (i % 4) * 900
   }
   const names = ['Read', 'Edit', 'Bash', 'Grep', 'Bash', 'Read']
@@ -283,7 +284,7 @@ function mockTimeline(from: number, to: number) {
     const r = requests[Math.min(n - 1, Math.floor((k / 70) * n))]
     return { ts_ms: r.ts_ms + 4_000, name: names[k % names.length], agent: r.agent, failed: k % 17 === 5 ? true : k % 9 === 0 ? null : false }
   })
-  return { requests, calls }
+  return { requests, calls, calls_hidden: false }
 }
 
 function mockSessions() {
@@ -656,12 +657,12 @@ function mockTrayPreview(tray: TraySettings) {
   const icon = !tray.show_percent
     ? null
     : tray.mark === 'number'
-      ? c && { text: String(shownPct), logo: '' as const, bg, fg, dial: null }
+      ? c && { text: String(shownPct), logo: '' as const, bg, fg, dial: null, opacity: 1 }
       : tray.mark === 'dial'
-        ? c && { text: '', logo: '' as const, bg: dialBg, fg: dialFg, dial: shownPct / 100 }
+        ? c && { text: '', logo: '' as const, bg: dialBg, fg: dialFg, dial: shownPct / 100, opacity: 1 }
         : tray.mark === 'tool'
-          ? c && { text: '', logo: c.provider, bg, fg, dial: null }
-          : { text: '', logo: tray.mark, bg, fg, dial: null }
+          ? c && { text: '', logo: c.provider, bg, fg, dial: null, opacity: 1 }
+          : { text: '', logo: tray.mark, bg, fg, dial: null, opacity: 1 }
   return { title: tray.title && shown.length && platform !== 'windows' ? `${tray.prefix}${shown.join(tray.separator)}${tray.suffix}` : '', parts, catalog, icon: icon || null }
 }
 

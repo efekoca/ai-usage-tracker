@@ -668,9 +668,25 @@ fn a_session_timeline_keeps_the_filter_of_the_session_list() {
     let t = session_timeline(&store, &book, Tool::ClaudeCode, "s1", m(0), m(3), &only).unwrap();
     let contexts: Vec<u64> = t.requests.iter().map(|r| r.context).collect();
     assert_eq!(contexts, [1_000, 3_000], "the other model's request in between stays out");
-    let names: Vec<&str> = t.calls.iter().map(|c| c.name.as_str()).collect();
-    assert_eq!(names, ["c1", "c3"], "a call goes with the request sent right before it");
+    assert!(t.calls.is_empty() && t.calls_hidden, "a call records no request, so none is guessed for the filter");
 
     let all = session_timeline(&store, &book, Tool::ClaudeCode, "s1", m(0), m(3), &Filter::default()).unwrap();
-    assert_eq!((all.requests.len(), all.calls.len()), (3, 3));
+    assert_eq!((all.requests.len(), all.calls.len(), all.calls_hidden), (3, 3, false));
+    let opus = Filter { models: vec!["claude-opus-5-5".into()], ..Default::default() };
+    assert!(session_timeline(&store, &book, Tool::ClaudeCode, "s1", m(0), m(3), &opus).unwrap().calls_hidden);
+}
+
+#[test]
+fn a_compaction_keeps_the_context_before_it_when_a_filter_hides_that_request() {
+    let m = |n: i64| ms(2026, 10, 2, 9, 0) + n * MIN;
+    let store = store_with(&[
+        ev("a", m(0), Tool::ClaudeCode, "claude-sonnet-5-5", Some("s1"), "C:/w/app", 10_000, 0, 100),
+        ev("b", m(1), Tool::ClaudeCode, "claude-opus-5-5", Some("s1"), "C:/w/app", 80_000, 0, 100),
+        ev("c", m(2), Tool::ClaudeCode, "claude-sonnet-5-5", Some("s1"), "C:/w/app", 20_000, 0, 100),
+    ]);
+    let sonnet = Filter { models: vec!["claude-sonnet-5-5".into()], ..Default::default() };
+    let t = session_timeline(&store, &PriceBook::default_book(), Tool::ClaudeCode, "s1", m(0), m(2), &sonnet).unwrap();
+    let last = t.requests.last().unwrap();
+    assert!(last.compacted);
+    assert_eq!(last.compacted_from, Some(80_000), "the hidden request before it, not the visible 10K");
 }

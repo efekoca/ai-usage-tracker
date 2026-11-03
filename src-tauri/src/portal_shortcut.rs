@@ -32,6 +32,9 @@ impl Drop for Session {
         if let Ok(p) = Proxy::new(&self.conn, DEST, self.handle.as_ref(), "org.freedesktop.portal.Session") {
             let _ = p.call_method("Close", &());
         }
+        // the listener holds a copy of the connection; closing it ends the listener's stream, so
+        // a changed hotkey leaves no thread and no connection behind
+        let _ = self.conn.clone().close();
     }
 }
 

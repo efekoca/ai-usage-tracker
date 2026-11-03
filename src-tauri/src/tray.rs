@@ -183,7 +183,13 @@ pub struct Badge {
     pub level: Level,
     /// The tool's color, shown while the limit is not close.
     pub tint: Option<[u8; 3]>,
+    /// The limit was used after its reading, so the value may be higher: drawn faded, as the
+    /// menu bar text marks it with "~".
+    pub behind: bool,
 }
+
+/// How much of a badge shows while its reading is behind.
+pub const BEHIND_ALPHA: f64 = 0.5;
 
 /// Every pool's current window, of each known Codex and Claude account too; `None` when limits cannot be read
 /// right now, so the tray keeps what it shows.
@@ -361,7 +367,7 @@ pub(crate) fn badge(s: &Settings, cfg: &TraySettings, limits: &[Current]) -> Opt
         }
     };
     let tint = if cfg.tool_color { tool_color(s, tool) } else { None };
-    Some(Badge { mark, level, tint })
+    Some(Badge { mark, level, tint, behind: c.is_some_and(|c| c.behind) })
 }
 
 /// The color chosen for a tool in the app, else the tool's own.
@@ -543,6 +549,16 @@ fn level_colors(level: Level) -> ([u8; 3], [u8; 3]) {
 }
 
 pub fn draw(b: &Badge, size: u32) -> Vec<u8> {
+    let mut px = paint(b, size);
+    if b.behind {
+        for p in px.as_chunks_mut::<4>().0 {
+            p[3] = (p[3] as f64 * BEHIND_ALPHA).round() as u8;
+        }
+    }
+    px
+}
+
+fn paint(b: &Badge, size: u32) -> Vec<u8> {
     let s = size as i64;
     let mut px = vec![0u8; (size * size * 4) as usize];
     if let Mark::Dial(used) = b.mark {
@@ -780,7 +796,16 @@ mod tests {
     use super::*;
 
     fn plain(mark: Mark, level: Level) -> Badge {
-        Badge { mark, level, tint: None }
+        Badge { mark, level, tint: None, behind: false }
+    }
+
+    #[test]
+    fn a_reading_used_since_is_drawn_faded() {
+        let sharp = draw(&plain(Mark::Number("73".into()), Level::Warn), 32);
+        let faded = draw(&Badge { behind: true, ..plain(Mark::Number("73".into()), Level::Warn) }, 32);
+        let alpha = |px: &[u8]| px.iter().skip(3).step_by(4).map(|&a| a as u32).sum::<u32>();
+        assert!(alpha(&sharp) > 0);
+        assert!(alpha(&faded) * 2 <= alpha(&sharp) + sharp.len() as u32 / 4, "about half as opaque");
     }
 
     fn lit(px: &[u8], size: u32, fg: [u8; 3]) -> Vec<(u32, u32)> {
@@ -889,7 +914,7 @@ mod tests {
         let claude = [0xD9, 0x77, 0x57];
         for (m, mark) in [("number", Mark::Number("30".into())), ("tool", Mark::Logo("anthropic"))] {
             s.tray.mark = m.into();
-            assert_eq!(badge(&s, &s.tray, &l), Some(Badge { mark, level: Level::Normal, tint: Some(claude) }), "{m}");
+            assert_eq!(badge(&s, &s.tray, &l), Some(Badge { mark, level: Level::Normal, tint: Some(claude), behind: false }), "{m}");
         }
         // a chosen logo takes its own tool's color, whichever limit colors it
         s.tray.mark = "opencode".into();

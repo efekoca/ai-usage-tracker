@@ -194,8 +194,9 @@
         })
       }
       if (r.compacted) {
-        const before = reqs.slice(0, i).findLast((p) => !sub(p))?.context ?? 0
-        out.push({ ms: r.ts_ms, cls: 'compact', title: t('timeline.ev.compact'), detail: `${fmtCompact(before)} → ${fmtCompact(r.context)}`, value: before ? `−${fmtPct((1 - r.context / before) * 100)}` : '' })
+        // the request before can be one a filter left out, so the size comes with the mark
+        const before = r.compacted_from
+        out.push({ ms: r.ts_ms, cls: 'compact', title: t('timeline.ev.compact'), detail: before ? `${fmtCompact(before)} → ${fmtCompact(r.context)}` : '', value: before ? `−${fmtPct((1 - r.context / before) * 100)}` : '' })
       }
     })
     for (const run of runs) {
@@ -245,6 +246,26 @@
     if (i !== hover) hover = i
   }
 
+  // the arrow keys move through the requests, and a screen reader hears each one
+  const STEPS: Record<string, number> = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1, PageUp: 10, PageDown: -10 }
+  function key(e: KeyboardEvent) {
+    if (!n) return
+    const at = hover ?? n - 1
+    let i: number
+    if (e.key in STEPS) i = Math.min(n - 1, Math.max(0, at + STEPS[e.key]))
+    else if (e.key === 'Home') i = 0
+    else if (e.key === 'End') i = n - 1
+    else return
+    e.preventDefault()
+    hover = i
+  }
+  const spoken = $derived.by(() => {
+    const r = reqs[hover ?? n - 1]
+    if (!r) return ''
+    const note = r.rewritten > 0 ? t('timeline.note.rewrite') : r.compacted ? t('timeline.note.compact') : sub(r) ? t('timeline.ev.agent', { a: agentOf(r) }) : ''
+    return [fmtClock(r.ts_ms), `${t('timeline.context')} ${fmtCompact(r.context)}`, `${t('metric.cost')} ${r.cost_usd === null ? '—' : fmtMoney(r.cost_usd)}`, note].filter(Boolean).join(', ')
+  })
+
   const maxContext = $derived(Math.max(0, ...reqs.map((r) => r.context)))
   const hit = $derived(prompt ? (sumOf((r) => r.cache_read) / prompt) * 100 : 0)
 </script>
@@ -269,7 +290,20 @@
   {:else if !n}
     <p class="muted small">{t('timeline.empty')}</p>
   {:else}
-    <div class="chart" bind:clientWidth={width}>
+    <div
+      class="chart"
+      bind:clientWidth={width}
+      role="slider"
+      tabindex="0"
+      aria-label={t('timeline.requests')}
+      aria-valuemin={1}
+      aria-valuemax={n}
+      aria-valuenow={(hover ?? n - 1) + 1}
+      aria-valuetext={spoken}
+      onkeydown={key}
+      onfocus={() => hover === null && (hover = n - 1)}
+      onblur={() => (hover = null)}
+    >
       {#if width}
         <svg {width} height={calls.length ? H : BASE + 26} role="img" aria-label={t('timeline.aria', { n: fmtInt(n), max: fmtCompact(maxContext) })}>
           {#each grid as g, k (k)}
@@ -319,6 +353,7 @@
         {/if}
       {/if}
     </div>
+    {#if data.calls_hidden}<p class="subtle small calls-note">{t('timeline.callsHidden')}</p>{/if}
 
     <div class="totals">
       {#each totals as s (s.cls)}
@@ -553,6 +588,9 @@
   }
   .tip-note.agent {
     color: var(--agent-text);
+  }
+  .calls-note {
+    margin: 4px 0 0;
   }
   .totals {
     display: grid;

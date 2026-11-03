@@ -220,14 +220,20 @@ fn step(used: f64, early_at: f64) -> Step {
 }
 
 /// A limit seen for the first time only records where it stands, so starting the app or a new
-/// account never notifies. Readings from before a reset are left out. An account not in use
-/// resets quietly: its notification would read as if the limit in use were free again.
+/// account never notifies. Readings from before a reset are left out. A limit resets quietly when
+/// another account of its provider is known to be in use: the notification would read as if the
+/// limit in use were free again. A reading that has expired is not passed in, so with no current
+/// reading of the provider the reset is still told.
 fn changes(seen: &mut HashMap<Limit, Seen>, readings: &[Reading], early_at: f64, now: i64) -> Vec<Alert> {
     let mut out = Vec::new();
-    let in_use: HashSet<(Provider, Option<&str>)> = readings.iter().filter(|r| r.active).map(|r| (r.provider, r.account.as_deref())).collect();
+    let in_use: HashMap<Provider, HashSet<Option<&str>>> = readings.iter().filter(|r| r.active).fold(HashMap::new(), |mut m, r| {
+        m.entry(r.provider).or_default().insert(r.account.as_deref());
+        m
+    });
+    let another = |l: &Limit| in_use.get(&l.provider).is_some_and(|a| !a.contains(&l.account.as_deref()));
     for (limit, s) in seen.iter_mut() {
         if s.resets_at.is_some_and(|at| at <= now) {
-            if s.step == Step::Full && in_use.contains(&(limit.provider, limit.account.as_deref())) {
+            if s.step == Step::Full && !another(limit) {
                 out.push(Alert::Reset { limit: limit.clone() });
             }
             *s = Seen { step: Step::Below, resets_at: None };
@@ -240,9 +246,11 @@ fn changes(seen: &mut HashMap<Limit, Seen>, readings: &[Reading], early_at: f64,
             seen.insert(limit, Seen { step: now_step, resets_at: r.resets_at });
             continue;
         };
-        // e.g. a Claude week that starts again early
+        // e.g. a Claude week that starts again early; a reset time that only moves while the
+        // limit stays where it was is not a new window
         if let (Some(was), Some(at)) = (s.resets_at, r.resets_at)
             && (was - at).abs() > MOVED_SECS
+            && now_step < s.step
         {
             if s.step == Step::Full {
                 out.push(Alert::Reset { limit: limit.clone() });
@@ -596,6 +604,8 @@ mod tests {
         let mut seen = HashMap::new();
         changes(&mut seen, &[read(Provider::Anthropic, "seven_day", 60.0, 3 * 86_400)], 70.0, NOW);
         assert_eq!(kinds(&changes(&mut seen, &[read(Provider::Anthropic, "seven_day", 100.0, 3 * 86_400 + 30)], 70.0, NOW)), ["full"]);
+        let moved = [read(Provider::Anthropic, "seven_day", 100.0, 5 * 86_400)];
+        assert!(changes(&mut seen, &moved, 70.0, NOW).is_empty(), "a reset time that moves while the limit stays full is not a new window");
         let restarted = [read(Provider::Anthropic, "seven_day", 2.0, 7 * 86_400)];
         assert_eq!(kinds(&changes(&mut seen, &restarted, 70.0, NOW)), ["reset"]);
     }
@@ -609,6 +619,10 @@ mod tests {
         assert!(changes(&mut seen, &[on("b", 75.0, 9000)], 70.0, NOW).is_empty(), "b is only recorded");
         assert_eq!(kinds(&changes(&mut seen, &[on("b", 100.0, 9000)], 70.0, NOW)), ["full"]);
         assert!(changes(&mut seen, &[on("b", 100.0, 9000)], 70.0, NOW + 3601).is_empty(), "a's reset while b is in use and full stays quiet");
+        let mut alone = HashMap::new();
+        changes(&mut alone, &[on("a", 90.0, 3600)], 70.0, NOW);
+        changes(&mut alone, &[on("a", 100.0, 3600)], 70.0, NOW);
+        assert_eq!(kinds(&changes(&mut alone, &[], 70.0, NOW + 3601)), ["reset"], "no current reading at the reset: still told");
         assert_eq!(kinds(&changes(&mut seen, &[on("a", 100.0, 20_000)], 70.0, NOW + 3700)), ["full"], "a fills again after switching back");
     }
 

@@ -65,7 +65,8 @@ export interface TrayPreview {
   catalog: string[]
   /** The badge the icon would draw; null keeps the app icon. */
   /** `dial` is the dial's filled share (0–1); a dial macOS tints has no `bg` or `fg`. */
-  icon: { text: string; logo: '' | Provider | 'opencode'; bg: string; fg: string; dial: number | null } | null
+  /** `opacity` is below 1 while the reading is behind (used since it was taken). */
+  icon: { text: string; logo: '' | Provider | 'opencode'; bg: string; fg: string; dial: number | null; opacity: number } | null
 }
 
 export type PanelKind = 'limit' | 'provider' | 'usage' | 'forecast' | 'scan' | 'action'
@@ -244,6 +245,8 @@ export interface ProjectShare {
   totals: Totals
   share: number
   estimated_pct: number | null
+  /** Requests no evidence ties to an account, shown apart on the view of the account in use. */
+  unknown_account: boolean
 }
 
 export interface LimitView {
@@ -403,6 +406,8 @@ export interface TimelineRequest {
   /** With a rewrite: the pause since the previous request of the same conversation and model. */
   pause_ms: number | null
   compacted: boolean
+  /** With a compaction: the main conversation's context before it, which a filter may have left out. */
+  compacted_from: number | null
 }
 export interface TimelineCall {
   ts_ms: number
@@ -413,6 +418,8 @@ export interface TimelineCall {
 export interface SessionTimeline {
   requests: TimelineRequest[]
   calls: TimelineCall[]
+  /** The filter left out some of the session's requests, so no tool call is shown: a call does not record which request it came from. */
+  calls_hidden: boolean
 }
 
 export interface MonthSpend {
@@ -904,7 +911,7 @@ export const api = {
   catalogPrices: (models: string[]) => invoke<ModelPrice[]>('catalog_prices', { models }),
   resetPricing: () => invoke<void>('reset_pricing'),
   plans: () => invoke<PlansFile>('get_plans'),
-  exportData: (path: string, period: Period, filter: Filter | undefined, granularity: 'events' | 'daily', format: 'csv' | 'json') =>
+  exportData: (path: string, period: Period, filter: Filter | undefined, granularity: 'events' | 'daily', format: 'csv' | 'csv_semicolon' | 'json') =>
     invoke<number>('export_data', { path, period, filter, granularity, format }),
   backup: (path: string) => invoke<void>('backup_database', { path }),
   importDb: (path: string) => invoke<{ events: number; limits: number }>('import_database', { path }),

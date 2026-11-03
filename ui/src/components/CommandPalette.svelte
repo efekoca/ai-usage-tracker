@@ -179,6 +179,17 @@
     return out
   })
 
+  /** The shown items by group, each with its place in `shown`, which the arrow keys move through. */
+  const groups = $derived.by(() => {
+    const out: { group: Group; items: { item: Item; i: number }[] }[] = []
+    shown.forEach((item, i) => {
+      const last = out[out.length - 1]
+      if (last?.group === item.group) last.items.push({ item, i })
+      else out.push({ group: item.group, items: [{ item, i }] })
+    })
+    return out
+  })
+
   $effect(() => {
     void query
     active = 0
@@ -271,29 +282,32 @@
       />
     </div>
     <ul id="palette-list" role="listbox" aria-label={t('palette.label')} bind:this={list}>
-      {#each shown as item, i (item.id)}
-        {#if i === 0 || shown[i - 1].group !== item.group}
-          <li class="group" role="presentation">{t(`palette.group.${item.group}`)}</li>
-        {/if}
-        <!-- the search field moves through the options (aria-activedescendant), so they take no focus -->
-        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_interactive_supports_focus -->
-        <li
-          id="palette-{i}"
-          data-index={i}
-          role="option"
-          aria-selected={i === active}
-          class:active={i === active}
-          onmousemove={() => (active = i)}
-          onclick={() => choose(item)}
-        >
-          <Icon name={item.icon} size={15} />
-          <span class="label">{item.label}</span>
-          {#if item.detail}<span class="detail">{item.detail}</span>{/if}
+      {#each groups as g (g.group)}
+        <li role="group" aria-labelledby="palette-group-{g.group}">
+          <div class="group" id="palette-group-{g.group}">{t(`palette.group.${g.group}`)}</div>
+          <ul role="presentation">
+            {#each g.items as { item, i } (item.id)}
+              <!-- the search field moves through the options (aria-activedescendant), so they take no focus -->
+              <!-- svelte-ignore a11y_click_events_have_key_events, a11y_interactive_supports_focus -->
+              <li
+                id="palette-{i}"
+                data-index={i}
+                role="option"
+                aria-selected={i === active}
+                class:active={i === active}
+                onmousemove={() => (active = i)}
+                onclick={() => choose(item)}
+              >
+                <Icon name={item.icon} size={15} />
+                <span class="label">{item.label}</span>
+                {#if item.detail}<span class="detail">{item.detail}</span>{/if}
+              </li>
+            {/each}
+          </ul>
         </li>
-      {:else}
-        <li class="empty" role="presentation">{t('palette.empty')}</li>
       {/each}
     </ul>
+    {#if !shown.length}<p class="empty" role="status">{t('palette.empty')}</p>{/if}
     <div class="hint small subtle">{t('palette.hint')}</div>
   </div>
 {/if}
@@ -344,6 +358,10 @@
     padding: 6px;
     overflow-y: auto;
   }
+  li[role='group'] > ul {
+    padding: 0;
+    overflow: visible;
+  }
   li[role='option'] {
     display: flex;
     align-items: center;
@@ -379,6 +397,7 @@
     color: var(--ink-3);
   }
   .empty {
+    margin: 0;
     padding: 18px 10px;
     color: var(--ink-3);
     text-align: center;

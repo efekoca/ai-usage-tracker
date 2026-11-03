@@ -46,7 +46,7 @@ Providers publish how their limits work, not the numbers themselves. The app the
 - If the tool was used after the newest reading, the current value is unknown. It is shown as "?" with the last reading and its age, never as the current value. The panel and the menu bar text mark that last reading with "~": it is usually lower than the current value, but higher if the provider reset your limit in between.
 - Percentages can read as **used** (as Claude shows them, "15 % used") or **left** (as Codex shows them, "85 % left"). Switch between them in **Settings**, on the **Limits** page, or in the **Widget studio**. Warning colors follow usage either way.
 - Without a real reading, you can set your own budget per window. The resulting percentage is labeled **Estimated**.
-- Limits are account-wide. Each rise of the percentage is split among the projects that sent requests meanwhile, by API-equivalent cost. Use from elsewhere (the web, a phone, cloud tasks, another computer) is not charged to your projects; it shows separately as **Not in local logs**. These shares are always **Estimated**.
+- Limits are account-wide. Each rise of the percentage is split among the projects that sent requests meanwhile, by API-equivalent cost. Use from elsewhere (the web, a phone, cloud tasks, another computer) is not charged to your projects; it shows separately as **Not in local logs**. With several Claude or Codex accounts, requests no evidence ties to an account get a share of their own, **Unidentified account**, and a reading taken before them is not shown as current. These shares are always **Estimated**.
 - Each tool is marked with its own monochrome icon. Under **Settings → General → Tool colors** you can give Claude, Codex, and Antigravity their own color for limit bars and widget rings, and color the icons too if you like. Warning colors still show when a limit gets close. If you prefer plain names, turn the icons off under **Settings → General → Show tool icons**.
 
 **More than one Codex account.** If you switch between Codex accounts, each account gets its own limits, history, and forecast. Codex does not record which account sent each request, so the app ties every request to its account by the limit window the request reports. It learns the account from what Codex does name: the account that started a session (for the requests sent right after) and the signed-in account in the Codex limit read (Codex 0.163 and later). Early resets, including resets the provider grants, are told apart from an account switch. If a reset for everyone makes two accounts' windows start together, that window is given to neither. Requests without such evidence are never guessed; they stay under **Unidentified account**. The widget, panel, and menu bar show the account in use, and you can add your other accounts beside it: in the **Widget studio**, or from the item lists on the **Menu bar** page. The **Limits** page shows every account, and you can name each one and choose its plan there. Usage can also be filtered by account. With a single account, nothing changes.
@@ -104,7 +104,7 @@ Amounts are API equivalents. On a subscription you do not pay them; they show th
 - **More than one account:** each Codex or Claude account seen in those 30 days counts with its own plan and price, and their prices are added up. The card lists each account's API-equivalent use next to its plan. Use on a free plan or at API rates is left out of the total, and use that no evidence ties to an account counts only toward the total. A price you enter for an account applies to that account's current plan only.
 - **Lower bound:** chat use in Claude and ChatGPT is not in local logs, so the real value can be higher.
 
-**Monthly budget.** Set a monthly limit for the API-equivalent cost of every tool in **Settings → Monthly budget**. The **Overview** then shows this month's spend, how much is left, the days remaining and, after the first days of the month, where you are heading at this pace. A notification tells you when you reach 80% of the budget and when you go over it; turn it off in **Settings → Notifications**.
+**Monthly budget.** Set a monthly limit for the API-equivalent cost of every tool in **Settings → Monthly budget**. The **Overview** then shows this month's spend against the budget, the days remaining and, after the first days of the month, where you are heading at this pace. A notification tells you when you reach 80% of the budget and when you go over it; turn it off in **Settings → Notifications**.
 
 ### Day by day
 
@@ -180,7 +180,7 @@ Press **Cmd+K** on a Mac or **Ctrl+K** on Windows and Linux, or click **Search**
 
 ### A widget that stays out of the way
 
-An always-on-top mini window sits by default in the bottom-right corner of the screen. It sizes itself to its content and, when snapped to a corner, stays flush with that corner while it resizes. Dragging it leaves it where you drop it.
+An always-on-top mini window sits by default in the bottom-right corner of the screen. It sizes itself to its content and, when snapped to a corner, stays flush with that corner while it resizes. Dragging it leaves it where you drop it. Right-click it to open the dashboard or change its opacity, size and position.
 
 ![The desktop widget showing today's tokens and cost, five-hour rings and weekly percentages for two Claude accounts, Antigravity and two Codex accounts, and today's OpenCode usage](assets/readme/widget-en.webp)
 
@@ -227,6 +227,8 @@ The panel also tells you when an update is ready and when a signed-out tool keep
 - **A limit's percentage or a tool's logo** (Claude, Codex, Antigravity, OpenCode, or the logo of the limit's tool) on a square. The square is slate, or the tool's color if you turn that on, and turns amber, then red, as the limit passes the widget's warning thresholds (70% and 90% by default).
 - **The usage dial**, filled to the limit. On macOS it is a plain mark that follows the menu bar's look; past the warning threshold it takes the warning color, still without a square. On Windows and Linux it sits on the app's navy square, with a blue, amber, or red arc.
 
+While the limit was used after its newest reading, so the real value may be higher, the icon is drawn faded, as the text marks such a value with "~".
+
 **Text next to the icon.** On macOS and Linux, text can sit next to the icon, such as `Cl 5h ▰▰▱▱▱ 46% · Cl W ⚠︎▰▰▰▰▱ 73%`. Windows shows no text next to tray icons. Pick the items and their order: any limit (of every Claude or Codex account too), its forecast, tokens, API-equivalent cost, sessions or cache hit rate for today, 7 or 30 days (for every tool or OpenCode alone), and the time of the last scan. Then choose:
 
 - **Labels:** full names (`Claude 5h`), short ones (`Cl 5h`), or none
@@ -245,7 +247,7 @@ On macOS you can also hide the icon so only the text shows; the icon comes back 
 The **Summary cards** page turns a day, a month or a year of your use into an image to share: a 1080 × 1920 Instagram story and a 1080 × 1080 square, side by side, in navy or light. Step through days, months or years with the arrows and save either card as a PNG.
 
 - **Year:** tokens, API-equivalent cost, what your plans were worth, a calendar of every day, the busiest month and day, the longest streak, and the model you used most.
-- **Month:** the same totals with a column per day and the daily average, active days, sessions, and the cache hit rate.
+- **Month:** the same totals with a column per day and the average per active day, active days, sessions, and the cache hit rate.
 - **Day:** the same totals with a column per hour, how the day compares with an average day of the 30 days before, sessions, requests, and the cache hit rate.
 
 A card shows only totals and model names, never project names or anything you wrote. What your plans were worth counts only plans whose price is known, and is left out when none is.
@@ -258,16 +260,16 @@ A card shows only totals and model names, never project names or anything you wr
 
 **Settings → Data** offers:
 
-- CSV or JSON export (per request or as a daily summary)
+- CSV or JSON export (per request or as a daily summary); **CSV (;)** uses semicolons and a decimal comma, so Excel in languages such as Turkish or German opens it in the right columns
 - database backup
 - merge-import from a backup
 - **Delete all my data**, which empties the archive and stops recording until you confirm your sources again. Backups and exports you saved elsewhere are not touched.
 
-**Prices.** Official API list prices ship with the app in [`config/pricing.json`](config/pricing.json), verified between 2026-10-02 and 2026-10-10 against the official [Anthropic](https://platform.claude.com/docs/en/about-claude/pricing), [OpenAI](https://developers.openai.com/api/docs/pricing), [Google Gemini](https://ai.google.dev/gemini-api/docs/pricing), and [Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/pricing) pages.
+**Prices.** Official API list prices ship with the app in [`config/pricing.json`](config/pricing.json), verified between 2026-10-02 and 2026-10-28 against the official [Anthropic](https://platform.claude.com/docs/en/about-claude/pricing), [OpenAI](https://developers.openai.com/api/docs/pricing), [Google Gemini](https://ai.google.dev/gemini-api/docs/pricing) and [Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/pricing) pages and, for models OpenCode can use, the pages of [DeepSeek](https://api-docs.deepseek.com/quick_start/pricing/), [Moonshot AI](https://platform.kimi.ai/docs/pricing/chat), [Z.ai](https://docs.z.ai/guides/overview/pricing), [Alibaba Cloud](https://www.alibabacloud.com/help/en/model-studio/model-pricing), [xAI](https://docs.x.ai/developers/pricing), [Mistral](https://docs.mistral.ai/inference/pricing) and [MiniMax](https://platform.minimax.io/docs/guides/pricing-paygo).
 
-- **Pricing rules covered:** 5-minute and 1-hour cache writes, the OpenAI long-context tier (>272K input tokens), fast-mode and US data-residency multipliers, and web-search fees.
+- **Pricing rules covered:** 5-minute and 1-hour cache writes, the OpenAI long-context tier (>272K input tokens), fast-mode and US data-residency multipliers, web-search fees, and prices that change on a set date, such as an introductory price that ends: each request is priced at the rate of its own day.
 - **Unknown models:** never priced by guesswork. They are listed as "no price" and left out of costs. You can dismiss the overview warning about them; it returns only if another model becomes unpriced, or through **Settings → Prices → Show the warning again**.
-- **Edits:** change prices in **Settings → Prices**. The list starts with the models found in your logs; **Show all models** lists every priced model. Your copy is stored as `pricing.json` in the app's data folder (see [Privacy](#privacy)). Models added in later versions are added to your copy automatically, and your edits stay. You can also map an unpriced model to another model's price or restore the defaults.
+- **Edits:** change prices in **Settings → Prices**. The list starts with the models found in your logs; **Show all models** lists every priced model. Your copy, stored as `pricing.json` in the app's data folder (see [Privacy](#privacy)), keeps only the prices you change; every other model, including corrections and models added in later versions, follows the app's list. You can also map an unpriced model to another model's price or restore the defaults.
 
 ## Supported sources
 
@@ -346,13 +348,13 @@ Every release includes `SHA256SUMS`, the checksum of each file. Put it next to y
 
 > **Content never enters the archive.** The app takes only details such as token counts, model, and time from the logs; prompt and response text is never saved to the app's archive. Your usage data never leaves your computer, and the app has no telemetry.
 
-- **Read:** timestamps, model, project folder, session ID, token counts, and limit percentages from the tools' own logs.
+- **Read:** timestamps, model, project folder, git branch, session ID, subagent name, token counts, the name and outcome of each tool call (never its input or output), and limit percentages from the tools' own logs.
 - **Stored:** only those values, in `tracker.db` (SQLite) in the app's data folder: `%LOCALAPPDATA%\AIUsageTracker` on Windows, `~/Library/Application Support/AIUsageTracker` on macOS, and `~/.local/share/AIUsageTracker` on Linux. Project names stay local. You can hide them one by one or all at once, and hidden names are masked in exports too.
 - **Never kept in the app's archive:** prompts, responses, file contents, credentials, or tokens. The app does **not** read the tools' credential files.
 - **Codex and Claude accounts:** to tell accounts apart, the app keeps only a one-way digest of the Codex account ID and of the Claude plan's organization ID. For Claude it reads only that ID: from `~/.claude.json`, from telemetry events, and from the folder names and session IDs of the Claude desktop app's Code-tab session list. Account names are the ones you give; e-mail addresses are never read.
 - **Antigravity's temporary copy:** Antigravity keeps its conversations, text included, in a database. So as never to touch that file, the app copies it into a temporary folder only you can open, reads the counts and deletes the copy right away. If the app is forced to quit, the next Antigravity read deletes leftover copies older than 10 minutes. Conversation text never reaches the app's archive.
 - **OpenCode's database:** OpenCode keeps its sessions, text included, in one database. The app opens it read-only and asks it only for token counts, model, provider, agent, project folder, and the name, result and time of each tool call; text is never read.
-- **Network:** the app itself connects only to check for updates. The check downloads the release's version file and sends nothing (**Settings → Updates**). The limit reads, on by default, run your own Claude Code, Codex and Antigravity CLI, which ask their own services for your plan's limit percentages; the app starts them with their telemetry and error reporting turned off. You can turn the reads off under **Sources → Live capture**. If you install a tool from the app, its installer is downloaded from the maker's site. Prices and plans ship with the app, and currency conversion uses a rate you enter yourself.
+- **Network:** the app itself connects only to check for updates. The check downloads the release's version file and sends nothing (**Settings → Updates**). The limit reads, on by default, run your own Claude Code, Codex and Antigravity CLI, which ask their own services for your plan's limit percentages; the app starts Claude Code with its telemetry and error reporting turned off and Codex with its analytics turned off; the Antigravity CLI has no such setting. You can turn the reads off under **Sources → Live capture**. If you install a tool from the app, its installer is downloaded from the maker's site. Prices and plans ship with the app, and currency conversion uses a rate you enter yourself.
 
 ### Live capture
 
@@ -405,10 +407,10 @@ The app checks for a new version at startup and every 6 hours. The check downloa
 
 ## Build from source
 
-Requirements: Rust 1.99+ (the version CI and the release builds use) and Node 20.19+ or 22.12+, plus:
+Requirements: Rust 1.99+ (the version CI and the release builds use) and Node 22.12+, plus:
 
 - **Windows:** Visual Studio Build Tools (C++)
-- **macOS:** Xcode Command Line Tools
+- **macOS:** Xcode Command Line Tools, and for the universal release build `rustup target add aarch64-apple-darwin x86_64-apple-darwin`
 - **Linux:** WebKitGTK 4.1 and its build files, for example on Debian and Ubuntu: `sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev`
 
 ```bash

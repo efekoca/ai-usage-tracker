@@ -638,6 +638,16 @@ fn csv_export_masks_hidden_projects_and_leaves_unpriced_cost_empty() {
     let review = text.lines().find(|l| l.contains("codex-auto-review")).unwrap();
     assert!(review.contains(",,exact,"), "{review}");
 
+    // the semicolon form for Excel where the comma is the decimal mark
+    let mut semi = Vec::new();
+    export(&store, &PriceBook::default_book(), range, &Filter::default(), &tz(), Granularity::Events, Format::CsvSemicolon, false, &mut semi).unwrap();
+    let semi = String::from_utf8(semi).unwrap();
+    assert!(semi.starts_with("time;tool;client;model;project;"));
+    assert_eq!(semi.lines().count(), 10);
+    let priced = semi.lines().skip(1).find(|l| !l.contains("codex-auto-review")).unwrap();
+    let cost = priced.split(';').nth(11).unwrap();
+    assert!(cost.contains(',') && !cost.contains('.'), "{priced}");
+
     let mut daily = Vec::new();
     export(&store, &PriceBook::default_book(), range, &Filter::default(), &tz(), Granularity::Daily, Format::Json, true, &mut daily).unwrap();
     let v: serde_json::Value = serde_json::from_slice(&daily).unwrap();
@@ -882,4 +892,77 @@ fn the_month_spend_counts_the_calendar_month_and_projects_only_after_its_first_t
 
     let october = month_spend(&store, &book, &tz(), ms(2026, 10, 2, 9, 0)).unwrap();
     assert_eq!((october.month.as_str(), october.spent_usd), ("2026-10-01", 0.0));
+}
+
+#[test]
+fn requests_of_no_known_account_are_not_taken_for_use_from_elsewhere() {
+    let mut store = Store::open_in_memory().unwrap();
+    let now = ms(2026, 10, 2, 12, 0);
+    let resets = (now + 2 * 3_600_000) / 1000;
+    let min = 60_000;
+    {
+        let mut tx = store.transaction().unwrap();
+        tx.upsert_events(&[
+            ev("mine", now - 100 * min, Tool::Codex, "gpt-5.6-terra", r"C:\p\a", 1_000, 0),
+            ev("other", now - 200 * min, Tool::Codex, "gpt-5.6-terra", r"C:\p\a", 1_000, 0),
+            // sent between the account in use's readings, by an account no evidence names
+            ev("unknown", now - 40 * min, Tool::Codex, "gpt-5.6-terra", r"C:\p\b", 1_000, 0),
+        ])
+        .unwrap();
+        tx.insert_limits(&[
+            snap(now - 170 * min, Provider::OpenAI, Tool::Codex, "five_hour", 50.0, Some(resets + 3_600), Some("plus"), "codex_rollout"),
+            snap(now - 60 * min, Provider::OpenAI, Tool::Codex, "five_hour", 20.0, Some(resets), Some("plus"), "codex_live"),
+            snap(now - 5 * min, Provider::OpenAI, Tool::Codex, "five_hour", 40.0, Some(resets), Some("plus"), "codex_live"),
+        ])
+        .unwrap();
+        tx.commit().unwrap();
+    }
+    let c = store.conn();
+    c.execute_batch(
+        "UPDATE usage_event SET owner = 'a' WHERE key = 'mine';
+         UPDATE usage_event SET owner = 'b' WHERE key = 'other';
+         UPDATE limit_snapshot SET owner = 'b' WHERE source = 'codex_rollout';
+         UPDATE limit_snapshot SET owner = 'a' WHERE source = 'codex_live';",
+    )
+    .unwrap();
+    let book = PriceBook::default_book();
+    let in_use = |s: &Store, at| limits_view(s, &book, at, &[]).unwrap().into_iter().find(|v| v.active && v.window == "five_hour").unwrap();
+
+    let v = in_use(&store, now);
+    assert_eq!((v.account.as_deref(), v.state), (Some("a"), LimitState::Fresh));
+    let unknown = v.projects.iter().find(|p| p.unknown_account).expect("a share of its own");
+    assert!(close(unknown.estimated_pct.unwrap(), 20.0), "the 20 → 40 rise had only that request");
+    assert_eq!(v.unlogged_pct, None, "before, the 20 → 40 rise counted as use from elsewhere");
+    assert_eq!(v.window_usage.events, 1, "it is not counted as the account's own use");
+
+    // after the newest reading, such a request may be the account in use's: the reading may be behind
+    let later = now + 15 * min;
+    {
+        let mut tx = store.transaction().unwrap();
+        tx.upsert_events(&[ev("unknown-later", now + 10 * min, Tool::Codex, "gpt-5.6-terra", r"C:\p\b", 1_000, 0)]).unwrap();
+        tx.commit().unwrap();
+    }
+    assert_eq!(in_use(&store, later).state, LimitState::Behind);
+}
+
+#[test]
+fn a_window_a_newer_full_read_leaves_out_goes_once_it_is_over() {
+    let mut store = Store::open_in_memory().unwrap();
+    let now = ms(2026, 10, 2, 12, 0);
+    let read = |at, window: &str, resets: i64| snap(at, Provider::Anthropic, Tool::ClaudeCode, window, 30.0, Some(resets / 1000), None, "claude_code_usage");
+    let week = now + 3 * 86_400_000;
+    {
+        let mut tx = store.transaction().unwrap();
+        tx.insert_limits(&[read(now - 3 * 3_600_000, "five_hour", now + 3_600_000), read(now - 3 * 3_600_000, "seven_day", week), read(now - 3 * 3_600_000, "seven_day_opus", now - 3_600_000)]).unwrap();
+        tx.commit().unwrap();
+    }
+    let book = PriceBook::default_book();
+    let opus = |s: &Store| limits_view(s, &book, now, &[]).unwrap().into_iter().find(|v| v.window == "seven_day_opus").map(|v| v.state);
+    assert_eq!(opus(&store), Some(LimitState::Reset), "no newer read yet: the reset shows");
+    {
+        let mut tx = store.transaction().unwrap();
+        tx.insert_limits(&[read(now - 600_000, "five_hour", now + 3_600_000), read(now - 600_000, "seven_day", week)]).unwrap();
+        tx.commit().unwrap();
+    }
+    assert_eq!(opus(&store), None, "Claude no longer reports it");
 }

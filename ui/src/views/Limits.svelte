@@ -227,9 +227,9 @@
             <AccuracyBadge kind="estimated" compact />
           </div>
           <ul>
-            {#each l.projects.slice(0, 6) as p (p.project_id ?? -1)}
+            {#each l.projects.slice(0, 6) as p (p.unknown_account ? -2 : (p.project_id ?? -1))}
               <li>
-                <span class="pname">{p.project_id === null ? t('projects.noProject') : p.hidden ? `${t('projects.hidden')} #${p.project_id}` : p.name}</span>
+                <span class="pname">{p.unknown_account ? t('accounts.unknown') : p.project_id === null ? t('projects.noProject') : p.hidden ? `${t('projects.hidden')} #${p.project_id}` : p.name}</span>
                 <span class="bar" aria-hidden="true"><span style="width:{p.share * 100}%"></span></span>
                 <span class="num small">{p.estimated_pct !== null ? `≈ ${fmtPct(p.estimated_pct, 1)}` : `${fmtPct(p.share * 100)}`}</span>
               </li>

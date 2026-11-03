@@ -62,8 +62,8 @@ pub fn ingest(store: &mut Store, files: &[DiscoveredFile], mut on_progress: impl
             }
             Ok(None) => {}
             Err(e) => {
+                // the worker logs it with the user name taken out
                 let p = file_key(&f.path);
-                log::warn!("ingest failed for {p}: {e}");
                 rep.errors.push((p, e));
             }
         }
