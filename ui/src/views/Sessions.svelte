@@ -187,33 +187,49 @@
                   <td></td>
                   <td colspan={cols.length}>
                     <div class="grid">
-                      <div>
-                        <h3>{t('sessions.modelsUsed')}</h3>
-                        <ul>
-                          {#each s.models as m (m.model)}
-                            <li>
-                              <span class="chip">{m.model}</span>
-                              <span class="subtle small">{fmtInt(m.events)} {lower(t('sessions.requests'))}</span>
-                              <span class="spacer"></span>
-                              <span class="num small">{fmtCompact(m.total_tokens)}</span>
-                              <span class="num small money">{m.unpriced ? '—' : fmtMoney(m.cost_usd)}</span>
-                            </li>
+                      <div class="panel">
+                        <div class="stats">
+                          {#each [
+                            [t('metric.input'), fmtCompact(s.totals.tokens.input), 'var(--ink-3)'],
+                            [t('metric.cacheRead'), fmtCompact(s.totals.tokens.cache_read), 'var(--s1)'],
+                            [t('metric.cacheWrite'), fmtCompact(s.totals.tokens.cache_write), 'var(--warning)'],
+                            [t('metric.output'), fmtCompact(s.totals.tokens.output), 'var(--s7)'],
+                            [t('sessions.avgContext'), fmtCompact(s.avg_context), null],
+                            [t('sessions.hit'), prompt(s) > 0 ? fmtPct(hit(s) * 100, 1) : '—', null],
+                          ] as [label, v, color] (label)}
+                            <div class="stat">
+                              <span class="label">{label}</span>
+                              <span class="value num">{v}</span>
+                              {#if color}<i class="tick" style:background={color}></i>{/if}
+                            </div>
                           {/each}
-                        </ul>
+                        </div>
+                        <div class="models">
+                          <span class="label">{t('sessions.models')}</span>
+                          <div class="used">
+                            {#each s.models as m (m.model)}
+                              <span class="model">
+                                <span class="chip">{m.model}</span>
+                                <span class="subtle">{fmtInt(m.events)} {lower(t('sessions.requests'))}</span>
+                                <span class="num">{fmtCompact(m.total_tokens)}</span>
+                                <b class="num">{m.unpriced ? '—' : fmtMoney(m.cost_usd)}</b>
+                              </span>
+                            {/each}
+                          </div>
+                        </div>
+                        <div class="meta">
+                          <span class="tool" title={t('sessions.tool')}>
+                            <i class="dot" style:background={toolColor[s.tool]}></i><span class="ink">{toolLabel(s.tool)}</span>
+                            {#if s.client}<span aria-hidden="true">·</span><span>{clientLabel(`${s.tool}:${s.client}`, s.client)}</span>{/if}
+                          </span>
+                          <span class="id">
+                            <code title={t('sessions.id')}>{s.session_id}</code>
+                            <button class="btn ghost icon" aria-label={copied === s.session_id ? t('sessions.copied') : t('sessions.copy')} title={copied === s.session_id ? t('sessions.copied') : t('sessions.copy')} onclick={() => copy(s.session_id)}>
+                              <Icon name={copied === s.session_id ? 'check' : 'copy'} size={14} />
+                            </button>
+                          </span>
+                        </div>
                       </div>
-                      <dl>
-                        <dt>{t('metric.input')}</dt><dd class="num">{fmtCompact(s.totals.tokens.input)}</dd>
-                        <dt>{t('metric.cacheRead')}</dt><dd class="num">{fmtCompact(s.totals.tokens.cache_read)}</dd>
-                        <dt>{t('metric.cacheWrite')}</dt><dd class="num">{fmtCompact(s.totals.tokens.cache_write)}</dd>
-                        <dt>{t('metric.output')}</dt><dd class="num">{fmtCompact(s.totals.tokens.output)}</dd>
-                        <dt>{t('sessions.avgContext')}</dt><dd class="num">{fmtCompact(s.avg_context)}</dd>
-                        <dt>{t('sessions.tool')}</dt><dd>{toolLabel(s.tool)}{s.client ? ` · ${clientLabel(`${s.tool}:${s.client}`, s.client)}` : ''}</dd>
-                        <dt>{t('sessions.id')}</dt>
-                        <dd class="id">
-                          <code>{s.session_id}</code>
-                          <button class="btn ghost small" onclick={() => copy(s.session_id)}>{copied === s.session_id ? t('sessions.copied') : t('sessions.copy')}</button>
-                        </dd>
-                      </dl>
                       <SessionTimeline session={s} />
                     </div>
                   </td>
@@ -346,7 +362,7 @@
   }
   .detail td {
     background: var(--surface-hover, transparent);
-    padding-top: 4px;
+    padding-top: 14px;
     padding-bottom: 16px;
   }
   /* a wide table scrolls sideways; the details keep to what is in view */
@@ -354,60 +370,121 @@
     position: sticky;
     left: 0;
     max-width: calc(var(--visible, 100%) - 34px - 32px);
-    display: grid;
-    grid-template-columns: 1.2fr 1fr;
-    gap: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
-  @container main (max-width: 840px) {
-    .grid {
-      grid-template-columns: 1fr;
+  .panel {
+    container: panel / inline-size;
+    border: 0.5px solid var(--hairline-strong);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    overflow: hidden;
+    border-bottom: 0.5px solid var(--hairline);
+  }
+  /* a Turkish label would wrap and push its value below the others */
+  @container panel (max-width: 800px) {
+    .stats {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
     }
   }
-  h3 {
+  .stat {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px 14px;
+    min-width: 0;
+    /* the outer edges fall outside .stats, so only the lines between cells show */
+    margin: 0 -0.5px -0.5px 0;
+    border-right: 0.5px solid var(--hairline);
+    border-bottom: 0.5px solid var(--hairline);
+  }
+  .label {
+    font-size: 11.5px;
+    color: var(--ink-3);
+  }
+  .value {
+    font-size: 18px;
+    font-weight: 600;
+    text-align: left;
+  }
+  .tick {
+    width: 22px;
+    height: 3px;
+    border-radius: 2px;
+  }
+  .models {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 14px;
+  }
+  .models .label {
     font-size: 12px;
     font-weight: 600;
     color: var(--ink-2);
-    margin: 0 0 6px;
-  }
-  ul {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-  li {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 0;
-  }
-  .money {
     min-width: 64px;
-    text-align: right;
+    line-height: 26px;
   }
-  dl {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 4px 16px;
-    margin: 0;
+  .used {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-width: 0;
   }
-  dt {
+  .model {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 3px 8px 3px 3px;
+    border-radius: 8px;
+    border: 0.5px solid var(--hairline);
+    background: var(--surface-2);
+    white-space: nowrap;
+  }
+  .model .chip {
+    margin-right: 0;
+  }
+  .model .subtle {
+    font-size: 12px;
+  }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px 16px;
+    padding: 6px 8px 6px 14px;
+    border-top: 0.5px solid var(--hairline);
+    font-size: 12.5px;
     color: var(--ink-2);
   }
-  dd {
-    margin: 0;
+  .tool {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
   }
-  dd.num {
-    text-align: left;
+  .tool .dot {
+    margin-right: 2px;
+    vertical-align: 0;
+  }
+  .ink {
+    color: var(--ink);
   }
   .id {
     display: flex;
-    gap: 8px;
+    gap: 4px;
     align-items: center;
     min-width: 0;
   }
   .id code {
     font-size: 11.5px;
-    word-break: break-all;
+    color: var(--ink-3);
+    overflow-wrap: anywhere;
   }
   .more {
     display: flex;

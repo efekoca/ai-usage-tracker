@@ -371,11 +371,13 @@ pub struct NotifySettings {
     pub seven_day: bool,
     /// At 80 % of `Settings::monthly_budget_usd` and past it.
     pub budget: bool,
+    /// When a signed-out CLI leaves a provider's limits unread.
+    pub sign_in: bool,
 }
 
 impl Default for NotifySettings {
     fn default() -> Self {
-        NotifySettings { enabled: true, early: "warn".into(), full: true, reset: true, five_hour: true, seven_day: true, budget: true }
+        NotifySettings { enabled: true, early: "warn".into(), full: true, reset: true, five_hour: true, seven_day: true, budget: true, sign_in: true }
     }
 }
 
@@ -624,7 +626,7 @@ pub struct CardSettings {
     pub accent: String,
     /// "story", "square", "landscape" or "wallpaper".
     pub format: String,
-    /// What the cards leave out: "cost", "plan", "change", "tools", "models", "badges".
+    /// What the cards leave out: "cost", "plan", "change", "tools", "models", "badges", "arc".
     pub hide: Vec<String>,
 }
 
@@ -646,7 +648,7 @@ impl CardSettings {
             self.format = "story".into();
         }
         let mut seen = Vec::new();
-        self.hide.retain(|h| ["cost", "plan", "change", "tools", "models", "badges"].contains(&h.as_str()) && !seen.contains(h) && {
+        self.hide.retain(|h| ["cost", "plan", "change", "tools", "models", "badges", "arc"].contains(&h.as_str()) && !seen.contains(h) && {
             seen.push(h.clone());
             true
         });

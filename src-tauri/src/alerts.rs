@@ -1,6 +1,6 @@
 //! System notifications when a limit in use passes the warning threshold, fills up, and starts
-//! again after filling, and when the monthly budget gets close or is exceeded. Clicking one opens
-//! the page it is about.
+//! again after filling, when the monthly budget gets close or is exceeded, and when a signed-out
+//! CLI leaves the limits unread. Clicking one opens the page it is about.
 
 use crate::settings::{NotifySettings, Settings};
 use crate::tray_text::{name, shown_value, Format, Reading};
@@ -15,6 +15,7 @@ const MOVED_SECS: i64 = 15 * 60;
 
 static SEEN: LazyLock<Mutex<HashMap<Limit, Seen>>> = LazyLock::new(Default::default);
 static BUDGET: Mutex<Option<BudgetSeen>> = Mutex::new(None);
+static SIGNED_OUT: LazyLock<Mutex<HashSet<Provider>>> = LazyLock::new(Default::default);
 
 /// The budget sums the whole month, so it is checked only every few minutes.
 const BUDGET_EVERY_MS: i64 = 5 * 60_000;
@@ -25,8 +26,8 @@ const BUDGET_CLOSE_PCT: f64 = 80.0;
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Sent {
     Shown,
-    /// macOS: the user did not allow the app's notifications.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    /// The user did not allow the app's notifications (macOS) or turned them off (Windows).
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
     Denied,
     Failed,
 }
@@ -106,6 +107,8 @@ pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading]) {
     let now_ms = chrono::Utc::now().timestamp_millis();
     let alerts = changes(&mut SEEN.lock().unwrap(), readings, early_at, now_ms / 1000);
     let budget = budget(app, s, now_ms);
+    let out = crate::capture::signed_out(app, s).into_iter().filter(|&p| !readings.iter().any(|r| r.active && r.provider == p)).collect();
+    let signed_out = newly_out(&mut SIGNED_OUT.lock().unwrap(), out);
     if !n.enabled {
         return;
     }
@@ -120,6 +123,37 @@ pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading]) {
         log::info!("budget notification");
         send(app, "budget", &title, &body, |_| {});
     }
+    for p in signed_out.into_iter().filter(|_| n.sign_in) {
+        let (title, body) = sign_in_text(p, f.tr);
+        log::info!("sign-in notification: {}", p.as_str());
+        send(app, &format!("signin-{}", p.as_str()), &title, &body, |_| {});
+    }
+}
+
+/// Unlike a limit, a sign-out is told at the first read after a start too: it is something to do
+/// now. It is told again only after a sign-in.
+fn newly_out(seen: &mut HashSet<Provider>, now: HashSet<Provider>) -> Vec<Provider> {
+    let mut new: Vec<Provider> = now.difference(seen).copied().collect();
+    new.sort_by_key(|p| p.as_str());
+    *seen = now;
+    new
+}
+
+fn sign_in_text(p: Provider, tr: bool) -> (String, String) {
+    let title = match (p, tr) {
+        (Provider::Anthropic, true) => "Claude Code'da oturum açın",
+        (Provider::Anthropic, false) => "Sign in to Claude Code",
+        (Provider::OpenAI, true) => "Codex'te oturum açın",
+        (Provider::OpenAI, false) => "Sign in to Codex",
+        (Provider::Google, true) => "Antigravity'de oturum açın",
+        (Provider::Google, false) => "Sign in to Antigravity",
+    };
+    let body = if tr {
+        "Oturum kapalı olduğu için limitleriniz okunamıyor. Giriş adımları için tıklayın."
+    } else {
+        "Your limits can't be read while you're signed out. Click to see how to sign in."
+    };
+    (title.into(), body.into())
 }
 
 fn budget(app: &AppHandle, s: &Settings, now_ms: i64) -> Option<BudgetAlert> {
@@ -436,15 +470,44 @@ fn send(_: &AppHandle, tag: &str, title: &str, body: &str, done: impl FnOnce(Sen
 #[cfg(windows)]
 static TOASTS: LazyLock<Mutex<HashMap<String, windows::UI::Notifications::ToastNotification>>> = LazyLock::new(Default::default);
 
-/// Shown under the app's name through the Start menu shortcut, which carries the app's identifier.
+/// Windows shows a toast only for an app id it knows. The Start menu shortcut names one, but an
+/// update never rewrites the shortcut, so one made before 0.2.8 still names the old id; this
+/// registry entry works with any shortcut or none.
+#[cfg(windows)]
+pub(crate) fn init(app: &AppHandle) {
+    use windows_sys::Win32::System::Registry::{RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
+    const ICON: &[u8] = include_bytes!("../icons/128x128.png");
+    let icon = app.state::<crate::state::AppState>().data_dir.join("notification-icon.png");
+    if std::fs::read(&icon).ok().as_deref() != Some(ICON)
+        && let Err(e) = std::fs::write(&icon, ICON)
+    {
+        log::warn!("notification icon: {e}");
+    }
+    let wide = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
+    let key = wide(&format!(r"Software\Classes\AppUserModelId\{}", app.config().identifier));
+    for (name, value) in [("DisplayName", "AI Usage Tracker".to_owned()), ("IconUri", icon.to_string_lossy().into_owned())] {
+        let data = wide(&value);
+        // SAFETY: NUL-terminated UTF-16 strings that outlive the call; the size counts the NUL.
+        let rc = unsafe { RegSetKeyValueW(HKEY_CURRENT_USER, key.as_ptr(), wide(name).as_ptr(), REG_SZ, data.as_ptr().cast(), (data.len() * 2) as u32) };
+        if rc != 0 {
+            log::warn!("notification registration: registry error {rc}");
+        }
+    }
+}
+
 #[cfg(windows)]
 fn send(app: &AppHandle, tag: &str, title: &str, body: &str, done: impl FnOnce(Sent) + Send + 'static) {
     use windows::core::{IInspectable, HSTRING};
     use windows::Data::Xml::Dom::XmlDocument;
     use windows::Foundation::TypedEventHandler;
-    use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
+    use windows::UI::Notifications::{NotificationSetting, ToastNotification, ToastNotificationManager};
 
-    let show = || -> windows::core::Result<()> {
+    let show = || -> windows::core::Result<Sent> {
+        let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app.config().identifier.as_str()))?;
+        // off for this app or for all of them: Windows would drop the toast without a word
+        if notifier.Setting()? != NotificationSetting::Enabled {
+            return Ok(Sent::Denied);
+        }
         let xml = XmlDocument::new()?;
         xml.LoadXml(&HSTRING::from(format!(
             r#"<toast><visual><binding template="ToastGeneric"><text>{}</text><text>{}</text></binding></visual></toast>"#,
@@ -458,12 +521,12 @@ fn send(app: &AppHandle, tag: &str, title: &str, body: &str, done: impl FnOnce(S
             open(&clicked, &page);
             Ok(())
         }))?;
-        ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app.config().identifier.as_str()))?.Show(&toast)?;
+        notifier.Show(&toast)?;
         TOASTS.lock().unwrap().insert(tag.to_owned(), toast);
-        Ok(())
+        Ok(Sent::Shown)
     };
     match show() {
-        Ok(()) => done(Sent::Shown),
+        Ok(r) => done(r),
         Err(e) => {
             log::warn!("notification: {e}");
             done(Sent::Failed);
@@ -675,6 +738,17 @@ mod tests {
         assert_eq!(budget_change(&mut seen, "2026-11-01", 1000.0, 100.0, 4), Some(Step::Full));
         assert_eq!(budget_change(&mut seen, "2026-11-01", 2000.0, 60.0, 5), None);
         assert_eq!(budget_change(&mut seen, "2026-11-01", 1000.0, 120.0, 6), Some(Step::Full), "lowered under the spend");
+    }
+
+    #[test]
+    fn a_sign_out_is_told_at_once_and_again_only_after_a_sign_in() {
+        let mut seen = HashSet::new();
+        let set = |p: &[Provider]| p.iter().copied().collect::<HashSet<_>>();
+        assert_eq!(newly_out(&mut seen, set(&[Provider::OpenAI, Provider::Anthropic])), vec![Provider::Anthropic, Provider::OpenAI], "the first read after a start");
+        assert_eq!(newly_out(&mut seen, set(&[Provider::OpenAI, Provider::Anthropic])), vec![]);
+        assert_eq!(newly_out(&mut seen, set(&[Provider::Anthropic])), vec![], "signed in to Codex");
+        assert_eq!(newly_out(&mut seen, set(&[Provider::OpenAI, Provider::Anthropic])), vec![Provider::OpenAI], "signed out of Codex again");
+        assert_eq!(sign_in_text(Provider::OpenAI, true).0, "Codex'te oturum açın");
     }
 
     #[test]
