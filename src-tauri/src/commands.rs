@@ -228,10 +228,10 @@ pub(crate) fn enabled_providers(s: &Settings) -> HashSet<Provider> {
 }
 
 #[tauri::command]
-pub async fn get_session_timeline(state: State<'_, AppState>, tool: Tool, session_id: String, from_ms: i64, to_ms: i64) -> Res<insights::SessionTimeline> {
+pub async fn get_session_timeline(state: State<'_, AppState>, tool: Tool, session_id: String, from_ms: i64, to_ms: i64, filter: Option<Filter>) -> Res<insights::SessionTimeline> {
     let store = state.db();
     let book = state.book.read().unwrap();
-    insights::session_timeline(&store, &book, tool, &session_id, from_ms, to_ms).map_err(err)
+    insights::session_timeline(&store, &book, tool, &session_id, from_ms, to_ms, &filter.unwrap_or_default()).map_err(err)
 }
 
 #[tauri::command]

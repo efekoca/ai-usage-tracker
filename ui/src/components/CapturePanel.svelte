@@ -75,8 +75,9 @@
     const list = STEPS[kind].includes(every(kind)) ? STEPS[kind] : [...STEPS[kind], every(kind)].sort((a, b) => a - b)
     return list.map((n) => ({ value: String(n), label: t('cap.every', { n }) }))
   }
-  // per reader, only the newest choice's answer counts, and it touches only the capture settings;
-  // a failed save redraws the list so it shows the interval still in use
+  // per reader, only the newest choice's answer counts, and it touches only that reader's interval,
+  // since another reader's newer choice may be saved before this answer arrives; a failed save
+  // redraws the list so it shows the interval still in use
   let unsaved = $state(0)
   let everyError = $state<Record<string, string>>({})
   const asked: Record<string, number> = {}
@@ -85,7 +86,8 @@
     try {
       const s = await api.setReadInterval(kind, minutes)
       if (mine !== asked[kind]) return
-      if (app.settings) app.settings = { ...app.settings, capture: s.capture }
+      const key = `${kind}_poll_minutes` as const
+      if (app.settings) app.settings = { ...app.settings, capture: { ...app.settings.capture, [key]: s.capture[key] } }
       delete everyError[kind]
     } catch (e) {
       if (mine !== asked[kind]) return

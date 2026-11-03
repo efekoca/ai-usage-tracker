@@ -57,7 +57,7 @@ Providers publish how their limits work, not the numbers themselves. The app the
 
 **Forecast.** Every current limit reading carries a forecast based on the window's **average pace since it started** (current % ÷ time since the window began). Every window starts at 0 % when it resets, so this pace is known and already includes idle hours: a burst of work is not extrapolated as if it never stopped. The app then says when the window would fill ("fills around Sun 21:12, 9 h before the reset") or where it would stand at the reset. If the provider resets a window early without moving its end, the pace is measured from that reset. No forecast is made in the first tenth of a window, and every forecast is labeled **Estimated**.
 
-**Notifications.** A system notification tells you when a limit you use passes your warning threshold, when it fills up, and when a full limit starts again. It shows when the limit resets and, at your current pace, roughly when it fills. In **Settings → Notifications**, choose an early warning at the **Caution** or **Critical** threshold or none, whether to hear when a limit fills up and when it resets, and which limits (5-hour, weekly) notify you. macOS asks once whether the app may send notifications. Opening the app never reports what happened while it was closed.
+**Notifications.** A system notification tells you when a limit you use passes your warning threshold, when it fills up, and when a full limit starts again. It shows when the limit resets and, at your current pace, roughly when it fills. In **Settings → Notifications**, choose an early warning at the **Caution** or **Critical** threshold or none, whether to hear when a limit fills up and when it resets, and which limits (5-hour, weekly) notify you. macOS asks once whether the app may send notifications. Opening the app never reports what happened while it was closed. Click a notification to open the **Limits** page. To check that notifications show on this computer, use **Settings → Notifications → Test notification**.
 
 ### Limit history
 
@@ -104,6 +104,8 @@ Amounts are API equivalents. On a subscription you do not pay them; they show th
 - **More than one account:** each Codex or Claude account seen in those 30 days counts with its own plan and price, and their prices are added up. The card lists each account's API-equivalent use next to its plan. Use on a free plan or at API rates is left out of the total, and use that no evidence ties to an account counts only toward the total. A price you enter for an account applies to that account's current plan only.
 - **Lower bound:** chat use in Claude and ChatGPT is not in local logs, so the real value can be higher.
 
+**Monthly budget.** Set a monthly limit for the API-equivalent cost of every tool in **Settings → Monthly budget**. The **Overview** then shows this month's spend, how much is left, the days remaining and, after the first days of the month, where you are heading at this pace. A notification tells you when you reach 80% of the budget and when you go over it; turn it off in **Settings → Notifications**.
+
 ### Day by day
 
 The **Daily** page shows the period day by day, as columns or, for long periods, as a calendar, in tokens, API-equivalent cost, or requests. It highlights the busiest day, the average per active day, the longest and current streaks of active days, and the weekend share.
@@ -145,7 +147,7 @@ Four more pages cover sessions, cache, context, and projects.
 |---|---|
 | **Sessions**: every session with its length, models, cost, and largest context | **Cache**: hit rate, reuse, and what the cache actually saved |
 
-**Sessions.** The **Sessions** page lists every session in the period with its start, project, models, length (first to last request), requests, tokens, API-equivalent cost, cache hit rate, and largest context. The list is sortable and searchable, and each row opens into a per-model breakdown. Subagent transcripts count toward their parent session.
+**Sessions.** The **Sessions** page lists every session in the period with its start, project, models, length (first to last request), requests, tokens, API-equivalent cost, cache hit rate, and largest context. The list is sortable and searchable, and each row opens into a per-model breakdown and a **timeline** of the session. The timeline shows each request as a column with its context size and how much of it came from the cache, and marks where the cache was written again after a pause, where the context shrank, which requests came from subagents and which tools were called. Subagent transcripts count toward their parent session.
 
 **Cache.** The **Cache** page shows:
 
@@ -171,6 +173,10 @@ Negative savings mean that written cache was not read enough to pay off.
 - the **long-context surcharge**: what requests above a model's long-context threshold (272K for GPT-5.x) cost beyond the standard rates
 
 **Branches.** The **Projects** page splits each project's usage by git branch. Claude Code records the branch with every request; Codex records it when a session starts in a repository. Requests outside a repository show as "no branch".
+
+### Find anything with one shortcut
+
+Press **Cmd+K** on a Mac or **Ctrl+K** on Windows and Linux, or click **Search** in the sidebar, and type a few letters to jump to any page, settings section, project, model or session. From there you can also switch the theme, show or hide the widget, and check for updates.
 
 ### A widget that stays out of the way
 
@@ -233,6 +239,16 @@ The panel also tells you when an update is ready and when a signed-out tool keep
 On macOS you can also hide the icon so only the text shows; the icon comes back while there is nothing to show.
 
 ![The Menu bar page's settings for the text and the icon on a Mac: three items (Claude's 5-hour and weekly limits and Codex's weekly limit) with their current values, the label, value, display, reset, separator, start and end, warning mark and hide-the-icon options, and the icon set to the usage dial for Claude's 5-hour limit](assets/readme/trayoptions-en.webp)
+
+### Share a summary card
+
+The **Summary cards** page turns a day, a month or a year of your use into an image to share: a 1080 × 1920 Instagram story and a 1080 × 1080 square, side by side, in navy or light. Step through days, months or years with the arrows and save either card as a PNG.
+
+- **Year:** tokens, API-equivalent cost, what your plans were worth, a calendar of every day, the busiest month and day, the longest streak, and the model you used most.
+- **Month:** the same totals with a column per day and the daily average, active days, sessions, and the cache hit rate.
+- **Day:** the same totals with a column per hour, how the day compares with an average day of the 30 days before, sessions, requests, and the cache hit rate.
+
+A card shows only totals and model names, never project names or anything you wrote. What your plans were worth counts only plans whose price is known, and is left out when none is.
 
 ### Weekly PDF, export, and your own prices
 

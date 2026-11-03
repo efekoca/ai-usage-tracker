@@ -388,6 +388,8 @@ export interface TimelineRequest {
   model: string
   /** The subagent that sent it; null for the main conversation. */
   agent: string | null
+  /** The subagent run it belongs to; null for the main conversation. */
+  thread: string | null
   context: number
   input: number
   cache_read: number
@@ -398,6 +400,8 @@ export interface TimelineRequest {
   rewritten: number
   /** What that rewrite cost above a warm cache. */
   rewrite_extra_usd: number | null
+  /** With a rewrite: the pause since the previous request of the same conversation and model. */
+  pause_ms: number | null
   compacted: boolean
 }
 export interface TimelineCall {
@@ -879,8 +883,8 @@ export const api = {
   limits: () => invoke<LimitView[]>('get_limits'),
   accounts: () => invoke<Account[]>('get_accounts'),
   sessions: (period: Period, filter?: Filter) => invoke<Sessions>('get_sessions', { period, filter }),
-  sessionTimeline: (tool: Tool, sessionId: string, fromMs: number, toMs: number) =>
-    invoke<SessionTimeline>('get_session_timeline', { tool, sessionId, fromMs, toMs }),
+  sessionTimeline: (tool: Tool, sessionId: string, fromMs: number, toMs: number, filter?: Filter) =>
+    invoke<SessionTimeline>('get_session_timeline', { tool, sessionId, fromMs, toMs, filter }),
   compareModels: (period: Period, filter?: Filter) => invoke<ModelCompare>('compare_models', { period, filter }),
   contextStats: (period: Period, filter?: Filter) => invoke<ContextStats>('context_stats', { period, filter }),
   planValue: (period?: Period) => invoke<PlanValue>('plan_value', { period }),

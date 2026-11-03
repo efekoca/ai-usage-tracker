@@ -27,8 +27,9 @@
   // "Start with Windows" only on Windows; elsewhere it starts at login
   const fx = $derived(s.currency === 'USD' ? 1 : s.fx_rate)
   function setBudget(el: HTMLInputElement) {
-    if (!el.value.trim()) return saveSettings({ monthly_budget_usd: 0 })
-    const n = num(el.value)
+    const n = el.value.trim() ? num(el.value) : 0
+    // a budget of 0 is off, and the field then shows "Off" as for an empty one
+    if (n === 0) el.value = ''
     if (n !== null) saveSettings({ monthly_budget_usd: n / fx })
     else el.value = s.monthly_budget_usd > 0 ? fmtInput(Math.round(s.monthly_budget_usd * fx * 100) / 100) : ''
   }
@@ -380,7 +381,7 @@
       </div>
     {/if}
     <div class="item">
-      <div><span>{t('settings.notify.test')}</span><div class="subtle small">{testResult ? t(`settings.notify.test.${testResult}`) : t('settings.notify.test.help')}</div></div>
+      <div><span>{t('settings.notify.test')}</span><div class="subtle small" aria-live="polite">{testResult ? t(`settings.notify.test.${testResult}`) : t('settings.notify.test.help')}</div></div>
       <button class="btn" onclick={sendTest} disabled={testing}>{testing ? t('settings.notify.test.sending') : t('settings.notify.test.send')}</button>
     </div>
   {/if}

@@ -28,7 +28,9 @@ import Cards from './views/Cards.svelte'
   let palette = $state(false)
   const paletteKeys = $derived(app.info?.platform === 'macos' ? '⌘K' : 'Ctrl K')
   function globalKey(e: KeyboardEvent) {
-    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k' && app.settings?.onboarded) {
+    // Ctrl+K on a Mac stays the text fields' "delete to the end of the line"
+    const mod = app.info?.platform === 'macos' ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
+    if (mod && !e.altKey && !e.shiftKey && !e.isComposing && e.key.toLowerCase() === 'k' && app.settings?.onboarded) {
       e.preventDefault()
       palette = !palette
     }

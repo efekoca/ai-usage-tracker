@@ -369,7 +369,7 @@ const tr: Dict = {
   'settings.notify.budget': 'Aylık bütçe dolmaya yaklaşınca ve aşılınca',
   'settings.notify.test': 'Deneme bildirimi',
   'settings.budget': 'Aylık bütçe',
-  'settings.budget.help': 'Tüm araçların API eşdeğeri maliyeti için aylık bir sınır. Genel bakışta bu ayki harcamanızı ve ay sonu gidişatını görürsünüz. Boş bırakırsanız kapalıdır.',
+  'settings.budget.help': 'Tüm araçların API eşdeğeri maliyeti için aylık bir sınır. Genel bakışta bu ayki harcamanızı ve ay sonu gidişatını görürsünüz. Kapatmak için boş bırakın.',
   'settings.budget.off': 'Kapalı',
   'budget.title': 'Bu ayki bütçe',
   'budget.left': '{n} gün kaldı',

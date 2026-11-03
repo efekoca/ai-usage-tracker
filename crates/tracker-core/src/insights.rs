@@ -256,6 +256,8 @@ pub struct TimelineRequest {
     pub model: String,
     /// The subagent that sent it; none for the main conversation.
     pub agent: Option<String>,
+    /// The subagent run it belongs to; none for the main conversation.
+    pub thread: Option<String>,
     /// The prompt: uncached input, cache read and cache write.
     pub context: u64,
     pub input: u64,
@@ -267,6 +269,8 @@ pub struct TimelineRequest {
     pub rewritten: u64,
     /// What that rewrite cost above a warm cache.
     pub rewrite_extra_usd: Option<f64>,
+    /// With a rewrite: the pause since the previous request of the same conversation and model.
+    pub pause_ms: Option<i64>,
     pub compacted: bool,
 }
 
@@ -284,27 +288,33 @@ pub struct SessionTimeline {
     pub calls: Vec<TimelineCall>,
 }
 
-/// One session's requests and tool calls between `from_ms` and `to_ms`, oldest first.
-pub fn session_timeline(store: &Store, book: &PriceBook, tool: Tool, session_id: &str, from_ms: i64, to_ms: i64) -> Result<SessionTimeline> {
+/// One session's requests and tool calls between `from_ms` and `to_ms`, oldest first, kept to
+/// the requests `filter` allows, as in the session list. Cache rewrites and compactions are found
+/// over the whole session, since the cache and the context are shared by all of it. A tool call
+/// carries no account, so it goes with the request sent right before it.
+pub fn session_timeline(store: &Store, book: &PriceBook, tool: Tool, session_id: &str, from_ms: i64, to_ms: i64, filter: &Filter) -> Result<SessionTimeline> {
     let ours = |t: Tool, s: Option<&str>| t == tool && s == Some(session_id);
     let mut events: Vec<EventRow> = store.events_between(from_ms, to_ms + 1)?.into_iter().filter(|e| ours(e.tool, e.session_id.as_deref())).collect();
     events.sort_by_key(|e| e.ts_ms);
     let prompt = |e: &EventRow| if e.request_input > 0 { e.request_input } else { e.tokens.input + e.tokens.cache_read + e.tokens.cache_write };
 
     let mut rewritten = vec![0; events.len()];
+    let mut pause = vec![None; events.len()];
     if tool.provider() == Some(Provider::Anthropic) {
         // the cache is per conversation and model, as in `tips::cache_rebuilds`
         let mut last: HashMap<(Option<&str>, &str), usize> = HashMap::new();
         for (i, e) in events.iter().enumerate() {
             if let Some(&p) = last.get(&(e.thread_id.as_deref(), e.model.as_str())) {
                 rewritten[i] = crate::tips::rewritten_after_pause(&events[p], e).unwrap_or(0);
+                pause[i] = (rewritten[i] > 0).then(|| e.ts_ms - events[p].ts_ms);
             }
             last.insert((e.thread_id.as_deref(), e.model.as_str()), i);
         }
     }
     let mut compacted = vec![false; events.len()];
     let mut before: Option<u64> = None;
-    for (i, e) in events.iter().enumerate().filter(|(_, e)| e.agent.is_none() && prompt(e) > 0) {
+    // a subagent without a name still has its own thread
+    for (i, e) in events.iter().enumerate().filter(|(_, e)| e.agent.is_none() && e.thread_id.is_none() && prompt(e) > 0) {
         compacted[i] = before.is_some_and(|b| b >= COMPACT_MIN_PROMPT && prompt(e) * 2 < b);
         before = Some(prompt(e));
     }
@@ -312,10 +322,12 @@ pub fn session_timeline(store: &Store, book: &PriceBook, tool: Tool, session_id:
     let requests = events
         .iter()
         .enumerate()
+        .filter(|(_, e)| filter.matches(e))
         .map(|(i, e)| TimelineRequest {
             ts_ms: e.ts_ms,
             model: e.model.clone(),
             agent: e.agent.clone(),
+            thread: e.thread_id.clone(),
             context: prompt(e),
             input: e.tokens.input,
             cache_read: e.tokens.cache_read,
@@ -324,6 +336,7 @@ pub fn session_timeline(store: &Store, book: &PriceBook, tool: Tool, session_id:
             cost_usd: book.cost(&input_of(e)).map(|c| c.total()),
             rewritten: rewritten[i],
             rewrite_extra_usd: (rewritten[i] > 0).then(|| crate::tips::rewrite_extra_usd(book, e, rewritten[i])).flatten(),
+            pause_ms: pause[i],
             compacted: compacted[i],
         })
         .collect();
@@ -331,6 +344,10 @@ pub fn session_timeline(store: &Store, book: &PriceBook, tool: Tool, session_id:
         .tool_calls_between(from_ms, to_ms + 1)?
         .into_iter()
         .filter(|c| ours(c.tool, c.session_id.as_deref()))
+        .filter(|c| {
+            let before = events.partition_point(|e| e.ts_ms <= c.ts_ms);
+            events.get(before.saturating_sub(1)).is_none_or(|e| filter.matches(e))
+        })
         .map(|c| TimelineCall { ts_ms: c.ts_ms, name: c.name, agent: c.agent, failed: c.failed })
         .collect();
     calls.sort_by_key(|c| c.ts_ms);

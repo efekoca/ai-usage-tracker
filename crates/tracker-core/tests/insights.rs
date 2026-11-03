@@ -621,12 +621,14 @@ fn a_session_timeline_marks_rebuilt_caches_compactions_subagents_and_failed_call
     tx.upsert_tool_calls(&calls).unwrap();
     tx.commit().unwrap();
 
-    let t = session_timeline(&store, &PriceBook::default_book(), Tool::ClaudeCode, "s1", m(0), m(21)).unwrap();
+    let t = session_timeline(&store, &PriceBook::default_book(), Tool::ClaudeCode, "s1", m(0), m(21), &Filter::default()).unwrap();
     let contexts: Vec<u64> = t.requests.iter().map(|r| r.context).collect();
     assert_eq!(contexts, [30_000, 60_000, 10_000, 70_000, 20_000], "only this session, oldest first");
     assert_eq!(t.requests[2].agent.as_deref(), Some("general-purpose"));
     let rewritten: Vec<u64> = t.requests.iter().map(|r| r.rewritten).collect();
     assert_eq!(rewritten, [0, 0, 0, 55_000, 0], "the main conversation's cache, rebuilt after the pause");
+    assert_eq!(t.requests[3].pause_ms, Some(19 * MIN), "measured from the main conversation, not the subagent");
+    assert_eq!(t.requests[2].thread.as_deref(), Some("a1"));
     let extra = t.requests[3].rewrite_extra_usd.unwrap();
     assert!(extra > 0.0 && t.requests.iter().filter(|r| r.rewrite_extra_usd.is_some()).count() == 1, "{extra}");
     let compacted: Vec<bool> = t.requests.iter().map(|r| r.compacted).collect();
@@ -634,4 +636,41 @@ fn a_session_timeline_marks_rebuilt_caches_compactions_subagents_and_failed_call
     assert!(t.requests.iter().all(|r| r.cost_usd.is_some()));
     let calls: Vec<(&str, Option<bool>)> = t.calls.iter().map(|c| (c.name.as_str(), c.failed)).collect();
     assert_eq!(calls, [("Bash", Some(true)), ("Read", Some(false))]);
+}
+
+#[test]
+fn a_session_timeline_keeps_the_filter_of_the_session_list() {
+    let m = |n: i64| ms(2026, 10, 2, 9, 0) + n * MIN;
+    let mut store = store_with(&[
+        ev("a1", m(0), Tool::ClaudeCode, "claude-sonnet-5-5", Some("s1"), "C:/w/app", 1_000, 0, 100),
+        ev("b1", m(1), Tool::ClaudeCode, "claude-opus-5-5", Some("s1"), "C:/w/app", 2_000, 0, 100),
+        ev("a2", m(2), Tool::ClaudeCode, "claude-sonnet-5-5", Some("s1"), "C:/w/app", 3_000, 0, 100),
+    ]);
+    let calls: Vec<ToolCall> = [("c1", m(0) + 1_000), ("c2", m(1) + 1_000), ("c3", m(2) + 1_000)]
+        .iter()
+        .map(|(key, ts)| ToolCall {
+            key: (*key).into(),
+            ts_ms: *ts,
+            tool: Tool::ClaudeCode,
+            session_id: Some("s1".into()),
+            project_path: Some("C:/w/app".into()),
+            agent: None,
+            name: (*key).into(),
+            failed: None,
+        })
+        .collect();
+    let mut tx = store.transaction().unwrap();
+    tx.upsert_tool_calls(&calls).unwrap();
+    tx.commit().unwrap();
+
+    let book = PriceBook::default_book();
+    let only = Filter { models: vec!["claude-sonnet-5-5".into()], ..Default::default() };
+    let t = session_timeline(&store, &book, Tool::ClaudeCode, "s1", m(0), m(3), &only).unwrap();
+    let contexts: Vec<u64> = t.requests.iter().map(|r| r.context).collect();
+    assert_eq!(contexts, [1_000, 3_000], "the other model's request in between stays out");
+    let names: Vec<&str> = t.calls.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, ["c1", "c3"], "a call goes with the request sent right before it");
+
+    let all = session_timeline(&store, &book, Tool::ClaudeCode, "s1", m(0), m(3), &Filter::default()).unwrap();
+    assert_eq!((all.requests.len(), all.calls.len()), (3, 3));
 }

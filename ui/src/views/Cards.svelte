@@ -21,6 +21,8 @@
   let status = $state<{ shape: Shape; ok: boolean; text: string } | null>(null)
   const canvases: Partial<Record<Shape, HTMLCanvasElement>> = $state({})
   let plans: PlansFile | null = null
+  /** The period on screen, so a data refresh keeps the cards and the saved note in place. */
+  let shown = ''
 
   const addDays = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
   function bounds(k: CardKind, d: Date) {
@@ -42,8 +44,11 @@
     const k = kind
     const { from, to } = range
     const period: Period = { kind: 'custom', from: localDate(from), to: localDate(to) }
-    card = undefined
-    status = null
+    if (shown !== `${k}:${period.from}`) {
+      shown = `${k}:${period.from}`
+      card = undefined
+      status = null
+    }
     return latest(
       async () => {
         if (k === 'day') {
@@ -60,7 +65,7 @@
           k === 'month' ? api.sessions(period) : null,
         ])
         plans = p
-        const multiple = planMultiple({ plans: p, settings: app.settings, accounts: app.accounts, value }, providersOf(app.settings?.enabled_sources ?? []))
+        const multiple = planMultiple({ plans: p, settings: app.settings, accounts: app.accounts, value, fromFirstSeen: true }, providersOf(app.settings?.enabled_sources ?? []))
         return sessions ? buildMonth(report, sessions, from, value.dates.length, multiple) : buildYear(report, from.getFullYear(), value.dates.length, multiple)
       },
       (c) => {
@@ -92,13 +97,16 @@
     const canvas = canvases[shape]
     if (!canvas || !card) return
     status = null
-    const chosen = await save({ defaultPath: `AI-Usage_${stem}${shape === 'square' ? '_square' : ''}.png`, filters: [{ name: 'PNG', extensions: ['png'] }] })
+    const filters = [{ name: 'PNG', extensions: ['png'] }]
+    let chosen = await save({ defaultPath: `AI-Usage_${stem}${shape === 'square' ? '_square' : ''}.png`, filters })
+    // some dialogs leave the extension off; asking again with it lets the dialog warn before replacing a file
+    if (chosen && !/\.png$/i.test(chosen)) chosen = await save({ defaultPath: `${chosen}.png`, filters })
     if (!chosen) return
     busy = shape
     try {
       const blob = await new Promise<Blob | null>((done) => canvas.toBlob(done, 'image/png'))
       if (!blob) throw new Error('png')
-      await api.saveImage(/\.png$/i.test(chosen) ? chosen : `${chosen}.png`, new Uint8Array(await blob.arrayBuffer()))
+      await api.saveImage(chosen, new Uint8Array(await blob.arrayBuffer()))
       status = { shape, ok: true, text: t('cards.saved') }
     } catch (e) {
       status = { shape, ok: false, text: t('cards.failed', { e: String(e) }) }
