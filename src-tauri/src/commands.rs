@@ -813,6 +813,79 @@ pub async fn save_image(window: WebviewWindow, state: State<'_, AppState>, path:
     Ok(())
 }
 
+#[derive(serde::Deserialize)]
+pub struct NamedImage {
+    name: String,
+    bytes: Vec<u8>,
+}
+
+/// Writes several cards into `dir`. A name is a plain `.png` file name, and a file already there is
+/// kept: the new one gets a free name next to it. Returns the paths written.
+#[tauri::command]
+pub async fn save_images(window: WebviewWindow, state: State<'_, AppState>, dir: PathBuf, images: Vec<NamedImage>) -> Res<Vec<PathBuf>> {
+    main_only(&window)?;
+    let plain = |n: &str| std::path::Path::new(n).file_name().is_some_and(|f| f == n) && !n.starts_with('.') && n.to_ascii_lowercase().ends_with(".png");
+    if !dir.is_dir() || images.iter().any(|i| !plain(&i.name) || !i.bytes.starts_with(b"\x89PNG\r\n\x1a\n")) {
+        return Err("not_png".into());
+    }
+    let mut written = Vec::new();
+    for i in images {
+        let path = free_path(&dir, &i.name);
+        export::write_atomically(&path, |f| std::io::Write::write_all(f, &i.bytes).map_err(err))?;
+        written.push(path);
+    }
+    *state.last_image.lock().unwrap() = written.first().cloned();
+    Ok(written)
+}
+
+/// `name` in `dir`, or `name (2)`, `name (3)`… when it is taken.
+fn free_path(dir: &std::path::Path, name: &str) -> PathBuf {
+    let (stem, ext) = name.rsplit_once('.').unwrap_or((name, ""));
+    (1..)
+        .map(|n| dir.join(if n == 1 { name.to_owned() } else { format!("{stem} ({n}).{ext}") }))
+        .find(|p| !p.exists())
+        .expect("an unbounded range")
+}
+
+/// Puts a card on the clipboard as an image. The clipboard stays open for the app's lifetime: on
+/// Linux the image is served from it until another app takes the clipboard.
+#[tauri::command]
+pub async fn copy_image(window: WebviewWindow, bytes: Vec<u8>) -> Res<()> {
+    main_only(&window)?;
+    if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err("not_png".into());
+    }
+    static CLIPBOARD: std::sync::Mutex<Option<arboard::Clipboard>> = std::sync::Mutex::new(None);
+    let image = tauri::image::Image::from_bytes(&bytes).map_err(err)?;
+    let mut slot = CLIPBOARD.lock().unwrap();
+    if slot.is_none() {
+        *slot = Some(arboard::Clipboard::new().map_err(err)?);
+    }
+    let data = arboard::ImageData { width: image.width() as usize, height: image.height() as usize, bytes: image.rgba().into() };
+    slot.as_mut().expect("set above").set_image(data).map_err(err)
+}
+
+#[derive(Serialize)]
+pub struct Earlier {
+    totals: analytics::Totals,
+    /// The archive reaches back to the start of the earlier period, so its totals are whole.
+    covered: bool,
+}
+
+/// The totals of `previous` (the day, week, month or year before `current`), cut to the part of
+/// `current` that has passed, so a period still running compares with the same stretch before it.
+#[tauri::command]
+pub async fn earlier_totals(app: AppHandle, current: Period, previous: Period) -> Res<Earlier> {
+    let state = app.state::<AppState>();
+    let store = state.db();
+    let book = state.book.read().unwrap();
+    let tz = chrono::Local;
+    let (cur, prev) = (range_for(&store, current)?, range_for(&store, previous)?);
+    let range = cur.cut_like(prev, &tz, now_ms());
+    let covered = store.first_event_ms().map_err(err)?.is_some_and(|f| analytics::start_of_day(&tz, analytics::local_date(&tz, f)) <= prev.from_ms);
+    Ok(Earlier { totals: analytics::totals_in(&store, &book, range, &Filter::default()).map_err(err)?, covered })
+}
+
 /// Opens only the card this app saved last, never an arbitrary path.
 #[tauri::command]
 pub fn open_last_image(window: WebviewWindow, state: State<AppState>) -> Res<()> {
@@ -1050,6 +1123,15 @@ pub async fn get_day_detail(app: AppHandle, date: String, filter: Option<Filter>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_card_saved_next_to_one_of_the_same_name_gets_a_free_name() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(free_path(dir.path(), "AI-Usage_2026.png"), dir.path().join("AI-Usage_2026.png"));
+        std::fs::write(dir.path().join("AI-Usage_2026.png"), b"").unwrap();
+        std::fs::write(dir.path().join("AI-Usage_2026 (2).png"), b"").unwrap();
+        assert_eq!(free_path(dir.path(), "AI-Usage_2026.png"), dir.path().join("AI-Usage_2026 (3).png"));
+    }
 
     #[test]
     fn a_hidden_project_name_stays_out_of_log_paths() {

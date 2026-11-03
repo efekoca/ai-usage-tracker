@@ -94,6 +94,7 @@ const settings: Settings = {
   account_names: accountNames(),
   account_plans: {},
   account_prices: {},
+  cards: { theme: 'navy', accent: 'theme', format: 'story', hide: [] },
 }
 
 // showcase names every account; otherwise one name sits next to the placeholders
@@ -746,6 +747,18 @@ export function installMock() {
           return null
         case 'open_last_image':
           return null
+        case 'save_images':
+          console.info('save images', a.dir, (a.images as { name: string }[]).map((i) => i.name))
+          return (a.images as { name: string }[]).map((i) => `${a.dir}/${i.name}`)
+        case 'copy_image':
+          console.info('copy image', (a.bytes as number[]).length)
+          return null
+        case 'earlier_totals': {
+          const r = report(a.previous as Period)
+          return { totals: totals(Math.round(r.totals.total_tokens * 0.78), r.totals.cost_usd * 0.8), covered: true }
+        }
+        case 'plugin:dialog|open':
+          return (a.options as { directory?: boolean } | undefined)?.directory ? '/Users/you/Desktop' : null
         case 'plugin:dialog|save':
           return `/Users/you/Desktop/${(a.options as { defaultPath?: string } | undefined)?.defaultPath ?? 'file'}`
         case 'get_limits':

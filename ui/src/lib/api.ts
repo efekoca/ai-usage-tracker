@@ -483,6 +483,26 @@ export interface Settings {
   account_plans: Record<string, string>
   /** Account id → monthly USD price, when it differs from the list price or the plan has none. */
   account_prices: Record<string, number>
+  cards: CardSettings
+}
+
+export type CardTheme = 'navy' | 'light' | 'sunset' | 'aurora'
+export type CardFormat = 'story' | 'square' | 'landscape' | 'wallpaper'
+export type CardInfo = 'cost' | 'plan' | 'change' | 'tools' | 'models' | 'badges'
+export interface CardSettings {
+  theme: CardTheme
+  /** `#rrggbb`, or "theme" for the theme's own color. */
+  accent: string
+  format: CardFormat
+  /** What the cards leave out. */
+  hide: CardInfo[]
+}
+
+/** An earlier period's totals, cut to the part of the current one that has passed. */
+export interface Earlier {
+  totals: Totals
+  /** The archive reaches back to the start of the earlier period. */
+  covered: boolean
 }
 
 export interface SourceInfo {
@@ -897,6 +917,10 @@ export const api = {
   planValue: (period?: Period) => invoke<PlanValue>('plan_value', { period }),
   saveImage: (path: string, bytes: Uint8Array) => invoke<void>('save_image', { path, bytes: Array.from(bytes) }),
   openLastImage: () => invoke<void>('open_last_image'),
+  saveImages: (dir: string, images: { name: string; bytes: Uint8Array }[]) =>
+    invoke<string[]>('save_images', { dir, images: images.map((i) => ({ name: i.name, bytes: Array.from(i.bytes) })) }),
+  copyImage: (bytes: Uint8Array) => invoke<void>('copy_image', { bytes: Array.from(bytes) }),
+  earlierTotals: (current: Period, previous: Period) => invoke<Earlier>('earlier_totals', { current, previous }),
   monthSpend: () => invoke<MonthSpend>('get_month_spend'),
   exportReport: (from: string, to: string, path: string) => invoke<void>('export_report', { from, to, path }),
   openLastReport: () => invoke<void>('open_last_report'),
