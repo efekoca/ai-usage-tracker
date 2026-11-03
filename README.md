@@ -244,13 +244,22 @@ On macOS you can also hide the icon so only the text shows; the icon comes back 
 
 ### Share a summary card
 
-The **Summary cards** page turns a day, a month or a year of your use into an image to share: a 1080 × 1920 Instagram story and a 1080 × 1080 square, side by side, in navy or light. Step through days, months or years with the arrows and save either card as a PNG.
+The **Summary cards** page turns a day, a week (Monday to Sunday), a month or a year of your use into an image to share. Step through periods with the arrows, pick a card and a size, and save it as a PNG or copy it to paste straight into a post or a chat.
 
-- **Year:** tokens, API-equivalent cost, what your plans were worth, a calendar of every day, the busiest month and day, the longest streak, and the model you used most.
-- **Month:** the same totals with a column per day and the average per active day, active days, sessions, and the cache hit rate.
-- **Day:** the same totals with a column per hour, how the day compares with an average day of the 30 days before, sessions, requests, and the cache hit rate.
+- **Summary:** tokens, the API-equivalent cost, what your plans were worth, a chart of the period, the change from the period before, your busiest day or hour, active days, sessions, the cache hit rate, the model you used most, and each tool's share.
+- **Calendar** (month or year): every day colored by how much you used, with your active days and your longest streak.
+- **Hours:** when in the day you work, around a 24-hour dial. The six hours that hold most of your use get a name (for example **Night owl** for 23:00–05:00), and longer periods show your week hour by hour.
+- **Year story:** your year as a row of story slides: the totals, the calendar, your hours, your models and the badges you earned. **Save all slides** saves them together.
 
-A card shows only totals and model names, never project names or anything you wrote. What your plans were worth counts only plans whose price is known, and is left out when none is.
+Every card comes in four sizes: a 1080 × 1920 story, a 1080 × 1080 square, a 1200 × 675 landscape image for X or LinkedIn, and a wallpaper the size of your screen. **Save all four sizes** saves them into one folder at once; a file already there is kept, and the new one gets a numbered name. Choose one of four themes (navy, light, sunset and aurora) and an accent color.
+
+**Show on the card** leaves out what you would rather not share: the API-equivalent cost, the plan value, the change from the period before, tool shares, model names or badges.
+
+**Badges** mark fixed thresholds the period reached: 100 million, 1 billion or 10 billion tokens; a 7-, 30- or 100-day streak; use on every day of a finished week or month; 2×, 5× or 10× the plan price; an 80%, 90% or 95% cache hit rate (with at least 1 million input tokens); and 2, 3 or 4 tools used together.
+
+The change from the period before compares with the same part of the calendar period before: a month still running is compared with the same days and time of the month before. It is left out when the archive does not reach back to the start of that period.
+
+A card shows only totals, tool names and model names, never project names or anything you wrote. What your plans were worth counts only plans whose price is known, and is left out when none is.
 
 ### Weekly PDF, export, and your own prices
 

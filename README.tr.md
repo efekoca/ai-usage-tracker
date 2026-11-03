@@ -233,13 +233,22 @@ macOS'te simgeyi gizleyip yalnızca metni bırakabilirsiniz; gösterilecek değe
 
 ### Özet kartı paylaşın
 
-**Özet kartları** sayfası bir gününüzü, ayınızı ya da yılınızı paylaşabileceğiniz bir görsele dönüştürür: 1080 × 1920 bir Instagram hikâyesi ve 1080 × 1080 bir kare, yan yana, lacivert ya da açık temada. Oklarla günler, aylar ya da yıllar arasında geçin ve istediğiniz kartı PNG olarak kaydedin.
+**Özet kartları** sayfası bir gününüzü, haftanızı (pazartesiden pazara), ayınızı ya da yılınızı paylaşabileceğiniz bir görsele dönüştürür. Oklarla dönemler arasında geçin, bir kart ve boyut seçin; kartı PNG olarak kaydedin ya da panoya kopyalayıp doğrudan bir gönderiye veya sohbete yapıştırın.
 
-- **Yıl:** token, API eşdeğeri maliyet, aboneliğinizin kaç kat değer kattığı, yılın her gününü gösteren bir takvim, en yoğun ay ve gün, en uzun seri ve en çok kullandığınız model.
-- **Ay:** aynı toplamlar; her gün için bir sütun ve aktif gün ortalaması, aktif gün, oturum ve önbellek isabeti.
-- **Gün:** aynı toplamlar; her saat için bir sütun, günün önceki 30 gündeki ortalama bir günle karşılaştırması, oturum, istek ve önbellek isabeti.
+- **Özet:** token, API eşdeğeri maliyet, aboneliğinizin kaç kat değer kattığı, dönemin grafiği, önceki döneme göre değişim, en yoğun gün ya da saat, aktif gün, oturum, önbellek isabeti, en çok kullandığınız model ve araçların payı.
+- **Takvim** (ay ya da yıl): her gün kullanımınıza göre renklenir; aktif günlerinizi ve en uzun serinizi gösterir.
+- **Saatler:** günün hangi saatlerinde çalıştığınızı 24 saatlik bir kadranda gösterir. Kullanımınızın çoğunun geçtiği altı saat bir ad alır (örneğin 23:00–05:00 için **Gece kuşu**); uzun dönemlerde haftanızı saat saat görürsünüz.
+- **Yıl hikâyesi:** yılınızı art arda hikâye slaytlarına döker: toplamlar, takvim, saatleriniz, modelleriniz ve kazandığınız rozetler. **Tüm slaytları kaydet** hepsini birlikte kaydeder.
 
-Kartta yalnızca toplamlar ve model adları yer alır, proje adları ya da yazdıklarınız asla yer almaz. Aboneliğin değeri yalnızca fiyatı bilinen planlarla hesaplanır; hiçbir planın fiyatı bilinmiyorsa kartta yer almaz.
+Her kartın dört boyutu var: 1080 × 1920 hikâye, 1080 × 1080 kare, X ve LinkedIn için 1200 × 675 yatay görsel ve ekranınızın boyutunda bir duvar kâğıdı. **Dört boyutu birden kaydet** hepsini tek bir klasöre kaydeder; klasörde aynı adda bir dosya varsa korunur, yenisi numaralı bir ad alır. Dört temadan (lacivert, açık, gün batımı ve kutup ışığı) birini ve bir vurgu rengi seçin.
+
+**Kartta göster** ile paylaşmak istemediklerinizi kartın dışında bırakın: API eşdeğeri tutar, abonelik değeri, önceki döneme göre değişim, araç payları, model adları ya da rozetler.
+
+**Rozetler** dönemin ulaştığı sabit eşikleri gösterir: 100 milyon, 1 milyar ya da 10 milyar token; 7, 30 ya da 100 günlük seri; biten bir haftanın ya da ayın her gününde kullanım; abonelik ücretinin 2, 5 ya da 10 katı; %80, %90 ya da %95 önbellek isabeti (en az 1 milyon girdi tokenıyla) ve birlikte kullanılan 2, 3 ya da 4 araç.
+
+Önceki döneme göre değişim, önceki takvim döneminin aynı bölümüyle karşılaştırılır: süren bir ay, önceki ayın aynı günleri ve saatiyle karşılaştırılır. Arşiv o dönemin başına kadar uzanmıyorsa değişim kartta yer almaz.
+
+Kartta yalnızca toplamlar, araç adları ve model adları yer alır; proje adları ya da yazdıklarınız asla yer almaz. Aboneliğin değeri yalnızca fiyatı bilinen planlarla hesaplanır; hiçbir planın fiyatı bilinmiyorsa kartta yer almaz.
 
 ### Haftalık rapor alın, verilerinizi yönetin
 

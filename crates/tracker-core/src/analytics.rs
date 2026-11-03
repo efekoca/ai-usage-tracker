@@ -42,7 +42,12 @@ impl Range {
     /// [`Range::previous`] cut to the part of this range that has passed by `now_ms`, at the same
     /// local time: today until 09:00 compares with yesterday until 09:00, not all of yesterday.
     pub fn previous_until<Tz: TimeZone>(&self, tz: &Tz, now_ms: i64) -> Range {
-        let prev = self.previous(tz);
+        self.cut_like(self.previous(tz), tz, now_ms)
+    }
+
+    /// `prev`, an earlier period, cut to the part of this range that has passed by `now_ms`: the same
+    /// number of days from its start, then the same local time.
+    pub fn cut_like<Tz: TimeZone>(&self, prev: Range, tz: &Tz, now_ms: i64) -> Range {
         if now_ms <= self.from_ms || now_ms >= self.to_ms {
             return prev;
         }
@@ -268,6 +273,16 @@ fn sorted_groups(map: HashMap<String, (String, bool, Totals)>) -> Vec<Group> {
     v
 }
 
+pub fn totals_in(store: &Store, book: &PriceBook, range: Range, filter: &Filter) -> Result<Totals> {
+    let events = store.events_between(range.from_ms, range.to_ms)?;
+    let writers = cache_writers(events.iter().filter(|e| filter.matches(e)));
+    let mut totals = Totals::default();
+    for e in events.iter().filter(|e| filter.matches(e)) {
+        totals.add_counted(e, cost_of(book, e).as_ref(), savings_of(book, e), writers(e));
+    }
+    Ok(totals)
+}
+
 /// `now_ms` cuts the previous period to the same elapsed time, so a range still running compares fairly.
 pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filter: &Filter, tz: &Tz, now_ms: i64) -> Result<Report> {
     let projects: HashMap<i64, ProjectRow> = store.projects()?.into_iter().map(|p| (p.id, p)).collect();
@@ -317,13 +332,7 @@ pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filte
         }
     }
 
-    let prev_range = range.previous_until(tz, now_ms);
-    let mut previous = Totals::default();
-    let prev_events = store.events_between(prev_range.from_ms, prev_range.to_ms)?;
-    let prev_writers = cache_writers(prev_events.iter().filter(|e| filter.matches(e)));
-    for e in prev_events.iter().filter(|e| filter.matches(e)) {
-        previous.add_counted(e, cost_of(book, e).as_ref(), savings_of(book, e), prev_writers(e));
-    }
+    let previous = totals_in(store, book, range.previous_until(tz, now_ms), filter)?;
 
     // dense daily series over the whole range
     let first = local_date(tz, range.from_ms);
@@ -870,6 +879,20 @@ mod tests {
         assert_eq!(week.previous_until(&tz, at(8, 9)), Range { from_ms: tz.with_ymd_and_hms(2026, 9, 25, 0, 0, 0).unwrap().timestamp_millis(), to_ms: at(1, 9) });
         // a finished range keeps the whole period before it
         assert_eq!(today.previous_until(&tz, at(3, 9)), today.previous(&tz));
+    }
+
+    #[test]
+    fn a_running_month_compares_with_the_same_days_of_the_calendar_month_before() {
+        let tz = FixedOffset::east_opt(3 * 3600).unwrap();
+        let day = |m, d| NaiveDate::from_ymd_opt(2026, m, d).unwrap();
+        let at = |m, d, h| tz.with_ymd_and_hms(2026, m, d, h, 0, 0).unwrap().timestamp_millis();
+        let custom = |from, to| period_range(Period::Custom { from, to }, &tz, 0, None);
+        let (november, october) = (custom(day(11, 1), day(11, 30)), custom(day(10, 1), day(10, 31)));
+        assert_eq!(november.cut_like(october, &tz, at(11, 3, 9)), Range { from_ms: at(10, 1, 0), to_ms: at(10, 3, 9) });
+        assert_eq!(november.cut_like(october, &tz, at(12, 2, 9)), october);
+        // the 31st of a month runs into a shorter month before it no further than that month's end
+        let (march, february) = (custom(day(3, 1), day(3, 31)), custom(day(2, 1), day(2, 28)));
+        assert_eq!(march.cut_like(february, &tz, at(3, 31, 12)), february);
     }
 
     #[test]

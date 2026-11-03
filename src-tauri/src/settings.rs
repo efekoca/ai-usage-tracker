@@ -611,6 +611,46 @@ pub struct Settings {
     /// `digest:plan` → monthly USD price of that account on that plan, when it differs from the list
     /// price or the plan has none; a price set for one plan never carries over to another.
     pub account_prices: std::collections::BTreeMap<String, f64>,
+    pub cards: CardSettings,
+}
+
+/// How the Summary cards page draws a card.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct CardSettings {
+    /// "navy", "light", "sunset" or "aurora".
+    pub theme: String,
+    /// `#rrggbb`, or "theme" for the theme's own color.
+    pub accent: String,
+    /// "story", "square", "landscape" or "wallpaper".
+    pub format: String,
+    /// What the cards leave out: "cost", "plan", "change", "tools", "models", "badges".
+    pub hide: Vec<String>,
+}
+
+impl Default for CardSettings {
+    fn default() -> Self {
+        CardSettings { theme: "navy".into(), accent: "theme".into(), format: "story".into(), hide: Vec::new() }
+    }
+}
+
+impl CardSettings {
+    pub fn normalize(&mut self) {
+        if !["navy", "light", "sunset", "aurora"].contains(&self.theme.as_str()) {
+            self.theme = "navy".into();
+        }
+        if self.accent != "theme" && !is_hex_color(&self.accent) {
+            self.accent = "theme".into();
+        }
+        if !["story", "square", "landscape", "wallpaper"].contains(&self.format.as_str()) {
+            self.format = "story".into();
+        }
+        let mut seen = Vec::new();
+        self.hide.retain(|h| ["cost", "plan", "change", "tools", "models", "badges"].contains(&h.as_str()) && !seen.contains(h) && {
+            seen.push(h.clone());
+            true
+        });
+    }
 }
 
 /// Long enough for "Work (team)", short enough for a limit card's header.
@@ -653,6 +693,7 @@ impl Default for Settings {
             account_names: Default::default(),
             account_plans: Default::default(),
             account_prices: Default::default(),
+            cards: CardSettings::default(),
         }
     }
 }
@@ -702,6 +743,7 @@ impl Settings {
                     s.widget.normalize();
                     s.tray.normalize();
                     s.panel.normalize();
+                    s.cards.normalize();
                     s.adopt_new_sources();
                     s
                 })
@@ -729,6 +771,7 @@ impl Settings {
         self.widget.normalize();
         self.tray.normalize();
         self.panel.normalize();
+        self.cards.normalize();
         if self.accent != "system" {
             self.accent = "app".into();
         }
@@ -808,6 +851,16 @@ mod tests {
         assert!(s.tray.show_percent && s.update_check && s.show_in_dock && s.notify.enabled);
         assert_eq!(s.accent, "app");
         assert_eq!(s.widget.hotkey, DEFAULT_HOTKEY);
+    }
+
+    #[test]
+    fn card_choices_from_elsewhere_fall_back_to_the_defaults() {
+        let mut s: Settings = serde_json::from_str(r##"{"cards":{"theme":"neon","accent":"red","format":"a4","hide":["cost","cost","projects","badges"]}}"##).unwrap();
+        s.normalize();
+        assert_eq!(s.cards, CardSettings { hide: vec!["cost".into(), "badges".into()], ..CardSettings::default() });
+        let mut kept = CardSettings { theme: "aurora".into(), accent: "#ff8a4c".into(), format: "wallpaper".into(), hide: vec![] };
+        kept.normalize();
+        assert_eq!((kept.theme.as_str(), kept.accent.as_str(), kept.format.as_str()), ("aurora", "#ff8a4c", "wallpaper"));
     }
 
     #[test]
