@@ -59,6 +59,8 @@ Sağlayıcılar limitlerin sayısal karşılığını yayımlamıyor, yalnızca 
 
 **Bildirimler.** Kullandığınız bir limit uyarı eşiğini geçince, dolunca ve dolan limit yenilenince sistem bildirimi alırsınız. Bildirimde limitin yenilenme saati ve bu hızla yaklaşık ne zaman dolacağı yazar. **Ayarlar → Bildirimler** bölümünden erken uyarının **Dikkat** ya da **Kritik** eşiğinde gelmesini veya hiç gelmemesini, limit dolunca ve yenilenince haber alıp almayacağınızı ve hangi limitler (5 saatlik, haftalık) için bildirim alacağınızı seçin. macOS, uygulamanın bildirim gönderip gönderemeyeceğini bir kez sorar. Uygulamayı açtığınızda, kapalıyken olanlar için bildirim gelmez. Bildirime tıklayınca **Limitler** sayfası açılır. Bildirimlerin bu bilgisayarda görünüp görünmediğini **Ayarlar → Bildirimler → Deneme bildirimi** ile kontrol edin.
 
+**Oturum açma bildirimi.** Claude Code, Codex CLI ya da Antigravity CLI'da oturum kapalı olduğu için limitleriniz okunamıyorsa bir kez bildirim alırsınız; bu, uygulamayı açtıktan hemen sonra da olabilir. Bildirime tıklayınca nasıl giriş yapacağınızı görürsünüz. İnternet olmaması ya da API anahtarı gibi diğer okuma sorunları oturum kapanışı sayılmaz, **Kaynaklar → Canlı yakalama** bölümünde görünür. Bu bildirimi **Ayarlar → Bildirimler → Oturum açmanız gerekince** ile kapatabilirsiniz.
+
 ### Geçmiş limit pencerelerinizi inceleyin
 
 **Limitler** sayfasındaki **Geçmiş** sekmesinde her 5 saatlik ve haftalık pencerenizi görürsünüz: ne kadar dolduğunu, dolup dolmadığını, ne kadar sürede dolduğunu ve o sırada bu bilgisayarda ne kadar kullandığınızı. Uygulama bu pencerelerden yola çıkarak bir pencerenin tamamının API eşdeğeri olarak kaça denk geldiğini de tahmin eder.
@@ -242,7 +244,7 @@ macOS'te simgeyi gizleyip yalnızca metni bırakabilirsiniz; gösterilecek değe
 
 Her kartın dört boyutu var: 1080 × 1920 hikâye, 1080 × 1080 kare, X ve LinkedIn için 1200 × 675 yatay görsel ve ekranınızın boyutunda bir duvar kâğıdı. **Dört boyutu birden kaydet** hepsini tek bir klasöre kaydeder; klasörde aynı adda bir dosya varsa korunur, yenisi numaralı bir ad alır. Dört temadan (lacivert, açık, gün batımı ve kutup ışığı) birini ve bir vurgu rengi seçin.
 
-**Kartta göster** ile paylaşmak istemediklerinizi kartın dışında bırakın: API eşdeğeri tutar, abonelik değeri, önceki döneme göre değişim, araç payları, model adları ya da rozetler.
+**Kartta göster** ile paylaşmak istemediklerinizi kartın dışında bırakın: API eşdeğeri tutar, abonelik değeri, önceki döneme göre değişim, araç payları, model adları, rozetler ya da aktif gün yayı.
 
 **Rozetler** dönemin ulaştığı sabit eşikleri gösterir: 100 milyon, 1 milyar ya da 10 milyar token; 7, 30 ya da 100 günlük seri; biten bir haftanın ya da ayın her gününde kullanım; abonelik ücretinin 2, 5 ya da 10 katı; %80, %90 ya da %95 önbellek isabeti (en az 1 milyon girdi tokenıyla) ve birlikte kullanılan 2, 3 ya da 4 araç.
 
