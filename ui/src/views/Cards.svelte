@@ -41,6 +41,8 @@
   const designs = $derived(designsFor(kind))
   const active = $derived(designs.includes(design) ? design : 'summary')
   const format = $derived<CardFormat>(active === 'wrapped' ? 'story' : prefs.format)
+  /** The sizes this card can take; a year story is only a story. */
+  const formats = $derived<CardFormat[]>(active === 'wrapped' ? ['story'] : FORMATS)
   const screen = { w: Math.round(window.screen.width * devicePixelRatio), h: Math.round(window.screen.height * devicePixelRatio) }
   const size = $derived(sizeOf(format, screen))
 
@@ -160,7 +162,7 @@
     if (!step) return
     e.preventDefault()
     const next = list[(list.indexOf(value) + step + list.length) % list.length]
-    set(next)
+    if (next !== value) set(next)
     const group = e.currentTarget as HTMLElement
     queueMicrotask(() => (group.querySelector('[aria-checked="true"]') as HTMLElement | null)?.focus())
   }
@@ -275,10 +277,10 @@
 
     <div class="group">
       <span class="glabel" id="card-format">{t('cards.format')}</span>
-      <div class="tiles two" role="radiogroup" aria-labelledby="card-format" tabindex="-1" onkeydown={(e) => arrows(e, FORMATS, format, (f) => setPrefs({ format: f }))}>
+      <div class="tiles two" role="radiogroup" aria-labelledby="card-format" tabindex="-1" onkeydown={(e) => arrows(e, formats, format, (f) => setPrefs({ format: f }))}>
         {#each FORMATS as f (f)}
           {@const s = sizeOf(f, screen)}
-          <button class="tile format" role="radio" aria-checked={format === f} disabled={active === 'wrapped' && f !== 'story'} tabindex={format === f ? 0 : -1} onclick={() => setPrefs({ format: f })}>
+          <button class="tile format" role="radio" aria-checked={format === f} disabled={!formats.includes(f)} tabindex={format === f ? 0 : -1} onclick={() => setPrefs({ format: f })}>
             <span class="ratio" style:aspect-ratio="{s.w} / {s.h}" aria-hidden="true"></span>
             <span>{t(`cards.format.${f}`)}</span>
           </button>

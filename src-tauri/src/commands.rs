@@ -830,21 +830,34 @@ pub async fn save_images(window: WebviewWindow, state: State<'_, AppState>, dir:
     }
     let mut written = Vec::new();
     for i in images {
-        let path = free_path(&dir, &i.name);
-        export::write_atomically(&path, |f| std::io::Write::write_all(f, &i.bytes).map_err(err))?;
-        written.push(path);
+        written.push(write_new(&dir, &i.name, &i.bytes)?);
     }
     *state.last_image.lock().unwrap() = written.first().cloned();
     Ok(written)
 }
 
-/// `name` in `dir`, or `name (2)`, `name (3)`… when it is taken.
-fn free_path(dir: &std::path::Path, name: &str) -> PathBuf {
+/// Writes `bytes` to `name` in `dir`, or to `name (2)`, `name (3)`… when that is taken. Each name is
+/// claimed by creating the file only if it does not exist, so a file that appears meanwhile is kept too.
+fn write_new(dir: &std::path::Path, name: &str, bytes: &[u8]) -> Res<PathBuf> {
+    use std::io::Write;
     let (stem, ext) = name.rsplit_once('.').unwrap_or((name, ""));
-    (1..)
-        .map(|n| dir.join(if n == 1 { name.to_owned() } else { format!("{stem} ({n}).{ext}") }))
-        .find(|p| !p.exists())
-        .expect("an unbounded range")
+    let mut n = 1;
+    loop {
+        let path = dir.join(if n == 1 { name.to_owned() } else { format!("{stem} ({n}).{ext}") });
+        n += 1;
+        let mut f = match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.to_string()),
+        };
+        // the file is this call's own, so a failed write leaves no half image behind
+        if let Err(e) = f.write_all(bytes).and_then(|_| f.sync_all()) {
+            drop(f);
+            let _ = std::fs::remove_file(&path);
+            return Err(e.to_string());
+        }
+        return Ok(path);
+    }
 }
 
 /// Puts a card on the clipboard as an image. The clipboard stays open for the app's lifetime: on
@@ -1127,10 +1140,23 @@ mod tests {
     #[test]
     fn a_card_saved_next_to_one_of_the_same_name_gets_a_free_name() {
         let dir = tempfile::tempdir().unwrap();
-        assert_eq!(free_path(dir.path(), "AI-Usage_2026.png"), dir.path().join("AI-Usage_2026.png"));
-        std::fs::write(dir.path().join("AI-Usage_2026.png"), b"").unwrap();
-        std::fs::write(dir.path().join("AI-Usage_2026 (2).png"), b"").unwrap();
-        assert_eq!(free_path(dir.path(), "AI-Usage_2026.png"), dir.path().join("AI-Usage_2026 (3).png"));
+        let at = |name: &str| dir.path().join(name);
+        assert_eq!(write_new(dir.path(), "AI-Usage_2026.png", b"first").unwrap(), at("AI-Usage_2026.png"));
+        std::fs::write(at("AI-Usage_2026 (2).png"), b"other app").unwrap();
+        assert_eq!(write_new(dir.path(), "AI-Usage_2026.png", b"second").unwrap(), at("AI-Usage_2026 (3).png"));
+        let read = |name: &str| std::fs::read(at(name)).unwrap();
+        assert_eq!((read("AI-Usage_2026.png"), read("AI-Usage_2026 (2).png"), read("AI-Usage_2026 (3).png")), (b"first".to_vec(), b"other app".to_vec(), b"second".to_vec()));
+    }
+
+    #[test]
+    fn a_card_is_never_written_over_a_file_that_appears_at_its_name() {
+        let dir = tempfile::tempdir().unwrap();
+        // another writer claims the first name between two saves; the name is taken when the file is created
+        let file = dir.path().join("card.png");
+        std::fs::write(&file, b"theirs").unwrap();
+        let path = write_new(dir.path(), "card.png", b"ours").unwrap();
+        assert_eq!((std::fs::read(&file).unwrap(), path), (b"theirs".to_vec(), dir.path().join("card (2).png")));
+        assert!(write_new(&dir.path().join("missing"), "card.png", b"ours").is_err(), "a folder that is gone is an error, not a loop");
     }
 
     #[test]
