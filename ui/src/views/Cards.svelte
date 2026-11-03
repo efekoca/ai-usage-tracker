@@ -14,7 +14,7 @@
   const KINDS: CardKind[] = ['day', 'week', 'month', 'year']
   const FORMATS: CardFormat[] = ['story', 'square', 'landscape', 'wallpaper']
   const THEMES: CardTheme[] = ['navy', 'light', 'sunset', 'aurora']
-  const INFO: CardInfo[] = ['cost', 'plan', 'change', 'tools', 'models', 'badges']
+  const INFO: CardInfo[] = ['cost', 'plan', 'change', 'tools', 'models', 'badges', 'arc']
   const ACCENT_NAMES = ['blue', 'violet', 'mint', 'amber', 'orange', 'pink']
   const DESIGN_ICON: Record<Design, string> = { summary: 'chart', calendar: 'daily', hours: 'clock', wrapped: 'report' }
   const DEFAULT_PREFS: CardSettings = { theme: 'navy', accent: 'theme', format: 'story', hide: [] }
@@ -104,12 +104,10 @@
     void i18n.lang
     void i18n.currency
     const f = { ...facts, hide: [...prefs.hide] }
-    if (active === 'wrapped') {
-      const slides = buildWrapped(f)
-      return slides.length ? slides : null
-    }
-    const card = active === 'calendar' ? buildCalendar(f) : active === 'hours' ? buildHours(f) : buildSummary(f)
-    return card ? [card] : null
+    const one = active === 'wrapped' ? null : active === 'calendar' ? buildCalendar(f) : active === 'hours' ? buildHours(f) : buildSummary(f)
+    const cards = active === 'wrapped' ? buildWrapped(f) : one ? [one] : []
+    if (!cards.length) return null
+    return prefs.hide.includes('arc') ? cards.map((c) => ({ ...c, share: null })) : cards
   })
   const current = $derived(built ? built[Math.min(slide, built.length - 1)] : null)
 

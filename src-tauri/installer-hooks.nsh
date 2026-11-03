@@ -28,6 +28,8 @@
   ${If} $UpdateMode <> 1
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "AI Usage Tracker"
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" "AI Usage Tracker"
+    ; the app registers its id here so Windows shows its notifications
+    DeleteRegKey HKCU "Software\Classes\AppUserModelId\${BUNDLEID}"
   ${EndIf}
   ${If} $DeleteAppDataCheckboxState = 1
     RMDir /r "$LOCALAPPDATA\AIUsageTracker"

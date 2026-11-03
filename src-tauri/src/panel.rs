@@ -233,16 +233,7 @@ pub async fn panel_data(app: AppHandle) -> Result<PanelData, String> {
         (limits, crate::commands::known_accounts(&store)?)
     };
     let live = |p: Provider| limits.iter().any(|l| l.active && l.provider == p && l.used_pct.is_some() && matches!(l.state, LimitState::Fresh | LimitState::Behind));
-    let cap = crate::capture::status(&app);
-    let signed_out: Vec<Provider> = [
-        (Provider::Anthropic, cap.claude_poll && cap.claude.last_error.as_deref() == Some("claude_no_plan_limits") && s.plans.get("anthropic").map(String::as_str) != Some("api")),
-        (Provider::OpenAI, cap.codex_poll && cap.codex.last_error.as_deref() == Some("codex_not_signed_in")),
-        (Provider::Google, cap.antigravity_poll && cap.antigravity.last_error.as_deref() == Some("agy_not_signed_in")),
-    ]
-    .into_iter()
-    .filter(|&(p, out)| out && providers.contains(&p) && !live(p))
-    .map(|(p, _)| p)
-    .collect();
+    let signed_out: Vec<Provider> = crate::capture::signed_out(&app, &s).into_iter().filter(|&p| !live(p)).collect();
     let limits = limits
         .into_iter()
         .filter(|l| providers.contains(&l.provider) && (l.window == "five_hour" || l.window == "seven_day"))

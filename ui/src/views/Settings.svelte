@@ -382,7 +382,16 @@
       </div>
     {/if}
     <div class="item">
-      <div><span>{t('settings.notify.test')}</span><div class="subtle small" aria-live="polite">{testResult ? t(`settings.notify.test.${testResult}`) : t('settings.notify.test.help')}</div></div>
+      <div><span>{t('settings.notify.signIn')}</span><div class="subtle small">{t('settings.notify.signIn.help')}</div></div>
+      <Toggle checked={s.notify.sign_in} label={t('settings.notify.signIn')} onchange={(v) => saveNotify({ sign_in: v })} />
+    </div>
+    <div class="item">
+      <div>
+        <span>{t('settings.notify.test')}</span>
+        <div class="subtle small" aria-live="polite">
+          {#if testResult === 'denied' && app.info?.platform === 'windows'}{t('settings.notify.test.deniedWindows')}{:else if testResult}{t(`settings.notify.test.${testResult}`)}{:else}{t('settings.notify.test.help')}{/if}
+        </div>
+      </div>
       <button class="btn" onclick={sendTest} disabled={testing}>{testing ? t('settings.notify.test.sending') : t('settings.notify.test.send')}</button>
     </div>
   {/if}

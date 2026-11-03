@@ -450,6 +450,23 @@ pub fn status(app: &AppHandle) -> CaptureStatus {
     }
 }
 
+/// The providers whose limits go unread because their CLI is signed out; an API plan has none to read.
+pub(crate) fn signed_out(app: &AppHandle, s: &Settings) -> Vec<tracker_core::model::Provider> {
+    use tracker_core::model::Provider;
+    let rt = &app.state::<AppState>().capture;
+    let says = |m: &Mutex<PollStatus>, code: &str| m.lock().unwrap().last_error.as_deref() == Some(code);
+    let providers = crate::commands::enabled_providers(s);
+    [
+        (Provider::Anthropic, s.capture.claude_poll && says(&rt.claude, "claude_no_plan_limits") && s.plans.get("anthropic").map(String::as_str) != Some("api")),
+        (Provider::OpenAI, s.capture.codex_poll && says(&rt.codex, codex_limits::NOT_SIGNED_IN)),
+        (Provider::Google, s.capture.antigravity_poll && says(&rt.antigravity, antigravity_limits::NOT_SIGNED_IN)),
+    ]
+    .into_iter()
+    .filter(|&(p, out)| out && providers.contains(&p))
+    .map(|(p, _)| p)
+    .collect()
+}
+
 fn codex_binary(s: &Settings) -> Option<PathBuf> {
     let configured = (!s.capture.codex_path.trim().is_empty()).then(|| PathBuf::from(s.capture.codex_path.trim()));
     codex_limits::find_codex(&Env::from_system(), configured.as_deref())

@@ -284,18 +284,20 @@ function painter(ctx: CanvasRenderingContext2D, family: string, c: Colors) {
 
 function dial(P: Painter, d: { x: number; y: number; r: number; w: number }, share: number) {
   const { ctx, c } = P
-  const a0 = (135 * Math.PI) / 180
+  // it ends high in the corner, well clear of the title
+  const a0 = (160 * Math.PI) / 180
+  const sweep = (245 * Math.PI) / 180
   ctx.lineCap = 'round'
   ctx.lineWidth = d.w
   ctx.strokeStyle = c.track
   ctx.beginPath()
-  ctx.arc(d.x, d.y, d.r, a0, a0 + 1.5 * Math.PI)
+  ctx.arc(d.x, d.y, d.r, a0, a0 + sweep)
   ctx.stroke()
   if (share > 0) {
     ctx.globalAlpha = 0.9
     ctx.strokeStyle = c.accent
     ctx.beginPath()
-    ctx.arc(d.x, d.y, d.r, a0, a0 + Math.min(1, share) * 1.5 * Math.PI)
+    ctx.arc(d.x, d.y, d.r, a0, a0 + Math.min(1, share) * sweep)
     ctx.stroke()
     ctx.globalAlpha = 1
   }

@@ -363,7 +363,7 @@ pub fn run() {
             worker::start(app.handle().clone(), db_path, rx);
             tray::build(app.handle())?;
             tray::start(app.handle().clone());
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", windows))]
             alerts::init(app.handle());
             #[cfg(target_os = "macos")]
             if !settings.show_in_dock {

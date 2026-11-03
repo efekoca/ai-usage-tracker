@@ -441,6 +441,8 @@ export interface NotifySettings {
   five_hour: boolean
   seven_day: boolean
   budget: boolean
+  /** When a signed-out CLI leaves a provider's limits unread. */
+  sign_in: boolean
 }
 
 export interface Settings {
@@ -488,7 +490,7 @@ export interface Settings {
 
 export type CardTheme = 'navy' | 'light' | 'sunset' | 'aurora'
 export type CardFormat = 'story' | 'square' | 'landscape' | 'wallpaper'
-export type CardInfo = 'cost' | 'plan' | 'change' | 'tools' | 'models' | 'badges'
+export type CardInfo = 'cost' | 'plan' | 'change' | 'tools' | 'models' | 'badges' | 'arc'
 export interface CardSettings {
   theme: CardTheme
   /** `#rrggbb`, or "theme" for the theme's own color. */

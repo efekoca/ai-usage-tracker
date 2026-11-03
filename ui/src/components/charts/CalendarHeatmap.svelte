@@ -55,7 +55,16 @@
     return out.filter((m, i, a) => m.c < cols && (i === 0 || m.c - a[i - 1].c >= 3))
   })
 
-  const svgW = $derived(36 + cols * (CELL + GAP))
+  const gridW = $derived(36 + cols * (CELL + GAP))
+  // a month that begins in the last column has its name run past the grid
+  let svg: SVGSVGElement | undefined = $state()
+  let tail = $state(0)
+  $effect(() => {
+    void months
+    const ends = [...(svg?.querySelectorAll<SVGTextElement>('text.month') ?? [])].map((el) => el.getBBox().x + el.getBBox().width)
+    tail = Math.max(0, ...ends.map((x) => Math.ceil(x) + 2 - gridW))
+  })
+  const svgW = $derived(gridW + tail)
   const svgH = 18 + 7 * (CELL + GAP)
   const names = $derived(weekdayNames())
 
@@ -73,9 +82,9 @@
 
 <div class="wrap">
   <div class="scroller">
-    <svg width={svgW} height={svgH} role="listbox" aria-label={ariaLabel} aria-activedescendant={hi !== null ? `${uid}-${hi}` : undefined} tabindex="0" onkeydown={key} onblur={() => (hover = null)}>
+    <svg bind:this={svg} width={svgW} height={svgH} role="listbox" aria-label={ariaLabel} aria-activedescendant={hi !== null ? `${uid}-${hi}` : undefined} tabindex="0" onkeydown={key} onblur={() => (hover = null)}>
       {#each months as m (m.c)}
-        <text class="axis" x={36 + m.c * (CELL + GAP)} y="10">{m.label}</text>
+        <text class="axis month" x={36 + m.c * (CELL + GAP)} y="10">{m.label}</text>
       {/each}
       {#each [0, 2, 4] as r (r)}
         <text class="axis" x="0" y={18 + r * (CELL + GAP) + CELL - 3}>{names[r]}</text>
