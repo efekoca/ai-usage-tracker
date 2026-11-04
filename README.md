@@ -59,6 +59,8 @@ Providers publish how their limits work, not the numbers themselves. The app the
 
 **Notifications.** A system notification tells you when a limit you use passes your warning threshold, when it fills up, and when a full limit starts again. It shows when the limit resets and, at your current pace, roughly when it fills. In **Settings → Notifications**, choose an early warning at the **Caution** or **Critical** threshold or none, whether to hear when a limit fills up and when it resets, and which limits (5-hour, weekly) notify you. macOS asks once whether the app may send notifications. Opening the app never reports what happened while it was closed. Click a notification to open the **Limits** page. To check that notifications show on this computer, use **Settings → Notifications → Test notification**.
 
+**Sign-in notifications.** When Claude Code, the Codex CLI or the Antigravity CLI is signed out and your limits cannot be read, a notification tells you once, even right after the app opens. Click it to see how to sign in. Other reasons a read fails, such as no network or an API key, never count as a sign-out and show under **Sources → Live capture** instead. Turn this off with **Settings → Notifications → When you need to sign in**.
+
 ### Limit history
 
 The **History** tab on the **Limits** page lists every five-hour and weekly window your readings cover. From those windows, the app estimates what a whole window is worth in API terms.
@@ -253,7 +255,7 @@ The **Summary cards** page turns a day, a week (Monday to Sunday), a month or a 
 
 Every card comes in four sizes: a 1080 × 1920 story, a 1080 × 1080 square, a 1200 × 675 landscape image for X or LinkedIn, and a wallpaper the size of your screen. **Save all four sizes** saves them into one folder at once; a file already there is kept, and the new one gets a numbered name. Choose one of four themes (navy, light, sunset and aurora) and an accent color.
 
-**Show on the card** leaves out what you would rather not share: the API-equivalent cost, the plan value, the change from the period before, tool shares, model names or badges.
+**Show on the card** leaves out what you would rather not share: the API-equivalent cost, the plan value, the change from the period before, tool shares, model names, badges or the active days arc.
 
 **Badges** mark fixed thresholds the period reached: 100 million, 1 billion or 10 billion tokens; a 7-, 30- or 100-day streak; use on every day of a finished week or month; 2×, 5× or 10× the plan price; an 80%, 90% or 95% cache hit rate (with at least 1 million input tokens); and 2, 3 or 4 tools used together.
 
