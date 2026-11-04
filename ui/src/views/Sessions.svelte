@@ -204,7 +204,7 @@
                             </div>
                           {/each}
                         </div>
-                        <div class="models">
+                        <div class="by-model">
                           <span class="label">{t('sessions.models')}</span>
                           <div class="used">
                             {#each s.models as m (m.model)}
@@ -417,13 +417,13 @@
     height: 3px;
     border-radius: 2px;
   }
-  .models {
+  .by-model {
     display: flex;
     align-items: flex-start;
     gap: 10px;
     padding: 10px 14px;
   }
-  .models .label {
+  .by-model .label {
     font-size: 12px;
     font-weight: 600;
     color: var(--ink-2);

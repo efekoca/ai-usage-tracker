@@ -633,7 +633,7 @@
   }
   .events li {
     display: grid;
-    grid-template-columns: 44px 8px minmax(140px, 230px) minmax(0, 1fr) auto;
+    grid-template-columns: 62px 8px minmax(140px, 230px) minmax(0, 1fr) auto;
     align-items: center;
     column-gap: 12px;
     padding: 10px 0;
@@ -642,6 +642,7 @@
   }
   .events .time {
     color: var(--ink-3);
+    white-space: nowrap;
   }
   .events .title {
     font-weight: 500;

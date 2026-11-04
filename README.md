@@ -29,8 +29,9 @@ A private app for Windows, macOS, and Linux that reads the usage logs your AI to
 - **See what subagents and tools cost you.** You see how much of your cost comes from subagents and how often each tool's calls fail.
 - **Measure what the cache saves you.** You see the hit rate, the net savings, and what it cost when the cache had to be written again after a long pause.
 - **Keep your history.** Resumed and forked sessions are never counted twice, and your history stays in the archive even after the tools delete their own logs (Claude Code does so after 30 days).
+- **Share your use, not your work.** Turn a day, a week, a month or a year into a card in four sizes. A card holds totals, tool names and model names only.
 
-![A short tour: the overview with a chart tooltip and plan value, the account filter, separate limits for each Claude account, limit history, tips, the daily view, the model comparison, the Menu bar page and the Widget studio changing the widget's layout](assets/readme/demo-en.webp)
+![A short tour: the overview with a chart tooltip and plan value, the account filter, separate limits for each Claude account, limit history, tips, the daily view, the model comparison, a session's details and timeline, a summary card, the Menu bar page and the Widget studio changing the widget's layout](assets/readme/demo-en.webp)
 
 ## Features
 
@@ -57,7 +58,7 @@ Providers publish how their limits work, not the numbers themselves. The app the
 
 **Forecast.** Every current limit reading carries a forecast based on the window's **average pace since it started** (current % ÷ time since the window began). Every window starts at 0 % when it resets, so this pace is known and already includes idle hours: a burst of work is not extrapolated as if it never stopped. The app then says when the window would fill ("fills around Sun 21:12, 9 h before the reset") or where it would stand at the reset. If the provider resets a window early without moving its end, the pace is measured from that reset. No forecast is made in the first tenth of a window, and every forecast is labeled **Estimated**.
 
-**Notifications.** A system notification tells you when a limit you use passes your warning threshold, when it fills up, and when a full limit starts again. It shows when the limit resets and, at your current pace, roughly when it fills. In **Settings → Notifications**, choose an early warning at the **Caution** or **Critical** threshold or none, whether to hear when a limit fills up and when it resets, and which limits (5-hour, weekly) notify you. macOS asks once whether the app may send notifications. Opening the app never reports what happened while it was closed. Click a notification to open the **Limits** page. To check that notifications show on this computer, use **Settings → Notifications → Test notification**.
+**Notifications.** A system notification tells you when a limit you use passes your warning threshold, when it fills up, and when a full limit starts again. It shows when the limit resets and, at your current pace, roughly when it fills. In **Settings → Notifications**, choose an early warning at the **Caution** or **Critical** threshold or none, whether to hear when a limit fills up and when it resets, and which limits (5-hour, weekly) notify you. macOS asks once whether the app may send notifications. Opening the app never reports what happened while it was closed. Click a notification to open the **Limits** page. To check that notifications show on this computer, use **Settings → Notifications → Test notification**. On Windows, notifications go through the app's Start menu shortcut, so keep it.
 
 **Sign-in notifications.** When Claude Code, the Codex CLI or the Antigravity CLI is signed out and your limits cannot be read, a notification tells you once, even right after the app opens. Click it to see how to sign in. Other reasons a read fails, such as no network or an API key, never count as a sign-out and show under **Sources → Live capture** instead. Turn this off with **Settings → Notifications → When you need to sign in**.
 
@@ -108,6 +109,8 @@ Amounts are API equivalents. On a subscription you do not pay them; they show th
 
 **Monthly budget.** Set a monthly limit for the API-equivalent cost of every tool in **Settings → Monthly budget**. The **Overview** then shows this month's spend against the budget, the days remaining and, after the first days of the month, where you are heading at this pace. A notification tells you when you reach 80% of the budget and when you go over it; turn it off in **Settings → Notifications**.
 
+![The Overview's budget card: this month's spend against a budget of $400, the days left, and where the month is heading at this pace](assets/readme/budget-en.webp)
+
 ### Day by day
 
 The **Daily** page shows the period day by day, as columns or, for long periods, as a calendar, in tokens, API-equivalent cost, or requests. It highlights the busiest day, the average per active day, the longest and current streaks of active days, and the weekend share.
@@ -149,7 +152,9 @@ Four more pages cover sessions, cache, context, and projects.
 |---|---|
 | **Sessions**: every session with its length, models, cost, and largest context | **Cache**: hit rate, reuse, and what the cache actually saved |
 
-**Sessions.** The **Sessions** page lists every session in the period with its start, project, models, length (first to last request), requests, tokens, API-equivalent cost, cache hit rate, and largest context. The list is sortable and searchable, and each row opens into a per-model breakdown and a **timeline** of the session. The timeline shows each request as a column with its context size and how much of it came from the cache, and marks where the cache was written again after a pause, where the context shrank, which requests came from subagents and which tools were called. Subagent transcripts count toward their parent session.
+**Sessions.** The **Sessions** page lists every session in the period with its start, project, models, length (first to last request), requests, tokens, API-equivalent cost, cache hit rate, and largest context. The list is sortable and searchable, and each row opens into a panel with the session's tokens, average context, cache hit rate, models, tool and session ID, and a **timeline** of the session. The timeline shows each request as a column with its context size and how much of it came from the cache, and marks where the cache was written again after a pause, where the context shrank, which requests came from subagents and which tools were called. Subagent transcripts count toward their parent session.
+
+![A session opened on the Sessions page: its tokens, average context, cache hit rate, model, tool and session ID, and a timeline with a cache rewrite, subagent requests and tool calls](assets/readme/session-en.webp)
 
 **Cache.** The **Cache** page shows:
 
@@ -179,6 +184,8 @@ Negative savings mean that written cache was not read enough to pay off.
 ### Find anything with one shortcut
 
 Press **Cmd+K** on a Mac or **Ctrl+K** on Windows and Linux, or click **Search** in the sidebar, and type a few letters to jump to any page, settings section, project, model or session. From there you can also switch the theme, show or hide the widget, and check for updates.
+
+![The search box open over the Overview, with models and sessions found for "opus"](assets/readme/palette-en.webp)
 
 ### A widget that stays out of the way
 
@@ -247,6 +254,8 @@ On macOS you can also hide the icon so only the text shows; the icon comes back 
 ### Share a summary card
 
 The **Summary cards** page turns a day, a week (Monday to Sunday), a month or a year of your use into an image to share. Step through periods with the arrows, pick a card and a size, and save it as a PNG or copy it to paste straight into a post or a chat.
+
+![The Summary cards page: a story card for October with tokens, cost, a daily chart, active days, tool shares and badges, next to the choices of card, size, theme, accent color and what to show](assets/readme/cards-en.webp)
 
 - **Summary:** tokens, the API-equivalent cost, what your plans were worth, a chart of the period, the change from the period before, your busiest day or hour, active days, sessions, the cache hit rate, the model you used most, and each tool's share.
 - **Calendar** (month or year): every day colored by how much you used, with your active days and your longest streak.
