@@ -29,8 +29,9 @@ AI Usage Tracker, Windows, macOS ve Linux'ta çalışan bir uygulamadır. Yapay 
 - **Alt ajanların ve araçların payını görün.** Maliyetin ne kadarının alt ajanlardan geldiğini ve hangi araçların ne sıklıkla hata verdiğini görürsünüz.
 - **Önbelleğin size ne kazandırdığını ölçün.** İsabet oranını, net tasarrufu ve uzun bir aradan sonra önbelleğin yeniden yazılmasının maliyetini görürsünüz.
 - **Geçmişinizi kaybetmeyin.** Devam ettirdiğiniz ya da kopyasından yeni oturum açtığınız sohbetler iki kez sayılmaz. Claude Code kayıtlarını 30 gün sonra silse bile geçmişiniz uygulamanın veri tabanında kalır.
+- **İşinizi değil, kullanımınızı paylaşın.** Bir gününüzü, haftanızı, ayınızı ya da yılınızı dört boyutta karta dönüştürün. Kartta yalnızca toplamlar, araç adları ve model adları bulunur.
 
-![Kısa bir tur: grafik ipucu ve abonelik değeriyle genel bakış, hesap filtresi, her Claude hesabı için ayrı limitler, limit geçmişi, öneriler, günlük görünüm, model karşılaştırması, Menü çubuğu sayfası ve widget'ın yerleşimini değiştiren Widget stüdyosu](assets/readme/demo-tr.webp)
+![Kısa bir tur: grafik ipucu ve abonelik değeriyle genel bakış, hesap filtresi, her Claude hesabı için ayrı limitler, limit geçmişi, öneriler, günlük görünüm, model karşılaştırması, bir oturumun ayrıntıları ve zaman çizelgesi, bir özet kartı, Menü çubuğu sayfası ve widget'ın yerleşimini değiştiren Widget stüdyosu](assets/readme/demo-tr.webp)
 
 ## Özellikler
 
@@ -57,7 +58,7 @@ Sağlayıcılar limitlerin sayısal karşılığını yayımlamıyor, yalnızca 
 
 **Dolma tahmini.** Uygulama her güncel okumada, pencerenin **başından bu yana ortalama hızınıza** göre bir tahmin yapar (şu anki yüzde ÷ pencere başladığından bu yana geçen süre). Her pencere %0'dan başladığı için bu hız kesin olarak bilinir ve boşta geçen saatleri de içerir; kısa bir yoğunluk hiç bitmeyecekmiş gibi ileriye taşınmaz. Sonuçta pencerenin ne zaman dolacağını ("Paz 21:12 civarında dolacak, sıfırlanmadan 9 sa önce") ya da sıfırlandığında hangi seviyede olacağını görürsünüz. Sağlayıcı bir pencereyi bitiş zamanını değiştirmeden erkenden sıfırlarsa hız o sıfırlamadan itibaren ölçülür. Pencerenin ilk onda birinde tahmin yapılmaz. Tahminler **Tahmini** etiketi taşır.
 
-**Bildirimler.** Kullandığınız bir limit uyarı eşiğini geçince, dolunca ve dolan limit yenilenince sistem bildirimi alırsınız. Bildirimde limitin yenilenme saati ve bu hızla yaklaşık ne zaman dolacağı yazar. **Ayarlar → Bildirimler** bölümünden erken uyarının **Dikkat** ya da **Kritik** eşiğinde gelmesini veya hiç gelmemesini, limit dolunca ve yenilenince haber alıp almayacağınızı ve hangi limitler (5 saatlik, haftalık) için bildirim alacağınızı seçin. macOS, uygulamanın bildirim gönderip gönderemeyeceğini bir kez sorar. Uygulamayı açtığınızda, kapalıyken olanlar için bildirim gelmez. Bildirime tıklayınca **Limitler** sayfası açılır. Bildirimlerin bu bilgisayarda görünüp görünmediğini **Ayarlar → Bildirimler → Deneme bildirimi** ile kontrol edin.
+**Bildirimler.** Kullandığınız bir limit uyarı eşiğini geçince, dolunca ve dolan limit yenilenince sistem bildirimi alırsınız. Bildirimde limitin yenilenme saati ve bu hızla yaklaşık ne zaman dolacağı yazar. **Ayarlar → Bildirimler** bölümünden erken uyarının **Dikkat** ya da **Kritik** eşiğinde gelmesini veya hiç gelmemesini, limit dolunca ve yenilenince haber alıp almayacağınızı ve hangi limitler (5 saatlik, haftalık) için bildirim alacağınızı seçin. macOS, uygulamanın bildirim gönderip gönderemeyeceğini bir kez sorar. Uygulamayı açtığınızda, kapalıyken olanlar için bildirim gelmez. Bildirime tıklayınca **Limitler** sayfası açılır. Bildirimlerin bu bilgisayarda görünüp görünmediğini **Ayarlar → Bildirimler → Deneme bildirimi** ile kontrol edin. Windows'ta bildirimler uygulamanın Başlat menüsü kısayolu üzerinden gelir, bu yüzden kısayolu silmeyin.
 
 **Oturum açma bildirimi.** Claude Code, Codex CLI ya da Antigravity CLI'da oturum kapalı olduğu için limitleriniz okunamıyorsa bir kez bildirim alırsınız; bu, uygulamayı açtıktan hemen sonra da olabilir. Bildirime tıklayınca nasıl giriş yapacağınızı görürsünüz. İnternet olmaması ya da API anahtarı gibi diğer okuma sorunları oturum kapanışı sayılmaz, **Kaynaklar → Canlı yakalama** bölümünde görünür. Bu bildirimi **Ayarlar → Bildirimler → Oturum açmanız gerekince** ile kapatabilirsiniz.
 
@@ -108,6 +109,8 @@ Tutarlar API eşdeğeridir. Abonelikle kullanıyorsanız bu tutarları ödemezsi
 
 **Aylık bütçe.** **Ayarlar → Aylık bütçe** bölümünden tüm araçların API eşdeğeri maliyeti için aylık bir sınır belirleyin. **Genel bakış** bu ayki harcamanızı bütçeyle birlikte, kalan günleri ve ayın ilk günlerinden sonra bu hızla ay sonunda nereye varacağınızı gösterir. Bütçenin %80'ine ulaştığınızda ve bütçeyi aştığınızda bildirim alırsınız; bunu **Ayarlar → Bildirimler** bölümünden kapatabilirsiniz.
 
+![Genel bakıştaki bütçe kartı: bu ayki harcama ve 400 dolarlık bütçe, kalan günler ve bu hızla ay sonunda varılacak tutar](assets/readme/budget-tr.webp)
+
 ### Kullanımınızı gün gün görün
 
 **Günlük** sayfası seçtiğiniz dönemi gün gün gösterir. Kısa dönemlerde sütunlar, uzun dönemlerde takvim görürsünüz; değerleri token, API eşdeğeri ya da istek sayısı olarak seçebilirsiniz.
@@ -143,7 +146,9 @@ Model aileleri aynı metni farklı sayıda token'a böler (Claude 4.7 ve sonras�
 | --------------------------------------------------------------------- | --------------------------------------------------- |
 | **Bağlam**: istemlerinizin ne kadar büyüdüğü ve uzun bağlam ek ücreti | **Projeler**: proje ve git dalı bazında kullanım   |
 
-**Oturumlar** sayfası dönemdeki her oturumunuzu listeler: başlangıç, proje, modeller, süre (ilk ve son istek arası), istek, token, API eşdeğeri, önbellek isabeti ve en büyük bağlam. Listeyi sıralayabilir ve içinde arama yapabilirsiniz; bir satırı açınca model bazında ayrıntısını ve oturumun **zaman çizelgesini** görürsünüz. Zaman çizelgesinde her istek bir sütundur ve bağlamın büyüklüğünü, ne kadarının önbellekten geldiğini gösterir. Önbelleğin bir aradan sonra yeniden yazıldığı ve bağlamın küçüldüğü yerler, alt ajan istekleri ve çağrılan araçlar da işaretlidir. Alt ajan kayıtları ait oldukları oturuma sayılır.
+**Oturumlar** sayfası dönemdeki her oturumunuzu listeler: başlangıç, proje, modeller, süre (ilk ve son istek arası), istek, token, API eşdeğeri, önbellek isabeti ve en büyük bağlam. Listeyi sıralayabilir ve içinde arama yapabilirsiniz; bir satırı açınca oturumun token dağılımını, ortalama bağlamını, önbellek isabetini, modellerini, aracını ve oturum kimliğini, ardından **zaman çizelgesini** görürsünüz. Zaman çizelgesinde her istek bir sütundur ve bağlamın büyüklüğünü, ne kadarının önbellekten geldiğini gösterir. Önbelleğin bir aradan sonra yeniden yazıldığı ve bağlamın küçüldüğü yerler, alt ajan istekleri ve çağrılan araçlar da işaretlidir. Alt ajan kayıtları ait oldukları oturuma sayılır.
+
+![Oturumlar sayfasında açılmış bir oturum: tokenlar, ortalama bağlam, önbellek isabeti, model, araç ve oturum kimliği, altında önbellek yeniden yazımı, alt ajan istekleri ve araç çağrılarıyla zaman çizelgesi](assets/readme/session-tr.webp)
 
 **Bağlam** sayfası her istekte gönderilen bağlamın büyüklüğünü gösterir (önbellekten okunan ve önbelleğe yazılanlar dahil tüm girdi token'ları):
 
@@ -168,6 +173,8 @@ Net tasarruf eksi çıkıyorsa, yazılan önbellek maliyetini karşılayacak kad
 ### Her şeyi tek kısayolla bulun
 
 Mac'te **Cmd+K**, Windows ve Linux'ta **Ctrl+K** tuşlarına basın ya da kenar çubuğundaki **Ara** düğmesine tıklayın. Birkaç harf yazarak istediğiniz sayfaya, ayar bölümüne, projeye, modele ya da oturuma geçin. Buradan temayı değiştirebilir, widget'ı gösterip gizleyebilir ve güncellemeleri denetleyebilirsiniz.
+
+![Genel bakışın üstünde açık arama kutusu ve "opus" için bulunan modeller ile oturumlar](assets/readme/palette-tr.webp)
 
 ### Limitlerinizi masaüstünde görün
 
@@ -236,6 +243,8 @@ macOS'te simgeyi gizleyip yalnızca metni bırakabilirsiniz; gösterilecek değe
 ### Özet kartı paylaşın
 
 **Özet kartları** sayfası bir gününüzü, haftanızı (pazartesiden pazara), ayınızı ya da yılınızı paylaşabileceğiniz bir görsele dönüştürür. Oklarla dönemler arasında geçin, bir kart ve boyut seçin; kartı PNG olarak kaydedin ya da panoya kopyalayıp doğrudan bir gönderiye veya sohbete yapıştırın.
+
+![Özet kartları sayfası: Ekim ayı için token, tutar, günlük grafik, aktif günler, araç payları ve rozetlerle bir hikâye kartı, yanında kart, boyut, tema, vurgu rengi ve gösterilecekler seçenekleri](assets/readme/cards-tr.webp)
 
 - **Özet:** token, API eşdeğeri maliyet, aboneliğinizin kaç kat değer kattığı, dönemin grafiği, önceki döneme göre değişim, en yoğun gün ya da saat, aktif gün, oturum, önbellek isabeti, en çok kullandığınız model ve araçların payı.
 - **Takvim** (ay ya da yıl): her gün kullanımınıza göre renklenir; aktif günlerinizi ve en uzun serinizi gösterir.
