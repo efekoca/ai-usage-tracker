@@ -402,6 +402,7 @@ pub fn run() {
             commands::parser_warnings,
             commands::get_report,
             commands::get_limits,
+            commands::account_routes,
             commands::get_widget_data,
             commands::list_projects,
             commands::list_projects_for_settings,

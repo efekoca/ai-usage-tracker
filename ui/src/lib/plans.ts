@@ -51,6 +51,47 @@ export interface ValueInput {
   value: PlanValue | null
   /** Count each account's plan only from the day it was first seen, for periods longer than its use. It runs on to the period's end: a plan can be paid while unused, so the value stays a lower bound. */
   fromFirstSeen?: boolean
+  /** Compare a plan with a renewal day against its full price over the billing period it is in. */
+  cycles?: boolean
+  today?: Date
+}
+
+/** A billing period: `from` is the day it renewed, `to` the next renewal. */
+export interface Cycle {
+  from: string
+  to: string
+  days: number
+  /** Days of it the data reaches, today included. */
+  elapsed: number
+  /** The renewal days of the plans it covers. */
+  renews: number[]
+}
+
+/** The day of the month a plan renews: the account's own, else the provider's. */
+export function renewalDay(s: Settings | null, p: Provider, account: string | null = null): number | undefined {
+  return (account ? s?.renewal_days?.[account] : undefined) ?? s?.renewal_days?.[p]
+}
+
+const daysBetween = (from: string, to: string) => Math.round((Date.parse(`${to}T12:00:00`) - Date.parse(`${from}T12:00:00`)) / 86_400_000)
+
+/** The billing period renewing on `day` that holds `today`; a shorter month renews on its last day. */
+export function cycleOf(day: number, today = new Date()): { from: string; to: string; days: number } {
+  const at = (y: number, m: number) => new Date(y, m, Math.min(day, new Date(y, m + 1, 0).getDate()))
+  const now = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  let start = at(now.getFullYear(), now.getMonth())
+  if (start > now) start = at(now.getFullYear(), now.getMonth() - 1)
+  const next = at(start.getFullYear(), start.getMonth() + 1)
+  const from = dayOf(start.getTime())
+  const to = dayOf(next.getTime())
+  return { from, to, days: daysBetween(from, to) }
+}
+
+/** A running total counted from `from` on: zero before it. */
+function since(cum: number[], dates: string[], from: string): number[] {
+  const i = dates.findIndex((d) => d >= from)
+  if (i < 0) return cum.map(() => 0)
+  const base = i > 0 ? cum[i - 1] : 0
+  return cum.map((c, j) => (j < i ? 0 : c - base))
 }
 
 function planOf(v: ValueInput, p: Provider): PlanDef | undefined {
@@ -64,16 +105,21 @@ const dayOf = (ms: number) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-/** A provider on one plan: its use against the plan's price for the period's days. */
+/** A provider on one plan: its use against the plan's price for the period's days, or against the full price over its billing period. */
 export function valueRow(v: ValueInput, p: Provider) {
   const pv = v.value?.providers.find((x) => x.provider === p)
   const plan = planOf(v, p)
   const price = planPrice(v.settings, p, plan)
-  const cost = pv?.cost_usd ?? 0
-  const share = shareOf(v, price.usd)
+  const dates = v.value?.dates ?? []
+  const renews = v.cycles ? renewalDay(v.settings, p) : undefined
+  const c = renews ? cycleOf(renews, v.today) : null
+  const cumulative = c ? since(pv?.cumulative ?? [], dates, c.from).filter((_, i) => dates[i] >= c.from) : (pv?.cumulative ?? [])
+  const cycle: Cycle | null = c && renews ? { ...c, elapsed: cumulative.length, renews: [renews] } : null
+  const cost = cycle ? (cumulative.at(-1) ?? 0) : (pv?.cost_usd ?? 0)
+  const share = cycle ? price.usd : shareOf(v, price.usd)
   const ratio = share && share > 0 ? cost / share : null
-  const day = share !== null && pv ? pv.cumulative.findIndex((c) => c >= share) : -1
-  return { pv, plan, price, cost, share, ratio, day }
+  const day = share !== null && pv ? cumulative.findIndex((x) => x >= share) : -1
+  return { pv, plan, price, cost, share, ratio, day, cumulative, cycle }
 }
 
 /** A provider with several accounts: each account seen in the period on its own plan, against their prices together. */
@@ -87,23 +133,48 @@ export function valueSplit(v: ValueInput, p: Provider) {
       const plan = accountPlan(v.plans, v.settings, a)
       const price = planPrice(v.settings, p, plan, id)
       const days = v.fromFirstSeen ? v.value?.dates.filter((d) => d >= dayOf(a.first_ms)).length : undefined
-      return { id, plan, price, share: shareOf(v, price.usd, days), use: pv?.accounts.find((x) => x.account === id) }
+      const renews = v.cycles ? renewalDay(v.settings, p, id) : undefined
+      return { id, plan, price, renews, share: shareOf(v, price.usd, days), cost: 0, use: pv?.accounts.find((x) => x.account === id) }
     })
   const unknown = pv?.accounts.find((x) => x.account === null)
   // use billed at API rates, or on a free plan, is not paid for by the plans counted here
   const counted = parts.filter((x) => x.plan?.id !== 'api' && x.price.usd !== 0)
   const missing = counted.find((x) => !x.plan || x.share === null)
-  const uses = [...counted.map((x) => x.use), unknown].filter((u): u is AccountValue => !!u)
-  const cost = uses.reduce((t, u) => t + u.cost_usd, 0)
-  const cumulative = (v.value?.dates ?? []).map((_, i) => uses.reduce((t, u) => t + (u.cumulative[i] ?? 0), 0))
+  const dates = v.value?.dates ?? []
+  // one period for all or none: a provider's figure would not add up across different spans
+  const cycled = !!v.cycles && counted.length > 0 && counted.every((x) => x.renews)
+  const periods = cycled ? counted.map((x) => cycleOf(x.renews as number, v.today)) : []
+  const from = periods.map((c) => c.from).sort()[0]
+  const latest = periods.map((c) => c.from).sort().at(-1)
+  // the figure changes at the first renewal, so the period ends there
+  const to = periods.map((c) => c.to).sort()[0]
+  const runs = (u: AccountValue | undefined, start: string | undefined) => (u ? (start ? since(u.cumulative, dates, start) : u.cumulative) : dates.map(() => 0))
+  for (const x of parts) {
+    const own = cycled ? (x.renews ? cycleOf(x.renews, v.today).from : from) : undefined
+    x.cost = own ? (runs(x.use, own).at(-1) ?? 0) : (x.use?.cost_usd ?? 0)
+    if (cycled && counted.includes(x)) x.share = x.price.usd
+  }
+  // use of an unknown account counts only from the latest renewal, so the figure stays a lower bound
+  const lines = [...counted.map((x) => runs(x.use, cycled ? cycleOf(x.renews as number, v.today).from : undefined)), runs(unknown, latest)]
+  const unknownCost = unknown ? (cycled ? (lines.at(-1)?.at(-1) ?? 0) : unknown.cost_usd) : 0
+  const all = dates.map((_, i) => lines.reduce((t, l) => t + (l[i] ?? 0), 0))
+  const cumulative = cycled && from ? all.filter((_, i) => dates[i] >= from) : all
+  const cost = cycled ? (cumulative.at(-1) ?? 0) : [...counted.map((x) => x.use), unknown].reduce((t, u) => t + (u?.cost_usd ?? 0), 0)
   const share = counted.reduce((t, x) => t + (x.share ?? 0), 0)
+  const cycle: Cycle | null =
+    cycled && from && to ? { from, to, days: daysBetween(from, to), elapsed: cumulative.length, renews: [...new Set(counted.map((x) => x.renews as number))].sort((a, b) => a - b) } : null
+  const uses = [...counted.map((x) => x.use), unknown].filter((u): u is AccountValue => !!u)
   return {
     pv,
     parts,
     unknown,
+    unknownCost,
     missing,
     cost,
     cumulative,
+    cycle,
+    /** Some accounts have a renewal day and some do not. */
+    partly: !!v.cycles && !cycled && counted.some((x) => x.renews),
     share,
     ratio: share > 0 ? cost / share : null,
     day: share > 0 ? cumulative.findIndex((c) => c >= share) : -1,

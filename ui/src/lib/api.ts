@@ -297,6 +297,23 @@ export interface WidgetData {
   /** Known accounts in order of first use, which numbers the unnamed ones. */
   accounts: KnownAccount[]
   updated_ms: number
+  /** While the setting is on and the latest Claude Code conversation's cache lasts. */
+  cache: { expires_ms: number; ttl_ms: number } | null
+}
+
+/** An account worth switching to now, for a provider with several. */
+export interface Route {
+  provider: Provider
+  /** The account in use. */
+  from: string | null
+  from_room: number
+  to: string
+  to_room: number
+  five_hour: number
+  seven_day: number
+  /** Its week started again since its last reading. */
+  renewed: boolean
+  observed_ms: number | null
 }
 
 export interface Threshold {
@@ -447,6 +464,10 @@ export interface NotifySettings {
   budget: boolean
   /** When a signed-out CLI leaves a provider's limits unread. */
   sign_in: boolean
+  /** A full limit's notification names the account with the most room. */
+  route: boolean
+  /** Shortly before Claude Code's cache runs out. */
+  cache: boolean
 }
 
 export interface Settings {
@@ -481,6 +502,12 @@ export interface Settings {
   update_check: boolean
   /** Follows the price list on the app's repository between releases. */
   price_updates: boolean
+  /** The Limits page suggests another Claude or Codex account when the one in use is full or has clearly less room. */
+  account_router: boolean
+  /** Claude Code's cache time left in the widget. */
+  cache_widget: boolean
+  /** The same in minutes next to the tray icon and in its tooltip. */
+  cache_menubar: boolean
   /** provider → #rrggbb; missing = the accent color */
   provider_colors: Partial<Record<Provider, string>>
   tint_icons: boolean
@@ -491,6 +518,8 @@ export interface Settings {
   account_plans: Record<string, string>
   /** Account id → monthly USD price, when it differs from the list price or the plan has none. */
   account_prices: Record<string, number>
+  /** Provider, or account digest while its provider has several → the day of the month its plan renews. */
+  renewal_days: Record<string, number>
   cards: CardSettings
 }
 
@@ -927,6 +956,7 @@ export const api = {
   parserWarnings: () => invoke<ParserWarning[]>('parser_warnings'),
   report: (period: Period, filter?: Filter) => invoke<Report>('get_report', { period, filter }),
   limits: () => invoke<LimitView[]>('get_limits'),
+  accountRoutes: () => invoke<Route[]>('account_routes'),
   accounts: () => invoke<Account[]>('get_accounts'),
   sessions: (period: Period, filter?: Filter) => invoke<Sessions>('get_sessions', { period, filter }),
   sessionTimeline: (tool: Tool, sessionId: string, fromMs: number, toMs: number, filter?: Filter) =>

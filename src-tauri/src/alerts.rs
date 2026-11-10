@@ -1,6 +1,7 @@
 //! System notifications when a limit in use passes the warning threshold, fills up, and starts
-//! again after filling, when the monthly budget gets close or is exceeded, and when a signed-out
-//! CLI leaves the limits unread. Clicking one opens the page it is about.
+//! again after filling, when the monthly budget gets close or is exceeded, when a signed-out
+//! CLI leaves the limits unread, and shortly before Claude Code's cache runs out. Clicking one
+//! opens the page it is about.
 
 use crate::capture::SignIn;
 use crate::settings::{NotifySettings, Settings};
@@ -10,6 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, Mutex};
 use tauri::{AppHandle, Manager};
 use tracker_core::analytics::LIVE_READING_MS;
+use tracker_core::insights::CacheTimer;
 use tracker_core::model::Provider;
 
 /// Readings round their reset time differently; a larger move is a window that started again.
@@ -18,6 +20,8 @@ const MOVED_SECS: i64 = 15 * 60;
 static SEEN: LazyLock<Mutex<HashMap<Limit, Seen>>> = LazyLock::new(Default::default);
 static BUDGET: Mutex<Option<BudgetSeen>> = Mutex::new(None);
 static SIGNED_OUT: LazyLock<Mutex<HashSet<Provider>>> = LazyLock::new(Default::default);
+/// When the cache already told about runs out.
+static CACHE_TOLD: Mutex<Option<i64>> = Mutex::new(None);
 
 /// The budget sums the whole month, so it is checked only every few minutes.
 const BUDGET_EVERY_MS: i64 = 5 * 60_000;
@@ -94,7 +98,7 @@ impl Alert {
     }
 }
 
-pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading]) {
+pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading], cache: Option<CacheTimer>) {
     if !s.onboarded {
         return;
     }
@@ -111,14 +115,35 @@ pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading]) {
     let budget = budget(app, s, now_ms);
     let live = |p| readings.iter().any(|r| r.active && r.provider == p && r.observed_ms.is_some_and(|t| now_ms - t < LIVE_READING_MS));
     let signed_out = newly_out(&mut SIGNED_OUT.lock().unwrap(), &crate::capture::sign_ins(app, s), live);
+    let cache = cache_due(&mut CACHE_TOLD.lock().unwrap(), cache, now_ms);
     if !n.enabled {
         return;
     }
     let f = crate::tray::format(s, &s.tray);
-    for a in alerts.iter().filter(|a| wanted(a, n)) {
-        let (title, body) = text(a, &f);
-        log::info!("limit notification: {}", a.limit().tag());
-        send(app, &a.limit().tag(), &title, &body, |_| {});
+    // which account to switch to is worked out only when the account in use fills
+    let routes = if n.route && alerts.iter().any(|a| matches!(a, Alert::Full { .. })) {
+        crate::commands::routes(&app.state::<crate::state::AppState>()).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let names = if routes.is_empty() { Default::default() } else { crate::tray::account_tags(app, s) };
+    let switch = |a: &Alert| match a {
+        Alert::Full { limit, .. } => routes.iter().find(|r| r.provider == limit.provider).map(|r| route_text(r, &names, f.tr)),
+        _ => None,
+    };
+    for a in alerts.iter() {
+        let hint = switch(a);
+        if wanted(a, n) {
+            let (title, body) = text(a, &f);
+            log::info!("limit notification: {}", a.limit().tag());
+            let body = hint.map_or(body.clone(), |h| [body, h].into_iter().filter(|x| !x.is_empty()).collect::<Vec<_>>().join(" "));
+            send(app, &a.limit().tag(), &title, &body, |_| {});
+        } else if let Some(h) = hint {
+            // the full limit's own notification is off, but the way out is still worth telling
+            let (title, _) = text(a, &f);
+            log::info!("account suggestion: {}", a.limit().tag());
+            send(app, &format!("route-{}", a.limit().provider.as_str()), &title, &h, |_| {});
+        }
     }
     if let Some(b) = budget.filter(|_| n.budget) {
         let (title, body) = budget_text(&b, &f);
@@ -129,6 +154,40 @@ pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading]) {
         let (title, body) = sign_in_text(p, f.tr);
         log::info!("sign-in notification: {}", p.as_str());
         send(app, &format!("signin-{}", p.as_str()), &title, &body, |_| {});
+    }
+    if let Some(minutes) = cache.filter(|_| n.cache) {
+        let (title, body) = cache_text(minutes, f.tr);
+        log::info!("cache notification");
+        send(app, "cache", &title, &body, |_| {});
+    }
+}
+
+/// A cache is told once, when its time left drops to a minute of a five-minute cache or five of
+/// an hour's: still time to continue. Returns the minutes left.
+fn cache_due(told: &mut Option<i64>, timer: Option<CacheTimer>, now_ms: i64) -> Option<i64> {
+    let t = timer?;
+    let lead = if t.ttl_ms <= 5 * 60_000 { 60_000 } else { 5 * 60_000 };
+    let left = t.expires_ms - now_ms;
+    if left <= 0 || left > lead || *told == Some(t.expires_ms) {
+        return None;
+    }
+    *told = Some(t.expires_ms);
+    Some((left + 59_999) / 60_000)
+}
+
+fn cache_text(minutes: i64, tr: bool) -> (String, String) {
+    if tr {
+        let when = if minutes <= 1 { "1 dakika".to_owned() } else { format!("{minutes} dakika") };
+        (
+            "Önbelleğin süresi dolmak üzere".into(),
+            format!("Claude Code'daki konuşmanızın önbelleği {when} sonra silinecek. Şimdi devam ederseniz istek önbellekten ucuza okunur."),
+        )
+    } else {
+        let when = if minutes <= 1 { "1 minute".to_owned() } else { format!("{minutes} minutes") };
+        (
+            "Your cache is about to run out".into(),
+            format!("Your Claude Code conversation's cache is dropped in {when}. Continue now and the request reads it at the cheap cache price."),
+        )
     }
 }
 
@@ -147,6 +206,20 @@ fn newly_out(seen: &mut HashSet<Provider>, states: &[(Provider, SignIn)], live: 
         }
     }
     new
+}
+
+fn route_text(r: &tracker_core::analytics::Route, names: &HashMap<String, String>, tr: bool) -> String {
+    let to = names.get(&r.to).map_or(r.to.as_str(), String::as_str);
+    let pct = |v: f64| {
+        let v = shown_value(v, false);
+        if tr { format!("%{v}") } else { format!("{v}%") }
+    };
+    match (r.renewed, tr) {
+        (true, true) => format!("“{to}” ile devam edin: haftalık limiti yenilendi."),
+        (true, false) => format!("Continue with “{to}”: its week has started again."),
+        (false, true) => format!("“{to}” ile devam edin: haftalık {}, 5 saatlik {} dolu.", pct(r.seven_day), pct(r.five_hour)),
+        (false, false) => format!("Continue with “{to}”: weekly {}, 5-hour {} used.", pct(r.seven_day), pct(r.five_hour)),
+    }
 }
 
 fn sign_in_text(p: Provider, tr: bool) -> (String, String) {
@@ -235,9 +308,14 @@ pub(crate) fn test(app: &AppHandle, s: &Settings) -> Sent {
     rx.recv_timeout(std::time::Duration::from_secs(300)).unwrap_or(Sent::Failed)
 }
 
-/// The budget is on the Overview; every other notification is about the Limits page.
+/// The budget is on the Overview and the cache on the Cache page; every other notification is
+/// about the Limits page.
 fn open(app: &AppHandle, tag: &str) {
-    crate::windows::show_main_at(app, Some(if tag == "budget" { "overview" } else { "limits" }));
+    crate::windows::show_main_at(app, Some(match tag {
+        "budget" => "overview",
+        "cache" => "cache",
+        _ => "limits",
+    }));
 }
 
 fn wanted(a: &Alert, n: &NotifySettings) -> bool {
@@ -782,6 +860,24 @@ mod tests {
     }
 
     #[test]
+    fn a_full_account_points_to_the_one_with_room() {
+        let r = tracker_core::analytics::Route {
+            provider: Provider::Anthropic,
+            from: Some("a".into()),
+            from_room: 0.0,
+            to: "b".into(),
+            to_room: 88.0,
+            five_hour: 0.0,
+            seven_day: 12.4,
+            renewed: false,
+            observed_ms: None,
+        };
+        let names = HashMap::from([("b".to_owned(), "Kişisel".to_owned())]);
+        assert_eq!(route_text(&r, &names, true), "“Kişisel” ile devam edin: haftalık %12, 5 saatlik %0 dolu.");
+        assert_eq!(route_text(&tracker_core::analytics::Route { renewed: true, ..r }, &HashMap::new(), false), "Continue with “b”: its week has started again.");
+    }
+
+    #[test]
     fn texts_name_the_limit_and_avoid_suffixes_after_numbers() {
         let tz = FixedOffset::east_opt(3 * 3600).unwrap();
         let cfg = TraySettings::default();
@@ -801,5 +897,22 @@ mod tests {
         assert_eq!(budget_text(&b, &f(true, false)), ("Aylık bütçe: %82 kullanıldı".into(), "Bu ay $412,00 / $500,00. Bu hızla ay sonunda $610,00.".into()));
         let over = BudgetAlert { over: true, used_pct: 103.0, spent_usd: 515.0, projected_usd: None, ..b };
         assert_eq!(budget_text(&over, &f(false, false)), ("You are over your monthly budget".into(), "$515.00 of $500.00 this month.".into()));
+    }
+
+    #[test]
+    fn a_cache_is_told_once_while_there_is_still_time() {
+        const MIN: i64 = 60_000;
+        let five = |expires_ms| Some(CacheTimer { expires_ms, ttl_ms: 5 * MIN });
+        let mut told = None;
+        assert_eq!(cache_due(&mut told, five(10 * MIN), 8 * MIN), None, "two minutes left");
+        assert_eq!(cache_due(&mut told, five(10 * MIN), 9 * MIN + 20_000), Some(1));
+        assert_eq!(cache_due(&mut told, five(10 * MIN), 9 * MIN + 40_000), None, "already told");
+        assert_eq!(cache_due(&mut told, five(15 * MIN), 14 * MIN + 30_000), Some(1), "a later request");
+        assert_eq!(cache_due(&mut told, five(20 * MIN), 20 * MIN), None, "run out");
+        let hour = Some(CacheTimer { expires_ms: 60 * MIN, ttl_ms: 60 * MIN });
+        assert_eq!(cache_due(&mut told, hour, 55 * MIN - 1), None);
+        assert_eq!(cache_due(&mut told, hour, 55 * MIN), Some(5));
+        assert_eq!(cache_text(1, true).1, "Claude Code'daki konuşmanızın önbelleği 1 dakika sonra silinecek. Şimdi devam ederseniz istek önbellekten ucuza okunur.");
+        assert!(cache_text(5, false).1.contains("in 5 minutes"));
     }
 }

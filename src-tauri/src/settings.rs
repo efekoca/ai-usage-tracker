@@ -373,11 +373,16 @@ pub struct NotifySettings {
     pub budget: bool,
     /// When a signed-out CLI leaves a provider's limits unread.
     pub sign_in: bool,
+    /// A full limit's notification names the account with the most room.
+    pub route: bool,
+    /// Shortly before Claude Code's prompt cache runs out. Off at first: a five-minute cache
+    /// would tell every short pause.
+    pub cache: bool,
 }
 
 impl Default for NotifySettings {
     fn default() -> Self {
-        NotifySettings { enabled: true, early: "warn".into(), full: true, reset: true, five_hour: true, seven_day: true, budget: true, sign_in: true }
+        NotifySettings { enabled: true, early: "warn".into(), full: true, reset: true, five_hour: true, seven_day: true, budget: true, sign_in: true, route: true, cache: false }
     }
 }
 
@@ -602,6 +607,13 @@ pub struct Settings {
     /// Follows the price list on the repository's main branch between releases; only that file is
     /// downloaded and nothing is sent.
     pub price_updates: bool,
+    /// The Limits page suggests another Claude or Codex account when the one in use is full or has
+    /// clearly less room.
+    pub account_router: bool,
+    /// How long Claude Code's prompt cache has left after the last request, in the widget.
+    pub cache_widget: bool,
+    /// The same in minutes, next to the tray icon and in its tooltip.
+    pub cache_menubar: bool,
     /// Provider → `#rrggbb` for its limit bars and mark; a missing one uses the accent color.
     pub provider_colors: std::collections::BTreeMap<String, String>,
     /// Marks take the tool's color too; off keeps them in the text color.
@@ -616,6 +628,9 @@ pub struct Settings {
     /// `digest:plan` → monthly USD price of that account on that plan, when it differs from the list
     /// price or the plan has none; a price set for one plan never carries over to another.
     pub account_prices: std::collections::BTreeMap<String, f64>,
+    /// Provider, or account digest while its provider has several → the day of the month the plan
+    /// renews; with one, plan value counts from the last renewal instead of the last 30 days.
+    pub renewal_days: std::collections::BTreeMap<String, u8>,
     pub cards: CardSettings,
 }
 
@@ -693,12 +708,16 @@ impl Default for Settings {
             panel: PanelSettings::default(),
             update_check: true,
             price_updates: true,
+            account_router: true,
+            cache_widget: true,
+            cache_menubar: true,
             provider_colors: Default::default(),
             tint_icons: false,
             show_icons: true,
             account_names: Default::default(),
             account_plans: Default::default(),
             account_prices: Default::default(),
+            renewal_days: Default::default(),
             cards: CardSettings::default(),
         }
     }
@@ -799,6 +818,7 @@ impl Settings {
         self.account_names.retain(|_, n| !n.is_empty());
         self.account_plans.retain(|id, plan| is_digest(id) && !plan.is_empty());
         self.account_prices.retain(|key, usd| key.split_once(':').is_some_and(|(id, plan)| is_digest(id) && !plan.is_empty()) && usd.is_finite() && *usd > 0.0);
+        self.renewal_days.retain(|key, day| (is_digest(key) || tracker_core::model::Provider::parse(key).is_some()) && (1..=31).contains(day));
     }
 
     /// The fields a page changed (`base` → `next`) applied to the current settings, so a change
@@ -878,6 +898,13 @@ mod tests {
         s.normalize();
         assert_eq!(s.account_plans.into_iter().collect::<Vec<_>>(), [("3f9c1a7e52b0d846".to_owned(), "max5x".to_owned())]);
         assert_eq!(s.account_prices.into_iter().collect::<Vec<_>>(), [("3f9c1a7e52b0d846:max5x".to_owned(), 120.0)]);
+    }
+
+    #[test]
+    fn renewal_days_are_days_of_a_month_for_a_provider_or_an_account() {
+        let mut s: Settings = serde_json::from_str(r#"{"renewal_days":{"anthropic":14,"openai":0,"google":32,"3f9c1a7e52b0d846":31,"someone":5}}"#).unwrap();
+        s.normalize();
+        assert_eq!(s.renewal_days.into_iter().collect::<Vec<_>>(), [("3f9c1a7e52b0d846".to_owned(), 31), ("anthropic".to_owned(), 14)]);
     }
 
     #[test]

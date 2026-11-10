@@ -522,6 +522,37 @@ pub struct PlanValue {
 
 /// API-equivalent cost per provider over `range`, with a daily running total (unfiltered).
 /// Over 401 days only the newest are shown; earlier use starts the first day's running total.
+/// When the prompt cache of the latest Claude Code conversation runs out.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct CacheTimer {
+    pub expires_ms: i64,
+    /// The lifetime it was written with: 5 minutes or an hour.
+    pub ttl_ms: i64,
+}
+
+const FIVE_MINUTES: i64 = 5 * 60_000;
+const ONE_HOUR: i64 = 60 * 60_000;
+
+/// The latest Claude Code conversation's cache: a request that reads it renews it, so it runs out
+/// its lifetime after the last request. A conversation that wrote both lifetimes loses its
+/// five-minute part first. Subagents keep caches of their own and are left out. `None` once it
+/// has run out, or when the conversation wrote no cache.
+pub fn cache_timer(store: &Store, now_ms: i64) -> Result<Option<CacheTimer>> {
+    let events = store.events_between(now_ms - ONE_HOUR, now_ms + 1)?;
+    let main: Vec<&EventRow> = events.iter().filter(|e| e.tool == Tool::ClaudeCode && e.agent.is_none() && e.session_id.is_some()).collect();
+    let Some(last) = main.iter().max_by_key(|e| e.ts_ms) else { return Ok(None) };
+    let session: Vec<&&EventRow> = main.iter().filter(|e| e.session_id == last.session_id).collect();
+    let ttl_ms = if session.iter().any(|e| e.tokens.cache_write > e.tokens.cache_write_1h) {
+        FIVE_MINUTES
+    } else if session.iter().any(|e| e.tokens.cache_write_1h > 0) {
+        ONE_HOUR
+    } else {
+        return Ok(None);
+    };
+    let expires_ms = last.ts_ms + ttl_ms;
+    Ok((expires_ms > now_ms).then_some(CacheTimer { expires_ms, ttl_ms }))
+}
+
 pub fn plan_value<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, tz: &Tz) -> Result<PlanValue> {
     let last = local_date(tz, range.to_ms - 1);
     let first = local_date(tz, range.from_ms).max(last.checked_sub_days(chrono::Days::new(400)).unwrap_or(last));
