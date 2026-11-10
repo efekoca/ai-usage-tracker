@@ -5,8 +5,41 @@ use crate::model::Tokens;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// The pricing file shipped with the app (users can override it with their own copy).
+/// The pricing file shipped with the app. A newer copy fetched from the app's repository takes its
+/// place (see [`base`]), and the user's own prices sit on top of either.
 pub const DEFAULT_PRICING_JSON: &str = include_str!("../../../config/pricing.json");
+
+pub fn bundled() -> PricingFile {
+    serde_json::from_str(DEFAULT_PRICING_JSON).expect("bundled pricing.json is valid")
+}
+
+/// A price list fetched from the app's repository, taken only when the app can price with it and
+/// it still holds every model the app shipped with, so a cut-short or broken copy changes nothing.
+pub fn checked_list(s: &str) -> Result<PricingFile, PricingError> {
+    let file: PricingFile = serde_json::from_str(s)?;
+    if file.schema_version != 1 {
+        return Err(PricingError::Schema(file.schema_version));
+    }
+    validate(&file)?;
+    let have: std::collections::HashSet<String> = file.models.iter().map(|m| m.id.to_ascii_lowercase()).collect();
+    if let Some(m) = bundled().models.iter().find(|m| !have.contains(&m.id.to_ascii_lowercase())) {
+        return Err(PricingError::Invalid(format!("{} is missing", m.id)));
+    }
+    if !file.user_aliases.is_empty() {
+        return Err(PricingError::Invalid("a shared list has no user aliases".into()));
+    }
+    Ok(file)
+}
+
+/// The list the user's prices sit on: a fetched one from the bundled list's day or later, else the
+/// bundled list.
+pub fn base(fetched: Option<&str>) -> PricingFile {
+    let bundled = bundled();
+    match fetched.and_then(|s| checked_list(s).ok()) {
+        Some(f) if f.updated_at >= bundled.updated_at => f,
+        _ => bundled,
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PricingFile {
@@ -281,12 +314,11 @@ pub fn catalog_prices(json: &str) -> HashMap<String, ModelPrice> {
     out
 }
 
-/// What a saved price list needs to keep: the models whose rates differ from the bundled list
-/// and the models it does not have. The rest follows the bundled list on every load.
-pub fn user_changes(mut file: PricingFile) -> Result<PricingFile, PricingError> {
-    let bundled: PricingFile = serde_json::from_str(DEFAULT_PRICING_JSON)?;
-    file.models.retain(|m| bundled.models.iter().find(|b| b.id.eq_ignore_ascii_case(&m.id)).is_none_or(|b| b.rates != m.rates));
-    Ok(file)
+/// What a saved price list needs to keep: the models whose rates differ from `base` and the
+/// models it does not have. The rest follows `base` on every load.
+pub fn user_changes(mut file: PricingFile, base: &PricingFile) -> PricingFile {
+    file.models.retain(|m| base.models.iter().find(|b| b.id.eq_ignore_ascii_case(&m.id)).is_none_or(|b| b.rates != m.rates));
+    file
 }
 
 impl PriceBook {
@@ -295,7 +327,10 @@ impl PriceBook {
     }
 
     pub fn from_json(s: &str) -> Result<PriceBook, PricingError> {
-        let file: PricingFile = serde_json::from_str(s)?;
+        PriceBook::from_file(serde_json::from_str(s)?)
+    }
+
+    pub fn from_file(file: PricingFile) -> Result<PriceBook, PricingError> {
         if file.schema_version != 1 {
             return Err(PricingError::Schema(file.schema_version));
         }
@@ -310,17 +345,16 @@ impl PriceBook {
         Ok(PriceBook { file, index, catalog: HashMap::new() })
     }
 
-    /// A saved price list keeps its edits but still learns models and aliases added to the
-    /// bundled list after it was saved; a name it already uses keeps its meaning. A saved model
-    /// whose rates the user never changed takes the bundled entry, so later corrections and
-    /// dated price changes reach it.
-    pub fn from_user_json(s: &str) -> Result<PriceBook, PricingError> {
+    /// A saved price list keeps its edits but still learns models and aliases added to `base`
+    /// after it was saved; a name it already uses keeps its meaning. A saved model whose rates the
+    /// user never changed takes the `base` entry, so later corrections and dated price changes
+    /// reach it.
+    pub fn from_user_json(s: &str, base: &PricingFile) -> Result<PriceBook, PricingError> {
         let mut file: PricingFile = serde_json::from_str(s)?;
-        let bundled: PricingFile = serde_json::from_str(DEFAULT_PRICING_JSON)?;
         let known = |f: &PricingFile| -> std::collections::HashSet<String> {
             f.models.iter().flat_map(|m| std::iter::once(&m.id).chain(&m.aliases)).chain(f.user_aliases.keys()).map(|n| n.to_ascii_lowercase()).collect()
         };
-        for b in bundled.models {
+        for b in base.models.iter().cloned() {
             let mut names = known(&file);
             if let Some(m) = file.models.iter_mut().find(|m| m.id.eq_ignore_ascii_case(&b.id)) {
                 if m.rates == b.rates {
@@ -338,7 +372,9 @@ impl PriceBook {
                 file.models.push(b);
             }
         }
-        PriceBook::from_json(&serde_json::to_string(&file)?)
+        // the list's own date, so the settings say how current the prices underneath are
+        file.updated_at.clone_from(&base.updated_at);
+        PriceBook::from_file(file)
     }
 
     pub fn file(&self) -> &PricingFile {
@@ -589,7 +625,7 @@ mod tests {
         sonnet.aliases.retain(|a| a.ends_with("-thinking"));
         sonnet.rates.input = 9.0;
         f.user_aliases.insert("gemini-3.8-flash-high".into(), "gemini-3.5-flash".into());
-        let b = PriceBook::from_user_json(&serde_json::to_string(&f).unwrap()).unwrap();
+        let b = PriceBook::from_user_json(&serde_json::to_string(&f).unwrap(), &bundled()).unwrap();
 
         assert_eq!(b.lookup("gemini-3.8-flash").map(|m| m.id.as_str()), Some("gemini-3.8-flash"));
         let s = b.lookup("claude-sonnet-5-5-high").unwrap();
@@ -775,15 +811,65 @@ mod tests {
         }
         let edited = saved.models.iter_mut().find(|m| m.id == "gemini-3.7-flash").unwrap();
         edited.rates.input = 0.5;
-        let book = PriceBook::from_user_json(&serde_json::to_string(&saved).unwrap()).unwrap();
+        let book = PriceBook::from_user_json(&serde_json::to_string(&saved).unwrap(), &bundled()).unwrap();
         let t = tokens(1_000_000, 0, 0, 0, 0);
         let ms = chrono::DateTime::parse_from_rfc3339("2027-03-01T00:00:00Z").unwrap().timestamp_millis();
         let cost = |model| book.cost(&CostInput { model, tokens: &t, request_input: 0, web_search_requests: 0, speed: None, inference_geo: None, ts_ms: Some(ms) }).unwrap().total();
         assert!((cost("gemini-3.8-flash") - 1.5).abs() < 1e-9, "unedited: the bundled later price");
         assert!((cost("gemini-3.7-flash") - 0.5).abs() < 1e-9, "edited: the user's price");
 
-        let kept = user_changes(saved).unwrap();
+        let kept = user_changes(saved, &bundled());
         let ids: Vec<&str> = kept.models.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, ["gemini-3.7-flash"], "only the edited model is saved");
+    }
+
+    #[test]
+    fn a_newer_shared_list_carries_new_prices_under_the_users_own() {
+        let mut fetched = bundled();
+        fetched.updated_at = "2099-01-01".into();
+        fetched.models.iter_mut().find(|m| m.id == "claude-opus-5-5").unwrap().rates.input = 3.0;
+        let mut new = fetched.models[0].clone();
+        new.id = "claude-next".into();
+        new.aliases.clear();
+        fetched.models.push(new);
+        let base = base(Some(&serde_json::to_string(&fetched).unwrap()));
+        assert_eq!(base.updated_at, "2099-01-01");
+
+        // the user typed a price for a model no list has and changed Sonnet's
+        let mut mine = bundled();
+        mine.models.iter_mut().find(|m| m.id == "claude-sonnet-5-5").unwrap().rates.input = 9.0;
+        let mut own = mine.models[0].clone();
+        own.id = "my-local-model".into();
+        own.provider = "custom".into();
+        own.aliases.clear();
+        mine.models.push(own);
+        let saved = serde_json::to_string(&user_changes(mine, &bundled())).unwrap();
+
+        let b = PriceBook::from_user_json(&saved, &base).unwrap();
+        assert_eq!(b.lookup("claude-opus-5-5").unwrap().rates.input, 3.0, "an untouched model takes the new price");
+        assert!(b.lookup("claude-next").is_some(), "a new model arrives without an app update");
+        assert_eq!(b.lookup("claude-sonnet-5-5").unwrap().rates.input, 9.0, "the user's price stays");
+        assert!(b.lookup("my-local-model").is_some(), "and so does the user's own model");
+        assert_eq!(b.file().updated_at, "2099-01-01");
+    }
+
+    #[test]
+    fn the_repositorys_own_list_passes_as_a_shared_list() {
+        // installed apps fetch this very file; one they refuse leaves them on older prices
+        checked_list(DEFAULT_PRICING_JSON).unwrap();
+    }
+
+    #[test]
+    fn a_shared_list_that_lost_models_or_is_older_is_not_taken() {
+        let mut cut = bundled();
+        cut.updated_at = "2099-01-01".into();
+        cut.models.truncate(3);
+        assert!(checked_list(&serde_json::to_string(&cut).unwrap()).is_err(), "a cut-short download");
+        assert_eq!(base(Some(&serde_json::to_string(&cut).unwrap())).updated_at, bundled().updated_at);
+
+        let mut old = bundled();
+        old.updated_at = "2020-01-01".into();
+        assert_eq!(base(Some(&serde_json::to_string(&old).unwrap())).updated_at, bundled().updated_at, "the app's own list is newer");
+        assert_eq!(base(Some("not json")).updated_at, bundled().updated_at);
     }
 }

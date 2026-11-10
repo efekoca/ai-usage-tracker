@@ -599,6 +599,9 @@ pub struct Settings {
     /// Only the version file is downloaded; nothing is sent. No effect until the build names a
     /// release location.
     pub update_check: bool,
+    /// Follows the price list on the repository's main branch between releases; only that file is
+    /// downloaded and nothing is sent.
+    pub price_updates: bool,
     /// Provider → `#rrggbb` for its limit bars and mark; a missing one uses the accent color.
     pub provider_colors: std::collections::BTreeMap<String, String>,
     /// Marks take the tool's color too; off keeps them in the text color.
@@ -689,6 +692,7 @@ impl Default for Settings {
             tray: TraySettings::default(),
             panel: PanelSettings::default(),
             update_check: true,
+            price_updates: true,
             provider_colors: Default::default(),
             tint_icons: false,
             show_icons: true,
@@ -850,7 +854,7 @@ mod tests {
         assert!(s.capture.claude_poll && s.capture.antigravity_poll);
         assert!(!s.capture.codex_poll, "an explicit choice is kept");
         assert_eq!(s.limit_display, "used");
-        assert!(s.tray.show_percent && s.update_check && s.show_in_dock && s.notify.enabled);
+        assert!(s.tray.show_percent && s.update_check && s.price_updates && s.show_in_dock && s.notify.enabled);
         assert_eq!(s.accent, "app");
         assert_eq!(s.widget.hotkey, DEFAULT_HOTKEY);
     }

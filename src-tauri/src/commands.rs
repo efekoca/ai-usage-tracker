@@ -297,6 +297,7 @@ pub struct WidgetLimit {
     /// The Codex or Claude account, while there are several.
     account: Option<String>,
     active: bool,
+    blocked: bool,
 }
 
 #[derive(Serialize, Default)]
@@ -379,6 +380,7 @@ pub async fn get_widget_data(state: State<'_, AppState>) -> Res<WidgetData> {
             observed_ms: l.observed_ms,
             account: l.account,
             active: l.active,
+            blocked: l.blocked,
         })
         .collect();
     let accounts = known_accounts(&store)?;
@@ -437,14 +439,40 @@ pub async fn list_models(state: State<'_, AppState>) -> Res<Vec<String>> {
 }
 
 #[derive(Serialize)]
+pub struct BaseRates {
+    id: String,
+    #[serde(flatten)]
+    rates: tracker_core::pricing::Rates,
+}
+
+#[derive(Serialize)]
 pub struct PricingInfo {
     file: PricingFile,
     origin: String,
+    /// The list the user's prices sit on, so the page can tell their own prices apart.
+    base: Vec<BaseRates>,
+    status: crate::prices::PriceStatus,
+    /// The build names a repository to fetch newer lists from.
+    can_update: bool,
 }
 
 #[tauri::command]
 pub fn get_pricing(state: State<AppState>) -> PricingInfo {
-    PricingInfo { file: state.book.read().unwrap().file().clone(), origin: state.pricing_origin.read().unwrap().clone() }
+    let base = crate::state::price_base(&state.data_dir).models.into_iter().map(|m| BaseRates { id: m.id, rates: m.rates }).collect();
+    PricingInfo {
+        file: state.book.read().unwrap().file().clone(),
+        origin: state.pricing_origin.read().unwrap().clone(),
+        base,
+        status: state.prices.lock().unwrap().clone(),
+        can_update: crate::updates::prices_url().is_some(),
+    }
+}
+
+/// Fetches the shared price list now; `true` when prices changed.
+#[tauri::command]
+pub async fn check_prices(window: WebviewWindow, app: AppHandle) -> Res<bool> {
+    main_only(&window)?;
+    crate::prices::check(&app).await
 }
 
 /// OpenCode catalog prices of the models in `models` the price list does not know.
@@ -453,12 +481,13 @@ pub fn catalog_prices(state: State<AppState>, models: Vec<String>) -> Vec<tracke
     state.book.read().unwrap().catalog_entries(models.iter().map(String::as_str))
 }
 
-/// Keeps only what differs from the bundled list, so every other price follows the app's updates.
+/// Keeps only what differs from the newest list, so every other price follows later lists.
 #[tauri::command]
 pub async fn save_pricing(window: WebviewWindow, app: AppHandle, state: State<'_, AppState>, file: PricingFile) -> Res<()> {
     main_only(&window)?;
-    let json = serde_json::to_string_pretty(&tracker_core::pricing::user_changes(file).map_err(err)?).map_err(err)?;
-    let book = PriceBook::from_user_json(&json).map_err(err)?.with_catalog(crate::state::opencode_catalog()); // validate before writing
+    let base = crate::state::price_base(&state.data_dir);
+    let json = serde_json::to_string_pretty(&tracker_core::pricing::user_changes(file, &base)).map_err(err)?;
+    let book = PriceBook::from_user_json(&json, &base).map_err(err)?.with_catalog(crate::state::opencode_catalog()); // validate before writing
     export::write_atomically(&state.user_pricing_path(), |f| std::io::Write::write_all(f, json.as_bytes()).map_err(|e| e.to_string()))?;
     *state.book.write().unwrap() = book;
     *state.pricing_origin.write().unwrap() = "user".into();

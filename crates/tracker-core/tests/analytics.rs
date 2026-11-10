@@ -231,6 +231,26 @@ fn limit_views_pick_the_newest_reading_and_split_it_across_projects() {
 }
 
 #[test]
+fn a_full_week_blocks_the_five_hours_but_a_model_week_does_not() {
+    let mut store = Store::open_in_memory().unwrap();
+    let now = ms(2026, 11, 10, 12, 0);
+    let later = Some(now / 1000 + 4 * 3600);
+    let read = |window: &str, used: f64| snap(now - 60_000, Provider::Anthropic, Tool::ClaudeCode, window, used, later, Some("max"), "claude_usage");
+    {
+        let mut tx = store.transaction().unwrap();
+        tx.insert_limits(&[read("five_hour", 0.0), read("seven_day", 99.6), read("seven_day_opus", 100.0)]).unwrap();
+        tx.insert_limits(&[snap(now - 60_000, Provider::OpenAI, Tool::Codex, "five_hour", 0.0, later, None, "codex_rate_limits")]).unwrap();
+        tx.insert_limits(&[snap(now - 60_000, Provider::OpenAI, Tool::Codex, "seven_day", 98.0, later, None, "codex_rate_limits")]).unwrap();
+        tx.commit().unwrap();
+    }
+    let v = limits_view(&store, &PriceBook::default_book(), now, &[]).unwrap();
+    let blocked = |p: Provider, w: &str| v.iter().find(|x| x.provider == p && x.window == w).unwrap().blocked;
+    assert!(blocked(Provider::Anthropic, "five_hour"), "the week shows as full");
+    assert!(!blocked(Provider::Anthropic, "seven_day") && !blocked(Provider::Anthropic, "seven_day_opus"), "only five hours are held back");
+    assert!(!blocked(Provider::OpenAI, "five_hour"), "a week at 98% still has room");
+}
+
+#[test]
 fn stale_reading_without_reset_time_is_marked_stale() {
     let mut store = Store::open_in_memory().unwrap();
     let now = ms(2026, 10, 2, 12, 0);

@@ -643,6 +643,7 @@ mod tests {
             at_reset: None,
             account: None,
             observed_ms: None,
+            blocked: false,
             active: true,
         }
     }

@@ -41,6 +41,13 @@ pub fn endpoint() -> Option<String> {
     valid_repo(repo).then(|| format!("https://github.com/{repo}/releases/latest/download/latest.json"))
 }
 
+/// The price list on the repository's main branch, which installed apps follow between releases.
+pub fn prices_url() -> Option<String> {
+    let repo = file().github_repo;
+    let repo = repo.trim();
+    valid_repo(repo).then(|| format!("https://raw.githubusercontent.com/{repo}/main/config/pricing.json"))
+}
+
 fn interval() -> Duration {
     Duration::from_secs(3600 * file().check_every_hours.clamp(1, 168))
 }

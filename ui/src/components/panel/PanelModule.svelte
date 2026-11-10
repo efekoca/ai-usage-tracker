@@ -54,15 +54,19 @@
   )
   const short = (w: string) => t(`panel.window.${w}`)
 
-  type Shown = { value: number | null; used: number | null; text: string; sub: string; why: string; behind: boolean }
+  type Shown = { value: number | null; used: number | null; text: string; sub: string; why: string; behind: boolean; locked: boolean }
   function shown(l: PanelLimit | null): Shown {
+    // its own percentage would read as room that a full week does not leave
+    if (live(l) && l.blocked) return { value: 0, used: null, text: '', sub: t('panel.why.locked'), why: t('panel.short.locked'), behind: false, locked: true }
     if (live(l)) {
       const v = limitShown(l.used_pct, mode)
-      return { value: v, used: l.used_pct, text: fmtPct(v), sub: t(`panel.${mode}`), why: '', behind: l.state === 'behind' }
+      return { value: v, used: l.used_pct, text: fmtPct(v), sub: t(`panel.${mode}`), why: '', behind: l.state === 'behind', locked: false }
     }
     const k = !l ? 'none' : l.state === 'reset' ? 'reset' : 'stale'
-    return { value: null, used: null, text: '—', sub: t(`panel.why.${k}`), why: t(`panel.short.${k}`), behind: false }
+    return { value: null, used: null, text: '—', sub: t(`panel.why.${k}`), why: t(`panel.short.${k}`), behind: false, locked: false }
   }
+  // a locked window says why where the others give their reset
+  const note = (s: Shown, l: PanelLimit | null) => (s.locked ? s.why : resetLeft(l) ? `↻ ${resetLeft(l)}` : '')
   // a time as what is left until it ("2h 14m"): short enough for a narrow tile in any language,
   // where a clock time like "Wed 11:59 PM" does not fit
   function until(atMs: number): string {
@@ -80,6 +84,7 @@
     return at - now < 86_400_000 ? fmtClock(at) : fmtTime(at)
   }
   function forecast(l: PanelLimit | null): { text: string; at?: string; short: string; tone: 'bad' | 'ok' | 'none' } {
+    if (live(l) && l.blocked) return { text: t('limits.status.locked'), short: '', tone: 'bad' }
     const f = live(l) ? l.forecast : null
     if (f?.kind === 'fills' && f.fills_at_ms) {
       const at = f.fills_at_ms - now < 86_400_000 ? fmtClock(f.fills_at_ms) : fmtTime(f.fills_at_ms)
@@ -114,6 +119,8 @@
   <span class="logo"><BrandIcon provider={providerOf(m)} {size} always /></span>
 {/snippet}
 
+{#snippet val(s: Shown, size: number)}{#if s.locked}<Icon name="lock" {size} />{:else}{s.behind ? '~' : ''}{s.text}{/if}{/snippet}
+
 {#snippet bar(s: Shown, p: string)}
   <span class="track"><span class="fill" style:width="{s.value ?? 0}%" style:background={color(s.used, p)}></span></span>
 {/snippet}
@@ -133,31 +140,31 @@
   </button>
 {:else if m.kind === 'limit'}
   {@const s = shown(one)}
-  <div class="mod limit {m.size} {m.style}" role="group" aria-label="{name} · {windowLabel(m.window)}: {s.text} {s.sub}">
+  <div class="mod limit {m.size} {m.style}" role="group" aria-label="{name} · {windowLabel(m.window)}: {s.locked ? s.sub : `${s.text} ${s.sub}`}">
     {#if m.size === 's'}
       {#if m.style === 'bar'}
         <span class="vfill" style:height="{s.value ?? 0}%" style:background={color(s.used, m.provider)}></span>
         <span class="stack">
-          <b class="num">{s.text}</b>
+          <b class="num">{@render val(s, 14)}</b>
           <span class="tiny">{short(m.window)}</span>
         </span>
       {:else}
-        <Ring value={s.value} color={color(s.used, m.provider)} size={40} stroke={4}><b class="num small">{s.value === null ? '—' : Math.round(s.value)}</b></Ring>
+        <Ring value={s.value} color={color(s.used, m.provider)} size={40} stroke={4}><b class="num small">{#if s.locked}<Icon name="lock" size={14} />{:else}{s.value === null ? '—' : Math.round(s.value)}{/if}</b></Ring>
         <span class="tiny">{short(m.window)}</span>
       {/if}
     {:else if m.size === 'w'}
       {#if m.style === 'bar'}
         <span class="txt grow">
-          <span class="row"><span class="lbl">{name}</span><b class="num val">{s.behind ? '~' : ''}{s.text}</b></span>
+          <span class="row"><span class="lbl">{name}</span><b class="num val">{@render val(s, 13)}</b></span>
           {@render bar(s, m.provider)}
-          <span class="sub" title={resetAt(one) || s.sub}>{short(m.window)}{resetLeft(one) ? ` · ↻ ${resetLeft(one)}` : s.value === null ? ` · ${s.why}` : ''}</span>
+          <span class="sub" title={resetAt(one) || s.sub}>{short(m.window)}{note(s, one) ? ` · ${note(s, one)}` : s.value === null ? ` · ${s.why}` : ''}</span>
         </span>
       {:else}
         <Ring value={s.value} color={color(s.used, m.provider)} size={38} stroke={4}>{@render logo(13)}</Ring>
         <span class="txt">
           <span class="lbl">{name}</span>
-          <span class="row start"><b class="num val">{s.behind ? '~' : ''}{s.text}</b><span class="unit">{short(m.window)}</span></span>
-          <span class="sub" title={resetAt(one) || s.sub}>{resetLeft(one) ? `↻ ${resetLeft(one)}` : s.value === null ? s.why : ' '}</span>
+          <span class="row start"><b class="num val">{@render val(s, 15)}</b><span class="unit">{short(m.window)}</span></span>
+          <span class="sub" title={resetAt(one) || s.sub}>{note(s, one) || (s.value === null ? s.why : ' ')}</span>
         </span>
       {/if}
     {:else}
@@ -165,35 +172,35 @@
       <span class="head">{@render logo(14)}<span class="lbl">{name}</span></span>
       {#if m.style === 'bar'}
         <span class="big">
-          <b class="num hero">{s.behind ? '~' : ''}{s.text}</b>
-          <span class="sub" title={s.sub}>{s.value === null ? s.why : s.sub} · {short(m.window)}</span>
+          <b class="num hero">{@render val(s, 26)}</b>
+          <span class="sub" title={s.sub}>{s.locked || s.value === null ? s.why : s.sub} · {short(m.window)}</span>
           {@render bar(s, m.provider)}
         </span>
       {:else}
         <span class="center">
           <Ring value={s.value} color={color(s.used, m.provider)} size={70} stroke={6.5}>
-            <b class="num mid">{s.behind ? '~' : ''}{s.text}</b>
-            <span class="tiny">{s.value === null ? '' : s.sub}</span>
+            <b class="num mid">{@render val(s, 20)}</b>
+            <span class="tiny">{s.locked || s.value === null ? '' : s.sub}</span>
           </Ring>
         </span>
       {/if}
       <span class="foot">
-        <span class="sub" title={resetAt(one) || undefined}>{resetLeft(one) ? `↻ ${resetLeft(one)}` : short(m.window)}</span>
+        <span class="sub" title={resetAt(one) || (s.locked ? s.sub : undefined)}>{note(s, one) || short(m.window)}</span>
         {#if f.short}<span class="sub" class:bad={f.tone === 'bad'} title={f.at ?? f.text}>{f.short}</span>{/if}
       </span>
     {/if}
   </div>
 {:else if m.kind === 'provider'}
   {@const rows = both.map((b) => ({ ...b, s: shown(b.l) }))}
-  <div class="mod provider {m.size} {m.style}" role="group" aria-label="{name}: {rows.map((r) => `${windowLabel(r.w)} ${r.s.text}`).join(', ')}">
+  <div class="mod provider {m.size} {m.style}" role="group" aria-label="{name}: {rows.map((r) => `${windowLabel(r.w)} ${r.s.locked ? r.s.why : r.s.text}`).join(', ')}">
     {#if m.size === 'm' && m.style !== 'bar'}
       <span class="head">{@render logo(14)}<span class="lbl">{name}</span></span>
       <span class="pair">
         {#each rows as r (r.w)}
           <span class="cell">
-            <Ring value={r.s.value} color={color(r.s.used, m.provider)} size={50} stroke={5}><b class="num small">{r.s.value === null ? '—' : fmtPct(r.s.value)}</b></Ring>
+            <Ring value={r.s.value} color={color(r.s.used, m.provider)} size={50} stroke={5}><b class="num small">{#if r.s.locked}<Icon name="lock" size={16} />{:else}{r.s.value === null ? '—' : fmtPct(r.s.value)}{/if}</b></Ring>
             <span class="tiny">{short(r.w)}</span>
-            <span class="tiny dim fit" title={r.s.value === null ? r.s.sub : resetAt(r.l) || undefined}>{resetLeft(r.l) ? `↻ ${resetLeft(r.l)}` : r.s.why || ' '}</span>
+            <span class="tiny dim fit" title={r.s.locked || r.s.value === null ? r.s.sub : resetAt(r.l) || undefined}>{note(r.s, r.l) || r.s.why || ' '}</span>
           </span>
         {/each}
       </span>
@@ -204,8 +211,8 @@
           <span class="brow">
             <span class="tiny key">{short(r.w)}</span>
             {@render bar(r.s, m.provider)}
-            <b class="num tiny val">{r.s.behind ? '~' : ''}{r.s.text}</b>
-            {#if m.size !== 'w'}<span class="tiny dim when fit" title={resetAt(r.l) || undefined}>{resetLeft(r.l) ? `↻ ${resetLeft(r.l)}` : r.s.why}</span>{/if}
+            <b class="num tiny val">{@render val(r.s, 11)}</b>
+            {#if m.size !== 'w'}<span class="tiny dim when fit" title={resetAt(r.l) || (r.s.locked ? r.s.sub : undefined)}>{note(r.s, r.l) || r.s.why}</span>{/if}
           </span>
         {/each}
       </span>

@@ -21,6 +21,7 @@
     provider = null,
     forecast = null,
     brand = null,
+    blocked = false,
   }: {
     window: string
     used: number | null
@@ -38,6 +39,8 @@
     forecast?: Forecast | null
     /** leads the title with the tool's mark (meters outside a tool's own card) */
     brand?: Provider | null
+    /** five hours behind a full week: their own percentage leaves no room */
+    blocked?: boolean
   } = $props()
 
   let now = $state(Date.now())
@@ -47,12 +50,13 @@
   })
 
   // 'behind': used since this reading, so it is shown as the last reading, never the current value.
-  const known = $derived(lstate === 'fresh' && used !== null)
-  const behind = $derived(lstate === 'behind' && used !== null)
+  const locked = $derived(blocked && (lstate === 'fresh' || lstate === 'behind'))
+  const known = $derived(!locked && lstate === 'fresh' && used !== null)
+  const behind = $derived(!locked && lstate === 'behind' && used !== null)
   const pct = $derived(known ? Math.max(0, Math.min(100, used as number)) : 0)
   // 99.5 already prints as 100 %, so it counts as full here too (as in the limit history)
-  const level = $derived(behind ? 'outdated' : !known ? 'unknown' : pct >= 99.5 ? 'full' : pct >= 90 ? 'high' : pct >= 70 ? 'warn' : 'ok')
-  const icon = $derived(level === 'ok' ? 'check' : level === 'unknown' || level === 'outdated' ? 'clock' : 'warning')
+  const level = $derived(locked ? 'locked' : behind ? 'outdated' : !known ? 'unknown' : pct >= 99.5 ? 'full' : pct >= 90 ? 'high' : pct >= 70 ? 'warn' : 'ok')
+  const icon = $derived(level === 'ok' ? 'check' : level === 'locked' ? 'lock' : level === 'unknown' || level === 'outdated' ? 'clock' : 'warning')
   // severity always follows usage; only the number and the bar follow the chosen reading
   const mode = $derived(app.settings?.limit_display ?? 'used')
   const shown = $derived(known ? limitShown(pct, mode) : 0)
@@ -64,7 +68,9 @@
   <div class="head">
     <span class="name" class:brandname={brand}>{#if brand}<BrandIcon provider={brand} size={13} color={markTint(brand)} />{/if}{title || windowLabel(win)}</span>
     <span class="spacer"></span>
-    {#if known}
+    {#if locked}
+      <span class="pct subtle" title={t('panel.why.locked')}><Icon name="lock" size={14} /></span>
+    {:else if known}
       <span class="pct num">{fmtLimit(pct, mode)}</span>
     {:else if behind}
       <span class="pct subtle" title={t('limits.state.behind.help')}>?</span>
@@ -79,7 +85,9 @@
     <span class="status {level}"><Icon name={icon} size={13} />{t(`limits.status.${level}`)}</span>
     {#if !compact}<AccuracyBadge kind={accuracy} compact />{/if}
     <span class="spacer"></span>
-    {#if lstate === 'reset'}
+    {#if locked}
+      <!-- the status says why; the week's own meter gives the time -->
+    {:else if lstate === 'reset'}
       <span class="subtle">{t('limits.state.reset')}</span>
     {:else if lstate === 'stale'}
       <span class="subtle">{t('limits.state.stale')}</span>

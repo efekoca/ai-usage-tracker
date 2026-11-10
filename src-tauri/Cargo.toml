@@ -37,6 +37,9 @@ tempfile = "3.27.0"
 kurbo = "0.13.1"
 # puts a summary card on the clipboard as an image
 arboard = "3"
+# the versions and TLS setup the updater already uses; they fetch the shared price list
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "system-proxy"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_Foundation", "Win32_System_Registry", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp"] }

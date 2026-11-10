@@ -199,6 +199,7 @@ pub struct PanelLimit {
     /// The Codex or Claude account, while there are several.
     account: Option<String>,
     active: bool,
+    blocked: bool,
 }
 
 #[derive(Serialize)]
@@ -250,6 +251,7 @@ pub async fn panel_data(app: AppHandle) -> Result<PanelData, String> {
             forecast: l.forecast,
             account: l.account,
             active: l.active,
+            blocked: l.blocked,
         })
         .collect();
     let (last_scan_ms, scanning) = {

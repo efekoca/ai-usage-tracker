@@ -162,6 +162,7 @@
                 resetsAt={l.resets_at}
                 observedMs={l.observed_ms}
                 forecast={l.forecast}
+                blocked={l.blocked}
               />
             {/each}
           </div>
