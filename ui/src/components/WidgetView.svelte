@@ -83,6 +83,16 @@
     const id = setInterval(() => (now = Date.now()), 30_000)
     return () => clearInterval(id)
   })
+  // the cache countdown ticks by the second, and only while there is one
+  let tick = $state(Date.now())
+  $effect(() => {
+    if (!data?.cache) return
+    tick = Date.now()
+    const id = setInterval(() => (tick = Date.now()), 1000)
+    return () => clearInterval(id)
+  })
+  const cacheLeft = $derived(data?.cache ? Math.max(0, Math.ceil((data.cache.expires_ms - tick) / 1000)) : 0)
+  const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
   const R = 15
   const C = 2 * Math.PI * R
@@ -184,6 +194,10 @@
   {/if}
 {/snippet}
 
+{#snippet cache()}
+  <span class="cache" title={t('widget.cache.help')}><Icon name="clock" size={11} />{t('widget.cache', { t: mmss(cacheLeft) })}</span>
+{/snippet}
+
 {#snippet providerLimits(p: Provider, pool: string | null, account: string | null, kinds: WidgetItemKind[])}
   {@const rows = kinds.map((k) => ({ k, l: limit(p, k, pool, account) })).filter((x) => x.l !== null) as { k: WidgetItemKind; l: NonNullable<ReturnType<typeof limit>> }[]}
   {@const tag = accountTag(p, account ?? inUse(p))}
@@ -256,10 +270,12 @@
         {@render stat(kind)}
       {/if}
     {/each}
+    {#if cacheLeft > 0}{@render cache()}{/if}
   {:else}
-    {#if statKinds.length}
+    {#if statKinds.length || cacheLeft > 0}
       <div class="col stats">
         {#each statKinds as kind (kind)}{@render stat(kind)}{/each}
+        {#if cacheLeft > 0}{@render cache()}{/if}
       </div>
     {/if}
     {#if rowKinds.length}
@@ -384,6 +400,14 @@
   .updated {
     font-size: calc(10.5px * var(--ts));
     color: var(--ink-3);
+  }
+  .cache {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: calc(10.5px * var(--ts));
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
   }
   .ring {
     display: flex;

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { accountName, accountOf, app, saveSettings, markTint } from '../lib/store.svelte'
-  import { api, providersOf, type PlanDef, type PlansFile, type Provider, type Threshold } from '../lib/api'
+  import { api, providersOf, type PlanDef, type PlansFile, type Provider, type Route, type Threshold } from '../lib/api'
   import { accountPlan, autoPlan, priceKey } from '../lib/plans'
   import { fmtCompact, fmtDate, fmtInput, fmtMoney, fmtPct, i18n, limitName, parseNumber, t, windowLabel } from '../lib/i18n.svelte'
   import LimitMeter from '../components/LimitMeter.svelte'
@@ -20,6 +20,26 @@
   })
 
   const providers = $derived(providersOf(app.settings?.enabled_sources ?? []))
+
+  let routes = $state<Route[]>([])
+  $effect(() => {
+    void app.tick
+    void app.limits
+    if (!app.settings?.account_router) {
+      routes = []
+      return
+    }
+    api.accountRoutes().then((r) => (routes = r)).catch(() => (routes = []))
+  })
+  function routeText(r: Route): string {
+    const to = accountName(r.to, r.provider)
+    const go = r.renewed
+      ? t('route.renewed', { to })
+      : t('route.go', { to, week: fmtPct(r.seven_day), five: fmtPct(r.five_hour) })
+    if (r.from === null) return go
+    const from = accountName(r.from, r.provider)
+    return `${go} ${r.from_room <= 0 ? t('route.fromFull', { from }) : t('route.fromLeft', { from, left: fmtPct(r.from_room) })}`
+  }
 
   function setPlan(p: Provider, id: string) {
     saveSettings((c) => {
@@ -79,6 +99,18 @@
     if (plan.id === app.settings?.plans[p] && typeof shared === 'number' && shared > 0) return fmtInput(shared)
     return typeof plan.monthly_usd === 'number' ? `${fmtInput(plan.monthly_usd)} (${t('value.listPrice')})` : '—'
   }
+  /** A day of the month, 1 to 31; an empty field removes it and anything else changes nothing. */
+  function setRenewal(key: string, raw: string): boolean {
+    const v = raw.trim() === '' ? null : Number(raw.trim())
+    if (v !== null && !(Number.isInteger(v) && v >= 1 && v <= 31)) return false
+    saveSettings((c) => {
+      const next = { ...c.renewal_days }
+      if (v !== null) next[key] = v
+      else delete next[key]
+      return { renewal_days: next }
+    })
+    return true
+  }
   const planNote = (p: Provider) => plans?.providers[p]?.plans.find((x) => x.id === app.settings?.plans[p])
   function setPrice(p: Provider, raw: string): boolean {
     // an empty field removes the custom price; text that is not a price changes nothing
@@ -107,6 +139,14 @@
 {#if app.limitsTab === 'history'}
   <LimitHistory />
 {:else}
+{#each routes as r (r.provider)}
+  <div class="banner route" role="status">
+    <Icon name="sync" size={16} />
+    <span><b>{t('route.title')}</b> {routeText(r)}</span>
+    <span class="spacer"></span>
+    <button class="btn ghost small" onclick={() => saveSettings({ account_router: false })}>{t('route.off')}</button>
+  </div>
+{/each}
 {#if plans}
   <section class="card plans">
     {#each providers as p (p)}
@@ -129,8 +169,13 @@
               <span class="subtle small">{t('value.price')}</span>
               <input class="field" inputmode="decimal" value={fmtInput(own)} placeholder={typeof pl.monthly_usd === 'number' ? `${fmtInput(pl.monthly_usd)} (${t('value.listPrice')})` : '—'} onchange={(e) => { if (!setPrice(p, e.currentTarget.value)) e.currentTarget.value = fmtInput(own) }} title={pl.price_note?.[i18n.lang] ?? ''} />
             </label>
+            {@const day = app.settings?.renewal_days?.[p]}
+            <label class="price" title={t('value.renewal.help')}>
+              <span class="subtle small">{t('value.renewal')}</span>
+              <input class="field day" inputmode="numeric" maxlength="2" value={day ?? ''} placeholder="—" aria-label="{plans.providers[p].label} · {t('value.renewal')}" onchange={(e) => { if (!setRenewal(p, e.currentTarget.value)) e.currentTarget.value = String(day ?? '') }} />
+            </label>
           {/if}
-          <span class="subtle small">{pl.note ? pl.note[i18n.lang] : ''}</span>
+          {#if pl.note}<span class="subtle small">{pl.note[i18n.lang]}</span>{/if}
           <button class="btn ghost small" onclick={() => api.openUrl(pl.source)}><Icon name="external" size={13} />{t('settings.pricing.sources')}</button>
           </div>
         {/if}
@@ -178,6 +223,11 @@
               <label class="price">
                 <span class="subtle small">{t('value.price')}</span>
                 <input class="field" inputmode="decimal" value={fmtInput(own)} placeholder={fallbackPrice(p, plan)} aria-label="{accountName(id, p)} · {t('value.price')}" onchange={(e) => { if (!setAccountPrice(key, e.currentTarget.value)) e.currentTarget.value = fmtInput(own) }} title={plan.price_note?.[i18n.lang] ?? ''} />
+              </label>
+              {@const day = app.settings?.renewal_days?.[id]}
+              <label class="price" title={t('value.renewal.help')}>
+                <span class="subtle small">{t('value.renewal')}</span>
+                <input class="field day" inputmode="numeric" maxlength="2" value={day ?? ''} placeholder={String(app.settings?.renewal_days?.[p] ?? '—')} aria-label="{accountName(id, p)} · {t('value.renewal')}" onchange={(e) => { if (!setRenewal(id, e.currentTarget.value)) e.currentTarget.value = String(day ?? '') }} />
               </label>
             {:else if !plan && a.read_plan}
               <span class="subtle small">{t('accounts.plan.which')}</span>
@@ -276,6 +326,17 @@
 {/if}
 
 <style>
+  .route {
+    align-items: center;
+    margin-bottom: 16px;
+  }
+  .route :global(svg) {
+    flex: none;
+    color: var(--accent);
+  }
+  .route .spacer {
+    flex: 1;
+  }
   .price {
     display: inline-flex;
     align-items: center;
@@ -283,6 +344,10 @@
   }
   .price .field {
     width: 128px;
+  }
+  .price .field.day {
+    width: 52px;
+    text-align: center;
   }
   header.bar {
     display: flex;
@@ -423,6 +488,9 @@
   .acct-row .price .field {
     width: 128px;
   }
+  .acct-row .price .field.day {
+    width: 52px;
+  }
   .seen {
     min-width: 0;
     text-align: right;
@@ -434,7 +502,7 @@
     text-align: right;
     white-space: nowrap;
   }
-  @container accounts (max-width: 940px) {
+  @container accounts (max-width: 1080px) {
     .acct-row {
       grid-template-columns: minmax(0, 340px) minmax(0, 1fr);
     }

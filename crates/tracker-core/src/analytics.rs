@@ -731,6 +731,74 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
     Ok(out)
 }
 
+/// A better account to use now, for a provider with several: see [`route`].
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Route {
+    pub provider: Provider,
+    /// The account in use; `None` for one no evidence names.
+    pub from: Option<String>,
+    /// Room left in the account in use: 100 minus its fuller window.
+    pub from_room: f64,
+    pub to: String,
+    pub to_room: f64,
+    pub five_hour: f64,
+    pub seven_day: f64,
+    /// The suggested account's week started again since its last reading, so it holds that
+    /// reading's room or more.
+    pub renewed: bool,
+    pub observed_ms: Option<i64>,
+}
+
+/// The most room an account needs over the one in use before it is suggested; a full account
+/// in use takes any account with room.
+const ROUTE_MARGIN: f64 = 25.0;
+
+/// For a provider with several Claude or Codex accounts, the account with the most room in both
+/// its five-hour and weekly window, when the account in use is full or has clearly less. Only
+/// readings count: an account without one for each window, or with a stale one, is never
+/// suggested, and a window that started again since its reading counts as empty. Nor is one
+/// suggested while the account in use has no current reading: it might have room.
+pub fn route(views: &[LimitView]) -> Vec<Route> {
+    let mut out = Vec::new();
+    for (provider, pool) in [(Provider::Anthropic, ""), (Provider::OpenAI, "codex")] {
+        let mine: Vec<&LimitView> = views.iter().filter(|v| v.provider == provider && v.limit_id == pool && v.accuracy != Accuracy::Estimated).collect();
+        let mut accounts: Vec<Option<&str>> = mine.iter().map(|v| v.account.as_deref()).collect();
+        accounts.sort();
+        accounts.dedup();
+        if accounts.len() < 2 {
+            continue;
+        }
+        let read = |account: Option<&str>, window: &str| -> Option<(f64, bool, Option<i64>)> {
+            let v = mine.iter().find(|v| v.account.as_deref() == account && v.window == window)?;
+            match v.state {
+                LimitState::Fresh | LimitState::Behind => Some((v.used_pct?, false, v.observed_ms)),
+                LimitState::Reset => Some((0.0, true, v.observed_ms)),
+                LimitState::Stale => None,
+            }
+        };
+        let room = |account: Option<&str>| -> Option<(f64, f64, f64, bool, Option<i64>)> {
+            let (five, _, _) = read(account, "five_hour")?;
+            let (week, renewed, seen) = read(account, "seven_day")?;
+            let full = five >= 99.5 || week >= 99.5;
+            Some((if full { 0.0 } else { 100.0 - five.max(week) }, five, week, renewed, seen))
+        };
+        let Some(active) = mine.iter().find(|v| v.active).map(|v| v.account.as_deref()) else { continue };
+        let Some((from_room, ..)) = room(active) else { continue };
+        let best = accounts
+            .iter()
+            .filter(|a| **a != active)
+            .filter_map(|a| Some((*a, room(*a)?)))
+            .filter(|(a, r)| a.is_some() && r.0 > 0.0)
+            .max_by(|x, y| x.1 .0.total_cmp(&y.1 .0));
+        if let Some((Some(to), (to_room, five, week, renewed, seen))) = best
+            && (from_room <= 0.0 || to_room - from_room >= ROUTE_MARGIN)
+        {
+            out.push(Route { provider, from: active.map(str::to_owned), from_room, to: to.to_owned(), to_room, five_hour: five, seven_day: week, renewed, observed_ms: seen });
+        }
+    }
+    out
+}
+
 /// `account`: `Some` keeps only that account's requests (`Some(None)`: those of no known account).
 pub(crate) fn of_account(e: &EventRow, account: Option<Option<&str>>) -> bool {
     account.is_none_or(|a| e.account.as_deref() == a)

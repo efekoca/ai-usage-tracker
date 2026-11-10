@@ -361,6 +361,18 @@
     <Segmented label={t('limits.mode')} value={s.limit_display} options={[{ value: 'used', label: t('limits.mode.used') }, { value: 'remaining', label: t('limits.mode.remaining') }]} onchange={(v) => saveSettings({ limit_display: v })} />
   </div>
   <div class="item">
+    <div><span>{t('settings.router')}</span><div class="subtle small">{t('settings.router.help')}</div></div>
+    <Toggle checked={s.account_router} label={t('settings.router')} onchange={(v) => saveSettings({ account_router: v })} />
+  </div>
+  <div class="item">
+    <div><span>{t('settings.cacheWidget')}</span><div class="subtle small">{t('settings.cacheWidget.help')}</div></div>
+    <Toggle checked={s.cache_widget} label={t('settings.cacheWidget')} onchange={(v) => saveSettings({ cache_widget: v })} />
+  </div>
+  <div class="item">
+    <div><span>{t('settings.cacheMenubar')}</span><div class="subtle small">{t('settings.cacheMenubar.help')}</div></div>
+    <Toggle checked={s.cache_menubar} label={t('settings.cacheMenubar')} onchange={(v) => saveSettings({ cache_menubar: v })} />
+  </div>
+  <div class="item">
     <div><span>{t(autostartKey)}</span><div class="subtle small">{t('settings.autostart.help')}</div></div>
     <Toggle checked={s.autostart} label={t(autostartKey)} onchange={(v) => saveSettings({ autostart: v })} />
   </div>
@@ -421,6 +433,10 @@
       <Toggle checked={s.notify.full} label={t('settings.notify.full')} onchange={(v) => saveNotify({ full: v })} />
     </div>
     <div class="item">
+      <div><span>{t('settings.notify.route')}</span><div class="subtle small">{t('settings.notify.route.help')}</div></div>
+      <Toggle checked={s.notify.route} label={t('settings.notify.route')} onchange={(v) => saveNotify({ route: v })} />
+    </div>
+    <div class="item">
       <span>{t('settings.notify.reset')}</span>
       <Toggle checked={s.notify.reset} label={t('settings.notify.reset')} onchange={(v) => saveNotify({ reset: v })} />
     </div>
@@ -441,6 +457,10 @@
     <div class="item">
       <div><span>{t('settings.notify.signIn')}</span><div class="subtle small">{t('settings.notify.signIn.help')}</div></div>
       <Toggle checked={s.notify.sign_in} label={t('settings.notify.signIn')} onchange={(v) => saveNotify({ sign_in: v })} />
+    </div>
+    <div class="item">
+      <div><span>{t('settings.notify.cache')}</span><div class="subtle small">{t('settings.notify.cache.help')}</div></div>
+      <Toggle checked={s.notify.cache} label={t('settings.notify.cache')} onchange={(v) => saveNotify({ cache: v })} />
     </div>
     <div class="item">
       <div>

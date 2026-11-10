@@ -2,7 +2,7 @@ mod common;
 
 use chrono::{FixedOffset, TimeZone};
 use common::*;
-use tracker_core::analytics::{limits_view, month_spend, period_range, report, Filter, LimitState, Period, Range, Threshold};
+use tracker_core::analytics::{limits_view, month_spend, period_range, report, route, Filter, LimitState, LimitView, Period, Range, Threshold, Totals};
 use tracker_core::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool, UsageEvent};
 use tracker_core::pricing::PriceBook;
 use tracker_core::store::Store;
@@ -248,6 +248,49 @@ fn a_full_week_blocks_the_five_hours_but_a_model_week_does_not() {
     assert!(blocked(Provider::Anthropic, "five_hour"), "the week shows as full");
     assert!(!blocked(Provider::Anthropic, "seven_day") && !blocked(Provider::Anthropic, "seven_day_opus"), "only five hours are held back");
     assert!(!blocked(Provider::OpenAI, "five_hour"), "a week at 98% still has room");
+}
+
+fn view(account: &str, active: bool, window: &str, used: f64, state: LimitState) -> LimitView {
+    LimitView {
+        provider: Provider::Anthropic,
+        account: Some(account.into()),
+        active,
+        limit_id: String::new(),
+        window: window.into(),
+        window_minutes: None,
+        used_pct: Some(used),
+        resets_at: None,
+        observed_ms: Some(1),
+        source: "claude_usage".into(),
+        status: None,
+        plan: None,
+        accuracy: Accuracy::Captured,
+        state,
+        window_start_ms: None,
+        window_usage: Totals::default(),
+        usage_since: Totals::default(),
+        forecast: None,
+        projects: Vec::new(),
+        unlogged_pct: None,
+        blocked: false,
+    }
+}
+
+#[test]
+fn the_router_suggests_the_account_with_clearly_more_room() {
+    let fresh = LimitState::Fresh;
+    let pair = |a: &str, active, five, week, state| [view(a, active, "five_hour", five, fresh), view(a, active, "seven_day", week, state)];
+    let at = |a: [LimitView; 2], b: [LimitView; 2]| route(&[a, b].concat());
+
+    let r = at(pair("team", true, 40.0, 100.0, fresh), pair("home", false, 0.0, 12.0, fresh));
+    assert_eq!((r[0].to.as_str(), r[0].from_room, r[0].to_room), ("home", 0.0, 88.0), "the account in use is full");
+    assert!(at(pair("team", true, 30.0, 50.0, fresh), pair("home", false, 0.0, 40.0, fresh)).is_empty(), "60 against 50: not worth a switch");
+    assert_eq!(at(pair("team", true, 30.0, 80.0, fresh), pair("home", false, 0.0, 40.0, fresh)).len(), 1, "60 against 20");
+    let renewed = at(pair("team", true, 10.0, 99.6, fresh), pair("home", false, 0.0, 70.0, LimitState::Reset));
+    assert!(renewed[0].renewed && renewed[0].to_room == 100.0, "a week that started again holds its room");
+    assert!(at(pair("team", true, 10.0, 99.6, fresh), pair("home", false, 0.0, 10.0, LimitState::Stale)).is_empty(), "no reading, no suggestion");
+    assert!(at(pair("team", true, 10.0, 100.0, fresh), pair("home", false, 100.0, 10.0, fresh)).is_empty(), "both full");
+    assert!(at(pair("team", true, 10.0, 90.0, LimitState::Stale), pair("home", false, 0.0, 10.0, fresh)).is_empty(), "the account in use might have room");
 }
 
 #[test]

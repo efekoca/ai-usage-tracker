@@ -242,6 +242,19 @@ pub async fn get_month_spend(state: State<'_, AppState>) -> Res<analytics::Month
     analytics::month_spend(&store, &book, &chrono::Local, now_ms()).map_err(err)
 }
 
+/// Accounts worth switching to now (see `analytics::route`).
+pub(crate) fn routes(state: &AppState) -> Res<Vec<analytics::Route>> {
+    let settings = state.settings.read().unwrap().clone();
+    let providers = enabled_providers(&settings);
+    let views = analytics::limits_view(&state.db(), &state.book.read().unwrap(), now_ms(), &settings.thresholds).map_err(err)?;
+    Ok(analytics::route(&views).into_iter().filter(|r| providers.contains(&r.provider)).collect())
+}
+
+#[tauri::command]
+pub async fn account_routes(state: State<'_, AppState>) -> Res<Vec<analytics::Route>> {
+    routes(&state)
+}
+
 #[tauri::command]
 pub async fn get_limits(state: State<'_, AppState>) -> Res<Vec<LimitView>> {
     let settings = state.settings.read().unwrap().clone();
@@ -320,6 +333,8 @@ pub struct WidgetData {
     /// Known accounts in order of first use, which numbers the unnamed ones.
     accounts: Vec<KnownAccount>,
     updated_ms: i64,
+    /// While `Settings::cache_widget` is on and the latest Claude Code conversation's cache lasts.
+    cache: Option<insights::CacheTimer>,
 }
 
 fn widget_period(
@@ -398,6 +413,7 @@ pub async fn get_widget_data(state: State<'_, AppState>) -> Res<WidgetData> {
         providers: provs,
         accounts,
         updated_ms: state.status.lock().unwrap().last_scan_ms.unwrap_or(now),
+        cache: if settings.cache_widget { insights::cache_timer(&store, now).map_err(err)? } else { None },
     })
 }
 

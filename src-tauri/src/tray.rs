@@ -307,7 +307,7 @@ pub(crate) fn data(app: &AppHandle, s: &Settings, cfg: &TraySettings, readings: 
 
 /// Each account's short name: the user's, else "Account" and its number among its provider's
 /// accounts in order of first use, as the Limits page numbers them.
-fn account_tags(app: &AppHandle, s: &Settings) -> std::collections::HashMap<String, String> {
+pub(crate) fn account_tags(app: &AppHandle, s: &Settings) -> std::collections::HashMap<String, String> {
     let list = tracker_core::accounts::accounts(&app.state::<AppState>().db()).unwrap_or_default();
     let mut counts: std::collections::HashMap<Provider, usize> = std::collections::HashMap::new();
     list.into_iter()
@@ -392,7 +392,21 @@ pub fn level(used: f64, warn_at: f64, high_at: f64) -> Level {
 }
 
 
-fn tooltip(limits: &[Current], s: &Settings, update: Option<&str>) -> String {
+/// Claude Code's cache time left, short for the menu bar and long for the tooltip, in whole
+/// minutes rounded up: the tray refreshes every 20 seconds.
+fn cache_left(t: tracker_core::insights::CacheTimer, now_ms: i64, tr: bool) -> (String, String) {
+    cache_text((t.expires_ms - now_ms + 59_999) / 60_000, tr)
+}
+
+fn cache_text(minutes: i64, tr: bool) -> (String, String) {
+    if tr {
+        (format!("Önbellek {minutes} dk"), format!("Önbelleğin kalan süresi: {minutes} dk"))
+    } else {
+        (format!("Cache {minutes}m"), format!("Cache time left: {minutes} min"))
+    }
+}
+
+fn tooltip(limits: &[Current], s: &Settings, update: Option<&str>, cache: Option<&str>) -> String {
     let tr = turkish(s);
     let remaining = s.limit_display == "remaining";
     let mut lines = vec!["AI Usage Tracker".to_owned()];
@@ -418,6 +432,7 @@ fn tooltip(limits: &[Current], s: &Settings, update: Option<&str>) -> String {
     if limits.is_empty() {
         lines.push(if tr { "Güncel limit okuması yok".into() } else { "No current limit reading".into() });
     }
+    lines.extend(cache.map(str::to_owned));
     if let Some(v) = update {
         lines.push(if tr { format!("Güncelleme hazır: v{v}") } else { format!("Update ready: v{v}") });
     }
@@ -432,13 +447,24 @@ fn tooltip(limits: &[Current], s: &Settings, update: Option<&str>) -> String {
 fn update(app: &AppHandle) {
     let s = app.state::<AppState>().settings.read().unwrap().clone();
     let Some(readings) = readings(app, &s) else { return };
-    crate::alerts::check(app, &s, &readings);
+    let now = chrono::Utc::now().timestamp_millis();
+    let timer = if s.cache_menubar || (s.notify.enabled && s.notify.cache) {
+        tracker_core::insights::cache_timer(&app.state::<AppState>().db(), now).ok().flatten()
+    } else {
+        None
+    };
+    crate::alerts::check(app, &s, &readings, timer);
     let Some(tray) = app.tray_by_id(ID) else { return };
     let limits = current_limits(&readings);
     let update = app.state::<AppState>().updates.lock().unwrap().available.as_ref().map(|a| a.version.clone());
     let size = icon_size(app);
     let icon = badge(&s, &s.tray, &limits).map(|b| (b, size));
+    let cache = timer.filter(|_| s.cache_menubar).map(|t| cache_left(t, now, turkish(&s)));
     let title = if s.onboarded { title(app, &s, &s.tray, &readings) } else { String::new() };
+    let title = match &cache {
+        Some((short, _)) if s.onboarded => [title, short.clone()].into_iter().filter(|x| !x.is_empty()).collect::<Vec<_>>().join("  "),
+        _ => title,
+    };
     // a menu bar item needs something to show: the icon stays while the text is empty
     let icon_hidden = cfg!(target_os = "macos") && s.tray.hide_icon && !title.is_empty();
     #[cfg(windows)]
@@ -450,7 +476,7 @@ fn update(app: &AppHandle) {
         icon_hidden,
         light_taskbar,
         title,
-        tooltip: tooltip(&limits, &s, update.as_deref()),
+        tooltip: tooltip(&limits, &s, update.as_deref(), cache.as_ref().map(|c| c.1.as_str())),
         menu: (turkish(&s), update.clone(), s.widget.hotkey.clone()),
     };
     let mut shown = SHOWN.lock().unwrap();
@@ -1015,11 +1041,14 @@ mod tests {
             Current { provider: Provider::Anthropic, window: "seven_day".into(), used: 43.0, behind: true, blocked: false },
             Current { provider: Provider::OpenAI, window: "five_hour".into(), used: 7.0, behind: false, blocked: false },
         ];
-        assert_eq!(tooltip(&l, &s, Some("0.3.0")), "AI Usage Tracker\nClaude · 5 sa %41 · haftalık ~%43\nCodex · 5 sa %7\nGüncelleme hazır: v0.3.0");
+        assert_eq!(tooltip(&l, &s, Some("0.3.0"), None), "AI Usage Tracker\nClaude · 5 sa %41 · haftalık ~%43\nCodex · 5 sa %7\nGüncelleme hazır: v0.3.0");
         s.language = "en".into();
         s.limit_display = "remaining".into();
-        assert_eq!(tooltip(&l, &s, None), "AI Usage Tracker\nClaude · 5h 59% left · week ~57% left\nCodex · 5h 93% left");
-        assert!(tooltip(&[], &s, None).ends_with("No current limit reading"));
+        assert_eq!(tooltip(&l, &s, None, None), "AI Usage Tracker\nClaude · 5h 59% left · week ~57% left\nCodex · 5h 93% left");
+        assert!(tooltip(&[], &s, None, None).ends_with("No current limit reading"));
+        let (short, long) = cache_text(4, true);
+        assert_eq!(short, "Önbellek 4 dk");
+        assert!(tooltip(&l, &s, None, Some(&long)).ends_with("\nÖnbelleğin kalan süresi: 4 dk"));
     }
 
     #[test]
@@ -1041,6 +1070,6 @@ mod tests {
         let l = current_limits(&[at("five_hour", 0.0, true), at("seven_day", 100.0, false)]);
         assert_eq!((l[0].used, l[0].blocked), (100.0, true), "the icon has no room for a lock");
         let s = Settings { language: "tr".into(), ..Default::default() };
-        assert_eq!(tooltip(&l, &s, None), "AI Usage Tracker\nClaude · 5 sa 🔒 haftalık dolu · haftalık %100");
+        assert_eq!(tooltip(&l, &s, None, None), "AI Usage Tracker\nClaude · 5 sa 🔒 haftalık dolu · haftalık %100");
     }
 }

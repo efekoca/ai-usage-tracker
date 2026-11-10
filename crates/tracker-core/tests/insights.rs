@@ -1,6 +1,6 @@
 use chrono::{FixedOffset, TimeZone};
 use tracker_core::analytics::{account_key, Filter, Range};
-use tracker_core::insights::{agents_tools, branches, compare_models, context_stats, day_detail, forecast, plan_value, restarted, session_timeline, sessions, subagent_cache, ForecastKind, PromptShare};
+use tracker_core::insights::{agents_tools, branches, cache_timer, compare_models, context_stats, day_detail, forecast, plan_value, restarted, session_timeline, sessions, subagent_cache, ForecastKind, PromptShare};
 use tracker_core::tips::{cache_rebuilds, tips, Tip, Tips};
 use tracker_core::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
 use tracker_core::pricing::{CostInput, PriceBook};
@@ -93,6 +93,24 @@ fn store_with(evs: &[Ev]) -> Store {
     tx.upsert_events(&rows).unwrap();
     tx.commit().unwrap();
     store
+}
+
+#[test]
+fn the_cache_timer_counts_from_the_last_request_with_the_shortest_lifetime() {
+    let t = ms(2026, 11, 10, 12, 0);
+    let five = store_with(&[
+        ev("a", t, Tool::ClaudeCode, "claude-opus-5-5", Some("s"), "/p", 10, 0, 5).cache_write(1_000, 800),
+        ev("b", t + 2 * MIN, Tool::ClaudeCode, "claude-opus-5-5", Some("s"), "/p", 10, 900, 5),
+        ev("c", t + 3 * MIN, Tool::ClaudeCode, "claude-opus-5-5", Some("s"), "/p", 10, 0, 5).agent("Explore", "x").cache_write(500, 0),
+    ]);
+    let timer = cache_timer(&five, t + 4 * MIN).unwrap().unwrap();
+    assert_eq!((timer.expires_ms, timer.ttl_ms), (t + 7 * MIN, 5 * MIN), "the read at +2 renews; a subagent's request does not count");
+    assert_eq!(cache_timer(&five, t + 8 * MIN).unwrap(), None, "run out");
+
+    let hour = store_with(&[ev("a", t, Tool::ClaudeCode, "claude-opus-5-5", Some("s"), "/p", 10, 0, 5).cache_write(1_000, 1_000)]);
+    assert_eq!(cache_timer(&hour, t + 30 * MIN).unwrap().unwrap().expires_ms, t + HOUR);
+    let none = store_with(&[ev("a", t, Tool::ClaudeCode, "claude-opus-5-5", Some("s"), "/p", 10, 0, 5), ev("b", t, Tool::Codex, "gpt-5.6-terra", Some("x"), "/p", 10, 0, 5)]);
+    assert_eq!(cache_timer(&none, t + MIN).unwrap(), None, "nothing cached");
 }
 
 fn all() -> Range {

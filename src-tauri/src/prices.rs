@@ -79,7 +79,11 @@ fn take(app: &AppHandle, text: &str) -> Result<bool, String> {
     let fetched = tracker_core::pricing::checked_list(text).map_err(|e| e.to_string())?;
     let path = state.data_dir.join(FETCHED_PRICING);
     // a list from the same day can still carry corrections, so the text decides
-    if fetched.updated_at < crate::state::price_base(&state.data_dir).updated_at || std::fs::read_to_string(&path).is_ok_and(|kept| kept == text) {
+    let same = |kept: &str| kept.trim() == text.trim();
+    if fetched.updated_at < crate::state::price_base(&state.data_dir).updated_at
+        || std::fs::read_to_string(&path).is_ok_and(|kept| same(&kept))
+        || (!path.exists() && same(tracker_core::pricing::DEFAULT_PRICING_JSON))
+    {
         return Ok(false);
     }
     tracker_core::export::write_atomically(&path, |f| std::io::Write::write_all(f, text.as_bytes()).map_err(|e| e.to_string()))?;
