@@ -15,6 +15,7 @@ mod settings;
 mod state;
 mod tray;
 mod tray_text;
+mod prices;
 mod updates;
 mod windows;
 mod worker;
@@ -347,6 +348,7 @@ pub fn run() {
                 store: Mutex::new(store),
                 book: RwLock::new(book),
                 pricing_origin: RwLock::new(origin),
+                prices: Mutex::new(prices::PriceStatus::default()),
                 settings: RwLock::new(settings.clone()),
                 status: Mutex::new(ScanStatus::default()),
                 worker,
@@ -383,6 +385,7 @@ pub fn run() {
             capture::start(app.handle());
             pdf::start_weekly(app.handle().clone());
             updates::start(app.handle().clone());
+            prices::start(app.handle().clone());
             #[cfg(target_os = "macos")]
             warn_if_temporary(app.handle(), &settings);
             log::info!("started v{}", app.package_info().version);
@@ -408,6 +411,7 @@ pub fn run() {
             commands::catalog_prices,
             commands::save_pricing,
             commands::reset_pricing,
+            commands::check_prices,
             commands::get_plans,
             commands::export_data,
             commands::backup_database,

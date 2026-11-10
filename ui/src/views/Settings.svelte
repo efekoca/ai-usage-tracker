@@ -3,8 +3,8 @@
   import { saveAs } from '../lib/dialogs'
   import { onMount } from 'svelte'
   import { app, refresh, saveSettings } from '../lib/store.svelte'
-  import { api, providersOf, type HotkeyStatus, type ModelPrice, type NotifySettings, type PricingFile, type Provider } from '../lib/api'
-  import { fmtDate, fmtDateTime, fmtInput, fmtInt, fmtPct, localDate, parseNumber, t, windowLabel } from '../lib/i18n.svelte'
+  import { api, providersOf, type HotkeyStatus, type ModelPrice, type NotifySettings, type PricingFile, type PricingInfo, type Provider } from '../lib/api'
+  import { fmtDate, fmtDateTime, fmtDuration, fmtInput, fmtInt, fmtPct, localDate, parseNumber, t, windowLabel } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
   import Select from '../components/Select.svelte'
   import Toggle from '../components/Toggle.svelte'
@@ -39,6 +39,11 @@
   let pricing: PricingFile | null = $state(null)
   let pricingOrigin = $state('bundled')
   let pricingDirty = $state(false)
+  let priceBase: PricingInfo['base'] = $state([])
+  let priceStatus: PricingInfo['status'] | null = $state(null)
+  let canUpdatePrices = $state(false)
+  let checkingPrices = $state(false)
+  let priceCheck = $state('')
   let notice = $state('')
   const SOURCE_NAMES: Record<string, string> = { anthropic: 'Anthropic', openai: 'OpenAI', google: 'Google', vertex_ai: 'Vertex AI', deepseek: 'DeepSeek', moonshotai: 'Moonshot AI', zai: 'Z.ai', alibaba: 'Alibaba Cloud', xai: 'xAI', mistral: 'Mistral', minimax: 'MiniMax' }
   let models: string[] = $state([])
@@ -52,6 +57,9 @@
     const p = await api.pricing()
     pricing = p.file
     pricingOrigin = p.origin
+    priceBase = p.base
+    priceStatus = p.status
+    canUpdatePrices = p.can_update
     pricingDirty = false
   }
   onMount(async () => {
@@ -197,6 +205,55 @@
       await loadPricing()
       await refresh()
     })
+  }
+  async function checkPrices() {
+    checkingPrices = true
+    priceCheck = ''
+    try {
+      const changed = await api.checkPrices()
+      priceCheck = t(changed ? 'settings.pricing.checkUpdated' : 'settings.pricing.checkUpToDate')
+      if (changed) await refresh()
+    } catch {
+      // the status line below gives the reason
+    } finally {
+      checkingPrices = false
+      // a fetched list replaces the base, and unsaved edits would be lost by reloading over them
+      if (!pricingDirty) await loadPricing()
+      else priceStatus = (await api.pricing()).status
+    }
+  }
+  const RATE_KEYS = ['input', 'output', 'cache_read', 'cache_write_5m', 'cache_write_1h'] as const
+  const baseOf = (m: ModelPrice) => priceBase.find((b) => b.id.toLowerCase() === m.id.toLowerCase())
+  const changed = (m: ModelPrice) => {
+    const b = baseOf(m)
+    return !!b && RATE_KEYS.some((k) => (m[k] ?? null) !== (b[k] ?? null))
+  }
+  function revert(m: ModelPrice) {
+    const b = baseOf(m)
+    if (!b) return
+    for (const k of RATE_KEYS) m[k] = b[k] as number
+    pricingDirty = true
+  }
+  function removeOwn(id: string) {
+    if (!pricing) return
+    pricing.models = pricing.models.filter((m) => m.id !== id)
+    pricingDirty = true
+  }
+  // a price typed in for a model no list has
+  let own = $state({ model: '', input: '', output: '', cache_read: '', cache_write_5m: '' })
+  let ownError = $state('')
+  function addOwn() {
+    if (!pricing || !own.model) return
+    const [input, output] = [num(own.input), num(own.output)]
+    if (input === null || output === null) {
+      ownError = t('settings.pricing.ownNeed')
+      return
+    }
+    const opt = (v: string) => (v.trim() === '' ? null : num(v))
+    pricing.models = [...pricing.models, { id: own.model, provider: 'custom', aliases: [], input, output, cache_read: opt(own.cache_read), cache_write_5m: opt(own.cache_write_5m), cache_write_1h: null, verified_at: null, notes: null }]
+    pricingDirty = true
+    own = { model: '', input: '', output: '', cache_read: '', cache_write_5m: '' }
+    ownError = ''
   }
   function addAlias() {
     if (!pricing || !aliasFrom || !aliasTo) return
@@ -494,6 +551,21 @@
       <span class="subtle small">{t(`settings.pricing.origin.${pricingOrigin}`)} · {t('settings.pricing.updated', { d: fmtDate(pricing.updated_at) })}</span>
     </div>
     <p class="subtle small prose">{t('settings.pricing.help')}</p>
+    {#if canUpdatePrices}
+      <div class="item">
+        <div>
+          <span>{t('settings.pricing.follow')}</span>
+          <div class="subtle small">{t('settings.pricing.follow.help')}</div>
+          <div class="subtle small" aria-live="polite">
+            {#if priceCheck}{priceCheck}{:else if priceStatus?.last_error}{t('settings.pricing.checkFailed', { e: priceStatus.last_error })}{:else if priceStatus?.last_check_ms}{t('settings.pricing.checked', { t: fmtDuration(Date.now() - priceStatus.last_check_ms) })}{:else}{t('settings.pricing.never')}{/if}
+          </div>
+        </div>
+        <div class="row">
+          <button class="btn small" onclick={checkPrices} disabled={checkingPrices}>{checkingPrices ? t('settings.pricing.checking') : t('settings.pricing.checkNow')}</button>
+          <Toggle checked={s.price_updates} label={t('settings.pricing.follow')} onchange={(v) => saveSettings({ price_updates: v })} />
+        </div>
+      </div>
+    {/if}
     <div class="table-wrap">
       <table class="prices">
         <thead>
@@ -504,12 +576,16 @@
             <th scope="col" class="num">{t('metric.cacheRead')}</th>
             <th scope="col" class="num">{t('metric.cacheWrite')} 5m</th>
             <th scope="col" class="num">{t('metric.cacheWrite')} 1h</th>
+            <th scope="col"><span class="sr-only">{t('settings.pricing.rowActions')}</span></th>
           </tr>
         </thead>
         <tbody>
           {#each shownPrices as m (m.id)}
             <tr>
-              <th scope="row" title={m.notes ?? ''}>{m.id}{#if m.long_context}<span class="subtle small">{' · '}&gt;{fmtInt(m.long_context.threshold / 1000)}K</span>{/if}</th>
+              <th scope="row" title={m.notes ?? ''}>
+                {m.id}{#if m.long_context}<span class="subtle small">{' · '}&gt;{fmtInt(m.long_context.threshold / 1000)}K</span>{/if}
+                {#if !baseOf(m)}<span class="mark mine">{t('settings.pricing.mine')}</span>{:else if changed(m)}<span class="mark">{t('settings.pricing.changed')}</span>{/if}
+              </th>
               {#each ['input', 'output', 'cache_read', 'cache_write_5m', 'cache_write_1h'] as const as k (k)}
                 <td class="num">
                   <input
@@ -531,6 +607,13 @@
                   />
                 </td>
               {/each}
+              <td class="act">
+                {#if !baseOf(m)}
+                  <button class="btn ghost icon" aria-label="{t('common.remove')}: {m.id}" title={t('common.remove')} onclick={() => removeOwn(m.id)}><Icon name="trash" size={14} /></button>
+                {:else if changed(m)}
+                  <button class="btn ghost icon" aria-label="{t('settings.pricing.revert')}: {m.id}" title={t('settings.pricing.revert')} onclick={() => revert(m)}><Icon name="refresh" size={14} /></button>
+                {/if}
+              </td>
             </tr>
           {/each}
         </tbody>
@@ -568,6 +651,21 @@
       </div>
     {/if}
 
+    {#if unpriced.length}
+      <h3 class="sub">{t('settings.pricing.own')}</h3>
+      <div class="row wrap own">
+        <Select label={t('common.model')} bind:value={own.model} minWidth={190} searchable placeholder="—" options={unpriced.map((m) => ({ value: m, label: m }))} />
+        {#each [['input', t('metric.input')], ['output', t('metric.output')], ['cache_read', t('metric.cacheRead')], ['cache_write_5m', `${t('metric.cacheWrite')} 5m`]] as const as [k, label] (k)}
+          <label class="own-field">
+            <span class="subtle small">{label}</span>
+            <input class="field" inputmode="decimal" placeholder={k === 'input' || k === 'output' ? '$' : '—'} bind:value={own[k]} oninput={() => (ownError = '')} />
+          </label>
+        {/each}
+        <button class="btn" onclick={addOwn} disabled={!own.model}><Icon name="plus" size={14} />{t('settings.pricing.ownAdd')}</button>
+      </div>
+      <p class="subtle small prose">{ownError || t('settings.pricing.ownHelp')}</p>
+    {/if}
+
     <h3 class="sub">{t('settings.pricing.alias')}</h3>
     {#each Object.entries(pricing.user_aliases ?? {}) as [from, to] (from)}
       <div class="list-row">
@@ -598,7 +696,7 @@
     </div>
     <div class="row wrap actions">
       <span class="spacer"></span>
-      <button class="btn" onclick={resetPricing} disabled={pricingOrigin === 'bundled' && !pricingDirty}>{t('settings.pricing.reset')}</button>
+      <button class="btn" onclick={resetPricing} disabled={pricingOrigin !== 'user' && !pricingDirty}>{t('settings.pricing.reset')}</button>
       <button class="btn primary" onclick={savePricing} disabled={!pricingDirty}>{t('settings.pricing.save')}</button>
     </div>
   </section>
@@ -806,6 +904,40 @@
   .sources {
     gap: 2px 4px;
     margin-top: 14px;
+  }
+  .mark {
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--surface-press);
+    color: var(--ink-2);
+    font-size: 10.5px;
+    font-weight: 500;
+  }
+  .mark.mine {
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+  }
+  .act {
+    width: 30px;
+    padding: 0 !important;
+  }
+  .icon {
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    justify-content: center;
+  }
+  .own {
+    align-items: flex-end;
+    gap: 8px;
+  }
+  .own-field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .own-field .field {
+    width: 84px;
   }
   .badge-unverified {
     padding: 1px 7px;

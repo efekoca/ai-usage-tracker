@@ -26,8 +26,9 @@ pub struct AppState {
     /// Connection used by UI commands (the worker has its own).
     pub store: Mutex<Store>,
     pub book: RwLock<PriceBook>,
-    /// "bundled" or "user"
+    /// "bundled", "updated" (a newer list from the repository) or "user"
     pub pricing_origin: RwLock<String>,
+    pub prices: Mutex<crate::prices::PriceStatus>,
     pub settings: RwLock<Settings>,
     pub status: Mutex<ScanStatus>,
     pub worker: Worker,
@@ -64,15 +65,24 @@ impl AppState {
     }
 }
 
+/// The newest shared price list the app has fetched (see `prices.rs`).
+pub const FETCHED_PRICING: &str = "pricing-latest.json";
+
+/// The list the user's prices sit on: the bundled one, or a newer one fetched since.
+pub fn price_base(data_dir: &std::path::Path) -> tracker_core::pricing::PricingFile {
+    tracker_core::pricing::base(std::fs::read_to_string(data_dir.join(FETCHED_PRICING)).ok().as_deref())
+}
+
 pub fn load_price_book(data_dir: &std::path::Path) -> (PriceBook, String) {
-    let p = data_dir.join("pricing.json");
-    if let Ok(s) = std::fs::read_to_string(&p) {
-        match PriceBook::from_user_json(&s) {
+    let base = price_base(data_dir);
+    if let Ok(s) = std::fs::read_to_string(data_dir.join("pricing.json")) {
+        match PriceBook::from_user_json(&s, &base) {
             Ok(b) => return (b.with_catalog(opencode_catalog()), "user".into()),
             Err(e) => log::warn!("user pricing.json ignored: {e}"),
         }
     }
-    (PriceBook::default_book().with_catalog(opencode_catalog()), "bundled".into())
+    let origin = if base.updated_at == tracker_core::pricing::bundled().updated_at { "bundled" } else { "updated" };
+    (PriceBook::from_file(base).expect("checked price list").with_catalog(opencode_catalog()), origin.into())
 }
 
 /// OpenCode keeps its model catalog in `$XDG_CACHE_HOME/opencode`, else `~/.cache/opencode`, on

@@ -25,6 +25,8 @@ pub struct Reading {
     pub account: Option<String>,
     /// When the reading was taken.
     pub observed_ms: Option<i64>,
+    /// Five hours held back by a full week (see `LimitView::blocked`).
+    pub blocked: bool,
     /// The provider's account in use.
     pub active: bool,
 }
@@ -186,6 +188,9 @@ impl<Tz: TimeZone> Format<'_, Tz> {
     }
 
     fn value(&self, r: &Reading, style: &str) -> String {
+        if r.blocked {
+            return "🔒".into();
+        }
         let remaining = self.remaining();
         let v = shown_value(r.used, remaining);
         // the last reading: use since then raises it, a reset the provider grants lowers it
@@ -349,7 +354,7 @@ mod tests {
     const NOW: i64 = 1_793_000_000_000; // a Monday, 07:33 UTC
 
     fn read(p: Provider, pool: &str, window: &str, used: f64, in_secs: i64) -> Reading {
-        Reading { provider: p, pool: pool.into(), window: window.into(), used, behind: false, resets_at: Some(NOW / 1000 + in_secs), fills_at_ms: None, at_reset: None, account: None, observed_ms: None, active: true }
+        Reading { provider: p, pool: pool.into(), window: window.into(), used, behind: false, resets_at: Some(NOW / 1000 + in_secs), fills_at_ms: None, at_reset: None, account: None, observed_ms: None, blocked: false, active: true }
     }
 
     fn data() -> Data {

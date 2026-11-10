@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-28",
+  "updated_at": "2026-11-10",
   "currency": "USD",
   "unit": "per_million_tokens",
   "sources": {
@@ -30,8 +30,12 @@
   "models": [
     { "id": "claude-opus-5-5", "provider": "anthropic", "aliases": ["claude-opus-5-5-thinking", "claude-opus-5-5-low", "claude-opus-5-5-medium", "claude-opus-5-5-high"], "input": 4, "output": 20, "cache_read": 0.2, "cache_write_5m": 5, "cache_write_1h": 8,
       "speed_multipliers": { "fast": 2 }, "geo_multipliers": { "us": 1.1 }, "web_search_per_1k": 10, "verified_at": "2026-10-02" },
+    { "id": "claude-fable-5-2", "provider": "anthropic", "input": 8, "output": 40, "cache_read": 0.2, "cache_write_5m": 10, "cache_write_1h": 16,
+      "speed_multipliers": { "fast": 2 }, "geo_multipliers": { "us": 1.1 }, "web_search_per_1k": 10, "verified_at": "2026-11-10" },
+    { "id": "claude-mythos-5-2", "provider": "anthropic", "input": 8, "output": 40, "cache_read": 0.2, "cache_write_5m": 10, "cache_write_1h": 16,
+      "speed_multipliers": { "fast": 2 }, "geo_multipliers": { "us": 1.1 }, "web_search_per_1k": 10, "verified_at": "2026-11-10", "notes": "Limited availability." },
     { "id": "claude-fable-5-1", "provider": "anthropic", "input": 10, "output": 50, "cache_read": 0.25, "cache_write_5m": 12.5, "cache_write_1h": 20,
-      "geo_multipliers": { "us": 1.1 }, "web_search_per_1k": 10, "verified_at": "2026-10-02" },
+      "geo_multipliers": { "us": 1.1 }, "web_search_per_1k": 10, "verified_at": "2026-11-10", "notes": "Legacy (still available)." },
     { "id": "claude-mythos-5-1", "provider": "anthropic", "input": 10, "output": 50, "cache_read": 0.25, "cache_write_5m": 12.5, "cache_write_1h": 20,
       "geo_multipliers": { "us": 1.1 }, "web_search_per_1k": 10, "verified_at": "2026-10-02", "notes": "Limited availability (Project Glasswing)." },
     { "id": "claude-sonnet-5-5", "provider": "anthropic", "aliases": ["claude-sonnet-5-5-thinking", "claude-sonnet-5-5-low", "claude-sonnet-5-5-medium", "claude-sonnet-5-5-high"], "input": 2, "output": 10, "cache_read": 0.1, "cache_write_5m": 2.5, "cache_write_1h": 4,

@@ -107,6 +107,8 @@ export interface PanelLimit {
   /** The Codex or Claude account, while there are several. */
   account: string | null
   active: boolean
+  /** Five hours behind a full week: none of it can be used until the week resets. */
+  blocked: boolean
 }
 export interface PanelData {
   limits: PanelLimit[]
@@ -273,6 +275,8 @@ export interface LimitView {
   projects: ProjectShare[]
   /** Estimated part of `used_pct` that rose while this computer sent no request; current readings only. */
   unlogged_pct: number | null
+  /** Five hours behind a full week: none of it can be used until the week resets. */
+  blocked: boolean
 }
 
 export interface WidgetPeriod {
@@ -286,7 +290,7 @@ export interface WidgetData {
   today: WidgetPeriod
   days7: WidgetPeriod
   month1: WidgetPeriod
-  limits: { provider: Provider; limit_id: string; window: string; used_pct: number | null; state: LimitState; accuracy: Accuracy; resets_at: number | null; observed_ms: number | null; account: string | null; active: boolean }[]
+  limits: { provider: Provider; limit_id: string; window: string; used_pct: number | null; state: LimitState; accuracy: Accuracy; resets_at: number | null; observed_ms: number | null; account: string | null; active: boolean; blocked: boolean }[]
   providers: Provider[]
   /** OpenCode's source is on and it was used in the last 30 days. */
   opencode: boolean
@@ -475,6 +479,8 @@ export interface Settings {
   tray: TraySettings
   panel: PanelSettings
   update_check: boolean
+  /** Follows the price list on the app's repository between releases. */
+  price_updates: boolean
   /** provider → #rrggbb; missing = the accent color */
   provider_colors: Partial<Record<Provider, string>>
   tint_icons: boolean
@@ -568,6 +574,17 @@ export interface ModelPrice extends Rates {
   off_peak?: { multiplier: number; peak_hours_utc: [number, number][] } | null
   verified_at?: string | null
   notes?: string | null
+}
+
+export interface PricingInfo {
+  file: PricingFile
+  /** `updated`: a newer list fetched from the app's repository; `user`: with the user's own prices. */
+  origin: 'bundled' | 'updated' | 'user'
+  /** The list the user's prices sit on, so their own prices can be told apart. */
+  base: (Rates & { id: string })[]
+  status: { last_check_ms: number | null; last_error: string | null }
+  /** The build names a repository to fetch newer lists from. */
+  can_update: boolean
 }
 
 export interface PricingFile {
@@ -932,7 +949,8 @@ export const api = {
   projectsForSettings: () => invoke<ProjectRow[]>('list_projects_for_settings'),
   setProjectHidden: (id: number, hidden: boolean) => invoke<void>('set_project_hidden', { id, hidden }),
   models: () => invoke<string[]>('list_models'),
-  pricing: () => invoke<{ file: PricingFile; origin: 'bundled' | 'user' }>('get_pricing'),
+  pricing: () => invoke<PricingInfo>('get_pricing'),
+  checkPrices: () => invoke<boolean>('check_prices'),
   savePricing: (file: PricingFile) => invoke<void>('save_pricing', { file }),
   catalogPrices: (models: string[]) => invoke<ModelPrice[]>('catalog_prices', { models }),
   resetPricing: () => invoke<void>('reset_pricing'),

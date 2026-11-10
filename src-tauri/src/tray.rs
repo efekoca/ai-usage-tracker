@@ -166,6 +166,8 @@ pub struct Current {
     pub used: f64,
     /// Used after the reading: the real value is at least `used`.
     pub behind: bool,
+    /// Five hours behind a full week, shown as full (see `LimitView::blocked`).
+    pub blocked: bool,
 }
 
 /// What the badge shows: the limit's percent or a tool's logo, by its key in `LOGOS`.
@@ -223,6 +225,7 @@ pub(crate) fn readings(app: &AppHandle, s: &Settings) -> Option<Vec<Reading>> {
                     at_reset,
                     account: v.account,
                     observed_ms: v.observed_ms,
+                    blocked: v.blocked,
                     active: v.active,
                 })
             })
@@ -234,7 +237,8 @@ pub(crate) fn readings(app: &AppHandle, s: &Settings) -> Option<Vec<Reading>> {
 pub(crate) fn current_limits(readings: &[Reading]) -> Vec<Current> {
     let mut out: Vec<Current> = Vec::new();
     for r in readings.iter().filter(|r| r.active) {
-        let c = Current { provider: r.provider, window: r.window.clone(), used: r.used, behind: r.behind };
+        // the icon has no room for a lock: five hours behind a full week show as full
+        let c = Current { provider: r.provider, window: r.window.clone(), used: if r.blocked { 100.0 } else { r.used }, behind: r.behind, blocked: r.blocked };
         match out.iter_mut().find(|x| x.provider == c.provider && x.window == c.window) {
             Some(x) if x.used >= c.used => {}
             Some(x) => *x = c,
@@ -396,6 +400,10 @@ fn tooltip(limits: &[Current], s: &Settings, update: Option<&str>) -> String {
         let mut parts = Vec::new();
         for (w, en, tr_) in [("five_hour", "5h", "5 sa"), ("seven_day", "week", "haftalık")] {
             let Some(c) = limits.iter().find(|c| c.provider == p && c.window == w) else { continue };
+            if c.blocked {
+                parts.push(if tr { format!("{tr_} 🔒 haftalık dolu") } else { format!("{en} 🔒 week full") });
+                continue;
+            }
             let v = shown_value(c.used, remaining);
             // the last reading: use since then raises it, a reset the provider grants lowers it
             let sign = if c.behind { "~" } else { "" };
@@ -885,8 +893,8 @@ mod tests {
     fn the_badge_shows_the_chosen_mark_in_its_limits_color() {
         let mut s = Settings { onboarded: true, ..Default::default() };
         let l = vec![
-            Current { provider: Provider::Anthropic, window: "five_hour".into(), used: 30.0, behind: false },
-            Current { provider: Provider::OpenAI, window: "seven_day".into(), used: 96.0, behind: false },
+            Current { provider: Provider::Anthropic, window: "five_hour".into(), used: 30.0, behind: false, blocked: false },
+            Current { provider: Provider::OpenAI, window: "seven_day".into(), used: 96.0, behind: false, blocked: false },
         ];
         let shown = |s: &Settings, l: &[Current]| badge(s, &s.tray, l);
         assert_eq!(shown(&s, &l), Some(plain(Mark::Number("96".into()), Level::High)));
@@ -911,7 +919,7 @@ mod tests {
         let mut s = Settings { onboarded: true, ..Default::default() };
         s.tray.tool_color = true;
         s.tray.limit = "anthropic:five_hour".into();
-        let mut l = vec![Current { provider: Provider::Anthropic, window: "five_hour".into(), used: 30.0, behind: false }];
+        let mut l = vec![Current { provider: Provider::Anthropic, window: "five_hour".into(), used: 30.0, behind: false, blocked: false }];
         let claude = [0xD9, 0x77, 0x57];
         for (m, mark) in [("number", Mark::Number("30".into())), ("tool", Mark::Logo("anthropic"))] {
             s.tray.mark = m.into();
@@ -952,7 +960,7 @@ mod tests {
     fn the_dial_fills_to_the_limit_and_its_needle_follows() {
         let mut s = Settings { onboarded: true, ..Default::default() };
         s.tray.mark = "dial".into();
-        let l = vec![Current { provider: Provider::Anthropic, window: "five_hour".into(), used: 30.0, behind: false }];
+        let l = vec![Current { provider: Provider::Anthropic, window: "five_hour".into(), used: 30.0, behind: false, blocked: false }];
         assert_eq!(badge(&s, &s.tray, &l), Some(plain(Mark::Dial(0.3), Level::Normal)));
         assert_eq!(badge(&s, &s.tray, &[]), None, "no reading keeps the app icon");
         s.limit_display = "remaining".into();
@@ -986,8 +994,8 @@ mod tests {
     #[test]
     fn the_fullest_current_limit_is_shown_unless_one_is_chosen() {
         let l = vec![
-            Current { provider: Provider::Anthropic, window: "five_hour".into(), used: 30.0, behind: false },
-            Current { provider: Provider::OpenAI, window: "seven_day".into(), used: 68.0, behind: false },
+            Current { provider: Provider::Anthropic, window: "five_hour".into(), used: 30.0, behind: false, blocked: false },
+            Current { provider: Provider::OpenAI, window: "seven_day".into(), used: 68.0, behind: false, blocked: false },
         ];
         assert_eq!(pick(&l, "auto").unwrap().used, 68.0);
         assert_eq!(pick(&l, "anthropic:five_hour").unwrap().used, 30.0);
@@ -1003,14 +1011,36 @@ mod tests {
     fn the_tooltip_lists_every_limit_in_the_users_language() {
         let mut s = Settings { language: "tr".into(), ..Default::default() };
         let l = vec![
-            Current { provider: Provider::Anthropic, window: "five_hour".into(), used: 41.0, behind: false },
-            Current { provider: Provider::Anthropic, window: "seven_day".into(), used: 43.0, behind: true },
-            Current { provider: Provider::OpenAI, window: "five_hour".into(), used: 7.0, behind: false },
+            Current { provider: Provider::Anthropic, window: "five_hour".into(), used: 41.0, behind: false, blocked: false },
+            Current { provider: Provider::Anthropic, window: "seven_day".into(), used: 43.0, behind: true, blocked: false },
+            Current { provider: Provider::OpenAI, window: "five_hour".into(), used: 7.0, behind: false, blocked: false },
         ];
         assert_eq!(tooltip(&l, &s, Some("0.3.0")), "AI Usage Tracker\nClaude · 5 sa %41 · haftalık ~%43\nCodex · 5 sa %7\nGüncelleme hazır: v0.3.0");
         s.language = "en".into();
         s.limit_display = "remaining".into();
         assert_eq!(tooltip(&l, &s, None), "AI Usage Tracker\nClaude · 5h 59% left · week ~57% left\nCodex · 5h 93% left");
         assert!(tooltip(&[], &s, None).ends_with("No current limit reading"));
+    }
+
+    #[test]
+    fn five_hours_behind_a_full_week_read_as_full() {
+        let at = |window: &str, used, blocked| Reading {
+            provider: Provider::Anthropic,
+            pool: String::new(),
+            window: window.into(),
+            used,
+            behind: false,
+            resets_at: None,
+            fills_at_ms: None,
+            at_reset: None,
+            account: None,
+            observed_ms: None,
+            blocked,
+            active: true,
+        };
+        let l = current_limits(&[at("five_hour", 0.0, true), at("seven_day", 100.0, false)]);
+        assert_eq!((l[0].used, l[0].blocked), (100.0, true), "the icon has no room for a lock");
+        let s = Settings { language: "tr".into(), ..Default::default() };
+        assert_eq!(tooltip(&l, &s, None), "AI Usage Tracker\nClaude · 5 sa 🔒 haftalık dolu · haftalık %100");
     }
 }

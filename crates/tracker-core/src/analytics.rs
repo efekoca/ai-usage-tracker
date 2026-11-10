@@ -468,6 +468,9 @@ pub struct LimitView {
     /// Estimated part of `used_pct` that rose while this computer sent no request (the web, a
     /// phone, cloud tasks, another computer); current readings only, `None` when none did.
     pub unlogged_pct: Option<f64>,
+    /// A five-hour window whose week is full: none of it can be used until the week resets,
+    /// whatever its own percentage says.
+    pub blocked: bool,
 }
 
 pub fn window_minutes(window: &str) -> Option<i64> {
@@ -658,6 +661,7 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
             forecast,
             projects: shares,
             unlogged_pct: unlogged,
+            blocked: false,
         });
     }
 
@@ -700,7 +704,18 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
             window_usage: usage,
             projects: shares,
             unlogged_pct: None,
+            blocked: false,
         });
+    }
+    // only the all-model week holds every five hours back: Claude's Opus or Sonnet week leaves other
+    // models free, and an estimate from a threshold is no proof
+    let full: Vec<(Provider, String, Option<String>, bool)> = out
+        .iter()
+        .filter(|v| v.window == "seven_day" && v.accuracy != Accuracy::Estimated && matches!(v.state, LimitState::Fresh | LimitState::Behind) && v.used_pct.is_some_and(|u| u >= 99.5))
+        .map(|v| (v.provider, v.limit_id.clone(), v.account.clone(), v.active))
+        .collect();
+    for v in out.iter_mut().filter(|v| v.window == "five_hour") {
+        v.blocked = full.iter().any(|(p, pool, account, active)| *p == v.provider && *pool == v.limit_id && *account == v.account && *active == v.active);
     }
     // the account in use first, an unknown account last
     out.sort_by(|a, b| {

@@ -3,6 +3,7 @@
   import { fmtCompact, fmtDec, fmtDuration, fmtMoney, fmtPct, fmtTime, has, limitShown, lower, t, toolLabel, type LimitMode } from '../lib/i18n.svelte'
   import { nameAccount, toolColor } from '../lib/store.svelte'
   import BrandIcon from './BrandIcon.svelte'
+  import Icon from './Icon.svelte'
 
   let {
     data,
@@ -65,11 +66,13 @@
     const mine = (x: { active: boolean; account: string | null }) => (account === null ? x.active : x.account === account)
     const l = (data?.limits ?? []).filter((x) => x.provider === p && x.window === w && (pool === null || x.limit_id === pool) && mine(x)).sort((a, b) => rank(b) - rank(a))[0]
     if (!l) return null
-    const known = l.state === 'fresh' && l.used_pct !== null
+    // a full week leaves none of the five hours, whatever their own percentage says
+    const locked = l.blocked && l.state !== 'reset' && l.state !== 'stale'
+    const known = !locked && l.state === 'fresh' && l.used_pct !== null
     // 'behind': the current value is unknown, so only the last reading is shown
-    const last = l.state === 'behind' && l.used_pct !== null ? { pct: limitShown(l.used_pct, mode), ago: l.observed_ms ? fmtDuration(now - l.observed_ms) : '' } : null
+    const last = !locked && l.state === 'behind' && l.used_pct !== null ? { pct: limitShown(l.used_pct, mode), ago: l.observed_ms ? fmtDuration(now - l.observed_ms) : '' } : null
     const pct = known ? Math.max(0, Math.min(100, l.used_pct as number)) : null
-    return { pct, val: pct === null ? null : limitShown(pct, mode), last, resets: l.resets_at, estimated: l.accuracy === 'estimated', captured: l.accuracy === 'captured' }
+    return { pct, val: pct === null ? null : limitShown(pct, mode), last, locked, resets: locked ? null : l.resets_at, estimated: l.accuracy === 'estimated', captured: l.accuracy === 'captured' }
   }
   // a tool's own color only for the calm range; warnings keep their colors
   const level = (pct: number, p: Provider) => (pct >= ws.high_at ? 'var(--critical)' : pct >= ws.warn_at ? 'var(--serious)' : colors?.[p] || 'var(--w-accent)')
@@ -187,20 +190,24 @@
   {#if rows.length}
     {@const lead = rows[0]}
     {#if ws.limit_style === 'ring'}
-      <div class="ring" role="img" aria-label="{t(`provider.${p}`)}{tag ? ` ${tag}` : pool && has(`widget.pool.${p}.${pool}`) ? ` ${t(`widget.pool.${p}.${pool}`)}` : ''} {rows.map((r) => `${winShort(r.k)} ${r.l.val !== null ? fmtPct(r.l.val) : r.l.last ? t('widget.lastReading', { pct: fmtPct(r.l.last.pct), t: r.l.last.ago }) : '—'}`).join(', ')}">
+      <div class="ring" role="img" aria-label="{t(`provider.${p}`)}{tag ? ` ${tag}` : pool && has(`widget.pool.${p}.${pool}`) ? ` ${t(`widget.pool.${p}.${pool}`)}` : ''} {rows.map((r) => `${winShort(r.k)} ${r.l.locked ? t('panel.short.locked') : r.l.val !== null ? fmtPct(r.l.val) : r.l.last ? t('widget.lastReading', { pct: fmtPct(r.l.last.pct), t: r.l.last.ago }) : '—'}`).join(', ')}">
         <svg viewBox="0 0 40 40" aria-hidden="true">
           <circle cx="20" cy="20" r={R} class="track" />
           {#if lead.l.pct !== null}
             <circle cx="20" cy="20" r={R} class="arc" stroke={level(lead.l.pct, p)} stroke-dasharray="{((lead.l.val ?? 0) / 100) * C} {C}" transform="rotate(-90 20 20)" />
           {/if}
-          <text x="20" y="20" dy="0.35em" text-anchor="middle">{lead.l.val !== null ? fmtDec(lead.l.val) : lead.l.last ? '?' : '–'}</text>
+          {#if lead.l.locked}
+            <g class="lock" transform="translate(14 13)"><rect x="0.75" y="5.5" width="10.5" height="8" rx="2" /><path d="M3.25 5.5V4a2.75 2.75 0 0 1 5.5 0v1.5" /></g>
+          {:else}
+            <text x="20" y="20" dy="0.35em" text-anchor="middle">{lead.l.val !== null ? fmtDec(lead.l.val) : lead.l.last ? '?' : '–'}</text>
+          {/if}
         </svg>
         <div class="rl">
           {@render name(p, pool, account)}
           <span class="sub">
-            {winShort(lead.k)}{lead.l.estimated ? ' ≈' : ''}{lead.l.last ? ` · ${t('widget.lastShort', { pct: fmtPct(lead.l.last.pct) })}` : ws.show_reset_time && lead.l.resets ? ` · ${fmtDuration(lead.l.resets * 1000 - now)}` : ''}
+            {winShort(lead.k)}{lead.l.estimated ? ' ≈' : ''}{lead.l.locked ? ` · ${t('panel.short.locked')}` : lead.l.last ? ` · ${t('widget.lastShort', { pct: fmtPct(lead.l.last.pct) })}` : ws.show_reset_time && lead.l.resets ? ` · ${fmtDuration(lead.l.resets * 1000 - now)}` : ''}
             {#each rows.slice(1) as r (r.k)}
-              · {winShort(r.k)} <b class="num" style="color:{r.l.pct !== null && r.l.pct >= ws.warn_at ? level(r.l.pct, p) : 'inherit'}">{r.l.val !== null ? fmtPct(r.l.val) : r.l.last ? '?' : '—'}</b>
+              · {winShort(r.k)} <b class="num" style="color:{r.l.pct !== null && r.l.pct >= ws.warn_at ? level(r.l.pct, p) : 'inherit'}">{r.l.locked ? t('panel.short.locked') : r.l.val !== null ? fmtPct(r.l.val) : r.l.last ? '?' : '—'}</b>
             {/each}
           </span>
         </div>
@@ -211,7 +218,7 @@
         {#each rows as r (r.k)}
           <div class="bh">
             <span class="sub">{winShort(r.k)}{ws.show_reset_time && r.l.resets ? ` · ${fmtDuration(r.l.resets * 1000 - now)}` : ''}</span>
-            <span class="pv num">{r.l.val !== null ? fmtPct(r.l.val) : r.l.last ? '?' : '—'}{r.l.estimated ? ' ≈' : ''}</span>
+            <span class="pv num">{#if r.l.locked}<Icon name="lock" size={12} />{:else}{r.l.val !== null ? fmtPct(r.l.val) : r.l.last ? '?' : '—'}{r.l.estimated ? ' ≈' : ''}{/if}</span>
           </div>
           <div class="bt"><span style="width:{r.l.val ?? 0}%;background:{r.l.pct !== null ? level(r.l.pct, p) : 'transparent'}"></span></div>
         {/each}
@@ -222,7 +229,7 @@
         {#each rows as r, i (r.k)}
           {#if i > 0}<span class="sub">·</span>{/if}
           <span class="sub">{winShort(r.k)}</span>
-          <b class="num" style="color:{r.l.pct !== null && r.l.pct >= ws.warn_at ? level(r.l.pct, p) : 'inherit'}">{r.l.val !== null ? fmtPct(r.l.val) : r.l.last ? '?' : '—'}</b>
+          <b class="num" style="color:{r.l.pct !== null && r.l.pct >= ws.warn_at ? level(r.l.pct, p) : 'inherit'}">{r.l.locked ? t('panel.short.locked') : r.l.val !== null ? fmtPct(r.l.val) : r.l.last ? '?' : '—'}</b>
         {/each}
       </span>
     {/if}
@@ -403,6 +410,12 @@
     font-size: 10.5px;
     font-weight: var(--nw);
     fill: var(--ink);
+  }
+  .lock {
+    fill: none;
+    stroke: var(--ink-2);
+    stroke-width: 1.5;
+    stroke-linecap: round;
   }
   .mark {
     position: relative;

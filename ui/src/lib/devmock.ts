@@ -9,6 +9,8 @@ let codexMissing = scenario.get('codex') === 'missing'
 let codexOut = scenario.get('codex') === 'nologin'
 let agyOut = scenario.get('agy') === 'nologin'
 let agyMissing = scenario.get('agy') === 'missing'
+// Claude's week full while its five hours are untouched
+const weekFull = scenario.get('weekfull') === '1'
 // every limit read fresh and in range, as on a typical day (README screenshots)
 const showcase = scenario.get('showcase') === '1'
 // ?opencode=missing: OpenCode not installed
@@ -88,6 +90,7 @@ const settings: Settings = {
     ],
   },
   update_check: true,
+  price_updates: true,
   provider_colors: {},
   tint_icons: false,
   show_icons: true,
@@ -249,7 +252,15 @@ function allLimits(): LimitView[] {
     { provider: 'google', limit_id: 'gemini', window: 'five_hour', window_minutes: 300, used_pct: 18, resets_at: Math.round(now / 1000 + 3.1 * 3600), observed_ms: now - 90000, source: 'antigravity_cli_usage', status: null, plan: null, accuracy: 'captured', state: 'fresh', window_start_ms: now - 1.9 * 3600e3, window_usage: totals(2.4e6, 0.6), usage_since: totals(0, 0), forecast: { kind: 'safe', rate_per_hour: 6.1, fills_at_ms: null, at_reset_pct: 37, basis_minutes: 114 }, projects: [share('website', 1, 18)] },
     { provider: 'google', limit_id: 'gemini', window: 'seven_day', window_minutes: 10080, used_pct: 9, resets_at: Math.round(now / 1000 + 4.2 * 86400), observed_ms: now - 90000, source: 'antigravity_cli_usage', status: null, plan: null, accuracy: 'captured', state: 'fresh', window_start_ms: now - 2.8 * 86400e3, window_usage: totals(9e6, 2.1), usage_since: totals(0, 0), forecast: null, projects: [share('website', 1, 9)] },
     { provider: 'google', limit_id: '3p', window: 'five_hour', window_minutes: 300, used_pct: 0, resets_at: Math.round(now / 1000 + 5 * 3600), observed_ms: now - 90000, source: 'antigravity_cli_usage', status: null, plan: null, accuracy: 'captured', state: 'fresh', window_start_ms: now, window_usage: totals(0, 0), usage_since: totals(0, 0), forecast: null, projects: [] },
-  ] as (Omit<LimitView, 'account' | 'active' | 'unlogged_pct'> & Partial<Pick<LimitView, 'unlogged_pct'>>)[]).map((l) => ({ unlogged_pct: null, ...l, account: null, active: true }))
+  ] as (Omit<LimitView, 'account' | 'active' | 'unlogged_pct' | 'blocked'> & Partial<Pick<LimitView, 'unlogged_pct'>>)[]).map((l) => ({ unlogged_pct: null, ...l, account: null, active: true, blocked: false }))
+  if (weekFull)
+    return all.map((l) =>
+      l.provider !== 'anthropic'
+        ? l
+        : l.window === 'seven_day'
+          ? { ...l, used_pct: 100, state: 'fresh', resets_at: Math.round(now / 1000 + 4.5 * 3600), observed_ms: now - 60000, forecast: null }
+          : { ...l, used_pct: 0, state: 'fresh', resets_at: null, observed_ms: now - 60000, forecast: null, blocked: true },
+    )
   if (!showcase) return all
   return all.map((l) => {
     if (l.provider === 'anthropic' && l.window === 'five_hour')
@@ -683,7 +694,7 @@ let mockScanning = false
 function mockPanelData() {
   const usage = (tokens: number, cost: number, sessions: number, hit: number) => ({ tokens, cost_usd: cost, sessions, prompt: 1_000_000, cache_read: hit * 10_000 })
   return {
-    limits: limits().map((l) => ({ provider: l.provider, limit_id: l.limit_id, window: l.window, used_pct: l.used_pct, state: l.state, resets_at: l.resets_at, forecast: l.forecast, account: l.account, active: l.active })),
+    limits: limits().map((l) => ({ provider: l.provider, limit_id: l.limit_id, window: l.window, used_pct: l.used_pct, state: l.state, resets_at: l.resets_at, forecast: l.forecast, account: l.account, active: l.active, blocked: l.blocked })),
     usage: [usage(18_400_000, 12.84, 4, 81), usage(412_000_000, 286.1, 23, 84), usage(1_900_000_000, 1204, 96, 86)],
     opencode: ocMissing ? null : [usage(552_000, 0.26, 1, 64), usage(2_900_000, 1.43, 3, 71), usage(12_000_000, 5.76, 9, 73)],
     last_scan_ms: Date.now() - 42_000,
@@ -698,6 +709,7 @@ function mockPanelData() {
 
 const update = { current: '1.2.0', configured: true, checking: false, last_check_ms: Date.now() - 3600e3, last_error: null, available: null as null | { version: string; notes: string | null; date: string | null }, installing: false, downloaded: 0, total: null }
 
+let pricingOrigin = 'bundled'
 const pricing = {
   schema_version: 1,
   updated_at: '2026-10-02',
@@ -707,6 +719,8 @@ const pricing = {
   models: models.filter((m) => m[3] > 0).map(([id, tool, , i, o, cr]) => ({ id, provider: tool === 'codex' ? 'openai' : tool === 'antigravity' ? 'google' : 'anthropic', input: i, output: o, cache_read: cr, cache_write_5m: i * 1.25, cache_write_1h: tool === 'codex' ? null : i * 2, verified_at: '2026-10-02' })),
   user_aliases: {},
 }
+// the list the user's prices sit on, before any of their edits
+const priceBase = pricing.models.map((m) => ({ ...m }))
 
 export function installMock() {
   mockIPC(
@@ -779,7 +793,7 @@ export function installMock() {
           return null
         case 'get_widget_data': {
           const per = (tok: number, cost: number) => ({ tokens: tok, cost_usd: cost, has_unpriced: false, tools: [{ tool: 'claude_code', tokens: tok * 0.75, cost_usd: cost * 0.83, has_unpriced: false }, { tool: 'codex', tokens: tok * 0.15, cost_usd: cost * 0.12, has_unpriced: false }, { tool: 'antigravity', tokens: tok * 0.07, cost_usd: cost * 0.03, has_unpriced: false }, ...(ocMissing ? [] : [{ tool: 'opencode', tokens: tok * 0.03, cost_usd: cost * 0.02, has_unpriced: false }])] })
-          return { today: per(18_400_000, 12.84), days7: per(96_000_000, 71.3), month1: per(402_000_000, 288.1), limits: limits().map((l) => ({ provider: l.provider, limit_id: l.limit_id, window: l.window, used_pct: l.used_pct, state: l.state, accuracy: l.accuracy, resets_at: l.resets_at, observed_ms: l.observed_ms, account: l.account, active: l.active })), providers: ['anthropic', 'openai', 'google'], opencode: !ocMissing, accounts: knownAccounts(), updated_ms: Date.now() - 60000 }
+          return { today: per(18_400_000, 12.84), days7: per(96_000_000, 71.3), month1: per(402_000_000, 288.1), limits: limits().map((l) => ({ provider: l.provider, limit_id: l.limit_id, window: l.window, used_pct: l.used_pct, state: l.state, accuracy: l.accuracy, resets_at: l.resets_at, observed_ms: l.observed_ms, account: l.account, active: l.active, blocked: l.blocked })), providers: ['anthropic', 'openai', 'google'], opencode: !ocMissing, accounts: knownAccounts(), updated_ms: Date.now() - 60000 }
         }
         case 'capture_status':
           return { claude_poll: settings.capture.claude_poll, claude: { binary: claudeMode === 'missing' ? null : 'C:/claude.exe', last_ok_ms: claudeMode ? null : Date.now() - 40000, last_error: claudeMode === 'nologin' ? 'claude_no_plan_limits' : claudeMode === 'missing' ? 'claude_not_found' : null }, claude_candidates_found: claudeMode !== 'missing', codex_poll: settings.capture.codex_poll, codex: { binary: codexMissing ? null : 'C:/codex.exe', last_ok_ms: codexMissing ? null : Date.now() - 120000, last_error: codexMissing ? 'codex_not_found' : codexOut ? 'codex_not_signed_in' : null }, codex_candidates_found: !codexMissing, antigravity_poll: settings.capture.antigravity_poll, antigravity: { binary: agyMissing ? null : 'C:/Users/you/AppData/Local/agy/bin/agy.exe', last_ok_ms: agyMissing ? null : Date.now() - 90000, last_error: agyMissing ? 'agy_not_found' : agyOut ? 'agy_not_signed_in' : null }, antigravity_candidates_found: !agyMissing, statusline: settings.capture.statusline, statusline_file: 'C:\\Users\\you\\.claude\\settings.json', statusline_chained: false, statusline_last_ms: Date.now() - 30000, otel: settings.capture.otel, otel_port: 43180, otel_listening: settings.capture.otel, otel_events: 42, otel_last_ms: Date.now() - 5000, otel_error: null, settings_file: 'C:\\Users\\you\\.claude\\settings.json' }
@@ -833,7 +847,13 @@ export function installMock() {
         case 'list_models':
           return [...models.map((m) => m[0]), ...(ocMissing ? [] : ['deepseek-chat'])]
         case 'get_pricing':
-          return { file: pricing, origin: 'bundled' }
+          return { file: pricing, origin: pricingOrigin, base: priceBase, status: { last_check_ms: Date.now() - 2 * 3600e3, last_error: null }, can_update: true }
+        case 'save_pricing':
+          Object.assign(pricing, a.file)
+          pricingOrigin = 'user'
+          return null
+        case 'check_prices':
+          return new Promise((done) => setTimeout(() => done(false), 800))
         case 'catalog_prices':
           return (a.models as string[]).includes('deepseek-chat') && !ocMissing ? [{ id: 'deepseek-chat', provider: 'deepseek', aliases: [], input: 0.14, output: 0.28, cache_read: 0.028, verified_at: null, notes: 'OpenCode model catalog' }] : []
         case 'get_plans':
