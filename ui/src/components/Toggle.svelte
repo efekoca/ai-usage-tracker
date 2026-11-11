@@ -3,8 +3,9 @@
     checked = $bindable(false),
     label,
     disabled = false,
+    small = false,
     onchange,
-  }: { checked?: boolean; label: string; disabled?: boolean; onchange?: (v: boolean) => void } = $props()
+  }: { checked?: boolean; label: string; disabled?: boolean; small?: boolean; onchange?: (v: boolean) => void } = $props()
 </script>
 
 <button
@@ -14,6 +15,7 @@
   aria-label={label}
   {disabled}
   class:on={checked}
+  class:small
   onclick={() => {
     // with a handler the owner's value decides, so a failed save never leaves the switch flipped
     if (onchange) onchange(!checked)
@@ -48,6 +50,18 @@
   }
   button.on span {
     transform: translateX(16px);
+  }
+  button.small {
+    width: 34px;
+    height: 20px;
+    border-radius: 10px;
+  }
+  button.small span {
+    width: 16px;
+    height: 16px;
+  }
+  button.small.on span {
+    transform: translateX(14px);
   }
   button:disabled {
     opacity: 0.5;

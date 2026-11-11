@@ -448,7 +448,7 @@ fn update(app: &AppHandle) {
     let s = app.state::<AppState>().settings.read().unwrap().clone();
     let Some(readings) = readings(app, &s) else { return };
     let now = chrono::Utc::now().timestamp_millis();
-    let timer = if s.cache_menubar || (s.notify.enabled && s.notify.cache) {
+    let timer = if s.cache_timer && (s.cache_menubar || (s.notify.enabled && s.notify.cache)) {
         tracker_core::insights::cache_timer(&app.state::<AppState>().db(), now).ok().flatten()
     } else {
         None

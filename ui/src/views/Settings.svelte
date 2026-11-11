@@ -360,17 +360,50 @@
     <div><span>{t('limits.mode')}</span><div class="subtle small">{t('limits.mode.help')}</div></div>
     <Segmented label={t('limits.mode')} value={s.limit_display} options={[{ value: 'used', label: t('limits.mode.used') }, { value: 'remaining', label: t('limits.mode.remaining') }]} onchange={(v) => saveSettings({ limit_display: v })} />
   </div>
-  <div class="item">
-    <div><span>{t('settings.router')}</span><div class="subtle small">{t('settings.router.help')}</div></div>
-    <Toggle checked={s.account_router} label={t('settings.router')} onchange={(v) => saveSettings({ account_router: v })} />
+  <div class="bundle">
+    <div class="item">
+      <div><span>{t('settings.router')}</span><div class="subtle small">{t('settings.router.help')}</div></div>
+      <Toggle checked={s.account_router} label={t('settings.router')} onchange={(v) => saveSettings({ account_router: v })} />
+    </div>
+    {#if s.account_router}
+      <div class="choices">
+        <div class="choice">
+          <span class="glyph"><Icon name="limits" size={16} /></span>
+          <span class="label">{t('settings.router.page')}</span>
+          <Toggle small checked={s.router_page} label="{t('settings.router')}: {t('settings.router.page')}" onchange={(v) => saveSettings({ router_page: v })} />
+        </div>
+        <div class="choice">
+          <span class="glyph"><Icon name="bell" size={16} /></span>
+          <span class="label">{t('settings.router.notify')}{#if !s.notify.enabled}<span class="subtle small">{t('settings.notifyOff')}</span>{/if}</span>
+          <Toggle small checked={s.notify.route} disabled={!s.notify.enabled} label="{t('settings.router')}: {t('settings.router.notify')}" onchange={(v) => saveNotify({ route: v })} />
+        </div>
+      </div>
+    {/if}
   </div>
-  <div class="item">
-    <div><span>{t('settings.cacheWidget')}</span><div class="subtle small">{t('settings.cacheWidget.help')}</div></div>
-    <Toggle checked={s.cache_widget} label={t('settings.cacheWidget')} onchange={(v) => saveSettings({ cache_widget: v })} />
-  </div>
-  <div class="item">
-    <div><span>{t('settings.cacheMenubar')}</span><div class="subtle small">{t('settings.cacheMenubar.help')}</div></div>
-    <Toggle checked={s.cache_menubar} label={t('settings.cacheMenubar')} onchange={(v) => saveSettings({ cache_menubar: v })} />
+  <div class="bundle">
+    <div class="item">
+      <div><span>{t('settings.cacheTimer')}</span><div class="subtle small">{t('settings.cacheTimer.help')}</div></div>
+      <Toggle checked={s.cache_timer} label={t('settings.cacheTimer')} onchange={(v) => saveSettings({ cache_timer: v })} />
+    </div>
+    {#if s.cache_timer}
+      <div class="choices">
+        <div class="choice">
+          <span class="glyph"><Icon name="widget" size={16} /></span>
+          <span class="label">{t('settings.cacheTimer.widget')}</span>
+          <Toggle small checked={s.cache_widget} label="{t('settings.cacheTimer')}: {t('settings.cacheTimer.widget')}" onchange={(v) => saveSettings({ cache_widget: v })} />
+        </div>
+        <div class="choice">
+          <span class="glyph"><Icon name="menubar" size={16} /></span>
+          <span class="label">{t('settings.cacheTimer.menubar')}<span class="subtle small">{t('settings.cacheTimer.menubar.help')}</span></span>
+          <Toggle small checked={s.cache_menubar} label="{t('settings.cacheTimer')}: {t('settings.cacheTimer.menubar')}" onchange={(v) => saveSettings({ cache_menubar: v })} />
+        </div>
+        <div class="choice">
+          <span class="glyph"><Icon name="bell" size={16} /></span>
+          <span class="label">{t('settings.cacheTimer.notify')}<span class="subtle small">{s.notify.enabled ? t('settings.cacheTimer.notify.help') : t('settings.notifyOff')}</span></span>
+          <Toggle small checked={s.notify.cache} disabled={!s.notify.enabled} label="{t('settings.cacheTimer')}: {t('settings.cacheTimer.notify')}" onchange={(v) => saveNotify({ cache: v })} />
+        </div>
+      </div>
+    {/if}
   </div>
   <div class="item">
     <div><span>{t(autostartKey)}</span><div class="subtle small">{t('settings.autostart.help')}</div></div>
@@ -433,10 +466,6 @@
       <Toggle checked={s.notify.full} label={t('settings.notify.full')} onchange={(v) => saveNotify({ full: v })} />
     </div>
     <div class="item">
-      <div><span>{t('settings.notify.route')}</span><div class="subtle small">{t('settings.notify.route.help')}</div></div>
-      <Toggle checked={s.notify.route} label={t('settings.notify.route')} onchange={(v) => saveNotify({ route: v })} />
-    </div>
-    <div class="item">
       <span>{t('settings.notify.reset')}</span>
       <Toggle checked={s.notify.reset} label={t('settings.notify.reset')} onchange={(v) => saveNotify({ reset: v })} />
     </div>
@@ -457,10 +486,6 @@
     <div class="item">
       <div><span>{t('settings.notify.signIn')}</span><div class="subtle small">{t('settings.notify.signIn.help')}</div></div>
       <Toggle checked={s.notify.sign_in} label={t('settings.notify.signIn')} onchange={(v) => saveNotify({ sign_in: v })} />
-    </div>
-    <div class="item">
-      <div><span>{t('settings.notify.cache')}</span><div class="subtle small">{t('settings.notify.cache.help')}</div></div>
-      <Toggle checked={s.notify.cache} label={t('settings.notify.cache')} onchange={(v) => saveNotify({ cache: v })} />
     </div>
     <div class="item">
       <div>
@@ -794,6 +819,55 @@
   }
   .item:last-child {
     border-bottom: 0;
+  }
+  /* a switch and the places it shows, in a panel under it */
+  .bundle {
+    border-bottom: 0.5px solid var(--hairline);
+  }
+  .bundle > .item {
+    border-bottom: 0;
+  }
+  .choices {
+    margin: -2px 0 14px;
+    background: var(--surface-2);
+    border: 0.5px solid var(--hairline);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .choice {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+  }
+  .choice + .choice::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 54px;
+    right: 0;
+    height: 0.5px;
+    background: var(--hairline);
+  }
+  .glyph {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: var(--surface-hover);
+    color: var(--ink-2);
+  }
+  .choice .label {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 13px;
   }
   .tints {
     flex: none;

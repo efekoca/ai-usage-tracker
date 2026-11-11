@@ -607,10 +607,15 @@ pub struct Settings {
     /// Follows the price list on the repository's main branch between releases; only that file is
     /// downloaded and nothing is sent.
     pub price_updates: bool,
-    /// The Limits page suggests another Claude or Codex account when the one in use is full or has
-    /// clearly less room.
+    /// Suggests another Claude or Codex account when the one in use is full or has clearly less
+    /// room; `router_page` and `notify.route` pick where.
     pub account_router: bool,
-    /// How long Claude Code's prompt cache has left after the last request, in the widget.
+    /// The suggestion on the Limits page.
+    pub router_page: bool,
+    /// How long Claude Code's prompt cache has left after the last request; `cache_widget`,
+    /// `cache_menubar` and `notify.cache` pick where.
+    pub cache_timer: bool,
+    /// The time left in the widget.
     pub cache_widget: bool,
     /// The same in minutes, next to the tray icon and in its tooltip.
     pub cache_menubar: bool,
@@ -709,6 +714,8 @@ impl Default for Settings {
             update_check: true,
             price_updates: true,
             account_router: true,
+            router_page: true,
+            cache_timer: true,
             cache_widget: true,
             cache_menubar: true,
             provider_colors: Default::default(),
