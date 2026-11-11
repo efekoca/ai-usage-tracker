@@ -19,6 +19,8 @@ const ocMissing = scenario.get('opencode') === 'missing'
 const platform = scenario.get('platform') ?? 'windows'
 // ?accounts=2: two Codex and two Claude accounts, the second one in use, plus requests of no known account
 const twoAccounts = scenario.get('accounts') === '2'
+// ?timeline=parallel: four subagents working at once, then a long pause and a cache written again
+const parallelTimeline = scenario.get('timeline') === 'parallel'
 // ?early=1: a Claude week that started again days early (another account's limit)
 const early = scenario.get('early') === '1'
 const ACCOUNT_A = '3f9c1a7e52b0d846'
@@ -276,7 +278,30 @@ function allLimits(): LimitView[] {
 }
 
 /** A working session: context grows, a pause lets the cache lapse, a subagent runs, the context is compacted. */
+function mockParallelTimeline(from: number) {
+  const requests: TimelineRequest[] = []
+  const pauseMs = (2 * 60 + 55) * 60e3
+  const push = (ts: number, context: number, thread: string | null, rewritten = 0) => {
+    const write = rewritten ? Math.round(context * 0.9) : 2_000
+    const read = Math.max(0, context - write - 300)
+    requests.push({ ts_ms: ts, model: 'claude-fable-5-2', agent: thread ? 'general-purpose' : null, thread, context, input: 300, cache_read: read, cache_write: write, output: 800, cost_usd: (read * 0.2 + write * 10 + 300 * 8 + 800 * 40) / 1e6, rewritten, rewrite_extra_usd: rewritten ? rewritten * 9.8e-6 : null, pause_ms: rewritten ? pauseMs : null, compacted: false, compacted_from: null })
+  }
+  let ts = from
+  for (let i = 0; i < 6; i++) push((ts += 9_000), 90_000 + i * 2_000, null)
+  for (let i = 0; i < 200; i++) {
+    const k = i % 4
+    const thread = i % 17 === 0 || (k === 3 && i > 120) ? null : `t${k + 1}`
+    push((ts += 5_500), 40_000 + i * 1_050 + k * 4_000, thread)
+  }
+  push((ts += pauseMs), 160_000, null, 150_000)
+  for (let i = 0; i < 14; i++) push((ts += 8_000), 165_000 + i * 6_000, null)
+  const names = ['Read', 'Edit', 'Bash', 'Grep']
+  const calls = requests.filter((_, i) => i % 2 === 0).map((r, k) => ({ ts_ms: r.ts_ms + 2_000, name: names[k % 4], agent: r.agent, failed: k % 23 === 7 ? true : false }))
+  return { requests, calls, calls_hidden: false }
+}
+
 function mockTimeline(from: number, to: number) {
+  if (parallelTimeline) return mockParallelTimeline(from)
   const n = 46
   const span = Math.max(to - from, 40 * 60e3)
   const requests: TimelineRequest[] = []

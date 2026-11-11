@@ -86,6 +86,14 @@ jobs:
 
       - name: Linux system libraries
         run: |
+          # the runner's Azure mirror is sometimes unreachable; Ubuntu's own archive has the same packages
+          if ! curl -fsI --max-time 20 -o /dev/null "http://azure.archive.ubuntu.com/ubuntu/dists/$(. /etc/os-release && echo "$VERSION_CODENAME")/InRelease"; then
+            echo "::warning::azure.archive.ubuntu.com is unreachable, using archive.ubuntu.com"
+            # the runner lists its mirrors in apt-mirrors.txt, the Azure one first
+            for f in /etc/apt/apt-mirrors.txt /etc/apt/sources.list; do
+              if [ -f "$f" ]; then sudo sed -i 's/azure\.archive\.ubuntu\.com/archive.ubuntu.com/g' "$f"; fi
+            done
+          fi
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev file
 

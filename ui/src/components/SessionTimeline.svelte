@@ -51,6 +51,16 @@
   const sub = (r: TimelineRequest) => !!r.agent || !!r.thread
   const agentOf = (r: TimelineRequest) => r.agent ?? 'subagent'
 
+  const family = getComputedStyle(document.body).fontFamily
+  let pen: CanvasRenderingContext2D | null = null
+  /** A label's width in the chart's 11 px type. */
+  function textW(s: string, weight: number): number {
+    pen ??= document.createElement('canvas').getContext('2d')
+    if (!pen) return s.length * 6.5
+    pen.font = `${weight} 11px ${family}`
+    return pen.measureText(s).width
+  }
+
   const geo = $derived.by(() => {
     const pauses = new Set(reqs.map((r, i) => (i > 0 && r.ts_ms - reqs[i - 1].ts_ms >= PAUSE_MS ? i : -1)).filter((i) => i > 0))
     const plotW = Math.max(0, width - L)
@@ -86,20 +96,32 @@
 
   const grid = $derived([1, 2, 3].map((k) => ({ y: BASE - hgt(scale.step * k) + 0.5, label: fmtCompact(scale.step * k) })))
 
-  const breaks = $derived(
-    geo.pauses.map((i) => {
+  /** A pause's length sits in the time row under its gap, which is too narrow to hold it. */
+  const breaks = $derived.by(() => {
+    let end = -Infinity
+    return geo.pauses.map((i) => {
       const from = geo.xs[i - 1] + geo.bw
-      return { x: from + 2, w: Math.max(0, geo.xs[i] - from - 4), cx: (from + geo.xs[i]) / 2, label: geo.gap >= 30 ? fmtDuration(reqs[i].ts_ms - reqs[i - 1].ts_ms) : '' }
-    }),
-  )
+      const cx = (from + geo.xs[i]) / 2
+      let label = geo.gap >= 30 ? fmtDuration(reqs[i].ts_ms - reqs[i - 1].ts_ms) : ''
+      const half = label ? textW(label, 400) / 2 : 0
+      const x = Math.min(Math.max(cx, L + half), width - half)
+      if (label && x - half < end + 8) label = ''
+      if (label) end = x + half
+      return { x: from + 2, w: Math.max(0, geo.xs[i] - from - 4), cx: x, half, label }
+    })
+  })
 
   const ticks = $derived.by(() => {
     if (!n) return []
+    const taken = breaks.filter((b) => b.label).map((b) => [b.cx - b.half - 8, b.cx + b.half + 8])
     const out: { x: number; label: string }[] = []
     for (const i of [...new Set([0, 1, 2, 3, 4, 5].map((k) => Math.round((k * (n - 1)) / 5)))]) {
       const x = geo.xs[i] + geo.bw / 2
       if (out.length && x - out[out.length - 1].x < 64) continue
-      out.push({ x, label: fmtClock(reqs[i].ts_ms) })
+      const label = fmtClock(reqs[i].ts_ms)
+      const half = textW(label, 400) / 2
+      if (taken.some(([a, b]) => x + half > a && x - half < b)) continue
+      out.push({ x, label })
     }
     return out
   })
@@ -133,14 +155,62 @@
     })
     return out
   })
-  const brackets = $derived(
-    runs.map((run) => {
-      const a = geo.xs[run.idx[0]]
-      const b = geo.xs[run.idx[run.idx.length - 1]] + geo.bw
-      const y = Math.max(14, Math.min(...run.idx.map((i) => BASE - hgt(reqs[i].context))) - 14)
-      return { d: `M${a} ${y + 5}V${y}H${b}V${y + 5}`, x: (a + b) / 2, y: y - 7, label: b - a >= 110 ? t('timeline.agentRun', { n: run.idx.length }) : '' }
-    }),
-  )
+  /** Runs that overlap share one bracket: subagents working at once interleave their requests. */
+  const groups = $derived.by(() => {
+    const spans = runs
+      .map((run) => ({ a: geo.xs[run.idx[0]], b: geo.xs[run.idx[run.idx.length - 1]] + geo.bw, runs: 1, n: run.idx.length }))
+      .sort((p, q) => p.a - q.a)
+    const out: typeof spans = []
+    for (const s of spans) {
+      const g = out[out.length - 1]
+      if (g && s.a <= g.b + 4) {
+        g.b = Math.max(g.b, s.b)
+        g.runs++
+        g.n += s.n
+      } else out.push({ ...s })
+    }
+    return out
+  })
+
+  /** Every label sits above the columns and the labels placed before it, so none overlap; the chart grows upward when they need the room. */
+  const layout = $derived.by(() => {
+    const w = Math.ceil(width) + 2
+    const sky = new Array<number>(w).fill(BASE)
+    const cols = (x0: number, x1: number) => [Math.max(0, Math.floor(x0)), Math.min(w - 1, Math.ceil(x1))]
+    const floor = (x0: number, x1: number) => {
+      const [p, q] = cols(x0, x1)
+      let m = BASE
+      for (let x = p; x <= q; x++) m = Math.min(m, sky[x])
+      return m
+    }
+    const raise = (x0: number, x1: number, y: number) => {
+      const [p, q] = cols(x0, x1)
+      for (let x = p; x <= q; x++) sky[x] = Math.min(sky[x], y)
+    }
+    const CAP = 11
+    reqs.forEach((r, i) => raise(geo.xs[i], geo.xs[i] + geo.bw, BASE - Math.max(1, hgt(r.context))))
+    // a note points at one column, so it goes nearest to it
+    const placedNotes = notes.map((note) => {
+      const lw = textW(note.text, 500)
+      const x0 = note.anchor === 'start' ? note.x : note.anchor === 'end' ? note.x - lw : note.x - lw / 2
+      const y = Math.min(note.top - 20, floor(x0 - 3, x0 + lw + 3) - 6)
+      raise(x0 - 3, x0 + lw + 3, y - CAP)
+      raise(note.x - 1, note.x + 1, y)
+      return { ...note, y }
+    })
+    const placedBrackets = groups.map((g) => {
+      const label = g.runs > 1 ? t('timeline.agentRuns', { k: g.runs, n: g.n }) : t('timeline.agentRun', { n: g.n })
+      const lw = textW(label, 500)
+      const cx = (g.a + g.b) / 2
+      const y = floor(g.a, g.b) - 10
+      raise(g.a, g.b, y)
+      const shown = g.b - g.a >= lw + 8
+      const ly = shown ? Math.min(y - 6, floor(cx - lw / 2 - 3, cx + lw / 2 + 3) - 4) : y
+      if (shown) raise(cx - lw / 2 - 3, cx + lw / 2 + 3, ly - CAP)
+      return { d: `M${g.a} ${y + 5}V${y}H${g.b}V${y + 5}`, x: cx, y: ly, label: shown ? label : '' }
+    })
+    return { notes: placedNotes, brackets: placedBrackets, lift: Math.max(0, Math.ceil(4 - Math.min(...sky))) }
+  })
 
   /** The request each call belongs to: the last one sent before it. */
   function slotOf(ms: number): number {
@@ -224,7 +294,7 @@
   const tip = $derived.by(() => {
     if (hover === null || !hr) return null
     const cx = geo.xs[hover] + geo.bw / 2
-    const top = BASE - Math.max(1, hgt(hr.context))
+    const top = BASE - Math.max(1, hgt(hr.context)) + layout.lift
     const above = top - 14 - tipH
     // above the column when it fits, else beside it
     const left = above >= 0 ? Math.min(Math.max(cx - 106, 0), width - 212) : cx + 16 + 212 <= width ? cx + 16 : cx - 16 - 212
@@ -305,12 +375,13 @@
       onblur={() => (hover = null)}
     >
       {#if width}
-        <svg {width} height={calls.length ? H : BASE + 26} role="img" aria-label={t('timeline.aria', { n: fmtInt(n), max: fmtCompact(maxContext) })}>
+        <svg {width} height={(calls.length ? H : BASE + 26) + layout.lift} role="img" aria-label={t('timeline.aria', { n: fmtInt(n), max: fmtCompact(maxContext) })}>
+          <g transform="translate(0 {layout.lift})">
           {#each grid as g, k (k)}
             <line class="grid" x1={L} x2={width} y1={g.y} y2={g.y} />
             <text class="axis" x="0" y={g.y + 3.5}>{g.label}</text>
           {/each}
-          {#each brackets as b, i (i)}
+          {#each layout.brackets as b, i (i)}
             <path class="bracket" d={b.d} />
             {#if b.label}<text class="bracket-label" x={b.x} y={b.y} text-anchor="middle">{b.label}</text>{/if}
           {/each}
@@ -320,14 +391,14 @@
               {#if b.cap}<path class="write" d={b.cap} />{/if}
             </g>
           {/each}
-          {#each notes as note (note.x)}
-            <line class="note-line {note.cls}" x1={note.x} x2={note.x} y1={note.top - 14} y2={note.top - 4} />
-            <text class="note {note.cls}" x={note.x} y={note.top - 20} text-anchor={note.anchor}>{note.text}</text>
+          {#each layout.notes as note (note.x)}
+            <line class="note-line {note.cls}" x1={note.x} x2={note.x} y1={note.y + 6} y2={note.top - 4} />
+            <text class="note {note.cls}" x={note.x} y={note.y} text-anchor={note.anchor}>{note.text}</text>
           {/each}
           <line class="baseline" x1={L} x2={width} y1={BASE + 0.5} y2={BASE + 0.5} />
           {#each breaks as b, k (k)}
             <rect class="break" x={b.x} y={BASE - 1} width={b.w} height="3" />
-            {#if b.label}<text class="axis" x={b.cx} y={BASE - 8} text-anchor="middle">{b.label}</text>{/if}
+            {#if b.label}<text class="axis" x={b.cx} y={BASE + 20} text-anchor="middle">{b.label}</text>{/if}
           {/each}
           {#each ticks as tk (tk.x)}
             <text class="axis" x={tk.x} y={BASE + 20} text-anchor="middle">{tk.label}</text>
@@ -339,6 +410,7 @@
             {/each}
           {/if}
           <rect class="hit" x={L} y="0" width={Math.max(0, width - L)} height={BASE} role="presentation" onpointermove={move} onpointerleave={() => (hover = null)} />
+          </g>
         </svg>
         {#if tip && hr}
           <div class="tip" style:left="{tip.left}px" style:top="{tip.top}px" bind:clientHeight={tipH}>
