@@ -94,6 +94,8 @@ const settings: Settings = {
   update_check: true,
   price_updates: true,
   account_router: true,
+  router_page: true,
+  cache_timer: true,
   cache_widget: true,
   cache_menubar: true,
   provider_colors: {},
@@ -824,7 +826,7 @@ export function installMock() {
           return null
         case 'get_widget_data': {
           const per = (tok: number, cost: number) => ({ tokens: tok, cost_usd: cost, has_unpriced: false, tools: [{ tool: 'claude_code', tokens: tok * 0.75, cost_usd: cost * 0.83, has_unpriced: false }, { tool: 'codex', tokens: tok * 0.15, cost_usd: cost * 0.12, has_unpriced: false }, { tool: 'antigravity', tokens: tok * 0.07, cost_usd: cost * 0.03, has_unpriced: false }, ...(ocMissing ? [] : [{ tool: 'opencode', tokens: tok * 0.03, cost_usd: cost * 0.02, has_unpriced: false }])] })
-          return { today: per(18_400_000, 12.84), days7: per(96_000_000, 71.3), month1: per(402_000_000, 288.1), limits: limits().map((l) => ({ provider: l.provider, limit_id: l.limit_id, window: l.window, used_pct: l.used_pct, state: l.state, accuracy: l.accuracy, resets_at: l.resets_at, observed_ms: l.observed_ms, account: l.account, active: l.active, blocked: l.blocked })), providers: ['anthropic', 'openai', 'google'], opencode: !ocMissing, accounts: knownAccounts(), updated_ms: Date.now() - 60000, cache: settings.cache_widget && scenario.get('cache') !== '0' ? { expires_ms: Date.now() + 192_000, ttl_ms: 300_000 } : null }
+          return { today: per(18_400_000, 12.84), days7: per(96_000_000, 71.3), month1: per(402_000_000, 288.1), limits: limits().map((l) => ({ provider: l.provider, limit_id: l.limit_id, window: l.window, used_pct: l.used_pct, state: l.state, accuracy: l.accuracy, resets_at: l.resets_at, observed_ms: l.observed_ms, account: l.account, active: l.active, blocked: l.blocked })), providers: ['anthropic', 'openai', 'google'], opencode: !ocMissing, accounts: knownAccounts(), updated_ms: Date.now() - 60000, cache: settings.cache_timer && settings.cache_widget && scenario.get('cache') !== '0' ? { expires_ms: Date.now() + 192_000, ttl_ms: 300_000 } : null }
         }
         case 'capture_status':
           return { claude_poll: settings.capture.claude_poll, claude: { binary: claudeMode === 'missing' ? null : 'C:/claude.exe', last_ok_ms: claudeMode ? null : Date.now() - 40000, last_error: claudeMode === 'nologin' ? 'claude_no_plan_limits' : claudeMode === 'missing' ? 'claude_not_found' : null }, claude_candidates_found: claudeMode !== 'missing', codex_poll: settings.capture.codex_poll, codex: { binary: codexMissing ? null : 'C:/codex.exe', last_ok_ms: codexMissing ? null : Date.now() - 120000, last_error: codexMissing ? 'codex_not_found' : codexOut ? 'codex_not_signed_in' : null }, codex_candidates_found: !codexMissing, antigravity_poll: settings.capture.antigravity_poll, antigravity: { binary: agyMissing ? null : 'C:/Users/you/AppData/Local/agy/bin/agy.exe', last_ok_ms: agyMissing ? null : Date.now() - 90000, last_error: agyMissing ? 'agy_not_found' : agyOut ? 'agy_not_signed_in' : null }, antigravity_candidates_found: !agyMissing, statusline: settings.capture.statusline, statusline_file: 'C:\\Users\\you\\.claude\\settings.json', statusline_chained: false, statusline_last_ms: Date.now() - 30000, otel: settings.capture.otel, otel_port: 43180, otel_listening: settings.capture.otel, otel_events: 42, otel_last_ms: Date.now() - 5000, otel_error: null, settings_file: 'C:\\Users\\you\\.claude\\settings.json' }

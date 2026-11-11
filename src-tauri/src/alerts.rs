@@ -121,7 +121,7 @@ pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading], cache: 
     }
     let f = crate::tray::format(s, &s.tray);
     // which account to switch to is worked out only when the account in use fills
-    let routes = if n.route && alerts.iter().any(|a| matches!(a, Alert::Full { .. })) {
+    let routes = if s.account_router && n.route && alerts.iter().any(|a| matches!(a, Alert::Full { .. })) {
         crate::commands::routes(&app.state::<crate::state::AppState>()).unwrap_or_default()
     } else {
         Vec::new()
@@ -155,7 +155,7 @@ pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading], cache: 
         log::info!("sign-in notification: {}", p.as_str());
         send(app, &format!("signin-{}", p.as_str()), &title, &body, |_| {});
     }
-    if let Some(minutes) = cache.filter(|_| n.cache) {
+    if let Some(minutes) = cache.filter(|_| s.cache_timer && n.cache) {
         let (title, body) = cache_text(minutes, f.tr);
         log::info!("cache notification");
         send(app, "cache", &title, &body, |_| {});

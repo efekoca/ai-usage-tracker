@@ -502,9 +502,11 @@ export interface Settings {
   update_check: boolean
   /** Follows the price list on the app's repository between releases. */
   price_updates: boolean
-  /** The Limits page suggests another Claude or Codex account when the one in use is full or has clearly less room. */
+  /** Suggests another Claude or Codex account when the one in use is full or has clearly less room; `router_page` and `notify.route` pick where. */
   account_router: boolean
-  /** Claude Code's cache time left in the widget. */
+  router_page: boolean
+  /** Claude Code's cache time left; `cache_widget`, `cache_menubar` and `notify.cache` pick where. */
+  cache_timer: boolean
   cache_widget: boolean
   /** The same in minutes next to the tray icon and in its tooltip. */
   cache_menubar: boolean

@@ -25,7 +25,7 @@
   $effect(() => {
     void app.tick
     void app.limits
-    if (!app.settings?.account_router) {
+    if (!app.settings?.account_router || !app.settings.router_page) {
       routes = []
       return
     }
@@ -144,7 +144,7 @@
     <Icon name="sync" size={16} />
     <span><b>{t('route.title')}</b> {routeText(r)}</span>
     <span class="spacer"></span>
-    <button class="btn ghost small" onclick={() => saveSettings({ account_router: false })}>{t('route.off')}</button>
+    <button class="btn ghost small" onclick={() => saveSettings({ router_page: false })}>{t('route.off')}</button>
   </div>
 {/each}
 {#if plans}

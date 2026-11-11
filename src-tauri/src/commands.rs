@@ -333,7 +333,7 @@ pub struct WidgetData {
     /// Known accounts in order of first use, which numbers the unnamed ones.
     accounts: Vec<KnownAccount>,
     updated_ms: i64,
-    /// While `Settings::cache_widget` is on and the latest Claude Code conversation's cache lasts.
+    /// While the widget shows the cache time left and the latest Claude Code conversation's cache lasts.
     cache: Option<insights::CacheTimer>,
 }
 
@@ -413,7 +413,7 @@ pub async fn get_widget_data(state: State<'_, AppState>) -> Res<WidgetData> {
         providers: provs,
         accounts,
         updated_ms: state.status.lock().unwrap().last_scan_ms.unwrap_or(now),
-        cache: if settings.cache_widget { insights::cache_timer(&store, now).map_err(err)? } else { None },
+        cache: if settings.cache_timer && settings.cache_widget { insights::cache_timer(&store, now).map_err(err)? } else { None },
     })
 }
 
