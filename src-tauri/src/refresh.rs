@@ -89,17 +89,7 @@ fn save(state: &AppState, b: &mut Book) {
 /// Where hooks leave their files: the app's own folder and, on Windows, the private copies of it
 /// that a packaged app (the Claude desktop app) gives the programs it starts.
 fn hook_dirs(state: &AppState) -> Vec<PathBuf> {
-    let dirs = vec![rh::dir(&state.data_dir)];
-    #[cfg(windows)]
-    let dirs = dirs.into_iter().chain(package_copies(&state.data_dir)).collect();
-    dirs
-}
-
-#[cfg(windows)]
-fn package_copies(data_dir: &std::path::Path) -> Vec<PathBuf> {
-    let (Some(folder), Some(local)) = (data_dir.file_name(), data_dir.parent()) else { return Vec::new() };
-    let Ok(entries) = std::fs::read_dir(local.join("Packages")) else { return Vec::new() };
-    entries.flatten().map(|e| rh::dir(&e.path().join("LocalCache").join("Local").join(folder))).filter(|d| d.is_dir()).collect()
+    std::iter::once(state.data_dir.clone()).chain(crate::capture::package_data_dirs(&state.data_dir)).map(|d| rh::dir(&d)).filter(|d| d == &rh::dir(&state.data_dir) || d.is_dir()).collect()
 }
 
 fn waiter_dir<'a>(dirs: &'a [PathBuf], session: &str) -> Option<&'a PathBuf> {
@@ -158,6 +148,7 @@ pub fn annotate(state: &AppState, s: &Settings, caches: &mut [Cache], now: i64) 
         c.refreshing = on_its_way(&b, &c.session_id);
         c.refresh_failed = !c.refreshing && b.failed.get(&c.session_id).is_some_and(|&at| now - at < FAILED_SHOWN_MS);
         c.refreshable = ready && !c.refreshing && waiter_dir(&dirs, &c.session_id).is_some();
+        c.unasked = ready && !c.refreshable && dirs.iter().any(|d| rh::runs_unasked(d, &c.session_id));
         c.auto = ready && auto_for(&b, s, &c.session_id);
         let made: Vec<&Refresh> = b.log.iter().filter(|r| r.done && r.session_id == c.session_id).collect();
         c.refreshes = made.len() as u32;
@@ -205,11 +196,12 @@ fn signal(app: &AppHandle, s: &Settings, c: &Cache, auto: bool) -> Result<(), St
     let state = app.state::<AppState>();
     let dirs = hook_dirs(&state);
     let dir = waiter_dir(&dirs, &c.session_id).ok_or("not_waiting")?;
+    // before the signal: the hook can take it at once, and a refresh counts only from a later take
+    let now = now_ms();
     rh::signal(dir, &c.session_id, message(s)).map_err(|e| e.to_string())?;
     log::info!("cache refresh {}", if auto { "(automatic)" } else { "(by hand)" });
     let mut b = BOOK.lock().unwrap();
     load(&state, &mut b);
-    let now = now_ms();
     b.failed.remove(&c.session_id);
     b.log.push(Refresh { at_ms: now, session_id: c.session_id.clone(), usd: c.refresh_usd, auto, done: false, before_ms: c.expires_ms });
     save(&state, &mut b);
@@ -306,6 +298,7 @@ pub async fn cache_refresh_info(state: State<'_, AppState>) -> Result<RefreshInf
 /// Adds our hook to Claude Code's settings, or brings one already there up to date. A record of a
 /// hook the user took out, or of one in another settings file, is replaced cleanly.
 pub fn install(app: &AppHandle) -> Result<(), String> {
+    let _one_at_a_time = crate::capture::state_lock();
     let state = app.state::<AppState>();
     let s = state.settings.read().unwrap().clone();
     let mut st = cs::read_state(&state.data_dir).map_err(|e| e.to_string())?;
@@ -334,8 +327,12 @@ pub async fn set_cache_refresh(window: WebviewWindow, app: AppHandle, on: bool) 
     if on {
         install(&app)?;
     } else {
+        let guard = crate::capture::state_lock();
         let mut st = cs::read_state(&state.data_dir).map_err(|e| e.to_string())?;
         cs::uninstall_refresh_hook(&mut st, &state.data_dir).map_err(|e| e.to_string())?;
+        drop(guard);
+        // switched by hand for one conversation: gone with the hook too
+        BOOK.lock().unwrap().auto.clear();
         if state.settings.read().unwrap().cache_auto {
             let s = state.update_settings(|s| s.cache_auto = false)?;
             let _ = app.emit("settings-changed", &s);
@@ -364,6 +361,7 @@ pub fn follow_app(state: &AppState) {
         return;
     }
     let Ok(exe) = crate::app_path() else { return };
+    let _one_at_a_time = crate::capture::state_lock();
     let mut st = cs::load_state(&state.data_dir);
     match cs::refresh_refresh_hook(&mut st, &state.data_dir, &crate::capture::cache_hook_command(&exe)) {
         Ok(true) => log::info!("cache refresh hook brought up to date"),

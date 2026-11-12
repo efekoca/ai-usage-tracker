@@ -49,12 +49,16 @@ pub struct OtelChange {
     pub installed_at_ms: i64,
 }
 
-pub const HEADERS_KEY: &str = "OTEL_EXPORTER_OTLP_HEADERS";
+/// Logs only: a header for every signal would also reach a collector of the user's own, and one
+/// of theirs would override ours.
+pub const HEADERS_KEY: &str = "OTEL_EXPORTER_OTLP_LOGS_HEADERS";
+/// Where installs before 1.4 put it.
+const OLD_HEADERS_KEY: &str = "OTEL_EXPORTER_OTLP_HEADERS";
 
 impl OtelChange {
     /// `None` for installs made before tokens existed.
     pub fn token(&self) -> Option<&str> {
-        self.added.get(HEADERS_KEY)?.strip_prefix(super::otlp::AUTH_HEADER)?.strip_prefix('=')
+        self.added.get(HEADERS_KEY).or_else(|| self.added.get(OLD_HEADERS_KEY))?.strip_prefix(super::otlp::AUTH_HEADER)?.strip_prefix('=')
     }
 }
 
@@ -361,8 +365,18 @@ fn event_groups<'a>(doc: &'a mut Map<String, Value>, event: &str) -> Result<&'a 
     }
 }
 
+/// Ours when every hook in it runs our command: a timeout or matcher the user changed since keeps
+/// it ours, a hook of their own added to it does not.
+fn same_group(group: &Value, ours: &Value) -> bool {
+    let commands = |g: &Value| g.get("hooks").and_then(Value::as_array).map(|h| h.iter().map(|x| x.get("command").and_then(Value::as_str).map(str::to_owned)).collect::<Vec<_>>());
+    match (commands(group), commands(ours)) {
+        (Some(a), Some(b)) => !a.is_empty() && a.iter().all(|c| c.is_some() && b.contains(c)),
+        _ => false,
+    }
+}
+
 fn has_group(doc: &Map<String, Value>, event: &str, group: &Value) -> bool {
-    doc.get("hooks").and_then(|h| h.get(event)).and_then(Value::as_array).is_some_and(|a| a.contains(group))
+    doc.get("hooks").and_then(|h| h.get(event)).and_then(Value::as_array).is_some_and(|a| a.iter().any(|g| same_group(g, group)))
 }
 
 /// Drops our events' lists and then `hooks` once nothing is left in them.
@@ -384,7 +398,7 @@ pub fn install_refresh_hook(st: &mut CaptureState, data_dir: &Path, settings_fil
     let also = refresh_hook_others(command);
     for (event, group) in std::iter::once((STOP, &installed)).chain(also.iter().map(|(e, g)| (e.as_str(), g))) {
         let groups = event_groups(&mut doc, event)?;
-        if !groups.contains(group) {
+        if !groups.iter().any(|g| same_group(g, group)) {
             groups.push(group.clone());
         }
     }
@@ -407,7 +421,7 @@ pub fn revert_refresh_hook(change: &RefreshHookChange) -> Result<RevertOutcome, 
         return Ok(RevertOutcome::NothingToDo);
     }
     for (event, group) in &ours {
-        event_groups(&mut doc, event)?.retain(|g| g != *group);
+        event_groups(&mut doc, event)?.retain(|g| !same_group(g, group));
     }
     tidy_hooks(&mut doc, &ours.iter().map(|(e, _)| *e).collect::<Vec<_>>());
     write_doc(&change.settings_file, &doc, &original)?;
@@ -430,11 +444,11 @@ pub fn refresh_refresh_hook(st: &mut CaptureState, data_dir: &Path, command: &st
     for (event, group) in wanted.groups() {
         let groups = event_groups(&mut doc, event)?;
         let mut found = false;
-        for g in groups.iter_mut().filter(|g| before.get(event).is_some_and(|b| **g == **b)) {
+        for g in groups.iter_mut().filter(|g| before.get(event).is_some_and(|b| same_group(g, b))) {
             *g = group.clone();
             found = true;
         }
-        if !found && !groups.contains(group) {
+        if !found && !groups.iter().any(|g| same_group(g, group)) {
             groups.push(group.clone());
         }
     }
@@ -598,6 +612,30 @@ pub fn add_otel_token(st: &mut CaptureState, data_dir: &Path, token: &str) -> Re
     Ok(true)
 }
 
+/// Moves an older install's token header to the logs-only key, while our entries are untouched.
+pub fn logs_only_header(st: &mut CaptureState, data_dir: &Path) -> Result<bool, SettingsError> {
+    let Some(ch) = st.otel.clone().filter(|c| c.added.contains_key(OLD_HEADERS_KEY)) else { return Ok(false) };
+    let (mut doc, original) = read_doc(&ch.settings_file)?;
+    let Some(env) = doc.get_mut("env").and_then(Value::as_object_mut) else { return Ok(false) };
+    let ours = ch.added.iter().all(|(k, v)| env.get(k).and_then(Value::as_str) == Some(v.as_str()));
+    if !ours || env.contains_key(HEADERS_KEY) {
+        return Ok(false);
+    }
+    let mut next = ch.clone();
+    let header = next.added.remove(OLD_HEADERS_KEY).unwrap_or_default();
+    env.remove(OLD_HEADERS_KEY);
+    env.insert(HEADERS_KEY.into(), Value::String(header.clone()));
+    next.added.insert(HEADERS_KEY.into(), header);
+    let before = st.otel.replace(next);
+    let result = save_state(data_dir, st).map_err(SettingsError::from).and_then(|_| write_doc(&ch.settings_file, &doc, &original));
+    if let Err(e) = result {
+        st.otel = before;
+        let _ = save_state(data_dir, st);
+        return Err(e);
+    }
+    Ok(true)
+}
+
 pub fn revert_otel(change: &OtelChange) -> Result<RevertOutcome, SettingsError> {
     let (mut doc, original) = read_doc(&change.settings_file)?;
     let Some(env) = doc.get_mut("env").and_then(Value::as_object_mut) else { return Ok(RevertOutcome::NothingToDo) };
@@ -605,8 +643,13 @@ pub fn revert_otel(change: &OtelChange) -> Result<RevertOutcome, SettingsError> 
     if change.added.iter().any(|(k, v)| env.get(k).is_some_and(|cur| cur.as_str() != Some(v.as_str()))) {
         return Ok(RevertOutcome::LeftUserValue);
     }
+    // telemetry the user set up since needs it switched on
+    let theirs = env.keys().any(|k| is_telemetry_key(k) && !change.added.contains_key(k));
     let mut removed = 0;
     for (k, v) in &change.added {
+        if theirs && k == "CLAUDE_CODE_ENABLE_TELEMETRY" {
+            continue;
+        }
         if env.get(k).and_then(Value::as_str) == Some(v.as_str()) {
             env.remove(k);
             removed += 1;
@@ -843,6 +886,35 @@ mod tests {
     }
 
     #[test]
+    fn an_older_install_moves_its_header_to_logs_only_and_a_users_telemetry_stays_on() {
+        let (_d, file, data) = setup(Some(r#"{"env": {"MY_VAR": "1"}}"#));
+        let mut st = CaptureState::default();
+        install_otel(&mut st, &data, &file, 43180, "tok", 1).unwrap();
+        assert_eq!(read(&file)["env"]["OTEL_EXPORTER_OTLP_LOGS_HEADERS"], "x-aiut-token=tok");
+        assert!(read(&file)["env"].get(OLD_HEADERS_KEY).is_none(), "the user's other signals keep their own headers");
+        // as installed before 1.4
+        let mut doc = read(&file);
+        let header = doc["env"].as_object_mut().unwrap().remove(HEADERS_KEY).unwrap();
+        doc["env"][OLD_HEADERS_KEY] = header.clone();
+        fs::write(&file, doc.to_string()).unwrap();
+        let ch = st.otel.as_mut().unwrap();
+        ch.added.remove(HEADERS_KEY);
+        ch.added.insert(OLD_HEADERS_KEY.into(), header.as_str().unwrap().into());
+        assert_eq!(st.otel.as_ref().unwrap().token(), Some("tok"), "an older install still has its token");
+        assert!(logs_only_header(&mut st, &data).unwrap());
+        assert_eq!(read(&file)["env"][HEADERS_KEY], "x-aiut-token=tok");
+        assert!(read(&file)["env"].get(OLD_HEADERS_KEY).is_none());
+        assert!(!logs_only_header(&mut st, &data).unwrap(), "once is enough");
+
+        // the user set up telemetry of their own meanwhile: the switch stays, our entries go
+        let mut doc = read(&file);
+        doc["env"]["OTEL_METRICS_EXPORTER"] = json!("otlp");
+        fs::write(&file, doc.to_string()).unwrap();
+        assert_eq!(uninstall_otel(&mut st, &data).unwrap(), RevertOutcome::Restored);
+        assert_eq!(read(&file)["env"], json!({"MY_VAR": "1", "OTEL_METRICS_EXPORTER": "otlp", "CLAUDE_CODE_ENABLE_TELEMETRY": "1"}));
+    }
+
+    #[test]
     fn a_failed_revert_keeps_the_record() {
         let (_d, file, data) = setup(None);
         let mut st = CaptureState::default();
@@ -983,6 +1055,26 @@ mod tests {
         let again = install_refresh_hook(&mut st, &data, &file, "aiut --cache-hook", 2).unwrap();
         assert!(refresh_hook_in_place(&again));
         assert_eq!(read(&file)["hooks"]["Stop"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn our_hook_with_a_timeout_the_user_raised_is_still_ours_and_theirs_in_it_stays() {
+        let (_d, file, data) = setup(Some(r#"{"model": "opus"}"#));
+        let mut st = CaptureState::default();
+        let ch = install_refresh_hook(&mut st, &data, &file, "aiut --cache-hook", 1).unwrap();
+        let mut doc = read(&file);
+        doc["hooks"]["Stop"][0]["hooks"][0]["timeout"] = json!(7200);
+        doc["hooks"]["SessionEnd"][0]["matcher"] = json!("");
+        fs::write(&file, doc.to_string()).unwrap();
+        assert!(refresh_hook_in_place(&ch), "a raised timeout or a matcher keeps it ours");
+        // a hook of the user's own put in our group makes it theirs
+        let mut doc = read(&file);
+        doc["hooks"]["UserPromptSubmit"][0]["hooks"].as_array_mut().unwrap().push(json!({"type": "command", "command": "~/mine.sh"}));
+        fs::write(&file, doc.to_string()).unwrap();
+        assert_eq!(uninstall_refresh_hook(&mut st, &data).unwrap(), RevertOutcome::Restored);
+        let after = read(&file);
+        assert_eq!(after["hooks"]["UserPromptSubmit"][0]["hooks"][1]["command"], "~/mine.sh");
+        assert!(after["hooks"].get("Stop").is_none() && after["hooks"].get("SessionEnd").is_none());
     }
 
     #[test]

@@ -36,6 +36,8 @@ pub struct Cache {
     pub refreshing: bool,
     /// The last refresh came to nothing: the cache's time did not move on.
     pub refresh_failed: bool,
+    /// It lets every tool run without asking, so it is never refreshed.
+    pub unasked: bool,
     /// It is refreshed by itself before it runs out.
     pub auto: bool,
     /// Its automatic refreshes stopped: more would cost more than writing the cache again.

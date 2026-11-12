@@ -12,18 +12,23 @@ use crate::model::{claude_account, parse_ts_ms, Accuracy, Tokens, Tool, UsageEve
 use crate::store::Store;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::io::Read;
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub const SOURCE: &str = "claude_otel";
 pub const DEFAULT_PORT: u16 = 43180;
 /// Sent by Claude Code via `OTEL_EXPORTER_OTLP_HEADERS`.
 pub const AUTH_HEADER: &str = "x-aiut-token";
 const MAX_BODY: usize = 16 * 1024 * 1024;
-const MAX_READERS: usize = 4;
+const MAX_HEAD: usize = 16 * 1024;
+/// Connections served at once; more are told to come back later.
+const MAX_CONNECTIONS: usize = 8;
+/// How long one request may take to arrive whole: a sender that stalls is cut off.
+const REQUEST_TIME: Duration = Duration::from_secs(30);
 const POLL: Duration = Duration::from_millis(50);
 
 /// OTLP JSON `AnyValue` → plain JSON (ints may arrive as strings per the OTLP JSON mapping).
@@ -149,7 +154,6 @@ pub struct ReceiverStats {
 }
 
 pub struct Receiver {
-    server: Arc<tiny_http::Server>,
     stop: Arc<AtomicBool>,
     pub port: u16,
     pub stats: Arc<ReceiverStats>,
@@ -157,16 +161,10 @@ pub struct Receiver {
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
-type ReadBody = (tiny_http::Request, Result<Vec<u8>, u16>);
-
-fn reply(code: u16) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
-    tiny_http::Response::from_string("{}")
-        .with_status_code(code)
-        .with_header("Content-Type: application/json".parse::<tiny_http::Header>().unwrap())
-}
-
-fn header<'a>(req: &'a tiny_http::Request, name: &'static str) -> Option<&'a str> {
-    req.headers().iter().find(|h| h.field.equiv(name)).map(|h| h.value.as_str())
+/// A body read whole, and where to send back the status it got.
+struct Batch {
+    body: Vec<u8>,
+    done: mpsc::Sender<u16>,
 }
 
 /// Constant time, so the token cannot be guessed byte by byte from response times.
@@ -174,25 +172,187 @@ fn same_token(given: &str, expected: &str) -> bool {
     given.len() == expected.len() && given.bytes().zip(expected.bytes()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
 }
 
-/// Checks everything that needs no body, so unauthenticated senders never get a reader.
-fn precheck(req: &tiny_http::Request, token: &str) -> Result<(), u16> {
-    if req.method() != &tiny_http::Method::Post {
+/// One connection's bytes, read against a deadline. A minimal HTTP/1.1 reader: the receiver
+/// takes one request per connection and closes it, so nothing is ever drained or kept alive.
+struct Conn {
+    stream: TcpStream,
+    buf: Vec<u8>,
+    deadline: Instant,
+}
+
+impl Conn {
+    /// Reads more bytes; 408 once the deadline passes, 400 when the sender closed.
+    fn fill(&mut self) -> Result<(), u16> {
+        let left = self.deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(408);
+        }
+        let _ = self.stream.set_read_timeout(Some(left));
+        let mut chunk = [0u8; 8192];
+        match self.stream.read(&mut chunk) {
+            Ok(0) => Err(400),
+            Ok(n) => {
+                self.buf.extend_from_slice(&chunk[..n]);
+                Ok(())
+            }
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => Err(408),
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => Ok(()),
+            Err(_) => Err(400),
+        }
+    }
+
+    /// The bytes up to `sep`, which is taken off too; at most `max` of them.
+    fn until(&mut self, sep: &[u8], max: usize, too_long: u16) -> Result<Vec<u8>, u16> {
+        loop {
+            if let Some(i) = self.buf.windows(sep.len()).position(|w| w == sep) {
+                let line = self.buf[..i].to_vec();
+                self.buf.drain(..i + sep.len());
+                return Ok(line);
+            }
+            if self.buf.len() > max {
+                return Err(too_long);
+            }
+            self.fill()?;
+        }
+    }
+
+    fn take(&mut self, n: usize) -> Result<Vec<u8>, u16> {
+        while self.buf.len() < n {
+            self.fill()?;
+        }
+        Ok(self.buf.drain(..n).collect())
+    }
+}
+
+struct Head {
+    method: String,
+    path: String,
+    headers: Vec<(String, String)>,
+}
+
+impl Head {
+    fn get(&self, name: &str) -> Option<&str> {
+        self.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
+    }
+}
+
+fn read_head(c: &mut Conn) -> Result<Head, u16> {
+    let raw = c.until(b"\r\n\r\n", MAX_HEAD, 431)?;
+    let text = std::str::from_utf8(&raw).map_err(|_| 400u16)?;
+    let mut lines = text.split("\r\n");
+    let mut first = lines.next().unwrap_or_default().split(' ');
+    let (Some(method), Some(path), Some(version)) = (first.next(), first.next(), first.next()) else { return Err(400) };
+    if !version.starts_with("HTTP/1.") {
+        return Err(400);
+    }
+    let headers = lines.map(|l| l.split_once(':').map(|(k, v)| (k.trim().to_owned(), v.trim().to_owned())).ok_or(400u16)).collect::<Result<_, _>>()?;
+    Ok(Head { method: method.to_owned(), path: path.to_owned(), headers })
+}
+
+/// Checks everything that needs no body, so unauthenticated senders never get one read.
+/// `Err(200)` takes a request that is not ours (metrics, traces) and drops it.
+fn precheck(h: &Head, token: &str) -> Result<Option<usize>, u16> {
+    if h.method != "POST" {
         return Err(405);
     }
-    if !header(req, AUTH_HEADER).is_some_and(|g| same_token(g, token)) {
+    if !h.get(AUTH_HEADER).is_some_and(|g| same_token(g, token)) {
         return Err(401);
     }
-    if req.url().split('?').next() != Some("/v1/logs") {
-        // metrics/traces are not configured by us; accept and drop
+    if h.path.split('?').next() != Some("/v1/logs") {
         return Err(200);
     }
-    if !header(req, "Content-Type").is_some_and(|v| v.starts_with("application/json")) {
+    if !h.get("Content-Type").is_some_and(|v| v.starts_with("application/json")) {
         return Err(415);
     }
-    if req.body_length().is_some_and(|n| n > MAX_BODY) {
-        return Err(413);
+    let chunked = h.get("Transfer-Encoding").is_some_and(|v| v.eq_ignore_ascii_case("chunked"));
+    match (h.get("Content-Length"), chunked) {
+        // both at once could be read two ways
+        (Some(_), true) => Err(400),
+        (None, true) => Ok(None),
+        (None, false) => Err(411),
+        (Some(n), false) => match n.parse::<u64>() {
+            Ok(n) if n > MAX_BODY as u64 => Err(413),
+            Ok(n) => Ok(Some(n as usize)),
+            Err(_) => Err(400),
+        },
     }
-    Ok(())
+}
+
+fn read_chunked(c: &mut Conn) -> Result<Vec<u8>, u16> {
+    let mut body = Vec::new();
+    loop {
+        let line = c.until(b"\r\n", 1024, 400)?;
+        let size = std::str::from_utf8(&line).ok().and_then(|l| usize::from_str_radix(l.split(';').next().unwrap_or_default().trim(), 16).ok()).ok_or(400u16)?;
+        if size == 0 {
+            // trailers, then the end
+            while !c.until(b"\r\n", 1024, 400)?.is_empty() {}
+            return Ok(body);
+        }
+        if body.len() + size > MAX_BODY {
+            return Err(413);
+        }
+        body.extend(c.take(size)?);
+        if !c.take(2)?.eq(b"\r\n") {
+            return Err(400);
+        }
+    }
+}
+
+fn reason(code: u16) -> &'static str {
+    match code {
+        200 => "OK",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        405 => "Method Not Allowed",
+        408 => "Request Timeout",
+        411 => "Length Required",
+        413 => "Content Too Large",
+        415 => "Unsupported Media Type",
+        431 => "Request Header Fields Too Large",
+        503 => "Service Unavailable",
+        _ => "Internal Server Error",
+    }
+}
+
+fn answer(stream: &mut TcpStream, code: u16) {
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+    let _ = write!(stream, "HTTP/1.1 {code} {}\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}", reason(code));
+    let _ = stream.flush();
+    let _ = stream.shutdown(std::net::Shutdown::Both);
+}
+
+/// The status for one request; a body read whole is stored by the receiver's own thread.
+fn serve(c: &mut Conn, token: &str, st: &ReceiverStats, batches: &mpsc::Sender<Batch>) -> u16 {
+    let head = match read_head(c) {
+        Ok(h) => h,
+        Err(code) => return code,
+    };
+    st.requests.fetch_add(1, Ordering::Relaxed);
+    let length = match precheck(&head, token) {
+        Ok(length) => length,
+        Err(code) => {
+            if code == 401 && st.rejected.fetch_add(1, Ordering::Relaxed) == 0 {
+                log::warn!("otlp receiver: a request without the expected token was refused");
+            }
+            return code;
+        }
+    };
+    if head.get("Expect").is_some_and(|v| v.eq_ignore_ascii_case("100-continue")) {
+        let _ = c.stream.write_all(b"HTTP/1.1 100 Continue\r\n\r\n");
+    }
+    let body = match length {
+        Some(n) => c.take(n),
+        None => read_chunked(c),
+    };
+    let body = match body {
+        Ok(b) => b,
+        Err(code) => return code,
+    };
+    let (done, result) = mpsc::channel();
+    if batches.send(Batch { body, done }).is_err() {
+        return 503;
+    }
+    result.recv().unwrap_or(503)
 }
 
 impl Receiver {
@@ -204,62 +364,50 @@ impl Receiver {
         }
         // opened first: a receiver that cannot store must not listen and leave requests waiting
         let mut store = Store::open(&db_path).map_err(|e| std::io::Error::other(e.to_string()))?;
-        let server = tiny_http::Server::http(("127.0.0.1", port)).map_err(|e| std::io::Error::other(e.to_string()))?;
-        let port = server.server_addr().to_ip().map(|a| a.port()).unwrap_or(port);
-        let server = Arc::new(server);
+        let listener = TcpListener::bind(("127.0.0.1", port))?;
+        let port = listener.local_addr()?.port();
+        // polled, so a stop is seen within POLL
+        listener.set_nonblocking(true)?;
         let stop = Arc::new(AtomicBool::new(false));
         let stats = Arc::new(ReceiverStats::default());
-        let (srv, st, stp, tok) = (server.clone(), stats.clone(), stop.clone(), token.clone());
+        let (st, stp, tok) = (stats.clone(), stop.clone(), token.clone());
         let thread = std::thread::Builder::new().name("otlp-receiver".into()).spawn(move || {
-            // tiny_http has no read deadline, so bodies are read off the serving thread
-            let (done_tx, done_rx) = mpsc::channel::<ReadBody>();
-            let readers = Arc::new(AtomicUsize::new(0));
+            let (batch_tx, batches) = mpsc::channel::<Batch>();
+            let busy = Arc::new(AtomicUsize::new(0));
             while !stp.load(Ordering::SeqCst) {
-                while let Ok((req, body)) = done_rx.try_recv() {
-                    let code = match body {
-                        Ok(body) => store_batch(&mut store, &body, &st, &on_events),
-                        Err(code) => code,
+                loop {
+                    let mut stream = match listener.accept() {
+                        Ok((s, _)) => s,
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                        Err(e) => {
+                            log::warn!("otlp receiver: {e}");
+                            break;
+                        }
                     };
-                    let _ = req.respond(reply(code));
-                }
-                let req = match srv.recv_timeout(POLL) {
-                    Ok(Some(r)) => r,
-                    Ok(None) => continue,
-                    Err(_) => break,
-                };
-                st.requests.fetch_add(1, Ordering::Relaxed);
-                if let Err(code) = precheck(&req, &tok) {
-                    if code == 401 && st.rejected.fetch_add(1, Ordering::Relaxed) == 0 {
-                        log::warn!("otlp receiver: a request without the expected token was refused");
+                    // some systems hand the listener's non-blocking mode on
+                    let _ = stream.set_nonblocking(false);
+                    if busy.load(Ordering::SeqCst) >= MAX_CONNECTIONS {
+                        answer(&mut stream, 503);
+                        continue;
                     }
-                    let _ = req.respond(reply(code));
-                    continue;
+                    busy.fetch_add(1, Ordering::SeqCst);
+                    let (st, tok, tx, held) = (st.clone(), tok.clone(), batch_tx.clone(), busy.clone());
+                    let spawned = std::thread::Builder::new().name("otlp-request".into()).spawn(move || {
+                        let mut c = Conn { stream, buf: Vec::new(), deadline: Instant::now() + REQUEST_TIME };
+                        let code = serve(&mut c, &tok, &st, &tx);
+                        answer(&mut c.stream, code);
+                        held.fetch_sub(1, Ordering::SeqCst);
+                    });
+                    if spawned.is_err() {
+                        busy.fetch_sub(1, Ordering::SeqCst);
+                    }
                 }
-                if readers.load(Ordering::SeqCst) >= MAX_READERS {
-                    let _ = req.respond(reply(503));
-                    continue;
-                }
-                readers.fetch_add(1, Ordering::SeqCst);
-                let (tx, busy) = (done_tx.clone(), readers.clone());
-                let spawned = std::thread::Builder::new().name("otlp-body".into()).spawn(move || {
-                    let mut req = req;
-                    let mut body = Vec::new();
-                    let read = req.as_reader().take(MAX_BODY as u64 + 1).read_to_end(&mut body);
-                    busy.fetch_sub(1, Ordering::SeqCst);
-                    let body = match read {
-                        Err(_) => Err(400),
-                        Ok(_) if body.len() > MAX_BODY => Err(413),
-                        Ok(_) => Ok(body),
-                    };
-                    // after shutdown nobody listens; dropping the request answers it with 500
-                    let _ = tx.send((req, body));
-                });
-                if spawned.is_err() {
-                    readers.fetch_sub(1, Ordering::SeqCst);
+                if let Ok(b) = batches.recv_timeout(POLL) {
+                    let _ = b.done.send(store_batch(&mut store, &b.body, &st, &on_events));
                 }
             }
         })?;
-        Ok(Receiver { server, stop, port, stats, token, thread: Some(thread) })
+        Ok(Receiver { stop, port, stats, token, thread: Some(thread) })
     }
 }
 
@@ -299,7 +447,6 @@ fn store_batch(store: &mut Store, body: &[u8], st: &ReceiverStats, on_events: &i
 impl Drop for Receiver {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
-        self.server.unblock();
         if let Some(t) = self.thread.take() {
             let _ = t.join();
         }
@@ -435,6 +582,70 @@ mod tests {
         assert!(t.elapsed() < Duration::from_secs(2));
         assert_eq!(count(&db), 1);
         drop(stalled);
+    }
+
+    fn send(port: u16, raw: &[u8]) -> String {
+        use std::io::Write;
+        let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        s.write_all(raw).unwrap();
+        let mut out = String::new();
+        let _ = s.read_to_string(&mut out);
+        out
+    }
+
+    #[test]
+    fn a_hostile_length_or_a_missing_body_neither_crashes_nor_holds_the_receiver() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("t.db");
+        let r = Receiver::start(0, db.clone(), "k".into(), |_| {}).unwrap();
+        for length in ["4611686018427387904", "18446744073709551615", "99999999999999999999999"] {
+            let raw = format!("POST /v1/logs HTTP/1.1\r\nContent-Type: application/json\r\nx-aiut-token: k\r\nContent-Length: {length}\r\n\r\n");
+            let got = send(r.port, raw.as_bytes());
+            assert!(got.starts_with("HTTP/1.1 413") || got.starts_with("HTTP/1.1 400"), "{length}: {got}");
+        }
+        // without the token nothing is read, so a body that never comes keeps nothing waiting
+        let t = Instant::now();
+        let got = send(r.port, b"POST /v1/logs HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 5000\r\n\r\n");
+        assert!(got.starts_with("HTTP/1.1 401") && t.elapsed() < Duration::from_secs(2), "{got}");
+        let got = send(r.port, b"GET /v1/logs HTTP/1.1\r\nContent-Length: 5000\r\n\r\n");
+        assert!(got.starts_with("HTTP/1.1 405"), "{got}");
+        let body = sample("req_c", "claude-haiku-4-5", 3).to_string();
+        assert!(post(r.port, "x-aiut-token: k\r\n", &body).starts_with("HTTP/1.1 200"), "still serving");
+        assert_eq!(count(&db), 1);
+    }
+
+    #[test]
+    fn a_chunked_body_is_read_and_too_many_waiting_senders_are_told_to_come_back() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("t.db");
+        let r = Receiver::start(0, db.clone(), "k".into(), |_| {}).unwrap();
+        let body = sample("req_d", "claude-haiku-4-5", 3).to_string();
+        let (a, b) = body.split_at(body.len() / 2);
+        let raw = format!(
+            "POST /v1/logs HTTP/1.1\r\nContent-Type: application/json\r\nx-aiut-token: k\r\nTransfer-Encoding: chunked\r\n\r\n{:x}\r\n{a}\r\n{:x}\r\n{b}\r\n0\r\n\r\n",
+            a.len(),
+            b.len()
+        );
+        assert!(send(r.port, raw.as_bytes()).starts_with("HTTP/1.1 200"));
+        assert_eq!(count(&db), 1);
+
+        let stalled: Vec<_> = (0..MAX_CONNECTIONS)
+            .map(|_| {
+                let mut s = std::net::TcpStream::connect(("127.0.0.1", r.port)).unwrap();
+                s.write_all(b"POST /v1/logs HTTP/1.1\r\n").unwrap();
+                s
+            })
+            .collect();
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(post(r.port, "x-aiut-token: k\r\n", &body).starts_with("HTTP/1.1 503"), "busy: asked to send again later");
+        drop(stalled);
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(post(r.port, "x-aiut-token: k\r\n", &body).starts_with("HTTP/1.1 200"));
+        let t = Instant::now();
+        drop(r);
+        assert!(t.elapsed() < Duration::from_secs(2));
     }
 
     #[test]

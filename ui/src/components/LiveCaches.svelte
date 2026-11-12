@@ -94,7 +94,7 @@
     if (c.refresh_failed) return { text: t('cache.live.failed'), tone: 'bad', auto: false, help: t('cache.live.failed.help') }
     if (c.auto && c.auto_capped) return { text: t('cache.live.autoStopped'), tone: '', auto: true, help: t('cache.live.autoStopped.help') }
     if (c.auto && c.refreshable) return { text: t('cache.live.refreshAt', { at: clockCase(autoAt(c), 'at') }), tone: '', auto: true }
-    return { text: t('cache.live.endsAt', { at: clockCase(c.expires_ms, 'at') }), tone: '', auto: false }
+    return { text: t('cache.live.endsAt', { at: clockCase(c.expires_ms, 'at') }), tone: '', auto: false, help: c.unasked ? t('cache.live.unasked') : undefined }
   }
 
   function untrack(c: LiveCache) {
@@ -102,7 +102,10 @@
     // a list already on its way would bring the row back
     gen++
     caches = caches.filter((x) => x.session_id !== c.session_id)
-    api.dropCache(c.session_id).catch(load)
+    api.dropCache(c.session_id).catch((e) => {
+      showError(c.session_id, e)
+      load()
+    })
   }
 
   const meta = (c: LiveCache) =>
@@ -170,7 +173,7 @@
               <button
                 class="btn go"
                 disabled={c.refreshing || asked.includes(c.session_id) || (!!refresh.info?.installed && !c.refreshable)}
-                title={refresh.info?.installed && !c.refreshable && !c.refreshing ? t('cache.live.notWaiting') : t('cache.live.refresh.help')}
+                title={c.unasked ? t('cache.live.unasked') : refresh.info?.installed && !c.refreshable && !c.refreshing ? t('cache.live.notWaiting') : t('cache.live.refresh.help')}
                 onclick={() => refreshNow(c)}>{t('cache.live.refresh')}</button
               >
               <div class="menu-wrap">
