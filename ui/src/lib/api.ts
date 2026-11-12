@@ -993,7 +993,8 @@ export interface DayDetail {
   sessions: number
   first_ms: number | null
   last_ms: number | null
-  limit_peaks: { provider: Provider; window: string; peak_pct: number; at_ms: number }[]
+  /** `account` is set while a provider has more than one; then each has its own peak. */
+  limit_peaks: { provider: Provider; account: string | null; window: string; peak_pct: number; at_ms: number }[]
 }
 
 export interface HotkeyStatus {

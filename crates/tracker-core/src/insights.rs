@@ -130,7 +130,8 @@ pub fn sessions(store: &Store, book: &PriceBook, range: Range, filter: &Filter) 
             Some(c) => m.cost_usd += c.total(),
             None => m.unpriced = true,
         }
-        if e.request_input > 0 {
+        // an advisor's prompt is its own, not one the conversation sent
+        if e.request_input > 0 && !e.advisor {
             a.max_ctx = a.max_ctx.max(e.request_input);
             a.ctx_sum = a.ctx_sum.saturating_add(e.request_input);
             a.ctx_n += 1;
@@ -304,12 +305,14 @@ pub fn session_timeline(store: &Store, book: &PriceBook, tool: Tool, session_id:
     events.sort_by_key(|e| e.ts_ms);
     let prompt = |e: &EventRow| if e.request_input > 0 { e.request_input } else { e.tokens.input + e.tokens.cache_read + e.tokens.cache_write };
 
+    // captured telemetry also holds helper requests and names no subagent or cache lifetime
+    let logged = |e: &EventRow| e.accuracy != Accuracy::Captured;
     let mut rewritten = vec![0; events.len()];
     let mut pause = vec![None; events.len()];
     if tool.provider() == Some(Provider::Anthropic) {
         // the cache is per conversation and model, as in `tips::cache_rebuilds`
         let mut last: HashMap<(Option<&str>, &str), usize> = HashMap::new();
-        for (i, e) in events.iter().enumerate() {
+        for (i, e) in events.iter().enumerate().filter(|(_, e)| logged(e)) {
             if let Some(&p) = last.get(&(e.thread_id.as_deref(), e.model.as_str())) {
                 rewritten[i] = crate::tips::rewritten_after_pause(&events[p], e).unwrap_or(0);
                 pause[i] = (rewritten[i] > 0).then(|| e.ts_ms - events[p].ts_ms);
@@ -319,8 +322,8 @@ pub fn session_timeline(store: &Store, book: &PriceBook, tool: Tool, session_id:
     }
     let mut compacted_from = vec![None; events.len()];
     let mut before: Option<u64> = None;
-    // a subagent without a name still has its own thread
-    for (i, e) in events.iter().enumerate().filter(|(_, e)| e.agent.is_none() && e.thread_id.is_none() && prompt(e) > 0) {
+    // a subagent without a name still has its own thread; an advisor reads a prompt of its own
+    for (i, e) in events.iter().enumerate().filter(|(_, e)| e.agent.is_none() && e.thread_id.is_none() && !e.advisor && logged(e) && prompt(e) > 0) {
         compacted_from[i] = before.filter(|&b| b >= COMPACT_MIN_PROMPT && prompt(e) * 2 < b);
         before = Some(prompt(e));
     }
@@ -547,13 +550,13 @@ const ONE_HOUR: i64 = 60 * 60_000;
 
 /// Every Claude Code conversation whose cache still lasts, the soonest to run out first. A request
 /// that reads a cache renews it, so it runs out its lifetime after the conversation's last request
-/// that used it; one that wrote both lifetimes loses its five-minute part first. Subagents keep
-/// caches of their own and are left out.
+/// that used it; one that wrote both lifetimes loses its five-minute part first. Subagents and
+/// advisors keep caches of their own and are left out.
 pub fn live_caches(store: &Store, book: &PriceBook, now_ms: i64) -> Result<Vec<LiveCache>> {
     let events = store.events_between(now_ms - ONE_HOUR, now_ms + 1)?;
     let mut sessions: BTreeMap<&str, Vec<&EventRow>> = BTreeMap::new();
     // captured telemetry also holds helper requests and does not tell the two cache lifetimes apart
-    for e in events.iter().filter(|e| e.tool == Tool::ClaudeCode && e.agent.is_none() && e.accuracy != Accuracy::Captured) {
+    for e in events.iter().filter(|e| e.tool == Tool::ClaudeCode && e.agent.is_none() && !e.advisor && e.accuracy != Accuracy::Captured) {
         if let Some(s) = e.session_id.as_deref() {
             sessions.entry(s).or_default().push(e);
         }
@@ -904,16 +907,22 @@ pub fn subagent_cache<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Rang
     // events come sorted by time, so the last one seen ends the run
     let mut runs: HashMap<SessionKey, (SessionKey, i64)> = HashMap::new();
     let mut first = PromptShare::default();
+    // reuse as the Cache page counts it
+    let writers = crate::analytics::cache_writers(events.iter());
+    let add = |t: &mut Totals, e: &EventRow| {
+        let i = input_of(e);
+        t.add_counted(e, book.cost(&i).as_ref(), book.cache_savings(&i).unwrap_or(0.0), writers(e));
+    };
     for e in &events {
         let a = acc
             .entry((e.tool.as_str(), e.agent.clone()))
             .or_insert_with(|| Acc { totals: Totals::default(), runs: Default::default(), first: PromptShare::default() });
-        add(&mut a.totals, book, e);
+        add(&mut a.totals, e);
         if e.agent.is_none() {
-            add(&mut main, book, e);
+            add(&mut main, e);
             continue;
         }
-        add(&mut subagents, book, e);
+        add(&mut subagents, e);
         let Some(thread) = e.thread_id.as_deref() else { continue };
         if a.runs.insert(thread.to_owned()) {
             a.first.add(&e.tokens);
@@ -924,8 +933,9 @@ pub fn subagent_cache<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Rang
         }
     }
 
+    // the conversation's own requests; an advisor's prompt and cache are its own
     let mut main_by_session: HashMap<SessionKey, Vec<&EventRow>> = HashMap::new();
-    for e in events.iter().filter(|e| e.agent.is_none()) {
+    for e in events.iter().filter(|e| e.agent.is_none() && !e.advisor) {
         if let Some(s) = e.session_id.as_deref() {
             main_by_session.entry((e.tool.as_str(), s)).or_default().push(e);
         }
@@ -997,6 +1007,9 @@ pub struct HourPoint {
 #[derive(Debug, Clone, Serialize)]
 pub struct DayLimitPeak {
     pub provider: Provider,
+    /// The account, while the provider has more than one (as in [`crate::analytics::LimitView`]);
+    /// `None` there for readings no evidence ties to one.
+    pub account: Option<String>,
     pub window: String,
     pub peak_pct: f64,
     pub at_ms: i64,
@@ -1036,13 +1049,16 @@ pub fn day_detail<Tz: TimeZone>(store: &Store, book: &PriceBook, date: NaiveDate
     let (mut by_tool, mut by_model, mut by_project) = (HashMap::new(), HashMap::new(), HashMap::new());
     let mut sessions = std::collections::HashSet::new();
     let (mut first, mut last) = (None::<i64>, None::<i64>);
-    for e in store.events_between(from, to)?.iter().filter(|e| filter.matches(e)) {
+    let events: Vec<EventRow> = store.events_between(from, to)?.into_iter().filter(|e| filter.matches(e)).collect();
+    let writers = crate::analytics::cache_writers(events.iter());
+    for e in &events {
         let i = input_of(e);
         let cost = book.cost(&i);
         let saving = book.cache_savings(&i).unwrap_or(0.0);
-        totals.add_event(e, cost.as_ref(), saving);
+        let reuse = writers(e);
+        totals.add_counted(e, cost.as_ref(), saving, reuse);
         let put = |m: &mut HashMap<String, (String, bool, Totals)>, key: String, label: String, hidden: bool| {
-            m.entry(key).or_insert_with(|| (label, hidden, Totals::default())).2.add_event(e, cost.as_ref(), saving);
+            m.entry(key).or_insert_with(|| (label, hidden, Totals::default())).2.add_counted(e, cost.as_ref(), saving, reuse);
         };
         put(&mut by_tool, e.tool.as_str().into(), e.tool.as_str().into(), false);
         put(&mut by_model, e.model.clone(), e.model.clone(), false);
@@ -1063,13 +1079,20 @@ pub fn day_detail<Tz: TimeZone>(store: &Store, book: &PriceBook, date: NaiveDate
         first = Some(first.map_or(e.ts_ms, |f| f.min(e.ts_ms)));
         last = Some(last.map_or(e.ts_ms, |l| l.max(e.ts_ms)));
     }
-    let mut peaks: BTreeMap<(Provider, String), (f64, i64)> = BTreeMap::new();
+    // each account has its own windows; a provider with one account keeps one peak per window
+    let several = crate::accounts::several(store)?;
+    let mut peaks: BTreeMap<(Provider, Option<String>, String), (f64, i64)> = BTreeMap::new();
     for (s, owner) in store.owned_limits_between(from, to)? {
         let (Some(u), true) = (s.used_pct, s.window == "five_hour" || s.window == "seven_day") else { continue };
         if !filter.accounts.is_empty() && !filter.accounts.contains(&crate::analytics::account_key(s.provider, owner.as_deref())) {
             continue;
         }
-        let p = peaks.entry((s.provider, s.window.clone())).or_insert((u, s.ts_ms));
+        let account = match several.contains(&s.provider) {
+            true if owner.as_deref() == Some(crate::accounts::NAMELESS) => continue,
+            true => owner,
+            false => None,
+        };
+        let p = peaks.entry((s.provider, account, s.window.clone())).or_insert((u, s.ts_ms));
         if u > p.0 {
             *p = (u, s.ts_ms);
         }
@@ -1084,7 +1107,7 @@ pub fn day_detail<Tz: TimeZone>(store: &Store, book: &PriceBook, date: NaiveDate
         sessions: sessions.len() as u64,
         first_ms: first,
         last_ms: last,
-        limit_peaks: peaks.into_iter().map(|((provider, window), (peak_pct, at_ms))| DayLimitPeak { provider, window, peak_pct, at_ms }).collect(),
+        limit_peaks: peaks.into_iter().map(|((provider, account, window), (peak_pct, at_ms))| DayLimitPeak { provider, account, window, peak_pct, at_ms }).collect(),
     })
 }
 

@@ -19,6 +19,8 @@ pub enum Tool {
 }
 
 impl Tool {
+    pub const ALL: [Tool; 5] = [Tool::ClaudeCode, Tool::Codex, Tool::ClaudeDesktop, Tool::Antigravity, Tool::OpenCode];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Tool::ClaudeCode => "claude_code",
@@ -309,7 +311,7 @@ mod tests {
 
     #[test]
     fn tools_and_providers_reach_the_ui_under_the_names_the_archive_uses() {
-        for t in [Tool::ClaudeCode, Tool::Codex, Tool::ClaudeDesktop, Tool::Antigravity, Tool::OpenCode] {
+        for t in Tool::ALL {
             // a new tool fails to compile here until it is listed above
             match t {
                 Tool::ClaudeCode | Tool::Codex | Tool::ClaudeDesktop | Tool::Antigravity | Tool::OpenCode => {}

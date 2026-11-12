@@ -102,18 +102,26 @@ fn read(path: &Path, state: &Value) -> Result<ParseOutput, Box<dyn std::error::E
         }
     }
     let before = state.get("sessions").and_then(Value::as_object);
+    // a tool call's outcome is written into its part in place, which none of the marks above
+    // sees: a session read with a call still running also keeps when its parts last changed,
+    // looked up through the session's index for those sessions only
+    let updated = |id: &str| -> rusqlite::Result<i64> {
+        conn.query_row("SELECT COALESCE(max(time_updated), 0) FROM part WHERE session_id = ?1", [id], |r| r.get(0))
+    };
     let mut seen = Map::new();
-    let mut changed = Vec::new();
+    let mut changed: Vec<(String, String)> = Vec::new();
     for (id, (parts, messages, newest)) in marks {
-        let mark = Value::from(format!("{parts}:{messages}:{newest}"));
-        if sessions.get(&id).is_some_and(|s| s.counted) && before.and_then(|b| b.get(&id)) != Some(&mark) {
-            changed.push(id.clone());
+        let was = before.and_then(|b| b.get(&id)).and_then(Value::as_str);
+        let base = format!("{parts}:{messages}:{newest}");
+        let mark = if was.is_some_and(|w| w.matches(':').count() == 3) { format!("{base}:{}", updated(&id)?) } else { base.clone() };
+        if sessions.get(&id).is_some_and(|s| s.counted) && was != Some(mark.as_str()) {
+            changed.push((id.clone(), base));
         }
-        seen.insert(id, mark);
+        seen.insert(id, Value::from(mark));
     }
 
-    changed.sort_by_key(|id| (sessions.get(id).map_or(0, |s| s.created), id.clone()));
-    for id in &changed {
+    changed.sort_by_key(|(id, _)| (sessions.get(id).map_or(0, |s| s.created), id.clone()));
+    for (id, base) in &changed {
         let (events, calls) = (out.events.len(), out.tool_calls.len());
         // one session that cannot be read leaves the others counted; it is tried again next time,
         // as is one with a damaged record, which may be whole by then
@@ -124,8 +132,11 @@ fn read(path: &Path, state: &Value) -> Result<ParseOutput, Box<dyn std::error::E
                 out.warn(format!("session {id} was skipped: {e}"));
                 seen.remove(id);
             }
-            Ok(0) => {}
-            Ok(damaged) => {
+            Ok((0, running)) => {
+                let mark = if running { format!("{base}:{}", updated(id)?) } else { base.clone() };
+                seen.insert(id.clone(), Value::from(mark));
+            }
+            Ok((damaged, _)) => {
                 out.warn(format!("{damaged} damaged records in session {id} were skipped"));
                 seen.remove(id);
             }
@@ -136,8 +147,9 @@ fn read(path: &Path, state: &Value) -> Result<ParseOutput, Box<dyn std::error::E
     Ok(out)
 }
 
-/// Returns how many of the session's records are not valid JSON and were left out.
-fn read_session(conn: &Connection, sessions: &HashMap<String, Session>, id: &str, out: &mut ParseOutput) -> rusqlite::Result<usize> {
+/// Returns how many of the session's records are not valid JSON and were left out, and whether a
+/// tool call has no outcome yet.
+fn read_session(conn: &Connection, sessions: &HashMap<String, Session>, id: &str, out: &mut ParseOutput) -> rusqlite::Result<(usize, bool)> {
     let damaged: usize = conn.query_row(
         "SELECT count(*) FROM part p JOIN message m ON m.id = p.message_id WHERE p.session_id = ?1 AND NOT (json_valid(p.data) AND json_valid(m.data))",
         [id],
@@ -183,6 +195,7 @@ fn read_session(conn: &Connection, sessions: &HashMap<String, Session>, id: &str
             call: r.get(18)?,
         })
     })?;
+    let mut running = false;
     for row in rows {
         out.lines_total += 1;
         // a field of an unexpected type damages only its own row
@@ -193,6 +206,7 @@ fn read_session(conn: &Connection, sessions: &HashMap<String, Session>, id: &str
             }
             r => r?,
         };
+        running |= row.kind.as_deref() == Some("tool") && !matches!(row.status.as_deref(), Some("completed" | "error"));
         // a subagent's requests count toward the session that started it, as for Claude Code
         let agent = if child {
             row.agent.clone().filter(|a| !a.is_empty()).or(Some("subagent".into()))
@@ -276,7 +290,7 @@ fn read_session(conn: &Connection, sessions: &HashMap<String, Session>, id: &str
             _ => {}
         }
     }
-    Ok(damaged)
+    Ok((damaged, running))
 }
 
 struct Row {
@@ -367,6 +381,15 @@ pub fn normalize_model(model: &str) -> String {
         s = s.char_indices().map(|(i, c)| if c == '.' && i > 0 && b[i - 1].is_ascii_digit() && b.get(i + 1).is_some_and(u8::is_ascii_digit) { '-' } else { c }).collect();
     }
     s
+}
+
+/// A Claude model under its Bedrock or Vertex name (`us.anthropic.claude-opus-5-v1:0`, an ARN
+/// ending in one, `claude-sonnet-4-5@20250929`) → Anthropic's id; `None` for any other spelling.
+pub fn cloud_claude_id(model: &str) -> Option<String> {
+    let last = model.trim().rsplit('/').next().unwrap_or_default();
+    let cloud = last.contains('@') || bedrock_base(last).is_some();
+    let id = normalize_model(last);
+    (cloud && id.starts_with("claude-")).then_some(id)
 }
 
 /// Bedrock ids: `[region.]vendor.model[-vN[:M]]` → `model`.

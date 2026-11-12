@@ -18,7 +18,7 @@
 //! The live database is never opened: it is copied with its WAL to a private temporary folder
 //! and read there, so Antigravity's files are not touched or locked.
 
-use super::ParseOutput;
+use super::{ParseOutput, SubagentLink};
 use crate::model::{Accuracy, Tokens, Tool, ToolCall, UsageEvent};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use std::collections::HashMap;
@@ -251,24 +251,23 @@ pub fn client_for(data_dir: &Path) -> String {
     if name.is_empty() { "antigravity".into() } else { name.replace('-', "_") }
 }
 
-/// Parent conversation and agent name of a subagent conversation, from the surface's summary DB.
-fn subagent_of(data_dir: &Path, id: &str) -> Option<(String, Option<String>)> {
+/// Every subagent conversation the surface's summary DB names, as (conversation, parent, agent).
+fn subagents(data_dir: &Path) -> Vec<(String, String, Option<String>)> {
     let db = data_dir.join("conversation_summaries.db");
     if !db.is_file() {
-        return None;
+        return Vec::new();
     }
-    let snap = Snapshot::open(&db).ok()?;
-    let (parent, agent): (String, String) = snap
-        .conn()
-        .query_row(
-            "SELECT parent_conversation_id, agent_name FROM conversation_summaries WHERE conversation_id = ?1",
-            [id],
-            |r| Ok((r.get::<_, Option<String>>(0)?.unwrap_or_default(), r.get::<_, Option<String>>(1)?.unwrap_or_default())),
-        )
-        .optional()
-        .ok()??;
-    let parent = parent.trim();
-    (!parent.is_empty() && parent != id).then(|| (parent.to_owned(), Some(agent.trim().to_owned()).filter(|a| !a.is_empty())))
+    let Ok(snap) = Snapshot::open(&db) else { return Vec::new() };
+    let Ok(mut q) = snap.conn().prepare("SELECT conversation_id, parent_conversation_id, agent_name FROM conversation_summaries") else { return Vec::new() };
+    let text = |r: &rusqlite::Row, i: usize| r.get::<_, Option<String>>(i);
+    let Ok(rows) = q.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?))) else { return Vec::new() };
+    // a row with a field of another type names nothing
+    rows.filter_map(Result::ok)
+        .filter_map(|(id, parent, agent)| {
+            let (id, parent) = (id?.trim().to_owned(), parent?.trim().to_owned());
+            (!id.is_empty() && !parent.is_empty() && parent != id).then(|| (id, parent, agent.map(|a| a.trim().to_owned()).filter(|a| !a.is_empty())))
+        })
+        .collect()
 }
 
 fn has_table(conn: &Connection, name: &str) -> bool {
@@ -313,10 +312,17 @@ fn read(path: &Path) -> Result<ParseOutput, Box<dyn std::error::Error + Send + S
             created_ms = msg(&b, 2).and_then(timestamp_ms);
         }
     }
-    let (session, thread, agent) = match subagent_of(data_dir, &id) {
-        Some((parent, agent)) => (parent, Some(id.clone()), agent),
-        None => (id.clone(), None, None),
-    };
+    // the summary can be written after a subagent's own database was last read, so every read
+    // also links the surface's other subagents
+    let mut session = id.clone();
+    let (mut thread, mut agent) = (None, None);
+    for (conversation, parent, name) in subagents(data_dir) {
+        if conversation == id {
+            (session, thread, agent) = (parent, Some(id.clone()), name);
+        } else {
+            out.links.push(SubagentLink { events: format!("ag:{conversation}:"), calls: format!("agt:{conversation}:"), thread: conversation, session: parent, agent: name });
+        }
+    }
 
     let mut steps: HashMap<i64, Step> = HashMap::new();
     {

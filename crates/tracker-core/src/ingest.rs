@@ -158,6 +158,7 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<FileR
         }
         tx.upsert_tool_calls(&out.tool_calls).map_err(|e| e.to_string())?;
         tx.apply_tool_results(&out.tool_results).map_err(|e| e.to_string())?;
+        tx.link_subagents(&out.links).map_err(|e| e.to_string())?;
         read.warning_count += out.warning_count;
         for w in out.warnings {
             if read.warnings.len() >= MAX_WARNING_DETAILS {

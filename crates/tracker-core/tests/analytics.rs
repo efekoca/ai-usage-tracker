@@ -877,8 +877,15 @@ fn cache_reuse_counts_codex_models_that_log_their_writes() {
         tx.commit().unwrap();
     }
     let range = Range { from_ms: now - 86_400_000, to_ms: now };
-    let r = report(&store, &PriceBook::default_book(), range, &Filter::default(), &tz(), i64::MAX).unwrap();
+    let book = PriceBook::default_book();
+    let r = report(&store, &book, range, &Filter::default(), &tz(), i64::MAX).unwrap();
     assert_eq!((r.totals.cache_read_with_writes, r.totals.cache_write_with_reads), (4_000, 1_000));
+    // the day and the subagent page count reuse as the Cache page does
+    let day = tracker_core::insights::day_detail(&store, &book, chrono::NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(), &Filter::default(), &tz()).unwrap();
+    let sub = tracker_core::insights::subagent_cache(&store, &book, range, &Filter::default(), &tz()).unwrap();
+    for t in [&day.totals, &sub.main, &sub.rows[0].totals] {
+        assert_eq!((t.cache_read_with_writes, t.cache_write_with_reads), (4_000, 1_000));
+    }
 }
 
 #[test]
@@ -1067,4 +1074,44 @@ fn a_window_a_newer_full_read_leaves_out_goes_once_it_is_over() {
         tx.commit().unwrap();
     }
     assert_eq!(opus(&store), None, "Claude no longer reports it");
+}
+
+const HOUR: i64 = 3_600_000;
+
+#[test]
+fn days_keep_their_local_bounds_across_a_daylight_saving_change() {
+    use chrono::NaiveDate;
+    use tracker_core::analytics::start_of_day;
+    let cet = Dst::europe();
+    let d = |m, day| NaiveDate::from_ymd_opt(2026, m, day).unwrap();
+    let local = |m, day, h, mi| cet.with_ymd_and_hms(2026, m, day, h, mi, 0).earliest().unwrap().timestamp_millis();
+    assert_eq!(start_of_day(&cet, d(3, 30)) - start_of_day(&cet, d(3, 29)), 23 * HOUR);
+    assert_eq!(start_of_day(&cet, d(10, 26)) - start_of_day(&cet, d(10, 25)), 25 * HOUR);
+
+    // today until 09:00 compares with yesterday until 09:00, however long yesterday was
+    let spring = Range { from_ms: start_of_day(&cet, d(3, 30)), to_ms: start_of_day(&cet, d(3, 31)) };
+    assert_eq!(spring.previous_until(&cet, local(3, 30, 9, 0)), Range { from_ms: start_of_day(&cet, d(3, 29)), to_ms: local(3, 29, 9, 0) });
+    let autumn = Range { from_ms: start_of_day(&cet, d(10, 26)), to_ms: start_of_day(&cet, d(10, 27)) };
+    assert_eq!(autumn.previous_until(&cet, local(10, 26, 9, 0)).to_ms, local(10, 25, 9, 0));
+    assert_eq!(autumn.previous_until(&cet, local(10, 26, 2, 30)).to_ms, ms(2026, 10, 25, 0, 30), "02:30 came twice that day: the first");
+    assert_eq!(spring.previous_until(&cet, local(3, 30, 2, 30)).to_ms, start_of_day(&cet, d(3, 29)) + 150 * 60_000, "02:30 never came: as long after midnight");
+
+    // a week across the change is seven local days, and so is the one before it
+    let week = period_range(Period::Days7, &cet, local(3, 31, 12, 0), None);
+    assert_eq!((week.from_ms, week.to_ms), (start_of_day(&cet, d(3, 25)), start_of_day(&cet, d(4, 1))));
+    assert_eq!(week.previous(&cet), Range { from_ms: start_of_day(&cet, d(3, 18)), to_ms: week.from_ms });
+}
+
+#[test]
+fn a_day_whose_midnight_is_skipped_starts_when_its_clock_does() {
+    use chrono::NaiveDate;
+    use tracker_core::analytics::{local_date, start_of_day};
+    // clocks go from 24:00 at UTC-4 to 01:00 at UTC-3, as in Chile
+    let zone = Dst { std: -4 * 3600, dst: -3 * 3600, start: 1_788_667_200, end: 1_806_807_600 };
+    let day = NaiveDate::from_ymd_opt(2026, 9, 6).unwrap();
+    assert_eq!(start_of_day(&zone, day), ms(2026, 9, 6, 4, 0), "01:00, the first time that day has");
+    assert_eq!(local_date(&zone, start_of_day(&zone, day)), day);
+    assert_eq!(local_date(&zone, start_of_day(&zone, day) - 1), day.pred_opt().unwrap());
+    let today = period_range(Period::Today, &zone, ms(2026, 9, 6, 15, 0), None);
+    assert_eq!((today.from_ms, today.to_ms - today.from_ms), (ms(2026, 9, 6, 4, 0), 23 * HOUR));
 }

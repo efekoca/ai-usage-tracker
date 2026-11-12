@@ -299,16 +299,24 @@ pub(crate) const NOT_SUPERSEDED: &str = "NOT (u.accuracy = 'captured' AND u.requ
         SELECT 1 FROM usage_event x WHERE x.request_id = u.request_id AND x.accuracy = 'exact'))";
 
 /// The columns `event_row` reads, in its order.
-const ROW_COLUMNS: &str = "ts_ms, tool, client, model, project_id, session_id, input, cache_read, cache_write,
-    cache_write_1h, output, reasoning, request_input, web_search, speed, inference_geo, accuracy,
-    branch, agent, thread_id, owner";
+fn row_columns() -> String {
+    format!(
+        "ts_ms, tool, client, model, project_id, session_id, input, cache_read, cache_write,
+         cache_write_1h, output, reasoning, request_input, web_search, speed, inference_geo, accuracy,
+         branch, agent, thread_id, owner, {}",
+        crate::sources::claude_code::ADVISOR_SQL
+    )
+}
 
-fn event_row(r: &rusqlite::Row) -> rusqlite::Result<EventRow> {
+/// A row of a tool or provider this version does not know (a newer version's, or a backup's) is
+/// left out instead of being counted as another one's; it stays stored for a version that knows it.
+fn event_row(r: &rusqlite::Row) -> rusqlite::Result<Option<EventRow>> {
     let tool: String = r.get(1)?;
+    let Some(tool) = Tool::parse(&tool) else { return Ok(None) };
     let acc: String = r.get(16)?;
-    Ok(EventRow {
+    Ok(Some(EventRow {
         ts_ms: r.get(0)?,
-        tool: Tool::parse(&tool).unwrap_or(Tool::ClaudeCode),
+        tool,
         client: r.get(2)?,
         model: r.get(3)?,
         project_id: r.get(4)?,
@@ -330,7 +338,8 @@ fn event_row(r: &rusqlite::Row) -> rusqlite::Result<EventRow> {
         agent: r.get(18)?,
         thread_id: r.get(19)?,
         account: r.get(20)?,
-    })
+        advisor: r.get(21)?,
+    }))
 }
 
 const EVENT_COLUMNS: &str = "key, ts_ms, tool, client, model, project_id, session_id, input, cache_read, cache_write,
@@ -400,6 +409,9 @@ pub struct EventRow {
     pub thread_id: Option<String>,
     /// Codex: the account [`crate::accounts::resolve`] assigned; `None` when it is not known.
     pub account: Option<String>,
+    /// Claude: the model a request consulted as its advisor. Priced as its own model, but no
+    /// request of the conversation: its cache and context are the advisor's.
+    pub advisor: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -491,16 +503,16 @@ impl Store {
 
     /// Events with `from_ms <= ts < to_ms`.
     pub fn events_between(&self, from_ms: i64, to_ms: i64) -> Result<Vec<EventRow>> {
-        let mut st = self.conn.prepare_cached(&format!("SELECT {ROW_COLUMNS} FROM usage_event u WHERE ts_ms >= ?1 AND ts_ms < ?2 AND {NOT_SUPERSEDED} ORDER BY ts_ms"))?;
+        let mut st = self.conn.prepare_cached(&format!("SELECT {} FROM usage_event u WHERE ts_ms >= ?1 AND ts_ms < ?2 AND {NOT_SUPERSEDED} ORDER BY ts_ms", row_columns()))?;
         let rows = st.query_map(params![from_ms, to_ms], event_row)?;
-        rows.collect()
+        rows.filter_map(Result::transpose).collect()
     }
 
     /// Every event of one session, of any tool, oldest first.
     pub fn session_events(&self, session_id: &str) -> Result<Vec<EventRow>> {
-        let mut st = self.conn.prepare_cached(&format!("SELECT {ROW_COLUMNS} FROM usage_event u WHERE session_id = ?1 AND {NOT_SUPERSEDED} ORDER BY ts_ms"))?;
+        let mut st = self.conn.prepare_cached(&format!("SELECT {} FROM usage_event u WHERE session_id = ?1 AND {NOT_SUPERSEDED} ORDER BY ts_ms", row_columns()))?;
         let rows = st.query_map(params![session_id], event_row)?;
-        rows.collect()
+        rows.filter_map(Result::transpose).collect()
     }
 
     /// When a session's first request was made.
@@ -511,13 +523,16 @@ impl Store {
 
     /// What the latest main-conversation request of a session that wrote to `model`'s cache wrote,
     /// up to `to_ms`: all written tokens, and of them those kept for an hour. Each model has a cache
-    /// of its own. Captured telemetry is left out, as it does not tell the two lifetimes apart.
+    /// of its own. Captured telemetry is left out, as it does not tell the two lifetimes apart, and
+    /// so are advisors, whose cache is their own.
     pub fn last_cache_write(&self, session_id: &str, model: &str, to_ms: i64) -> Result<Option<(u64, u64)>> {
-        let mut st = self.conn.prepare_cached(
+        let mut st = self.conn.prepare_cached(&format!(
             "SELECT cache_write, cache_write_1h FROM usage_event
              WHERE session_id = ?1 AND tool = ?2 AND model = ?3 AND ts_ms <= ?4 AND cache_write > 0 AND agent IS NULL AND accuracy <> 'captured'
+               AND NOT {}
              ORDER BY ts_ms DESC LIMIT 1",
-        )?;
+            crate::sources::claude_code::ADVISOR_SQL
+        ))?;
         st.query_row(params![session_id, Tool::ClaudeCode.as_str(), model, to_ms], |r| Ok((r.get::<_, i64>(0)?.max(0) as u64, r.get::<_, i64>(1)?.max(0) as u64))).optional()
     }
 
@@ -536,21 +551,26 @@ impl Store {
         )?;
         let rows = st.query_map(params![from_ms, to_ms], |r| {
             let tool: String = r.get(1)?;
-            Ok(ToolCallRow {
+            let Some(tool) = Tool::parse(&tool) else { return Ok(None) };
+            Ok(Some(ToolCallRow {
                 ts_ms: r.get(0)?,
-                tool: Tool::parse(&tool).unwrap_or(Tool::ClaudeCode),
+                tool,
                 session_id: r.get(2)?,
                 project_id: r.get(3)?,
                 agent: r.get(4)?,
                 name: r.get(5)?,
                 failed: r.get::<_, Option<i64>>(6)?.map(|f| f != 0),
-            })
+            }))
         })?;
-        rows.collect()
+        rows.filter_map(Result::transpose).collect()
     }
 
     pub fn first_event_ms(&self) -> Result<Option<i64>> {
-        self.conn.query_row("SELECT MIN(ts_ms) FROM usage_event", [], |r| r.get(0))
+        let known: Vec<String> = Tool::ALL.iter().map(|t| format!("'{}'", t.as_str())).collect();
+        // `+tool` keeps SQLite on the time index, which it walks from the start to the first match,
+        // instead of reading every row through the tool index and sorting them
+        let sql = format!("SELECT ts_ms FROM usage_event WHERE +tool IN ({}) ORDER BY ts_ms LIMIT 1", known.join(", "));
+        self.conn.query_row(&sql, [], |r| r.get(0)).optional()
     }
 
     pub fn projects(&self) -> Result<Vec<ProjectRow>> {
@@ -584,8 +604,8 @@ impl Store {
               AND s.limit_id = g.limit_id AND s.window = g.window AND s.ts_ms = g.m
              ORDER BY s.provider, s.window",
         )?;
-        let rows = st.query_map([latest_accepted_ms()], |r| Ok((row_to_limit(r)?, r.get(12)?)))?;
-        rows.collect()
+        let rows = st.query_map([latest_accepted_ms()], owned_limit)?;
+        rows.filter_map(Result::transpose).collect()
     }
 
     pub fn limits_between(&self, from_ms: i64, to_ms: i64) -> Result<Vec<LimitSnapshot>> {
@@ -597,8 +617,8 @@ impl Store {
             "SELECT ts_ms, provider, tool, account, limit_id, window, used_pct, resets_at, status, plan, source, accuracy, owner
              FROM limit_snapshot WHERE ts_ms >= ?1 AND ts_ms < ?2 ORDER BY ts_ms",
         )?;
-        let rows = st.query_map(params![from_ms, to_ms], |r| Ok((row_to_limit(r)?, r.get(12)?)))?;
-        rows.collect()
+        let rows = st.query_map(params![from_ms, to_ms], owned_limit)?;
+        rows.filter_map(Result::transpose).collect()
     }
 
     /// Notes which account (a digest; `None` when signed out or not on a plan) the Claude config
@@ -869,15 +889,22 @@ fn canonical(path: &Path) -> Option<String> {
     Some(full.to_string_lossy().to_lowercase())
 }
 
-fn row_to_limit(r: &rusqlite::Row<'_>) -> rusqlite::Result<LimitSnapshot> {
+/// A reading with its owner; `None` for one of a provider or tool this version does not know.
+fn owned_limit(r: &rusqlite::Row<'_>) -> rusqlite::Result<Option<(LimitSnapshot, Option<String>)>> {
+    let Some(s) = row_to_limit(r)? else { return Ok(None) };
+    Ok(Some((s, r.get(12)?)))
+}
+
+fn row_to_limit(r: &rusqlite::Row<'_>) -> rusqlite::Result<Option<LimitSnapshot>> {
     let provider: String = r.get(1)?;
     let tool: String = r.get(2)?;
+    let (Some(provider), Some(tool)) = (Provider::parse(&provider), Tool::parse(&tool)) else { return Ok(None) };
     let account: String = r.get(3)?;
     let acc: String = r.get(11)?;
-    Ok(LimitSnapshot {
+    Ok(Some(LimitSnapshot {
         ts_ms: r.get(0)?,
-        provider: Provider::parse(&provider).unwrap_or(Provider::Anthropic),
-        tool: Tool::parse(&tool).unwrap_or(Tool::ClaudeCode),
+        provider,
+        tool,
         account: (!account.is_empty()).then_some(account),
         limit_id: r.get(4)?,
         window: r.get(5)?,
@@ -887,7 +914,7 @@ fn row_to_limit(r: &rusqlite::Row<'_>) -> rusqlite::Result<LimitSnapshot> {
         plan: r.get(9)?,
         source: r.get(10)?,
         accuracy: Accuracy::parse(&acc),
-    })
+    }))
 }
 
 pub struct StoreTx<'a> {
@@ -1003,8 +1030,10 @@ impl StoreTx<'_> {
         Ok(())
     }
 
-    /// Removes what an older version stored for a file now read again under new keys.
-    pub fn drop_stale(&mut self, events: &[String], calls: &[String], limits: &[(String, i64)]) -> Result<()> {
+    /// Removes what an older version stored for a file now read again under new keys. A reading
+    /// goes only while it still holds what the file gave it: another log's reading of the same
+    /// moment stays.
+    pub fn drop_stale(&mut self, events: &[String], calls: &[String], limits: &[LimitSnapshot]) -> Result<()> {
         let mut e = self.tx.prepare_cached("DELETE FROM usage_event WHERE key = ?1")?;
         for k in events {
             e.execute([k])?;
@@ -1013,9 +1042,13 @@ impl StoreTx<'_> {
         for k in calls {
             c.execute([k])?;
         }
-        let mut l = self.tx.prepare_cached("DELETE FROM limit_snapshot WHERE source = ?1 AND ts_ms = ?2")?;
-        for (source, ts) in limits {
-            l.execute(params![source, ts])?;
+        // a version that did not read `resets_in_seconds` stored no reset time
+        let mut l = self.tx.prepare_cached(
+            "DELETE FROM limit_snapshot WHERE source = ?1 AND account = ?2 AND limit_id = ?3 AND window = ?4 AND ts_ms = ?5
+               AND used_pct IS ?6 AND (resets_at IS ?7 OR resets_at IS NULL)",
+        )?;
+        for s in limits {
+            l.execute(params![s.source, s.account.clone().unwrap_or_default(), s.limit_id, s.window, s.ts_ms, s.used_pct, s.resets_at_ms().map(|ms| ms / 1000)])?;
         }
         Ok(())
     }
@@ -1043,6 +1076,22 @@ impl StoreTx<'_> {
             earliest = Some(earliest.map_or(ts, |e: i64| e.min(ts)));
         }
         Ok(earliest)
+    }
+
+    /// A subagent's records stored as a session of their own, before the source named the session
+    /// that started it, join that session as in a read that knew it.
+    pub fn link_subagents(&mut self, links: &[crate::sources::SubagentLink]) -> Result<()> {
+        // keys of one prefix sort between it and the same text ending in ';', the next character after ':'
+        let upper = |p: &str| format!("{};", p.strip_suffix(':').unwrap_or(p));
+        let mut events = self.tx.prepare_cached(
+            "UPDATE usage_event SET session_id = ?3, thread_id = ?4, agent = COALESCE(agent, ?5) WHERE key >= ?1 AND key < ?2 AND thread_id IS NULL",
+        )?;
+        let mut calls = self.tx.prepare_cached("UPDATE tool_call SET session_id = ?3, agent = COALESCE(agent, ?5) WHERE key >= ?1 AND key < ?2 AND session_id IS ?4")?;
+        for l in links {
+            events.execute(params![l.events, upper(&l.events), l.session, l.thread, l.agent])?;
+            calls.execute(params![l.calls, upper(&l.calls), l.session, l.thread, l.agent])?;
+        }
+        Ok(())
     }
 
     /// Records outcomes that arrived after their calls (Claude's `tool_result` lines).

@@ -250,6 +250,33 @@ fn a_tool_call_read_while_its_input_streams_counts_once() {
     assert_eq!(edits[0].failed, Some(false));
 }
 
+#[test]
+fn a_tool_call_whose_outcome_is_written_in_place_is_read_again() {
+    let db = opencode();
+    let mut store = Store::open_in_memory().unwrap();
+    step(&db.conn, 11, MAIN, "anthropic", "claude-sonnet-4-5", "build", [10, 20, 0, 30, 0], "");
+    tool(&db.conn, 11, MAIN, "bash", "running");
+    run(&mut store, &db.env);
+    let bash = |store: &Store| store.tool_calls_between(0, i64::MAX).unwrap().into_iter().find(|c| c.name == "bash").map(|c| c.failed);
+    assert_eq!(bash(&store), Some(None), "still running");
+
+    // aborted: the part turns to an error and nothing is added to the session
+    db.conn
+        .execute("UPDATE part SET data = replace(data, '\"running\"', '\"error\"'), time_updated = time_updated + 5000 WHERE id = 'prt_011_tool'", [])
+        .unwrap();
+    assert!(run(&mut store, &db.env).records_written > 0);
+    assert_eq!(bash(&store), Some(Some(true)));
+    assert_eq!(events(&store).len(), 5, "its request once");
+
+    // once every call has its outcome the session is looked at by its counts alone again
+    db.conn.execute("UPDATE part SET time_updated = time_updated + 5000 WHERE id = 'prt_011_tool'", []).unwrap();
+    assert_eq!(run(&mut store, &db.env).records_written, 0);
+
+    // the update time is looked up through the session's index, not by reading every part
+    let plan: String = db.conn.query_row("EXPLAIN QUERY PLAN SELECT COALESCE(max(time_updated), 0) FROM part WHERE session_id = ?1", [MAIN], |r| r.get(3)).unwrap();
+    assert!(plan.contains("part_session_idx"), "{plan}");
+}
+
 /// What OpenCode's `Session.fork` does: every message and part copied under new ids into a new
 /// top-level session, their data (times, model, step tokens, call ids) unchanged.
 fn fork(c: &Connection, from: &str, to: &str, version: &str) {
