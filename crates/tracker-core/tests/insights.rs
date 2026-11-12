@@ -140,6 +140,10 @@ fn a_cache_keeps_the_lifetime_it_was_last_written_with() {
         // a 5-minute cache that ran out, then written again whole for an hour
         ev("x1", t, Tool::ClaudeCode, opus, Some("x"), "/p", 10, 0, 5).cache_write(1_000, 0),
         ev("x2", t + 10 * MIN, Tool::ClaudeCode, opus, Some("x"), "/p", 10, 0, 5).cache_write(2_000, 2_000),
+        // the model switched and back: each model has a cache of its own
+        ev("m1", t + 55 * MIN, Tool::ClaudeCode, opus, Some("m"), "/p", 10, 0, 5).cache_write(1_000, 0),
+        ev("m2", t + 56 * MIN, Tool::ClaudeCode, "claude-sonnet-5-5", Some("m"), "/p", 10, 0, 5).cache_write(2_000, 2_000),
+        ev("m3", t + 57 * MIN, Tool::ClaudeCode, opus, Some("m"), "/p", 10, 1_000, 5),
         // a helper request seen only through telemetry, which cannot tell the lifetimes apart
         ev("c1", t + 50 * MIN, Tool::ClaudeCode, opus, Some("c"), "/p", 10, 0, 5).cache_write(3_000, 3_000),
         ev("c2", t + 55 * MIN, Tool::ClaudeCode, "claude-haiku-5-5", Some("c"), "/p", 10, 900, 5).cache_write(500, 0).captured(),
@@ -147,8 +151,8 @@ fn a_cache_keeps_the_lifetime_it_was_last_written_with() {
     let store = store_with(&evs);
     let live = live_caches(&store, &book, t + 61 * MIN).unwrap();
     let got: Vec<(&str, i64, i64)> = live.iter().map(|c| (c.session_id.as_str(), c.ttl_ms, c.expires_ms)).collect();
-    assert_eq!(got, [("r", 5 * MIN, t + 65 * MIN), ("x", HOUR, t + 70 * MIN), ("c", HOUR, t + 110 * MIN)]);
-    assert_eq!(live[2].model, opus);
+    assert_eq!(got, [("m", 5 * MIN, t + 62 * MIN), ("r", 5 * MIN, t + 65 * MIN), ("x", HOUR, t + 70 * MIN), ("c", HOUR, t + 110 * MIN)]);
+    assert_eq!((live[0].model.as_str(), live[3].model.as_str()), (opus, opus));
 }
 
 fn all() -> Range {

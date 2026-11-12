@@ -392,6 +392,25 @@ fn rows_that_are_not_json_or_a_damaged_session_do_not_stop_the_rest() {
 }
 
 #[test]
+fn a_damaged_record_is_read_once_it_is_whole_again() {
+    let db = opencode();
+    let c = &db.conn;
+    c.execute("INSERT INTO part VALUES('prt_cut', 'msg_001', ?1, ?2, ?2, '{\"type\":\"step-finish\",\"tokens\":{\"in')", params![MAIN, T0 + 1700]).unwrap();
+    let mut store = Store::open_in_memory().unwrap();
+    let rep = run(&mut store, &db.env);
+    assert!(rep.warnings.iter().any(|(_, w)| w.contains("damaged records")), "{:?}", rep.warnings);
+    assert_eq!(events(&store).len(), 4);
+    // the same row, whole now: no new row or message tells the session changed
+    c.execute(
+        "UPDATE part SET data = ?1, time_updated = time_updated + 1 WHERE id = 'prt_cut'",
+        params![r#"{"type":"step-finish","tokens":{"input":10,"output":5,"reasoning":0,"cache":{"read":0,"write":0}}}"#],
+    )
+    .unwrap();
+    run(&mut store, &db.env);
+    assert_eq!(events(&store).len(), 5, "read again, and the four before not counted twice");
+}
+
+#[test]
 fn a_part_with_a_count_of_the_wrong_type_is_skipped_and_the_rest_is_read() {
     let db = opencode();
     db.conn

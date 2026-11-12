@@ -393,9 +393,10 @@ pub fn install_refresh_hook(st: &mut CaptureState, data_dir: &Path, settings_fil
     record_then_write(st, data_dir, |s| &mut s.refresh, change, &backup, || write_doc(settings_file, &doc, &original))
 }
 
-/// Whether Claude Code's settings still hold our hook (the user may have removed it since).
+/// Whether Claude Code's settings still hold every part of our hook (the user may have removed
+/// some since). Without the prompt and end parts a refresh could wake a conversation that went on.
 pub fn refresh_hook_in_place(change: &RefreshHookChange) -> bool {
-    read_doc(&change.settings_file).is_ok_and(|(doc, _)| has_group(&doc, STOP, &change.installed))
+    read_doc(&change.settings_file).is_ok_and(|(doc, _)| change.groups().into_iter().all(|(e, g)| has_group(&doc, e, g)))
 }
 
 /// Removes our groups only; the user's own hooks stay as they are.
@@ -422,7 +423,7 @@ pub fn refresh_refresh_hook(st: &mut CaptureState, data_dir: &Path, command: &st
         return Ok(false);
     }
     let (mut doc, original) = read_doc(&old.settings_file)?;
-    if !has_group(&doc, STOP, &old.installed) {
+    if !old.groups().into_iter().all(|(e, g)| has_group(&doc, e, g)) {
         return Ok(false);
     }
     let before: BTreeMap<&str, &Value> = old.groups().into_iter().collect();
@@ -967,6 +968,21 @@ mod tests {
         assert!(!refresh_refresh_hook(&mut st, &data, "aiut --cache-hook").unwrap());
         assert_eq!(uninstall_refresh_hook(&mut st, &data).unwrap(), RevertOutcome::Restored);
         assert_eq!(read(&file), json!({"model": "opus"}));
+    }
+
+    #[test]
+    fn a_hook_missing_a_part_is_not_ready_and_adding_it_again_makes_it_whole() {
+        let (_d, file, data) = setup(Some(r#"{"model": "opus"}"#));
+        let mut st = CaptureState::default();
+        let ch = install_refresh_hook(&mut st, &data, &file, "aiut --cache-hook", 1).unwrap();
+        fs::write(&file, json!({"model": "opus", "hooks": {"Stop": [ch.installed.clone()]}}).to_string()).unwrap();
+        assert!(!refresh_hook_in_place(&ch), "the prompt and end parts were taken out");
+        assert!(!refresh_refresh_hook(&mut st, &data, "aiut --cache-hook").unwrap(), "a part the user removed is not put back by itself");
+        // adding it again from the app replaces the record cleanly
+        uninstall_refresh_hook(&mut st, &data).unwrap();
+        let again = install_refresh_hook(&mut st, &data, &file, "aiut --cache-hook", 2).unwrap();
+        assert!(refresh_hook_in_place(&again));
+        assert_eq!(read(&file)["hooks"]["Stop"].as_array().unwrap().len(), 1);
     }
 
     #[test]

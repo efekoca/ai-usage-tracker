@@ -15,7 +15,8 @@ use tracker_core::capture::refresh_hook as rh;
 
 const LOG_KEY: &str = "cache_refreshes";
 const SINCE_KEY: &str = "cache_refresh_since";
-/// Long enough that a conversation's automatic refreshes all count until they reach their limit.
+/// Long enough that a conversation's automatic refreshes all count until they reach their limit;
+/// automatic refreshes stop once the user's last request is older, as the log no longer reaches it.
 const KEEP_MS: i64 = 7 * 86_400_000;
 /// A refresh the cache's time has not moved on from by then did not happen.
 const PENDING_MS: i64 = 5 * 60_000;
@@ -30,9 +31,12 @@ struct Refresh {
     session_id: String,
     usd: Option<f64>,
     auto: bool,
-    /// The cache's time moved on after it; until then it was only asked for.
+    /// The cache's time moved on after the hook took it; until then it was only asked for.
     #[serde(default = "made")]
     done: bool,
+    /// The cache's expiry when it was asked for, which the refresh is to move on.
+    #[serde(default)]
+    before_ms: i64,
 }
 
 fn made() -> bool {
@@ -42,9 +46,8 @@ fn made() -> bool {
 #[derive(Default)]
 struct Book {
     loaded: bool,
+    /// Refreshes made, and those still on their way (kept across restarts, so their cost counts).
     log: Vec<Refresh>,
-    /// Session → when it was signalled and the expiry the refresh is to move on.
-    pending: HashMap<String, (i64, i64)>,
     /// Session → when its last refresh came to nothing.
     failed: HashMap<String, i64>,
     /// Sessions whose automatic refresh was switched by hand, over the setting.
@@ -67,15 +70,14 @@ fn load(state: &AppState, b: &mut Book) {
     b.loaded = true;
     let read = |key| state.db().setting(key).ok().flatten();
     b.log = read(LOG_KEY).and_then(|r| serde_json::from_str(&r).ok()).unwrap_or_default();
-    // one still waiting when the app closed cannot be confirmed any more
-    b.log.retain(|r| r.done);
     b.since = read(SINCE_KEY).and_then(|r| serde_json::from_str(&r).ok()).unwrap_or_default();
 }
 
 fn save(state: &AppState, b: &mut Book) {
-    let since = now_ms() - KEEP_MS;
-    b.log.retain(|r| r.at_ms >= since);
-    b.since.retain(|_, t| *t >= since);
+    let keep = now_ms() - KEEP_MS;
+    b.log.retain(|r| r.at_ms >= keep);
+    // a conversation first seen longer ago stops refreshing by itself, and has run out by then
+    b.since.retain(|_, t| *t >= keep - KEEP_MS);
     let store = state.db();
     for (key, value) in [(LOG_KEY, serde_json::to_string(&b.log)), (SINCE_KEY, serde_json::to_string(&b.since))] {
         if let Err(e) = store.set_setting(key, &value.unwrap_or_default()) {
@@ -114,27 +116,34 @@ fn auto_for(b: &Book, s: &Settings, session: &str) -> bool {
     b.auto.get(session).copied().unwrap_or(s.cache_auto)
 }
 
-/// A refresh counts once the cache's time moved on after it; one that did not within PENDING_MS
-/// came to nothing and is taken out of the log. Returns whether the log changed.
-fn settle(b: &mut Book, caches: &[Cache], now: i64) -> bool {
-    let waiting: Vec<(String, i64, i64)> = b.pending.iter().map(|(s, &(at, expires))| (s.clone(), at, expires)).collect();
+/// A refresh counts once the hook took its signal and the cache's time then moved on. When the
+/// time moved on without the hook taking it, the user's own request did that and the refresh is
+/// dropped; one that moved nothing within PENDING_MS came to nothing. Returns whether the log changed.
+fn settle(b: &mut Book, caches: &[Cache], dirs: &[PathBuf], now: i64) -> bool {
+    let waiting: Vec<(String, i64, i64)> = b.log.iter().filter(|r| !r.done).map(|r| (r.session_id.clone(), r.at_ms, r.before_ms)).collect();
     let mut changed = false;
-    for (session, at, expires) in waiting {
-        let moved = caches.iter().any(|c| c.session_id == session && c.expires_ms > expires);
-        if !moved && now - at <= PENDING_MS {
-            continue;
-        }
-        b.pending.remove(&session);
-        if moved {
-            b.log.iter_mut().filter(|r| r.session_id == session && r.at_ms == at).for_each(|r| r.done = true);
+    for (session, at, before) in waiting {
+        let moved = caches.iter().any(|c| c.session_id == session && c.expires_ms > before);
+        let took = dirs.iter().filter_map(|d| rh::took(d, &session)).any(|t| t >= at);
+        let this = |r: &Refresh| r.session_id == session && r.at_ms == at;
+        if moved && took {
+            b.log.iter_mut().filter(|r| this(r)).for_each(|r| r.done = true);
             b.failed.remove(&session);
+        } else if moved {
+            b.log.retain(|r| !this(r));
+        } else if now - at > PENDING_MS {
+            b.log.retain(|r| !this(r));
+            b.failed.insert(session.clone(), now);
         } else {
-            b.log.retain(|r| !(r.session_id == session && r.at_ms == at));
-            b.failed.insert(session, now);
+            continue;
         }
         changed = true;
     }
     changed
+}
+
+fn on_its_way(b: &Book, session: &str) -> bool {
+    b.log.iter().any(|r| !r.done && r.session_id == session)
 }
 
 /// Adds what the refresh side knows to each cache: whether it can be refreshed now, whether a
@@ -144,9 +153,9 @@ pub fn annotate(state: &AppState, s: &Settings, caches: &mut [Cache], now: i64) 
     let dirs = hook_dirs(state);
     let mut b = BOOK.lock().unwrap();
     load(state, &mut b);
-    let mut changed = settle(&mut b, caches, now);
+    let mut changed = settle(&mut b, caches, &dirs, now);
     for c in caches.iter_mut() {
-        c.refreshing = b.pending.contains_key(&c.session_id);
+        c.refreshing = on_its_way(&b, &c.session_id);
         c.refresh_failed = !c.refreshing && b.failed.get(&c.session_id).is_some_and(|&at| now - at < FAILED_SHOWN_MS);
         c.refreshable = ready && !c.refreshing && waiter_dir(&dirs, &c.session_id).is_some();
         c.auto = ready && auto_for(&b, s, &c.session_id);
@@ -154,7 +163,7 @@ pub fn annotate(state: &AppState, s: &Settings, caches: &mut [Cache], now: i64) 
         c.refreshes = made.len() as u32;
         c.refreshes_usd = made.iter().filter_map(|r| r.usd).sum();
         let prompt = dirs.iter().filter_map(|d| rh::last_prompt(d, &c.session_id)).max();
-        c.auto_capped = c.auto && capped(&mut b, c, prompt, &mut changed);
+        c.auto_capped = c.auto && capped(&mut b, c, prompt, now, &mut changed);
     }
     if changed {
         save(state, &mut b);
@@ -164,7 +173,7 @@ pub fn annotate(state: &AppState, s: &Settings, caches: &mut [Cache], now: i64) 
 /// Automatic refreshes stop once, since the user's last own prompt, they would cost more than
 /// writing the cache again; a model without a price, or priced at nothing, is not refreshed by
 /// itself. Refreshes still on their way count too.
-fn capped(b: &mut Book, c: &Cache, prompt: Option<i64>, changed: &mut bool) -> bool {
+fn capped(b: &mut Book, c: &Cache, prompt: Option<i64>, now: i64, changed: &mut bool) -> bool {
     let (Some(read), Some(write)) = (c.refresh_usd, c.rewrite_usd) else { return true };
     if read <= 0.0 || write <= 0.0 {
         return true;
@@ -177,6 +186,9 @@ fn capped(b: &mut Book, c: &Cache, prompt: Option<i64>, changed: &mut bool) -> b
             c.expires_ms - c.ttl_ms
         }),
     };
+    if since < now - KEEP_MS {
+        return true;
+    }
     let spent: f64 = b.log.iter().filter(|r| r.session_id == c.session_id && r.auto && r.at_ms > since).filter_map(|r| r.usd).sum();
     spent + read > write
 }
@@ -198,9 +210,8 @@ fn signal(app: &AppHandle, s: &Settings, c: &Cache, auto: bool) -> Result<(), St
     let mut b = BOOK.lock().unwrap();
     load(&state, &mut b);
     let now = now_ms();
-    b.pending.insert(c.session_id.clone(), (now, c.expires_ms));
     b.failed.remove(&c.session_id);
-    b.log.push(Refresh { at_ms: now, session_id: c.session_id.clone(), usd: c.refresh_usd, auto, done: false });
+    b.log.push(Refresh { at_ms: now, session_id: c.session_id.clone(), usd: c.refresh_usd, auto, done: false, before_ms: c.expires_ms });
     save(&state, &mut b);
     drop(b);
     crate::tray::refresh_soon();
@@ -370,51 +381,61 @@ mod tests {
     }
 
     fn auto_at(b: &mut Book, session: &str, at_ms: i64) {
-        b.log.push(Refresh { at_ms, session_id: session.into(), usd: Some(0.25), auto: true, done: true });
+        b.log.push(Refresh { at_ms, session_id: session.into(), usd: Some(0.25), auto: true, done: true, before_ms: 0 });
     }
+
+    const NOW: i64 = 10_000_000;
 
     #[test]
     fn automatic_refreshes_stop_at_a_rewrites_cost_and_start_again_after_a_prompt() {
         let mut b = Book::default();
         // its last request was at 6_400_000
-        let c = cache("s", 10_000_000);
+        let c = cache("s", NOW);
         let mut changed = false;
         for at in [6_000_000, 7_000_000, 8_000_000] {
             auto_at(&mut b, "s", at);
         }
-        assert!(!capped(&mut b, &c, None, &mut changed), "counted from when it was first seen: two, and the next costs less than a rewrite");
+        assert!(!capped(&mut b, &c, None, NOW, &mut changed), "counted from when it was first seen: two, and the next costs less than a rewrite");
         assert!(changed, "when it was first seen is kept");
         // after a restart only what was saved is known
         let mut restarted = Book { since: b.since.clone(), log: b.log.clone(), ..Book::default() };
         auto_at(&mut restarted, "s", 9_000_000);
-        assert!(!capped(&mut restarted, &c, None, &mut changed), "three and the next make exactly a rewrite");
-        auto_at(&mut restarted, "s", 9_500_000);
-        assert!(capped(&mut restarted, &c, None, &mut changed), "four and the next cost more, across the restart");
-        assert!(!capped(&mut restarted, &c, Some(9_600_000), &mut changed), "the user wrote again");
-        assert!(capped(&mut restarted, &c, Some(6_500_000), &mut changed), "an older prompt does not start the count again");
+        assert!(!capped(&mut restarted, &c, None, NOW, &mut changed), "three and the next make exactly a rewrite");
+        // one still on its way when the app closed counts too
+        restarted.log.push(Refresh { at_ms: 9_500_000, session_id: "s".into(), usd: Some(0.25), auto: true, done: false, before_ms: NOW });
+        assert!(capped(&mut restarted, &c, None, NOW, &mut changed), "four and the next cost more, across the restart");
+        assert!(!capped(&mut restarted, &c, Some(9_600_000), NOW, &mut changed), "the user wrote again");
+        assert!(capped(&mut restarted, &c, Some(6_500_000), NOW, &mut changed), "an older prompt does not start the count again");
+        assert!(capped(&mut restarted, &c, Some(9_600_000), 9_600_000 + KEEP_MS + 1, &mut changed), "past what the log reaches, it stops");
     }
 
     #[test]
     fn a_model_priced_at_nothing_is_not_refreshed_by_itself() {
         let mut changed = false;
         let free = Cache { refresh_usd: Some(0.0), rewrite_usd: Some(0.0), ..cache("s", 1) };
-        assert!(capped(&mut Book::default(), &free, Some(0), &mut changed));
+        assert!(capped(&mut Book::default(), &free, Some(0), 1, &mut changed));
         let unknown = Cache { refresh_usd: None, ..cache("s", 1) };
-        assert!(capped(&mut Book::default(), &unknown, Some(0), &mut changed));
+        assert!(capped(&mut Book::default(), &unknown, Some(0), 1, &mut changed));
     }
 
     #[test]
-    fn a_refresh_counts_once_the_cache_moves_on_and_one_that_did_not_is_dropped() {
+    fn a_refresh_counts_once_the_hook_took_it_and_the_cache_moved_on() {
+        let d = tempfile::tempdir().unwrap();
+        let dirs = [d.path().to_owned()];
         let mut b = Book::default();
-        for (s, at) in [("a", 1_000), ("b", 1_000)] {
-            b.pending.insert(s.into(), (at, 50_000));
-            b.log.push(Refresh { at_ms: at, session_id: s.into(), usd: Some(0.2), auto: true, done: false });
+        for s in ["a", "b", "c"] {
+            b.log.push(Refresh { at_ms: 1_000, session_id: s.into(), usd: Some(0.2), auto: true, done: false, before_ms: 50_000 });
         }
-        assert!(!settle(&mut b, &[cache("a", 50_000), cache("b", 50_000)], 2_000), "still on its way");
-        assert!(settle(&mut b, &[cache("a", 3_650_000), cache("b", 50_000)], 3_000));
-        assert!(b.log.iter().any(|r| r.session_id == "a" && r.done));
-        assert!(settle(&mut b, &[cache("b", 50_000)], 1_000 + PENDING_MS + 1));
-        assert!(b.log.iter().all(|r| r.session_id != "b"), "a refresh that came to nothing is not counted");
-        assert!(b.failed.contains_key("b") && b.pending.is_empty());
+        rh::woke(d.path(), "a", 1_500);
+        rh::woke(d.path(), "b", 500);
+        let moved = |s: &str| cache(s, 3_650_000);
+        assert!(!settle(&mut b, &[cache("a", 50_000), cache("b", 50_000), cache("c", 50_000)], &dirs, 2_000), "still on its way");
+        assert!(on_its_way(&b, "a"), "a refresh on its way is kept as one, also across a restart");
+        assert!(settle(&mut b, &[moved("a"), moved("b"), cache("c", 50_000)], &dirs, 3_000));
+        assert!(b.log.iter().any(|r| r.session_id == "a" && r.done), "the hook took it, then the cache moved on");
+        assert!(b.log.iter().all(|r| r.session_id != "b") && !b.failed.contains_key("b"), "the user's own request moved it; the hook took only an older signal");
+        assert!(settle(&mut b, &[cache("c", 50_000)], &dirs, 1_000 + PENDING_MS + 1));
+        assert!(b.log.iter().all(|r| r.session_id != "c"), "a refresh that came to nothing is not counted");
+        assert!(b.failed.contains_key("c") && !on_its_way(&b, "c"));
     }
 }
