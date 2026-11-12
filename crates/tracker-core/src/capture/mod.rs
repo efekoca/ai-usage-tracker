@@ -7,6 +7,7 @@ pub mod claude_signin;
 pub mod claude_usage;
 pub mod codex_limits;
 pub mod otlp;
+pub mod refresh_hook;
 pub mod statusline;
 
 use serde_json::Value;

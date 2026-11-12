@@ -12,6 +12,7 @@
   import BrandIcon from '../components/BrandIcon.svelte'
   import ColorPick from '../components/ColorPick.svelte'
   import ReportCard from '../components/ReportCard.svelte'
+  import { ensureRefresh, loadRefreshInfo, refresh as hook, removeRefresh } from '../lib/refresh.svelte'
 
   const s = $derived(app.settings!)
 
@@ -68,6 +69,14 @@
     if (s.cache_timer && s.cache_projects === 'picked' && !cacheChoices) api.cacheProjectChoices().then((c) => (cacheChoices = c)).catch(() => (cacheChoices = []))
   })
   const follow = (path: string, on: boolean) => saveSettings({ cache_picked: on ? [...s.cache_picked, path] : s.cache_picked.filter((p) => p !== path) })
+  $effect(() => {
+    if (s.cache_timer) loadRefreshInfo()
+  })
+  // automatic refresh needs the hook, which is added only once the user agrees
+  async function setAuto(on: boolean) {
+    if (on && !(await ensureRefresh())) return
+    saveSettings({ cache_auto: on })
+  }
 
   onMount(async () => {
     hk = await api.hotkeyStatus().catch(() => null)
@@ -428,6 +437,31 @@
           {/each}
         {/if}
       </div>
+      <span class="choices-title">{t('settings.cacheTimer.refresh')}</span>
+      <div class="choices">
+        <div class="choice plain">
+          <span class="label">{t('settings.cacheTimer.auto')}<span class="subtle small">{t('settings.cacheTimer.auto.help')}</span></span>
+          <Toggle small checked={s.cache_auto && !!hook.info?.installed} label={t('settings.cacheTimer.auto')} onchange={setAuto} />
+        </div>
+        {#if s.cache_auto && hook.info?.installed}
+          <div class="choice plain">
+            <span class="label">{t('settings.cacheTimer.lead')}</span>
+            <Segmented label={t('settings.cacheTimer.lead')} value={String(s.cache_lead)} options={['1', '2', '5'].map((n) => ({ value: n, label: t('settings.cacheTimer.lead.n', { n }) }))} onchange={(v) => saveSettings({ cache_lead: Number(v) as 1 | 2 | 5 })} />
+          </div>
+        {/if}
+      </div>
+      <p class="refresh-note subtle small">
+        {t('settings.cacheTimer.limit')}
+        <span class="hook">
+          {#if hook.info?.installed}
+            <span title={hook.info.settings_file}>{t('settings.cacheTimer.hook')}</span>
+            <button class="btn ghost small" onclick={() => removeRefresh().catch(() => {})}>{t('settings.cacheTimer.hook.remove')}</button>
+          {:else if hook.info}
+            <span>{t('settings.cacheTimer.hook.none')}</span>
+            <button class="btn ghost small" onclick={() => ensureRefresh()}>{t('settings.cacheTimer.hook.add')}</button>
+          {/if}
+        </span>
+      </p>
     {/if}
   </div>
   <div class="item">
@@ -888,6 +922,18 @@
   }
   .choice.plain::before {
     left: 14px;
+  }
+  .refresh-note {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: -6px 2px 14px;
+    line-height: 1.5;
+  }
+  .hook {
+    display: flex;
+    align-items: center;
+    gap: 4px;
   }
   .choices-title {
     display: block;

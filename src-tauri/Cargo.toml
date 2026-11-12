@@ -55,11 +55,11 @@ core-foundation = "0.10"
 core-graphics = "0.25"
 # the versions Tauri's own WKWebView binding uses (report printing, accent color, fonts, locale)
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSURL", "NSDictionary", "NSGeometry", "NSLocale", "NSArray", "NSBundle", "NSError"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSURL", "NSDictionary", "NSGeometry", "NSLocale", "NSArray", "NSBundle", "NSError", "NSSet"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPrintInfo", "NSPrintOperation", "NSView", "NSResponder", "NSWindow", "NSColor", "NSColorSpace", "NSFontManager", "NSScreen", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "objc2-core-foundation"] }
 # limit notifications; both already in the tree through objc2-app-kit
 block2 = "0.6"
-objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "UNUserNotificationCenter", "UNNotificationContent", "UNNotificationRequest", "UNNotificationTrigger", "UNNotification", "UNNotificationResponse"] }
+objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "UNUserNotificationCenter", "UNNotificationContent", "UNNotificationRequest", "UNNotificationTrigger", "UNNotification", "UNNotificationResponse", "UNNotificationAction", "UNNotificationCategory"] }
 objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "WKWebView", "objc2-app-kit"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

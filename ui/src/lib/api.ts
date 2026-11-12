@@ -127,6 +127,8 @@ export interface PanelData {
   accounts: KnownAccount[]
   /** The followed caches, the soonest to run out first; empty while the feature is off. */
   caches: LiveCache[]
+  /** The refresh hook is in Claude Code's settings. */
+  cache_refresh: boolean
 }
 
 export type Period =
@@ -320,6 +322,26 @@ export interface LiveCache {
   /** API-equivalent cost of reading it once, and of writing it again after it runs out. */
   refresh_usd: number | null
   rewrite_usd: number | null
+  /** A hook waits in this conversation, so it can be refreshed now. */
+  refreshable: boolean
+  /** A refresh was asked for and has not reached the logs yet. */
+  refreshing: boolean
+  /** It is refreshed by itself before it runs out. */
+  auto: boolean
+  /** Its automatic refreshes stopped: more would cost more than writing the cache again. */
+  auto_capped: boolean
+  /** Refreshes in the last two days and their API-equivalent cost. */
+  refreshes: number
+  refreshes_usd: number
+}
+
+export interface RefreshInfo {
+  /** Our hook is in Claude Code's settings. */
+  installed: boolean
+  settings_file: string
+  /** Refreshes made today and their API-equivalent cost. */
+  today: number
+  today_usd: number
 }
 
 export interface ProjectChoice {
@@ -540,6 +562,10 @@ export interface Settings {
   cache_projects: 'all' | 'picked'
   /** The projects followed while `cache_projects` is "picked", by path. */
   cache_picked: string[]
+  /** Refreshes a waiting conversation's cache by itself shortly before it runs out. */
+  cache_auto: boolean
+  /** Minutes before an hour's cache runs out: 1, 2 or 5 (a 5-minute cache: in its last minute). */
+  cache_lead: 1 | 2 | 5
   /** provider → #rrggbb; missing = the accent color */
   provider_colors: Partial<Record<Provider, string>>
   tint_icons: boolean
@@ -1009,6 +1035,10 @@ export const api = {
   liveCaches: () => invoke<LiveCache[]>('live_caches'),
   dropCache: (sessionId: string) => invoke<void>('drop_cache', { sessionId }),
   cacheProjectChoices: () => invoke<ProjectChoice[]>('cache_project_choices'),
+  refreshCache: (sessionId: string) => invoke<void>('refresh_cache', { sessionId }),
+  setCacheAuto: (sessionId: string, on: boolean) => invoke<void>('set_cache_auto', { sessionId, on }),
+  cacheRefreshInfo: () => invoke<RefreshInfo>('cache_refresh_info'),
+  setCacheRefresh: (on: boolean) => invoke<RefreshInfo>('set_cache_refresh', { on }),
   trayPreview: (tray: TraySettings) => invoke<TrayPreview>('tray_preview', { tray }),
   projects: () => invoke<ProjectRow[]>('list_projects'),
   projectsForSettings: () => invoke<ProjectRow[]>('list_projects_for_settings'),

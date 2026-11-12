@@ -100,6 +100,8 @@ const settings: Settings = {
   cache_menubar: true,
   cache_projects: 'all' as 'all' | 'picked',
   cache_picked: [] as string[],
+  cache_auto: false,
+  cache_lead: 2 as 1 | 2 | 5,
   provider_colors: {},
   tint_icons: false,
   show_icons: true,
@@ -730,9 +732,17 @@ let mockScanning = false
 // conversations keep working in the preview: each cache starts again once it runs out
 const cacheStart = Date.now()
 const droppedCaches = new Set<string>()
+// the preview's refresh side: the hook is added on first use, as in the app
+let refreshHook = scenario.get('refresh') === '1'
+const refreshedAt = new Map<string, number>()
+const autoOverride = new Map<string, boolean>()
+const refreshLog: { at: number; usd: number; session: string }[] = []
 function mockCaches() {
   if (!settings.cache_timer || scenario.get('cache') === '0') return []
-  const at = (offset: number, ttl: number) => {
+  const at = (offset: number, ttl: number, id: string) => {
+    // a refresh starts the lifetime again from when it reached the cache
+    const done = refreshedAt.get(id)
+    if (done && Date.now() >= done) return done + ttl
     const left = (((offset - (Date.now() - cacheStart)) % ttl) + ttl) % ttl
     return Date.now() + (left || ttl)
   }
@@ -743,11 +753,17 @@ function mockCaches() {
     model,
     client,
     ttl_ms: ttl,
-    expires_ms: at(offset, ttl),
+    expires_ms: at(offset, ttl, session_id),
     started_ms: cacheStart - 44 * 60e3,
     tokens,
     refresh_usd: (tokens * read) / 1e6,
     rewrite_usd: (tokens * write) / 1e6,
+    refreshable: refreshHook && session_id !== 'c-demo-main' && !((refreshedAt.get(session_id) ?? 0) > Date.now()),
+    refreshing: (refreshedAt.get(session_id) ?? 0) > Date.now(),
+    auto: refreshHook && (autoOverride.get(session_id) ?? settings.cache_auto),
+    auto_capped: false,
+    refreshes: refreshLog.filter((r) => r.session === session_id).length,
+    refreshes_usd: refreshLog.filter((r) => r.session === session_id).reduce((n, r) => n + r.usd, 0),
   })
   const all = [
     one('c-notes', 'notes', null, 'claude-sonnet-5-5', 'cli', 300_000, 96_000, 64_000, 0.1, 2.5),
@@ -776,6 +792,7 @@ function mockPanelData() {
     signed_out: scenario.get('claude') === 'nologin' ? ['anthropic'] : [],
     accounts: knownAccounts(),
     caches: mockCaches(),
+    cache_refresh: refreshHook,
   }
 }
 
@@ -874,6 +891,23 @@ export function installMock() {
         case 'drop_cache':
           droppedCaches.add(a.sessionId as string)
           return null
+        case 'refresh_cache': {
+          const c = mockCaches().find((x) => x.session_id === a.sessionId)
+          if (!refreshHook) throw 'not_installed'
+          if (!c?.refreshable) throw 'not_waiting'
+          refreshedAt.set(c.session_id, Date.now() + 2500)
+          refreshLog.push({ at: Date.now(), usd: c.refresh_usd, session: c.session_id })
+          return null
+        }
+        case 'set_cache_auto':
+          autoOverride.set(a.sessionId as string, !!a.on)
+          return null
+        case 'cache_refresh_info':
+        case 'set_cache_refresh': {
+          if (cmd === 'set_cache_refresh') refreshHook = !!a.on
+          const today = refreshLog.filter((r) => new Date(r.at).toDateString() === new Date().toDateString())
+          return { installed: refreshHook, settings_file: platform === 'windows' ? 'C:\\Users\\you\\.claude\\settings.json' : '/Users/you/.claude/settings.json', today: today.length, today_usd: today.reduce((n, r) => n + r.usd, 0) }
+        }
         case 'cache_project_choices':
           return ['demo-app', 'website', 'notes', 'data-pipeline'].map((p) => ({ path: `C:\\Projects\\${p}`, name: p }))
         case 'capture_status':
