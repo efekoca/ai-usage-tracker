@@ -509,6 +509,18 @@ impl Store {
         st.query_row(params![session_id], |r| r.get(0))
     }
 
+    /// What the latest main-conversation request of a session that wrote to the cache wrote, up to
+    /// `to_ms`: all written tokens, and of them those kept for an hour. Captured telemetry is left
+    /// out, as it does not tell the two lifetimes apart.
+    pub fn last_cache_write(&self, session_id: &str, to_ms: i64) -> Result<Option<(u64, u64)>> {
+        let mut st = self.conn.prepare_cached(
+            "SELECT cache_write, cache_write_1h FROM usage_event
+             WHERE session_id = ?1 AND tool = ?2 AND ts_ms <= ?3 AND cache_write > 0 AND agent IS NULL AND accuracy <> 'captured'
+             ORDER BY ts_ms DESC LIMIT 1",
+        )?;
+        st.query_row(params![session_id, Tool::ClaudeCode.as_str(), to_ms], |r| Ok((r.get::<_, i64>(0)?.max(0) as u64, r.get::<_, i64>(1)?.max(0) as u64))).optional()
+    }
+
     /// The projects a tool was used in since `from_ms`, the most recent first.
     pub fn projects_used_since(&self, tool: Tool, from_ms: i64) -> Result<Vec<i64>> {
         let mut st = self.conn.prepare_cached("SELECT project_id FROM usage_event WHERE tool = ?1 AND ts_ms >= ?2 AND project_id IS NOT NULL GROUP BY project_id ORDER BY MAX(ts_ms) DESC")?;
@@ -677,8 +689,13 @@ impl Store {
         self.project_cache.borrow_mut().clear();
         self.conn.execute_batch(
             "BEGIN; DELETE FROM usage_event; DELETE FROM tool_call; DELETE FROM limit_snapshot; DELETE FROM file_checkpoint;
-             DELETE FROM project; DELETE FROM account_session; DELETE FROM signin_span; DELETE FROM session_root; COMMIT; VACUUM;",
-        )
+             DELETE FROM project; DELETE FROM account_session; DELETE FROM signin_span; DELETE FROM session_root; COMMIT;",
+        )?;
+        // the data is gone once committed; a full disk only keeps the file from shrinking
+        if let Err(e) = self.conn.execute_batch("VACUUM;") {
+            log::warn!("could not compact the database after deleting the data: {e}");
+        }
+        Ok(())
     }
 
     /// Merges another tracker database (e.g. a backup) into this one using the same de-dup

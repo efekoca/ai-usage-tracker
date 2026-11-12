@@ -760,6 +760,7 @@ function mockCaches() {
     rewrite_usd: (tokens * write) / 1e6,
     refreshable: refreshHook && session_id !== 'c-demo-main' && !((refreshedAt.get(session_id) ?? 0) > Date.now()),
     refreshing: (refreshedAt.get(session_id) ?? 0) > Date.now(),
+    refresh_failed: false,
     auto: refreshHook && (autoOverride.get(session_id) ?? settings.cache_auto),
     auto_capped: false,
     refreshes: refreshLog.filter((r) => r.session === session_id).length,
@@ -909,7 +910,7 @@ export function installMock() {
           return { installed: refreshHook, settings_file: platform === 'windows' ? 'C:\\Users\\you\\.claude\\settings.json' : '/Users/you/.claude/settings.json', today: today.length, today_usd: today.reduce((n, r) => n + r.usd, 0) }
         }
         case 'cache_project_choices':
-          return ['demo-app', 'website', 'notes', 'data-pipeline'].map((p) => ({ path: `C:\\Projects\\${p}`, name: p }))
+          return ['demo-app', 'website', 'notes', 'data-pipeline', 'client-x'].map((p, i) => ({ id: i + 1, path: `C:\\Projects\\${p}`, name: p === 'client-x' || settings.hide_project_names ? '' : p, hidden: p === 'client-x' || settings.hide_project_names }))
         case 'capture_status':
           return { claude_poll: settings.capture.claude_poll, claude: { binary: claudeMode === 'missing' ? null : 'C:/claude.exe', last_ok_ms: claudeMode ? null : Date.now() - 40000, last_error: claudeMode === 'nologin' ? 'claude_no_plan_limits' : claudeMode === 'missing' ? 'claude_not_found' : null }, claude_candidates_found: claudeMode !== 'missing', codex_poll: settings.capture.codex_poll, codex: { binary: codexMissing ? null : 'C:/codex.exe', last_ok_ms: codexMissing ? null : Date.now() - 120000, last_error: codexMissing ? 'codex_not_found' : codexOut ? 'codex_not_signed_in' : null }, codex_candidates_found: !codexMissing, antigravity_poll: settings.capture.antigravity_poll, antigravity: { binary: agyMissing ? null : 'C:/Users/you/AppData/Local/agy/bin/agy.exe', last_ok_ms: agyMissing ? null : Date.now() - 90000, last_error: agyMissing ? 'agy_not_found' : agyOut ? 'agy_not_signed_in' : null }, antigravity_candidates_found: !agyMissing, statusline: settings.capture.statusline, statusline_file: 'C:\\Users\\you\\.claude\\settings.json', statusline_chained: false, statusline_last_ms: Date.now() - 30000, otel: settings.capture.otel, otel_port: 43180, otel_listening: settings.capture.otel, otel_events: 42, otel_last_ms: Date.now() - 5000, otel_error: null, settings_file: 'C:\\Users\\you\\.claude\\settings.json' }
         case 'install_cli':

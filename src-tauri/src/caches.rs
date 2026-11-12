@@ -34,6 +34,8 @@ pub struct Cache {
     pub refreshable: bool,
     /// A refresh was asked for and has not reached the logs yet.
     pub refreshing: bool,
+    /// The last refresh came to nothing: the cache's time did not move on.
+    pub refresh_failed: bool,
     /// It is refreshed by itself before it runs out.
     pub auto: bool,
     /// Its automatic refreshes stopped: more would cost more than writing the cache again.
@@ -117,7 +119,10 @@ pub async fn live_caches(state: State<'_, AppState>) -> Result<Vec<Cache>, Strin
 
 /// Stops following one conversation; the others and new ones are still followed.
 #[tauri::command]
-pub fn drop_cache(app: AppHandle, session_id: String) -> Result<(), String> {
+pub async fn drop_cache(window: WebviewWindow, app: AppHandle, session_id: String) -> Result<(), String> {
+    if window.label() != crate::windows::MAIN {
+        return Err("not_allowed".into());
+    }
     let mut dropped = DROPPED.lock().unwrap();
     if !dropped.contains(&session_id) {
         dropped.push(session_id);
@@ -130,8 +135,11 @@ pub fn drop_cache(app: AppHandle, session_id: String) -> Result<(), String> {
 
 #[derive(Debug, Serialize)]
 pub struct ProjectChoice {
+    pub id: i64,
     pub path: String,
+    /// Empty while project names are hidden or this one is.
     pub name: String,
+    pub hidden: bool,
 }
 
 /// The projects to pick from: those Claude Code was used in over the last 30 days, the most recent
@@ -141,14 +149,21 @@ pub async fn cache_project_choices(window: WebviewWindow, state: State<'_, AppSt
     if window.label() != crate::windows::MAIN {
         return Err("not_allowed".into());
     }
-    let picked = state.settings.read().unwrap().cache_picked.clone();
+    let (picked, hide_all) = {
+        let s = state.settings.read().unwrap();
+        (s.cache_picked.clone(), s.hide_project_names)
+    };
     let store = state.db();
     let recent = store.projects_used_since(Tool::ClaudeCode, chrono::Utc::now().timestamp_millis() - MONTH_MS).map_err(|e| e.to_string())?;
     let projects: HashMap<i64, _> = store.projects().map_err(|e| e.to_string())?.into_iter().map(|p| (p.id, p)).collect();
-    let mut out: Vec<ProjectChoice> = recent.iter().filter_map(|id| projects.get(id)).map(|p| ProjectChoice { path: p.path.clone(), name: p.name.clone() }).collect();
+    let choice = |p: &tracker_core::store::ProjectRow| {
+        let hidden = hide_all || p.hidden;
+        ProjectChoice { id: p.id, path: p.path.clone(), name: if hidden { String::new() } else { p.name.clone() }, hidden }
+    };
+    let mut out: Vec<ProjectChoice> = recent.iter().filter_map(|id| projects.get(id)).map(choice).collect();
     for p in projects.values() {
         if picked.contains(&p.path) && !out.iter().any(|o| o.path == p.path) {
-            out.push(ProjectChoice { path: p.path.clone(), name: p.name.clone() });
+            out.push(choice(p));
         }
     }
     Ok(out)

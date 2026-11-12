@@ -125,7 +125,10 @@ pub fn statusline_command(exe: &Path) -> String {
 
 /// The cache refresh hook runs the same way: Claude Code picks the shell by the same rule.
 pub fn cache_hook_command(exe: &Path) -> String {
-    quoted_command(&exe.to_string_lossy(), short_path(exe).as_deref(), !cfg!(windows) || git_bash().is_some(), "--cache-hook")
+    let cmd = quoted_command(&exe.to_string_lossy(), short_path(exe).as_deref(), !cfg!(windows) || git_bash().is_some(), "--cache-hook");
+    // PowerShell would report a program's exit code 2, which wakes the conversation, as 1; in Git
+    // Bash the unset variable leaves a bare `exit`, which keeps the code as it is
+    if cfg!(windows) { format!("{cmd}; exit $LASTEXITCODE") } else { cmd }
 }
 
 /// Single quotes: inside double quotes both shells would still expand `$` and backticks.
@@ -167,7 +170,8 @@ pub fn statusline_main() -> i32 {
 }
 
 /// Run by Claude Code after each turn: waits in the background and, when the app asks, wakes the
-/// conversation for one short turn, so its prompt cache is read before it runs out.
+/// conversation for one short turn, so its prompt cache is read before it runs out. Run on a new
+/// prompt or at the end of a conversation, it sends the waiting one away at once.
 pub fn cache_hook_main() -> i32 {
     use tracker_core::capture::refresh_hook as rh;
     let Some(data_dir) = tracker_core::store::default_data_dir() else { return 0 };
@@ -175,17 +179,83 @@ pub fn cache_hook_main() -> i32 {
     let _ = std::io::stdin().take(1024 * 1024).read_to_end(&mut input);
     let json: serde_json::Value = serde_json::from_slice(&input).unwrap_or(serde_json::Value::Null);
     let Some(session) = json.get("session_id").and_then(|v| v.as_str()).filter(|s| rh::valid_session(s)) else { return 0 };
+    let dir = rh::dir(&data_dir);
+    // nothing is printed: a prompt hook's output would be added to the conversation
+    match json.get("hook_event_name").and_then(|v| v.as_str()) {
+        Some("UserPromptSubmit") => {
+            rh::prompted(&dir, session, now_ms());
+            return 0;
+        }
+        Some("SessionEnd") => {
+            rh::retire(&dir, session);
+            return 0;
+        }
+        _ if scripted() => return 0,
+        _ => {}
+    }
     let transcript = json.get("transcript_path").and_then(|v| v.as_str()).map(PathBuf::from);
     let me = format!("{}-{}", std::process::id(), now_ms());
     // ends before Claude Code's own timeout, so the wait is never cut off mid-signal
     let until = Instant::now() + Duration::from_secs(cs::REFRESH_HOOK_TIMEOUT_SECS.saturating_sub(60));
-    match rh::wait(&rh::dir(&data_dir), session, &me, transcript.as_deref(), Duration::from_secs(1), until, parent_alive()) {
+    match rh::wait(&dir, session, &me, transcript.as_deref(), Duration::from_secs(1), until, parent_alive()) {
         Ok(rh::Outcome::Wake(message)) => {
+            rh::woke(&dir, session);
             eprint!("{message}");
             2
         }
         _ => 0,
     }
+}
+
+/// `claude -p` waits for its hooks before it exits, so in a scripted run the hook must not wait (and
+/// no one would see a refresh there). SDK runs say so in their entrypoint; a print run started from
+/// inside another session inherits that session's, so the command line that started it is read too.
+fn scripted() -> bool {
+    if std::env::var("CLAUDE_CODE_ENTRYPOINT").is_ok_and(|e| e.starts_with("sdk")) {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        let mut pid = std::os::unix::process::parent_id();
+        // the hook may run under a shell that did not hand its place over
+        for _ in 0..2 {
+            let Some((args, parent)) = process_args(pid) else { break };
+            if print_run(&args) {
+                return true;
+            }
+            let shell = args.first().and_then(|a| Path::new(a.trim_start_matches('-')).file_name()).is_some_and(|n| ["sh", "bash", "zsh", "dash"].contains(&n.to_string_lossy().as_ref()));
+            if !shell {
+                break;
+            }
+            pid = parent;
+        }
+    }
+    false
+}
+
+#[cfg(any(unix, test))]
+fn print_run(args: &[String]) -> bool {
+    args.iter().skip(1).any(|a| a == "-p" || a == "--print" || a.starts_with("--print="))
+}
+
+/// A process's command line and its parent.
+#[cfg(target_os = "linux")]
+fn process_args(pid: u32) -> Option<(Vec<String>, u32)> {
+    let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+    let args = raw.split(|b| *b == 0).filter(|a| !a.is_empty()).map(|a| String::from_utf8_lossy(a).into_owned()).collect();
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // after the name in parentheses: state, then the parent
+    let parent = stat.rsplit_once(')')?.1.split_whitespace().nth(1)?.parse().ok()?;
+    Some((args, parent))
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn process_args(pid: u32) -> Option<(Vec<String>, u32)> {
+    let out = std::process::Command::new("/bin/ps").args(["-o", "ppid=", "-o", "args=", "-p", &pid.to_string()]).stderr(std::process::Stdio::null()).output().ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut words = text.split_whitespace();
+    let parent = words.next()?.parse().ok()?;
+    Some((words.map(str::to_owned).collect(), parent))
 }
 
 /// Whether the Claude Code that started the hook still runs: an orphan gets a new parent.
@@ -380,15 +450,15 @@ pub fn revert_all_main() -> i32 {
             return 2;
         }
     };
-    let had = (state.statusline.is_some(), state.otel.is_some());
+    let had = (state.statusline.is_some(), state.otel.is_some(), state.refresh.is_some());
     let statusline = cs::uninstall_statusline(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: status line: {e}"));
     let otel = cs::uninstall_otel(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: telemetry: {e}"));
-    let refresh_ok = cs::uninstall_refresh_hook(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: cache refresh: {e}")).is_ok();
-    let (statusline_ok, otel_ok) = (statusline.is_ok(), otel.is_ok());
+    let refresh = cs::uninstall_refresh_hook(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: cache refresh: {e}"));
+    let (statusline_ok, otel_ok, refresh_ok) = (statusline.is_ok(), otel.is_ok(), refresh.is_ok());
     // only what the uninstaller itself took out is put back; a value the user changed stays theirs
     let restored = |r: &Result<RevertOutcome, _>| matches!(r, Ok(RevertOutcome::Restored));
-    let reverted = Reverted { statusline: had.0 && restored(&statusline), otel: had.1 && restored(&otel), at_ms: now_ms() };
-    if reverted.statusline || reverted.otel {
+    let reverted = Reverted { statusline: had.0 && restored(&statusline), otel: had.1 && restored(&otel), refresh: had.2 && restored(&refresh), at_ms: now_ms() };
+    if reverted.statusline || reverted.otel || reverted.refresh {
         let _ = std::fs::write(reverted_file(&data_dir), serde_json::to_string(&reverted).unwrap_or_default());
     }
     if let Ok(store) = Store::open(&data_dir.join("tracker.db")) {
@@ -406,6 +476,8 @@ pub fn revert_all_main() -> i32 {
 struct Reverted {
     statusline: bool,
     otel: bool,
+    #[serde(default)]
+    refresh: bool,
     at_ms: i64,
 }
 
@@ -420,7 +492,7 @@ impl Reverted {
         if !(0..REINSTALL_WINDOW_MS).contains(&(now - self.at_ms)) {
             return Vec::new();
         }
-        [("statusline", self.statusline), ("otel", self.otel)].into_iter().filter(|k| k.1).map(|k| k.0).collect()
+        [("statusline", self.statusline), ("otel", self.otel), ("refresh", self.refresh)].into_iter().filter(|k| k.1).map(|k| k.0).collect()
     }
 }
 
@@ -430,7 +502,8 @@ fn restore_after_upgrade(app: &AppHandle) {
     let _ = std::fs::remove_file(&file);
     let Ok(reverted) = serde_json::from_str::<Reverted>(&raw) else { return };
     for kind in reverted.to_restore(now_ms()) {
-        match set(app, kind, true) {
+        let done = if kind == "refresh" { crate::refresh::install(app).map(|()| "enabled".to_owned()) } else { set(app, kind, true) };
+        match done {
             Ok(r) => log::info!("{kind} turned back on after the upgrade: {r}"),
             Err(e) => log::warn!("{kind} could not be turned back on after the upgrade: {e}"),
         }
@@ -1344,9 +1417,22 @@ mod tests {
     }
 
     #[test]
+    fn a_print_run_is_told_by_its_flag() {
+        let args = |s: &str| s.split(' ').map(str::to_owned).collect::<Vec<_>>();
+        assert!(print_run(&args("claude -p hello --model haiku")));
+        assert!(print_run(&args("node /x/cli.js --print hi")));
+        assert!(!print_run(&args("claude --model opus")));
+        assert!(!print_run(&args("-p")), "the program's own name is not a flag");
+        #[cfg(unix)]
+        assert!(process_args(std::process::id()).is_some_and(|(a, p)| !a.is_empty() && p > 0), "this test's own command line");
+    }
+
+    #[test]
     fn only_a_recent_uninstall_turns_captures_back_on() {
-        let r = Reverted { statusline: true, otel: false, at_ms: 1_000_000 };
-        assert_eq!(r.to_restore(1_000_000 + 5 * 60_000), ["statusline"]);
+        let r = Reverted { statusline: true, otel: false, refresh: true, at_ms: 1_000_000 };
+        assert_eq!(r.to_restore(1_000_000 + 5 * 60_000), ["statusline", "refresh"]);
+        let older: Reverted = serde_json::from_str(r#"{"statusline": false, "otel": true, "at_ms": 1000000}"#).unwrap();
+        assert_eq!(older.to_restore(1_000_000), ["otel"], "a record written before the refresh hook existed");
         assert!(r.to_restore(1_000_000 + REINSTALL_WINDOW_MS).is_empty());
         // a clock set back is no reason to touch the user's settings
         assert!(r.to_restore(1_000_000 - 1).is_empty());
@@ -1382,6 +1468,7 @@ mod tests {
     fn status_line_paths_are_quoted_literally_for_each_shell() {
         assert_eq!(quoted_command(r"C:\Users\A\x.exe", Some(r"C:\Users\A\x.exe"), true, "--statusline"), "C:/Users/A/x.exe --statusline");
         assert_eq!(quoted_command(r"C:\Users\A\x.exe", Some(r"C:\Users\A\x.exe"), true, "--cache-hook"), "C:/Users/A/x.exe --cache-hook");
+        assert!(cache_hook_command(Path::new(r"C:\Missing\app.exe")).ends_with("--cache-hook; exit $LASTEXITCODE"), "the wake's exit code survives PowerShell");
         let odd = r"C:\Users\O'Neil $HOME `x`\app.exe";
         assert_eq!(quoted_command(odd, None, true, "--statusline"), r"'C:/Users/O'\''Neil $HOME `x`/app.exe' --statusline");
         assert_eq!(quoted_command(odd, Some(r"C:\Users\ONEIL$~1\app.exe"), false, "--statusline"), "& 'C:/Users/O''Neil $HOME `x`/app.exe' --statusline");

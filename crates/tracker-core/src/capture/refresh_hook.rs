@@ -1,7 +1,9 @@
 //! The cache refresh hook. Claude Code runs it after each turn (`--cache-hook`); it waits in the
 //! background, and when the app asks, it wakes the waiting conversation for one short turn, which
-//! reads the cache and starts its lifetime again. The app and the hook share only small files named
-//! by the session id; nothing of the conversation is read.
+//! reads the cache and starts its lifetime again. A new prompt or the end of the conversation sends
+//! the waiting hook away, and a prompt's time is kept so the app can tell the user's own turns from
+//! its refreshes. The app and the hook share only small files named by the session id; nothing of
+//! the conversation is read.
 
 use std::fs;
 use std::io;
@@ -13,6 +15,12 @@ pub const HEARTBEAT: Duration = Duration::from_secs(15);
 const STALE: Duration = Duration::from_secs(45);
 /// Claude Code may still write to the transcript just after a turn ends.
 const SETTLE: Duration = Duration::from_secs(5);
+/// A prompt this soon after a wake is the refresh's own turn.
+const WOKE_GRACE: Duration = Duration::from_secs(30);
+/// Left by a hook that was killed; well past the hook's own time limit.
+const WAITER_GONE: Duration = Duration::from_secs(2 * 3600);
+/// A prompt's time is kept as long as the app keeps its refresh log.
+const PROMPT_KEPT: Duration = Duration::from_secs(7 * 86_400);
 
 pub fn dir(data_dir: &Path) -> PathBuf {
     data_dir.join("refresh")
@@ -29,6 +37,14 @@ fn waiter_file(dir: &Path, session: &str) -> PathBuf {
 
 fn signal_file(dir: &Path, session: &str) -> PathBuf {
     dir.join(format!("signal-{session}"))
+}
+
+fn prompt_file(dir: &Path, session: &str) -> PathBuf {
+    dir.join(format!("prompt-{session}"))
+}
+
+fn woke_file(dir: &Path, session: &str) -> PathBuf {
+    dir.join(format!("woke-{session}"))
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -99,6 +115,45 @@ pub fn wait(dir: &Path, session: &str, me: &str, transcript: Option<&Path>, tick
     }
 }
 
+/// Sends the waiter for `session` away: the conversation went on or ended.
+pub fn retire(dir: &Path, session: &str) {
+    let _ = fs::remove_file(waiter_file(dir, session));
+}
+
+/// Marks the turn a wake is about to start, so its prompt is not taken for the user's.
+pub fn woke(dir: &Path, session: &str) {
+    let _ = fs::write(woke_file(dir, session), "");
+}
+
+/// A prompt was submitted: the waiter goes, and unless it is the turn a wake just started, its time
+/// is kept as the user's latest request.
+pub fn prompted(dir: &Path, session: &str, now_ms: i64) {
+    retire(dir, session);
+    let woke = woke_file(dir, session);
+    let own = modified(&woke).is_some_and(|t| t.elapsed().unwrap_or_default() < WOKE_GRACE);
+    let _ = fs::remove_file(&woke);
+    if !own {
+        let _ = fs::create_dir_all(dir);
+        let _ = fs::write(prompt_file(dir, session), now_ms.to_string());
+    }
+}
+
+/// Removes every kept prompt time and wake mark.
+pub fn forget_prompts(dir: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for e in entries.flatten() {
+        let name = e.file_name();
+        if name.to_string_lossy().starts_with("prompt-") || name.to_string_lossy().starts_with("woke-") {
+            let _ = fs::remove_file(e.path());
+        }
+    }
+}
+
+/// When the user last submitted a prompt in `session`, as far as the hook saw.
+pub fn last_prompt(dir: &Path, session: &str) -> Option<i64> {
+    fs::read_to_string(prompt_file(dir, session)).ok()?.trim().parse().ok()
+}
+
 /// Whether a waiter for `session` is there to be woken.
 pub fn waiting(dir: &Path, session: &str, now: SystemTime) -> bool {
     modified(&waiter_file(dir, session)).is_some_and(|t| now.duration_since(t).unwrap_or_default() < STALE)
@@ -116,14 +171,25 @@ pub fn signal(dir: &Path, session: &str, message: &str) -> io::Result<()> {
     })
 }
 
-/// A signal no waiter took within `max_age` will not be taken; it is removed.
+/// A signal no waiter took within `max_age` will not be taken; it is removed, as are files left by
+/// hooks long gone. A live waiter's file is kept even when it looks old: after the computer sleeps,
+/// its next heartbeat can come a little later.
 pub fn drop_stale_signals(dir: &Path, now: SystemTime, max_age: Duration) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     for e in entries.flatten() {
-        let old = e.metadata().and_then(|m| m.modified()).is_ok_and(|t| now.duration_since(t).unwrap_or_default() > max_age);
+        let age = e.metadata().and_then(|m| m.modified()).map_or(Duration::ZERO, |t| now.duration_since(t).unwrap_or_default());
         let name = e.file_name();
         let name = name.to_string_lossy();
-        if old && (name.starts_with("signal-") || name.starts_with(".signal-") || name.starts_with("waiter-")) {
+        let limit = if name.starts_with("signal-") || name.starts_with(".signal-") {
+            max_age
+        } else if name.starts_with("waiter-") || name.starts_with("woke-") {
+            WAITER_GONE
+        } else if name.starts_with("prompt-") {
+            PROMPT_KEPT
+        } else {
+            continue;
+        };
+        if age > limit {
             let _ = fs::remove_file(e.path());
         }
     }
@@ -184,6 +250,27 @@ mod tests {
     }
 
     #[test]
+    fn a_prompt_sends_the_waiter_away_and_only_the_users_own_is_kept() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().to_owned();
+        let waiter = {
+            let dir = dir.clone();
+            std::thread::spawn(move || wait(&dir, "s", "a", None, TICK, later(5_000), || true).unwrap())
+        };
+        while !waiting(&dir, "s", SystemTime::now()) {
+            std::thread::sleep(TICK);
+        }
+        prompted(&dir, "s", 1_000);
+        assert_eq!(waiter.join().unwrap(), Outcome::Moved, "the conversation went on at once");
+        assert_eq!(last_prompt(&dir, "s"), Some(1_000));
+        woke(&dir, "s");
+        prompted(&dir, "s", 2_000);
+        assert_eq!(last_prompt(&dir, "s"), Some(1_000), "the turn a wake started is not the user's");
+        prompted(&dir, "s", 3_000);
+        assert_eq!(last_prompt(&dir, "s"), Some(3_000));
+    }
+
+    #[test]
     fn only_session_ids_name_files_and_stale_signals_are_cleared() {
         assert!(valid_session("1425e5e7-8bc3-4140-a831-c06cc4747644"));
         for bad in ["", "../x", "a/b", "a b", &"x".repeat(65)] {
@@ -193,7 +280,11 @@ mod tests {
         signal(d.path(), "s", "x").unwrap();
         drop_stale_signals(d.path(), SystemTime::now(), Duration::from_secs(60));
         assert!(signal_file(d.path(), "s").exists());
+        fs::write(waiter_file(d.path(), "s"), "a").unwrap();
         drop_stale_signals(d.path(), SystemTime::now() + Duration::from_secs(120), Duration::from_secs(60));
         assert!(!signal_file(d.path(), "s").exists());
+        assert!(waiter_file(d.path(), "s").exists(), "a waiter after sleep is not taken for gone");
+        drop_stale_signals(d.path(), SystemTime::now() + WAITER_GONE * 2, Duration::from_secs(60));
+        assert!(!waiter_file(d.path(), "s").exists());
     }
 }

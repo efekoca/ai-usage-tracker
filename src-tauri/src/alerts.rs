@@ -115,7 +115,8 @@ pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading], caches:
     let budget = budget(app, s, now_ms);
     let live = |p| readings.iter().any(|r| r.active && r.provider == p && r.observed_ms.is_some_and(|t| now_ms - t < LIVE_READING_MS));
     let signed_out = newly_out(&mut SIGNED_OUT.lock().unwrap(), &crate::capture::sign_ins(app, s), live);
-    let caches: Vec<Cache> = caches.iter().filter(|c| !(c.auto && c.refreshable && !c.auto_capped)).cloned().collect();
+    // a cache refreshed by itself, or on its way to it, is not told about
+    let caches: Vec<Cache> = caches.iter().filter(|c| !(c.auto && !c.auto_capped && (c.refreshable || c.refreshing))).cloned().collect();
     let cache = cache_due(&mut CACHE_TOLD.lock().unwrap(), &caches, now_ms);
     if !n.enabled {
         return;
@@ -318,10 +319,15 @@ fn act(app: &AppHandle, tag: &str, action: &str) {
     if action == REFRESH
         && let Some(session) = tag.strip_prefix("cache-")
     {
-        match crate::refresh::refresh_now(app, session) {
-            Ok(()) => return,
-            Err(e) => log::info!("refresh from a notification: {e}"),
-        }
+        // macOS calls this on the main thread, and a refresh waits for the database
+        let (app, tag, session) = (app.clone(), tag.to_owned(), session.to_owned());
+        std::thread::spawn(move || {
+            if let Err(e) = crate::refresh::refresh_now(&app, &session) {
+                log::info!("refresh from a notification: {e}");
+                open(&app, &tag);
+            }
+        });
+        return;
     }
     open(app, tag);
 }

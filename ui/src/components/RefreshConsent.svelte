@@ -3,10 +3,30 @@
   import { answerConsent, refresh } from '../lib/refresh.svelte'
 
   let primary: HTMLButtonElement | undefined = $state()
+  let dialog: HTMLDivElement | undefined = $state()
+  // the button that opened the dialog gets the focus back when it closes
+  let opener: HTMLElement | null = null
   $effect(() => {
-    if (refresh.asking) primary?.focus()
+    if (refresh.asking) {
+      opener ??= document.activeElement as HTMLElement | null
+      primary?.focus()
+    } else if (opener) {
+      if (opener.isConnected) opener.focus()
+      opener = null
+    }
   })
-  const keys = (e: KeyboardEvent) => e.key === 'Escape' && !refresh.busy && answerConsent(false)
+  function keys(e: KeyboardEvent) {
+    if (e.key === 'Escape' && !refresh.busy) return answerConsent(false)
+    if (e.key !== 'Tab' || !dialog) return
+    // Tab stays in the dialog
+    const items = [...dialog.querySelectorAll<HTMLElement>('button:not([disabled])')]
+    const [first, last] = [items[0], items[items.length - 1]]
+    const at = document.activeElement
+    if (!dialog.contains(at) || (e.shiftKey && at === first) || (!e.shiftKey && at === last)) {
+      e.preventDefault()
+      ;(e.shiftKey ? last : first)?.focus()
+    }
+  }
 </script>
 
 <svelte:window onkeydown={(e) => refresh.asking && keys(e)} />
@@ -14,7 +34,7 @@
 {#if refresh.asking}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <div class="backdrop" onclick={() => !refresh.busy && answerConsent(false)}></div>
-  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="refresh-title" aria-describedby="refresh-text">
+  <div class="dialog" bind:this={dialog} role="dialog" aria-modal="true" aria-labelledby="refresh-title" aria-describedby="refresh-text">
     <h2 id="refresh-title">{t('refresh.consent.title')}</h2>
     <p id="refresh-text">{t('refresh.consent.text')}</p>
     <div class="sample" aria-label={t('refresh.consent.sample')}>

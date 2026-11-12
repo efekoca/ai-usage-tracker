@@ -326,6 +326,8 @@ export interface LiveCache {
   refreshable: boolean
   /** A refresh was asked for and has not reached the logs yet. */
   refreshing: boolean
+  /** The last refresh came to nothing: the cache's time did not move on. */
+  refresh_failed: boolean
   /** It is refreshed by itself before it runs out. */
   auto: boolean
   /** Its automatic refreshes stopped: more would cost more than writing the cache again. */
@@ -345,8 +347,11 @@ export interface RefreshInfo {
 }
 
 export interface ProjectChoice {
+  id: number
   path: string
+  /** Empty while project names are hidden or this one is. */
   name: string
+  hidden: boolean
 }
 
 /** An account worth switching to now, for a provider with several. */
