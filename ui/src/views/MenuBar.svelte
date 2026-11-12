@@ -3,6 +3,7 @@
   import { app, latest, nameAccount, saveSettings } from '../lib/store.svelte'
   import { api, type PanelData, type PanelModule, type PanelSize, type Provider, type TrayItem, type TrayMark, type TrayPreview, type TraySettings } from '../lib/api'
   import { fmtClock, fmtPct, limitName, t, toolLabel, windowLabel } from '../lib/i18n.svelte'
+  import { cacheShown, setCacheShown } from '../lib/caches'
   import Segmented from '../components/Segmented.svelte'
   import Select from '../components/Select.svelte'
   import Toggle from '../components/Toggle.svelte'
@@ -78,14 +79,16 @@
   })
   $effect(() => {
     void app.tick
+    // the soonest cache follows the menu bar text
+    void cacheShown('cache_menubar')
     const snap = $state.snapshot(tray) as TraySettings
     return latest(() => api.trayPreview(snap), (p) => (preview = p), () => {})
   })
 
   // the gallery: every module, as in `panel_catalog` (settings.rs)
   const MAX = 16
-  const SIZES: Record<string, PanelSize[]> = { limit: ['w', 's', 'm'], provider: ['m', 'w', 'l'], usage: ['w', 's', 'm'], forecast: ['w', 'l'], scan: ['w'], action: ['s', 'w'] }
-  const ORDER: PanelSize[] = ['s', 'w', 'm', 'l']
+  const SIZES: Record<string, PanelSize[]> = { limit: ['w', 's', 'm'], provider: ['m', 'w', 'l'], usage: ['w', 's', 'm'], forecast: ['w', 'l'], caches: ['t', 'l'], scan: ['w'], action: ['s', 'w'] }
+  const ORDER: PanelSize[] = ['s', 'w', 'm', 'l', 't']
   const POOLS = [['anthropic', ''], ['openai', ''], ['google', 'gemini'], ['google', '3p']] as const
   const mk = (m: Partial<PanelModule> & { kind: PanelModule['kind'] }): PanelModule => ({ provider: '', pool: '', window: '', period: '', action: '', size: SIZES[m.kind][0], style: '', account: '', ...m })
   // each Codex or Claude limit for the account in use, followed by the same limit of every known account
@@ -101,6 +104,7 @@
     ...POOLS.flatMap(([provider, pool]) => ['five_hour', 'seven_day'].map((window) => mk({ kind: 'limit', provider, pool, window, style: 'ring' }))),
     ...POOLS.flatMap(([provider, pool]) => ['five_hour', 'seven_day'].map((window) => mk({ kind: 'forecast', provider, pool, window }))),
     ...['', 'opencode'].flatMap((provider) => ['today', 'days7', 'month1'].map((period) => mk({ kind: 'usage', provider, period }))),
+    mk({ kind: 'caches' }),
     mk({ kind: 'scan' }),
     ...['open', 'widget', 'rescan', 'settings'].map((action) => mk({ kind: 'action', action })),
   ]
@@ -115,7 +119,7 @@
       ...['open', 'widget', 'rescan', 'settings'].map((a) => find((m) => m.action === a)),
     ]
   }
-  const category = (m: PanelModule) => (m.kind === 'provider' || m.kind === 'limit' ? 'limits' : m.kind === 'scan' || m.kind === 'action' ? 'controls' : m.kind)
+  const category = (m: PanelModule) => (m.kind === 'provider' || m.kind === 'limit' ? 'limits' : m.kind === 'scan' || m.kind === 'action' ? 'controls' : m.kind === 'caches' ? 'usage' : m.kind)
   const modName = (m: PanelModule) => {
     const name = who(m.provider, m.pool, m.account)
     switch (m.kind) {
@@ -127,6 +131,8 @@
         return t('menubar.mod.forecast', { name: `${name} · ${windowLabel(m.window)}` })
       case 'usage':
         return `${m.provider === 'opencode' ? toolLabel('opencode') : t('menubar.mod.usage')} · ${t(`widget.period.${m.period}`)}`
+      case 'caches':
+        return t('menubar.mod.caches')
       case 'scan':
         return t('panel.scan')
       default:
@@ -267,7 +273,7 @@
     setModules(shown.map((x) => ({ ...x })))
     selected = moduleKey(d.m)
   }
-  const ghostSize = (m: PanelModule): [number, number] => ({ s: [64, 64], w: [136, 64], m: [136, 136], l: [280, 64] })[m.size] as [number, number]
+  const ghostSize = (m: PanelModule): [number, number] => ({ s: [64, 64], w: [136, 64], m: [136, 136], l: [280, 64], t: [280, 208] })[m.size] as [number, number]
   function keys(e: KeyboardEvent, i: number) {
     if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault()
@@ -386,6 +392,8 @@
     <BrandIcon provider="opencode" size={16} always />
   {:else if m.kind === 'usage'}
     <Icon name="chart" size={16} />
+  {:else if m.kind === 'caches'}
+    <Icon name="cache" size={16} />
   {:else if m.kind === 'scan'}
     <Icon name="refresh" size={16} />
   {:else}
@@ -637,6 +645,10 @@
         {/if}
       </div>
     {/if}
+    <div class="item">
+      <div><span>{t('menubar.cache')}</span><div class="subtle small">{t(windows ? 'menubar.cache.windows' : 'menubar.cache.help')}</div></div>
+      <Toggle checked={cacheShown('cache_menubar')} label={t('menubar.cache')} onchange={(v) => setCacheShown('cache_menubar', v)} />
+    </div>
   </section>
 
   <section class="card group">

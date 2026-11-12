@@ -4,6 +4,8 @@
   import { nameAccount, toolColor } from '../lib/store.svelte'
   import BrandIcon from './BrandIcon.svelte'
   import Icon from './Icon.svelte'
+  import CachePie from './CachePie.svelte'
+  import { cacheTone, mmss } from '../lib/caches'
 
   let {
     data,
@@ -91,8 +93,7 @@
     const id = setInterval(() => (tick = Date.now()), 1000)
     return () => clearInterval(id)
   })
-  const cacheLeft = $derived(data?.cache ? Math.max(0, Math.ceil((data.cache.expires_ms - tick) / 1000)) : 0)
-  const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+  const cacheLeft = $derived(data?.cache ? Math.max(0, data.cache.expires_ms - tick) : 0)
 
   const R = 15
   const C = 2 * Math.PI * R
@@ -195,7 +196,16 @@
 {/snippet}
 
 {#snippet cache()}
-  <span class="cache" title={t('widget.cache.help')}><Icon name="clock" size={11} />{t('widget.cache', { t: mmss(cacheLeft) })}</span>
+  {@const c = data?.cache}
+  {#if c}
+    {@const tone = cacheTone(c, cacheLeft)}
+    <span class="cache" title={t('widget.cache.help')}>
+      <CachePie frac={cacheLeft / c.ttl_ms} {tone} size={11} />
+      <span class="who">{c.project || t('widget.cache')}</span>
+      <b class="left {tone}">{mmss(cacheLeft)}</b>
+      {#if c.more}<span class="more" title={t('widget.cache.more', { n: c.more })}>+{c.more}</span>{/if}
+    </span>
+  {/if}
 {/snippet}
 
 {#snippet providerLimits(p: Provider, pool: string | null, account: string | null, kinds: WidgetItemKind[])}
@@ -404,10 +414,30 @@
   .cache {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 5px;
+    min-width: 0;
     font-size: calc(10.5px * var(--ts));
     color: var(--ink-2);
     font-variant-numeric: tabular-nums;
+  }
+  .cache .who {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cache .left {
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .cache .left.soon {
+    color: color-mix(in srgb, var(--warning) 72%, var(--ink));
+  }
+  .cache .left.urgent {
+    color: color-mix(in srgb, var(--critical) 82%, var(--ink));
+  }
+  .cache .more {
+    color: var(--ink-3);
   }
   .ring {
     display: flex;

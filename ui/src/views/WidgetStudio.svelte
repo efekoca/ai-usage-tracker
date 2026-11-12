@@ -9,6 +9,7 @@
   import ColorPick from '../components/ColorPick.svelte'
   import Icon from '../components/Icon.svelte'
   import WidgetView from '../components/WidgetView.svelte'
+  import { cacheShown, setCacheShown } from '../lib/caches'
 
   // Windows sees a full-screen program; macOS lets the widget join one only without a Dock icon
   const behaviorKeys = $derived(
@@ -34,6 +35,7 @@
   // follows new data like the widget does; a failed read keeps the last preview
   $effect(() => {
     void app.tick
+    void cacheShown('cache_widget')
     return latest(() => api.widgetData(), (d) => (data = d), () => {})
   })
   const SUGGESTED = ['Segoe UI Variable Display', 'Segoe UI', 'Aptos', 'Bahnschrift', 'Calibri', 'Cascadia Mono', 'Consolas', 'Georgia', 'Verdana', 'Arial']
@@ -189,6 +191,10 @@
       <div class="item">
         <span>{t('limits.mode')}<span class="subtle small block">{t('limits.mode.help')}</span></span>
         <Segmented label={t('limits.mode')} value={app.settings?.limit_display ?? 'used'} options={[{ value: 'used', label: t('limits.mode.used') }, { value: 'remaining', label: t('limits.mode.remaining') }]} onchange={(v) => saveSettings({ limit_display: v })} />
+      </div>
+      <div class="item">
+        <span>{t('ws.cache')}<span class="subtle small block">{t('ws.cache.help')}</span></span>
+        <Toggle checked={cacheShown('cache_widget')} label={t('ws.cache')} onchange={(v) => setCacheShown('cache_widget', v)} />
       </div>
       <div class="item stack">
         <span>{t('ws.providers')}<span class="subtle small block">{t('ws.providers.help')}</span></span>

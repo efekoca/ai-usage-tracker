@@ -333,8 +333,18 @@ pub struct WidgetData {
     /// Known accounts in order of first use, which numbers the unnamed ones.
     accounts: Vec<KnownAccount>,
     updated_ms: i64,
-    /// While the widget shows the cache time left and the latest Claude Code conversation's cache lasts.
-    cache: Option<insights::CacheTimer>,
+    /// While the widget shows the cache time left: the followed cache that runs out first.
+    cache: Option<WidgetCache>,
+}
+
+#[derive(Serialize)]
+pub struct WidgetCache {
+    /// Empty while project names are hidden.
+    project: String,
+    expires_ms: i64,
+    ttl_ms: i64,
+    /// How many more followed caches last.
+    more: usize,
 }
 
 fn widget_period(
@@ -376,10 +386,11 @@ fn widget_period(
 #[tauri::command]
 pub async fn get_widget_data(state: State<'_, AppState>) -> Res<WidgetData> {
     let settings = state.settings.read().unwrap().clone();
+    let now = now_ms();
+    let caches = if settings.cache_widget { crate::caches::followed(&state, &settings, now) } else { Vec::new() };
     let providers = enabled_providers(&settings);
     let store = state.db();
     let book = state.book.read().unwrap();
-    let now = now_ms();
     let limits = analytics::limits_view(&store, &book, now, &settings.thresholds)
         .map_err(err)?
         .into_iter()
@@ -413,7 +424,7 @@ pub async fn get_widget_data(state: State<'_, AppState>) -> Res<WidgetData> {
         providers: provs,
         accounts,
         updated_ms: state.status.lock().unwrap().last_scan_ms.unwrap_or(now),
-        cache: if settings.cache_timer && settings.cache_widget { insights::cache_timer(&store, now).map_err(err)? } else { None },
+        cache: caches.first().map(|c| WidgetCache { project: c.project.clone(), expires_ms: c.expires_ms, ttl_ms: c.ttl_ms, more: caches.len() - 1 }),
     })
 }
 
@@ -739,7 +750,8 @@ pub async fn tray_preview(app: AppHandle, tray: crate::settings::TraySettings) -
     let bare = crate::settings::TraySettings { label: "none".into(), ..tray.clone() };
     let g = crate::tray::format(&s, &bare);
     Ok(TrayPreview {
-        title: if tray.title && !cfg!(windows) { f.title(&data) } else { String::new() },
+        // as in the menu bar, where Windows has no room for text
+        title: if cfg!(windows) { String::new() } else { crate::tray::with_cache(if tray.title { f.title(&data) } else { String::new() }, crate::tray::cache_title(&app, &s, now_ms()).as_deref()) },
         parts: tray.items.iter().map(|i| f.part(i, &data).unwrap_or_default()).collect(),
         catalog: crate::settings::tray_catalog().iter().map(|i| g.part(i, &data).unwrap_or_default()).collect(),
         icon,

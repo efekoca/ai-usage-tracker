@@ -503,6 +503,19 @@ impl Store {
         rows.collect()
     }
 
+    /// When a session's first request was made.
+    pub fn session_started_ms(&self, session_id: &str) -> Result<Option<i64>> {
+        let mut st = self.conn.prepare_cached(&format!("SELECT MIN(ts_ms) FROM usage_event u WHERE session_id = ?1 AND {NOT_SUPERSEDED}"))?;
+        st.query_row(params![session_id], |r| r.get(0))
+    }
+
+    /// The projects a tool was used in since `from_ms`, the most recent first.
+    pub fn projects_used_since(&self, tool: Tool, from_ms: i64) -> Result<Vec<i64>> {
+        let mut st = self.conn.prepare_cached("SELECT project_id FROM usage_event WHERE tool = ?1 AND ts_ms >= ?2 AND project_id IS NOT NULL GROUP BY project_id ORDER BY MAX(ts_ms) DESC")?;
+        let rows = st.query_map(params![tool.as_str(), from_ms], |r| r.get(0))?;
+        rows.collect()
+    }
+
     /// Tool calls with `from_ms <= ts < to_ms`.
     pub fn tool_calls_between(&self, from_ms: i64, to_ms: i64) -> Result<Vec<ToolCallRow>> {
         let mut st = self.conn.prepare_cached(

@@ -218,6 +218,8 @@ pub struct PanelData {
     signed_out: Vec<Provider>,
     /// Known accounts in order of first use, which numbers the unnamed ones.
     accounts: Vec<crate::commands::KnownAccount>,
+    /// The followed caches, the soonest to run out first; empty while the feature is off.
+    caches: Vec<crate::caches::Cache>,
 }
 
 /// Everything the panel's modules show; the Menu bar page's preview reads it too.
@@ -226,6 +228,7 @@ pub async fn panel_data(app: AppHandle) -> Result<PanelData, String> {
     let state = app.state::<AppState>();
     let s = state.settings.read().unwrap().clone();
     let providers = crate::commands::enabled_providers(&s);
+    let caches = crate::caches::followed(&state, &s, now_ms());
     let (limits, accounts) = {
         let store = state.db();
         let book = state.book.read().unwrap();
@@ -272,6 +275,7 @@ pub async fn panel_data(app: AppHandle) -> Result<PanelData, String> {
         providers: order,
         signed_out,
         accounts,
+        caches,
     })
 }
 
@@ -289,6 +293,7 @@ pub fn panel_action(app: AppHandle, window: WebviewWindow, action: String) -> Re
         "open" => show_main_at(&app, None),
         "settings" => show_main_at(&app, Some("settings")),
         "limits" => show_main_at(&app, Some("limits")),
+        "cache" => show_main_at(&app, Some("cache")),
         "update" => handle_menu(&app, "tray:update"),
         "close" => {}
         _ => return Err("unknown_action".into()),

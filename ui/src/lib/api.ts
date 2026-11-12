@@ -69,9 +69,9 @@ export interface TrayPreview {
   icon: { text: string; logo: '' | Provider | 'opencode'; bg: string; fg: string; dial: number | null; opacity: number } | null
 }
 
-export type PanelKind = 'limit' | 'provider' | 'usage' | 'forecast' | 'scan' | 'action'
-/** s 1×1, w 2×1, m 2×2, l 4×1 cells. */
-export type PanelSize = 's' | 'w' | 'm' | 'l'
+export type PanelKind = 'limit' | 'provider' | 'usage' | 'forecast' | 'caches' | 'scan' | 'action'
+/** s 1×1, w 2×1, m 2×2, l 4×1, t 4×3 cells. */
+export type PanelSize = 's' | 'w' | 'm' | 'l' | 't'
 export interface PanelModule {
   kind: PanelKind
   provider: string
@@ -125,6 +125,8 @@ export interface PanelData {
   signed_out: Provider[]
   /** Known accounts in order of first use, which numbers the unnamed ones. */
   accounts: KnownAccount[]
+  /** The followed caches, the soonest to run out first; empty while the feature is off. */
+  caches: LiveCache[]
 }
 
 export type Period =
@@ -297,8 +299,32 @@ export interface WidgetData {
   /** Known accounts in order of first use, which numbers the unnamed ones. */
   accounts: KnownAccount[]
   updated_ms: number
-  /** While the setting is on and the latest Claude Code conversation's cache lasts. */
-  cache: { expires_ms: number; ttl_ms: number } | null
+  /** While the widget shows the cache time left: the followed cache that runs out first. */
+  cache: { project: string; expires_ms: number; ttl_ms: number; more: number } | null
+}
+
+/** A Claude Code conversation whose prompt cache still lasts. */
+export interface LiveCache {
+  session_id: string
+  /** Empty while the project's name is hidden or not known. */
+  project: string
+  branch: string | null
+  model: string
+  /** "cli", "claude-desktop", "claude-vscode" and so on. */
+  client: string | null
+  ttl_ms: number
+  expires_ms: number
+  started_ms: number
+  /** The prompt the last request left in the cache. */
+  tokens: number
+  /** API-equivalent cost of reading it once, and of writing it again after it runs out. */
+  refresh_usd: number | null
+  rewrite_usd: number | null
+}
+
+export interface ProjectChoice {
+  path: string
+  name: string
 }
 
 /** An account worth switching to now, for a provider with several. */
@@ -510,6 +536,10 @@ export interface Settings {
   cache_widget: boolean
   /** The same in minutes next to the tray icon and in its tooltip. */
   cache_menubar: boolean
+  /** "all" or "picked": whose caches are followed. */
+  cache_projects: 'all' | 'picked'
+  /** The projects followed while `cache_projects` is "picked", by path. */
+  cache_picked: string[]
   /** provider → #rrggbb; missing = the accent color */
   provider_colors: Partial<Record<Provider, string>>
   tint_icons: boolean
@@ -976,6 +1006,9 @@ export const api = {
   exportReport: (from: string, to: string, path: string) => invoke<void>('export_report', { from, to, path }),
   openLastReport: () => invoke<void>('open_last_report'),
   widgetData: () => invoke<WidgetData>('get_widget_data'),
+  liveCaches: () => invoke<LiveCache[]>('live_caches'),
+  dropCache: (sessionId: string) => invoke<void>('drop_cache', { sessionId }),
+  cacheProjectChoices: () => invoke<ProjectChoice[]>('cache_project_choices'),
   trayPreview: (tray: TraySettings) => invoke<TrayPreview>('tray_preview', { tray }),
   projects: () => invoke<ProjectRow[]>('list_projects'),
   projectsForSettings: () => invoke<ProjectRow[]>('list_projects_for_settings'),

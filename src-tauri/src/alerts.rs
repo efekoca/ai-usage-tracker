@@ -3,6 +3,7 @@
 //! CLI leaves the limits unread, and shortly before Claude Code's cache runs out. Clicking one
 //! opens the page it is about.
 
+use crate::caches::Cache;
 use crate::capture::SignIn;
 use crate::settings::{NotifySettings, Settings};
 use crate::tray_text::{name, shown_value, Format, Reading};
@@ -11,7 +12,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, Mutex};
 use tauri::{AppHandle, Manager};
 use tracker_core::analytics::LIVE_READING_MS;
-use tracker_core::insights::CacheTimer;
 use tracker_core::model::Provider;
 
 /// Readings round their reset time differently; a larger move is a window that started again.
@@ -21,7 +21,7 @@ static SEEN: LazyLock<Mutex<HashMap<Limit, Seen>>> = LazyLock::new(Default::defa
 static BUDGET: Mutex<Option<BudgetSeen>> = Mutex::new(None);
 static SIGNED_OUT: LazyLock<Mutex<HashSet<Provider>>> = LazyLock::new(Default::default);
 /// When the cache already told about runs out.
-static CACHE_TOLD: Mutex<Option<i64>> = Mutex::new(None);
+static CACHE_TOLD: LazyLock<Mutex<HashMap<String, i64>>> = LazyLock::new(Default::default);
 
 /// The budget sums the whole month, so it is checked only every few minutes.
 const BUDGET_EVERY_MS: i64 = 5 * 60_000;
@@ -98,7 +98,7 @@ impl Alert {
     }
 }
 
-pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading], cache: Option<CacheTimer>) {
+pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading], caches: &[Cache]) {
     if !s.onboarded {
         return;
     }
@@ -115,7 +115,7 @@ pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading], cache: 
     let budget = budget(app, s, now_ms);
     let live = |p| readings.iter().any(|r| r.active && r.provider == p && r.observed_ms.is_some_and(|t| now_ms - t < LIVE_READING_MS));
     let signed_out = newly_out(&mut SIGNED_OUT.lock().unwrap(), &crate::capture::sign_ins(app, s), live);
-    let cache = cache_due(&mut CACHE_TOLD.lock().unwrap(), cache, now_ms);
+    let cache = cache_due(&mut CACHE_TOLD.lock().unwrap(), caches, now_ms);
     if !n.enabled {
         return;
     }
@@ -155,40 +155,38 @@ pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading], cache: 
         log::info!("sign-in notification: {}", p.as_str());
         send(app, &format!("signin-{}", p.as_str()), &title, &body, |_| {});
     }
-    if let Some(minutes) = cache.filter(|_| s.cache_timer && n.cache) {
-        let (title, body) = cache_text(minutes, f.tr);
+    for (c, minutes) in cache.into_iter().filter(|_| s.cache_timer && n.cache) {
+        let (title, body) = cache_text(c, minutes, f.tr);
         log::info!("cache notification");
-        send(app, "cache", &title, &body, |_| {});
+        send(app, &format!("cache-{}", c.session_id), &title, &body, |_| {});
     }
 }
 
-/// A cache is told once, when its time left drops to a minute of a five-minute cache or five of
-/// an hour's: still time to continue. Returns the minutes left.
-fn cache_due(told: &mut Option<i64>, timer: Option<CacheTimer>, now_ms: i64) -> Option<i64> {
-    let t = timer?;
-    let lead = if t.ttl_ms <= 5 * 60_000 { 60_000 } else { 5 * 60_000 };
-    let left = t.expires_ms - now_ms;
-    if left <= 0 || left > lead || *told == Some(t.expires_ms) {
-        return None;
+/// Each cache is told once, when its time left drops to a minute of a five-minute cache or five
+/// of an hour's: still time to continue. Returns those due with their minutes left.
+fn cache_due<'a>(told: &mut HashMap<String, i64>, caches: &'a [Cache], now_ms: i64) -> Vec<(&'a Cache, i64)> {
+    // a conversation that ran out is forgotten
+    told.retain(|id, _| caches.iter().any(|c| &c.session_id == id));
+    let mut due = Vec::new();
+    for c in caches {
+        let lead = if c.ttl_ms <= 5 * 60_000 { 60_000 } else { 5 * 60_000 };
+        let left = c.expires_ms - now_ms;
+        if left <= 0 || left > lead || told.get(&c.session_id) == Some(&c.expires_ms) {
+            continue;
+        }
+        told.insert(c.session_id.clone(), c.expires_ms);
+        due.push((c, (left + 59_999) / 60_000));
     }
-    *told = Some(t.expires_ms);
-    Some((left + 59_999) / 60_000)
+    due
 }
 
-fn cache_text(minutes: i64, tr: bool) -> (String, String) {
-    if tr {
-        let when = if minutes <= 1 { "1 dakika".to_owned() } else { format!("{minutes} dakika") };
-        (
-            "Önbelleğin süresi dolmak üzere".into(),
-            format!("Claude Code'daki konuşmanızın önbelleği {when} sonra silinecek. Şimdi devam ederseniz istek önbellekten ucuza okunur."),
-        )
-    } else {
-        let when = if minutes <= 1 { "1 minute".to_owned() } else { format!("{minutes} minutes") };
-        (
-            "Your cache is about to run out".into(),
-            format!("Your Claude Code conversation's cache is dropped in {when}. Continue now and the request reads it at the cheap cache price."),
-        )
-    }
+fn cache_text(c: &Cache, minutes: i64, tr: bool) -> (String, String) {
+    let title = match (tr, minutes) {
+        (true, _) => format!("Önbellek {minutes} dakika sonra silinecek"),
+        (false, 1) => "Cache runs out in 1 minute".into(),
+        (false, _) => format!("Cache runs out in {minutes} minutes"),
+    };
+    (title, crate::caches::label(c, tr).unwrap_or_else(|| "Claude Code".into()))
 }
 
 /// Unlike a limit, a sign-out is told at the first read after a start too: it is something to do
@@ -313,7 +311,7 @@ pub(crate) fn test(app: &AppHandle, s: &Settings) -> Sent {
 fn open(app: &AppHandle, tag: &str) {
     crate::windows::show_main_at(app, Some(match tag {
         "budget" => "overview",
-        "cache" => "cache",
+        t if t.starts_with("cache") => "cache",
         _ => "limits",
     }));
 }
@@ -609,7 +607,12 @@ fn send(app: &AppHandle, tag: &str, title: &str, body: &str, done: impl FnOnce(S
             Ok(())
         }))?;
         notifier.Show(&toast)?;
-        TOASTS.lock().unwrap().insert(tag.to_owned(), toast);
+        let mut toasts = TOASTS.lock().unwrap();
+        // one per conversation adds up over a long run; the newest few stay clickable
+        if tag.starts_with("cache-") && toasts.keys().filter(|k| k.starts_with("cache-")).count() >= 8 {
+            toasts.retain(|k, _| !k.starts_with("cache-"));
+        }
+        toasts.insert(tag.to_owned(), toast);
         Ok(Sent::Shown)
     };
     match show() {
@@ -900,19 +903,33 @@ mod tests {
     }
 
     #[test]
-    fn a_cache_is_told_once_while_there_is_still_time() {
+    fn each_cache_is_told_once_while_there_is_still_time() {
         const MIN: i64 = 60_000;
-        let five = |expires_ms| Some(CacheTimer { expires_ms, ttl_ms: 5 * MIN });
-        let mut told = None;
-        assert_eq!(cache_due(&mut told, five(10 * MIN), 8 * MIN), None, "two minutes left");
-        assert_eq!(cache_due(&mut told, five(10 * MIN), 9 * MIN + 20_000), Some(1));
-        assert_eq!(cache_due(&mut told, five(10 * MIN), 9 * MIN + 40_000), None, "already told");
-        assert_eq!(cache_due(&mut told, five(15 * MIN), 14 * MIN + 30_000), Some(1), "a later request");
-        assert_eq!(cache_due(&mut told, five(20 * MIN), 20 * MIN), None, "run out");
-        let hour = Some(CacheTimer { expires_ms: 60 * MIN, ttl_ms: 60 * MIN });
-        assert_eq!(cache_due(&mut told, hour, 55 * MIN - 1), None);
-        assert_eq!(cache_due(&mut told, hour, 55 * MIN), Some(5));
-        assert_eq!(cache_text(1, true).1, "Claude Code'daki konuşmanızın önbelleği 1 dakika sonra silinecek. Şimdi devam ederseniz istek önbellekten ucuza okunur.");
-        assert!(cache_text(5, false).1.contains("in 5 minutes"));
+        let cache = |id: &str, expires_ms, ttl_ms| Cache {
+            session_id: id.into(),
+            project: "notes".into(),
+            branch: Some("main".into()),
+            model: String::new(),
+            client: None,
+            ttl_ms,
+            expires_ms,
+            started_ms: 0,
+            tokens: 0,
+            refresh_usd: None,
+            rewrite_usd: None,
+        };
+        let ids = |due: Vec<(&Cache, i64)>| due.into_iter().map(|(c, m)| (c.session_id.clone(), m)).collect::<Vec<_>>();
+        let mut told = HashMap::new();
+        let first = [cache("a", 10 * MIN, 5 * MIN), cache("b", 60 * MIN, 60 * MIN)];
+        assert!(cache_due(&mut told, &first, 8 * MIN).is_empty(), "two minutes left");
+        assert_eq!(ids(cache_due(&mut told, &first, 9 * MIN + 20_000)), [("a".into(), 1)]);
+        assert!(cache_due(&mut told, &first, 9 * MIN + 40_000).is_empty(), "already told");
+        let later = [cache("a", 15 * MIN, 5 * MIN), cache("b", 60 * MIN, 60 * MIN)];
+        assert_eq!(ids(cache_due(&mut told, &later, 14 * MIN + 30_000)), [("a".into(), 1)], "a later request");
+        assert!(cache_due(&mut told, &later, 15 * MIN).is_empty(), "run out");
+        assert_eq!(ids(cache_due(&mut told, &later[1..], 55 * MIN)), [("b".into(), 5)], "each conversation on its own");
+        assert_eq!(told.len(), 1, "one that ran out is forgotten");
+        assert_eq!(cache_text(&first[0], 1, true), ("Önbellek 1 dakika sonra silinecek".into(), "notes · main".into()));
+        assert_eq!(cache_text(&cache("x", 0, 0), 5, false).0, "Cache runs out in 5 minutes");
     }
 }

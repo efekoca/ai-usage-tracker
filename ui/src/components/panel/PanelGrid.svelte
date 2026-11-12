@@ -86,6 +86,10 @@
   .cell.l {
     grid-column: span 4;
   }
+  .cell.t {
+    grid-column: span 4;
+    grid-row: span 3;
+  }
   .body {
     width: 100%;
     height: 100%;

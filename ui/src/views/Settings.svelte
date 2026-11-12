@@ -3,7 +3,7 @@
   import { saveAs } from '../lib/dialogs'
   import { onMount } from 'svelte'
   import { app, refresh, saveSettings } from '../lib/store.svelte'
-  import { api, providersOf, type HotkeyStatus, type ModelPrice, type NotifySettings, type PricingFile, type PricingInfo, type Provider } from '../lib/api'
+  import { api, providersOf, type HotkeyStatus, type ModelPrice, type NotifySettings, type PricingFile, type PricingInfo, type ProjectChoice, type Provider } from '../lib/api'
   import { fmtDate, fmtDateTime, fmtDuration, fmtInput, fmtInt, fmtPct, localDate, parseNumber, t, windowLabel } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
   import Select from '../components/Select.svelte'
@@ -62,6 +62,13 @@
     canUpdatePrices = p.can_update
     pricingDirty = false
   }
+  // the projects to follow caches in, loaded once the list is shown
+  let cacheChoices: ProjectChoice[] | null = $state(null)
+  $effect(() => {
+    if (s.cache_timer && s.cache_projects === 'picked' && !cacheChoices) api.cacheProjectChoices().then((c) => (cacheChoices = c)).catch(() => (cacheChoices = []))
+  })
+  const follow = (path: string, on: boolean) => saveSettings({ cache_picked: on ? [...s.cache_picked, path] : s.cache_picked.filter((p) => p !== path) })
+
   onMount(async () => {
     hk = await api.hotkeyStatus().catch(() => null)
     await loadPricing()
@@ -386,6 +393,7 @@
       <Toggle checked={s.cache_timer} label={t('settings.cacheTimer')} onchange={(v) => saveSettings({ cache_timer: v })} />
     </div>
     {#if s.cache_timer}
+      <span class="choices-title">{t('settings.cacheTimer.where')}</span>
       <div class="choices">
         <div class="choice">
           <span class="glyph"><Icon name="widget" size={16} /></span>
@@ -402,6 +410,23 @@
           <span class="label">{t('settings.cacheTimer.notify')}<span class="subtle small">{s.notify.enabled ? t('settings.cacheTimer.notify.help') : t('settings.notifyOff')}</span></span>
           <Toggle small checked={s.notify.cache} disabled={!s.notify.enabled} label="{t('settings.cacheTimer')}: {t('settings.cacheTimer.notify')}" onchange={(v) => saveNotify({ cache: v })} />
         </div>
+      </div>
+      <span class="choices-title">{t('settings.cacheTimer.projects')}</span>
+      <div class="choices">
+        <div class="choice plain">
+          <span class="label">{t('settings.cacheTimer.followed')}</span>
+          <Segmented label={t('settings.cacheTimer.followed')} value={s.cache_projects} options={[{ value: 'all', label: t('settings.cacheTimer.all') }, { value: 'picked', label: t('settings.cacheTimer.picked') }]} onchange={(v) => saveSettings({ cache_projects: v })} />
+        </div>
+        {#if s.cache_projects === 'picked' && cacheChoices}
+          {#each cacheChoices as p (p.path)}
+            <div class="choice plain">
+              <span class="label" title={p.path}>{p.name}</span>
+              <Toggle small checked={s.cache_picked.includes(p.path)} label={t('settings.cacheTimer.follow', { name: p.name })} onchange={(v) => follow(p.path, v)} />
+            </div>
+          {:else}
+            <div class="choice plain"><span class="label subtle small">{t('settings.cacheTimer.noProjects')}</span></div>
+          {/each}
+        {/if}
       </div>
     {/if}
   </div>
@@ -860,6 +885,16 @@
     border-radius: 8px;
     background: var(--surface-hover);
     color: var(--ink-2);
+  }
+  .choice.plain::before {
+    left: 14px;
+  }
+  .choices-title {
+    display: block;
+    margin: 2px 2px 6px;
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--ink-3);
   }
   .choice .label {
     flex: 1;

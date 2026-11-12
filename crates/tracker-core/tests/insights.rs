@@ -1,6 +1,7 @@
 use chrono::{FixedOffset, TimeZone};
 use tracker_core::analytics::{account_key, Filter, Range};
-use tracker_core::insights::{agents_tools, branches, cache_timer, compare_models, context_stats, day_detail, forecast, plan_value, restarted, session_timeline, sessions, subagent_cache, ForecastKind, PromptShare};
+use tracker_core::insights::{agents_tools, branches, compare_models, context_stats, day_detail, forecast, plan_value, restarted, session_timeline, sessions, subagent_cache, ForecastKind, PromptShare};
+use tracker_core::insights::live_caches;
 use tracker_core::tips::{cache_rebuilds, tips, Tip, Tips};
 use tracker_core::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
 use tracker_core::pricing::{CostInput, PriceBook};
@@ -96,21 +97,30 @@ fn store_with(evs: &[Ev]) -> Store {
 }
 
 #[test]
-fn the_cache_timer_counts_from_the_last_request_with_the_shortest_lifetime() {
+fn each_conversation_keeps_its_own_cache_counted_from_its_last_request() {
     let t = ms(2026, 11, 10, 12, 0);
-    let five = store_with(&[
-        ev("a", t, Tool::ClaudeCode, "claude-opus-5-5", Some("s"), "/p", 10, 0, 5).cache_write(1_000, 800),
-        ev("b", t + 2 * MIN, Tool::ClaudeCode, "claude-opus-5-5", Some("s"), "/p", 10, 900, 5),
-        ev("c", t + 3 * MIN, Tool::ClaudeCode, "claude-opus-5-5", Some("s"), "/p", 10, 0, 5).agent("Explore", "x").cache_write(500, 0),
+    let book = PriceBook::default_book();
+    let store = store_with(&[
+        ev("a", t - 2 * HOUR, Tool::ClaudeCode, "claude-opus-5-5", Some("s"), "/p", 10, 0, 5).cache_write(1_000, 800),
+        ev("b", t, Tool::ClaudeCode, "claude-opus-5-5", Some("s"), "/p", 10, 0, 5).cache_write(1_000, 800),
+        ev("c", t + 2 * MIN, Tool::ClaudeCode, "claude-opus-5-5", Some("s"), "/p", 10, 900, 5).branch("main"),
+        ev("d", t + 3 * MIN, Tool::ClaudeCode, "claude-opus-5-5", Some("s"), "/p", 10, 0, 5).agent("Explore", "x").cache_write(500, 0),
+        ev("e", t + 3 * MIN, Tool::ClaudeCode, "<synthetic>", Some("s"), "/p", 0, 0, 0),
+        ev("f", t + MIN, Tool::ClaudeCode, "claude-sonnet-5-5", Some("h"), "/q", 10, 0, 5).cache_write(2_000, 2_000),
+        ev("g", t + MIN, Tool::Codex, "gpt-5.6-terra", Some("x"), "/p", 10, 400, 5),
+        ev("i", t + MIN, Tool::ClaudeCode, "claude-opus-5-5", Some("n"), "/p", 10, 0, 5),
     ]);
-    let timer = cache_timer(&five, t + 4 * MIN).unwrap().unwrap();
-    assert_eq!((timer.expires_ms, timer.ttl_ms), (t + 7 * MIN, 5 * MIN), "the read at +2 renews; a subagent's request does not count");
-    assert_eq!(cache_timer(&five, t + 8 * MIN).unwrap(), None, "run out");
-
-    let hour = store_with(&[ev("a", t, Tool::ClaudeCode, "claude-opus-5-5", Some("s"), "/p", 10, 0, 5).cache_write(1_000, 1_000)]);
-    assert_eq!(cache_timer(&hour, t + 30 * MIN).unwrap().unwrap().expires_ms, t + HOUR);
-    let none = store_with(&[ev("a", t, Tool::ClaudeCode, "claude-opus-5-5", Some("s"), "/p", 10, 0, 5), ev("b", t, Tool::Codex, "gpt-5.6-terra", Some("x"), "/p", 10, 0, 5)]);
-    assert_eq!(cache_timer(&none, t + MIN).unwrap(), None, "nothing cached");
+    let live = live_caches(&store, &book, t + 4 * MIN).unwrap();
+    assert_eq!(live.iter().map(|c| c.session_id.as_str()).collect::<Vec<_>>(), ["s", "h"], "soonest first; nothing cached, other tools and subagents left out");
+    let s = &live[0];
+    assert_eq!((s.expires_ms, s.ttl_ms), (t + 7 * MIN, 5 * MIN), "the read at +2 renews; a failed request and a subagent's do not");
+    assert_eq!((s.tokens, s.branch.as_deref(), s.model.as_str()), (900, Some("main"), "claude-opus-5-5"));
+    assert_eq!(s.started_ms, t - 2 * HOUR, "the conversation began before the last hour");
+    let (read, write) = (s.refresh_usd.unwrap(), s.rewrite_usd.unwrap());
+    assert!(read > 0.0 && write > 10.0 * read, "a refresh reads the cache for a fraction of writing it again");
+    assert_eq!((live[1].expires_ms, live[1].ttl_ms, live[1].tokens), (t + MIN + HOUR, HOUR, 2_000));
+    assert!(live[1].rewrite_usd.unwrap() > book.cost(&CostInput { model: "claude-sonnet-5-5", tokens: &Tokens { cache_write: 2_000, ..Default::default() }, request_input: 2_000, web_search_requests: 0, speed: None, inference_geo: None, ts_ms: None }).unwrap().total(), "an hour's cache costs more to write");
+    assert_eq!(live_caches(&store, &book, t + 8 * MIN).unwrap().iter().map(|c| c.session_id.as_str()).collect::<Vec<_>>(), ["h"], "run out");
 }
 
 fn all() -> Range {
