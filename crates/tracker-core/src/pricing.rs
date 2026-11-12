@@ -13,17 +13,27 @@ pub fn bundled() -> PricingFile {
     serde_json::from_str(DEFAULT_PRICING_JSON).expect("bundled pricing.json is valid")
 }
 
-/// A price list fetched from the app's repository, taken only when the app can price with it and
-/// it still holds every model the app shipped with, so a cut-short or broken copy changes nothing.
+/// A price list fetched from the app's repository, taken only when the app can price with it, it
+/// still holds every model and alias the app shipped with and its date is a real day no later than
+/// tomorrow, so a cut-short, broken or misdated copy changes nothing.
 pub fn checked_list(s: &str) -> Result<PricingFile, PricingError> {
     let file: PricingFile = serde_json::from_str(s)?;
     if file.schema_version != 1 {
         return Err(PricingError::Schema(file.schema_version));
     }
     validate(&file)?;
+    let tomorrow = chrono::Utc::now().date_naive() + chrono::Days::new(1);
+    if file.day().is_none_or(|d| d > tomorrow) {
+        return Err(PricingError::Invalid(format!("updated_at {} is not a day up to tomorrow", file.updated_at)));
+    }
     let have: std::collections::HashSet<String> = file.models.iter().map(|m| m.id.to_ascii_lowercase()).collect();
-    if let Some(m) = bundled().models.iter().find(|m| !have.contains(&m.id.to_ascii_lowercase())) {
+    let shipped = bundled();
+    if let Some(m) = shipped.models.iter().find(|m| !have.contains(&m.id.to_ascii_lowercase())) {
         return Err(PricingError::Invalid(format!("{} is missing", m.id)));
+    }
+    let names: std::collections::HashSet<String> = file.models.iter().flat_map(|m| std::iter::once(&m.id).chain(&m.aliases)).map(|n| n.to_ascii_lowercase()).collect();
+    if let Some(a) = shipped.models.iter().flat_map(|m| &m.aliases).find(|a| !names.contains(&a.to_ascii_lowercase())) {
+        return Err(PricingError::Invalid(format!("{a} is missing")));
     }
     if !file.user_aliases.is_empty() {
         return Err(PricingError::Invalid("a shared list has no user aliases".into()));
@@ -36,9 +46,13 @@ pub fn checked_list(s: &str) -> Result<PricingFile, PricingError> {
 pub fn base(fetched: Option<&str>) -> PricingFile {
     let bundled = bundled();
     match fetched.and_then(|s| checked_list(s).ok()) {
-        Some(f) if f.updated_at >= bundled.updated_at => f,
+        Some(f) if f.day() >= bundled.day() => f,
         _ => bundled,
     }
+}
+
+fn day(s: &str) -> Option<chrono::NaiveDate> {
+    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +71,13 @@ pub struct PricingFile {
     /// User-defined "price model X like model Y" mappings.
     #[serde(default)]
     pub user_aliases: HashMap<String, String>,
+}
+
+impl PricingFile {
+    /// `updated_at` as a day; `None` when it is not one.
+    pub fn day(&self) -> Option<chrono::NaiveDate> {
+        day(&self.updated_at)
+    }
 }
 
 fn usd() -> String {
@@ -80,7 +101,7 @@ pub struct Rates {
     pub cache_write_1h: Option<f64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LongContext {
     pub threshold: u64,
     #[serde(flatten)]
@@ -106,8 +127,8 @@ pub struct ModelPrice {
     pub web_search_per_1k: Option<f64>,
     #[serde(default)]
     pub off_peak: Option<OffPeak>,
-    /// Rates that take over from a day on (UTC), oldest first, e.g. when an introductory price
-    /// ends; requests before it keep the rates above, so a price change never reprices the past.
+    /// Prices that take over from a day on (UTC), oldest first, e.g. when an introductory price
+    /// ends; requests before it keep the prices above, so a price change never reprices the past.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub later: Vec<LaterRates>,
     #[serde(default)]
@@ -116,23 +137,37 @@ pub struct ModelPrice {
     pub notes: Option<String>,
 }
 
+/// Replaces the model's rates and its long-context tier; without `long_context` no tier applies
+/// from that day.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LaterRates {
     pub from: chrono::NaiveDate,
     #[serde(flatten)]
     pub rates: Rates,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub long_context: Option<LongContext>,
 }
 
 impl ModelPrice {
-    /// The rates for one request: the long-context tier when its prompt is over the threshold,
-    /// else those in force on its day. A request without a time takes today's.
-    fn rates_for(&self, c: &CostInput) -> &Rates {
-        if let Some(lc) = self.long_context.as_ref().filter(|lc| c.request_input > lc.threshold) {
-            return &lc.rates;
-        }
+    /// The rates and long-context tier in force on a request's day. A request without a time takes
+    /// today's.
+    fn prices_on(&self, c: &CostInput) -> (&Rates, Option<&LongContext>) {
         let ms = c.ts_ms.unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
-        let Some(day) = chrono::DateTime::from_timestamp_millis(ms).map(|t| t.date_naive()) else { return &self.rates };
-        self.later.iter().rev().find(|l| l.from <= day).map_or(&self.rates, |l| &l.rates)
+        let day = chrono::DateTime::from_timestamp_millis(ms).map(|t| t.date_naive());
+        match day.and_then(|d| self.later.iter().rev().find(|l| l.from <= d)) {
+            Some(l) => (&l.rates, l.long_context.as_ref()),
+            None => (&self.rates, self.long_context.as_ref()),
+        }
+    }
+
+    /// The long-context tier when this request's prompt is over its threshold.
+    fn long_tier(&self, c: &CostInput) -> Option<&LongContext> {
+        self.prices_on(c).1.filter(|lc| c.request_input > lc.threshold)
+    }
+
+    fn rates_for(&self, c: &CostInput) -> &Rates {
+        let (rates, lc) = self.prices_on(c);
+        lc.filter(|lc| c.request_input > lc.threshold).map_or(rates, |lc| &lc.rates)
     }
 }
 
@@ -247,6 +282,12 @@ fn validate(file: &PricingFile) -> Result<(), PricingError> {
         }
         for (i, l) in m.later.iter().enumerate() {
             check_rates(&format!("{id}.later[{i}]"), &l.rates)?;
+            match (&l.long_context, &m.long_context) {
+                (Some(lc), _) => check_rates(&format!("{id}.later[{i}].long_context"), &lc.rates)?,
+                // left out it would be read as "no tier any more": it has to be stated
+                (None, Some(_)) => return Err(PricingError::Invalid(format!("{id}.later[{i}] needs the long-context tier the model has"))),
+                (None, None) => {}
+            }
             if i > 0 && m.later[i - 1].from >= l.from {
                 return Err(PricingError::Invalid(format!("{id}.later must be in date order")));
             }
@@ -314,6 +355,10 @@ pub fn catalog_prices(json: &str) -> HashMap<String, ModelPrice> {
     out
 }
 
+/// Cache-read prices the bundled list once had wrong, with the day of the first list that fixed
+/// them. A full list saved before the fix holds the old value, which the user never typed.
+const FIXED_CACHE_READS: [(&str, f64, &str); 1] = [("claude-sonnet-5-5", 0.2, "2026-10-10")];
+
 /// What a saved price list needs to keep: the models whose rates differ from `base` and the
 /// models it does not have. The rest follows `base` on every load.
 pub fn user_changes(mut file: PricingFile, base: &PricingFile) -> PricingFile {
@@ -348,18 +393,25 @@ impl PriceBook {
     /// A saved price list keeps its edits but still learns models and aliases added to `base`
     /// after it was saved; a name it already uses keeps its meaning. A saved model whose rates the
     /// user never changed takes the `base` entry, so later corrections and dated price changes
-    /// reach it.
+    /// reach it. An edited model keeps the user's price on every day, with no dated changes.
     pub fn from_user_json(s: &str, base: &PricingFile) -> Result<PriceBook, PricingError> {
         let mut file: PricingFile = serde_json::from_str(s)?;
+        let saved_on = file.day();
         let known = |f: &PricingFile| -> std::collections::HashSet<String> {
             f.models.iter().flat_map(|m| std::iter::once(&m.id).chain(&m.aliases)).chain(f.user_aliases.keys()).map(|n| n.to_ascii_lowercase()).collect()
         };
         for b in base.models.iter().cloned() {
             let mut names = known(&file);
             if let Some(m) = file.models.iter_mut().find(|m| m.id.eq_ignore_ascii_case(&b.id)) {
+                let shipped_wrong = FIXED_CACHE_READS.iter().any(|(id, wrong, fixed_on)| m.id.eq_ignore_ascii_case(id) && m.rates.cache_read == Some(*wrong) && saved_on.is_some_and(|d| Some(d) < day(fixed_on)));
+                if shipped_wrong {
+                    m.rates.cache_read = b.rates.cache_read;
+                }
                 if m.rates == b.rates {
                     let aliases = std::mem::take(&mut m.aliases);
                     *m = ModelPrice { aliases, ..b.clone() };
+                } else {
+                    m.later.clear();
                 }
                 for a in b.aliases {
                     if names.insert(a.to_ascii_lowercase()) {
@@ -475,19 +527,16 @@ impl PriceBook {
 
 impl PriceBook {
     pub fn is_long_context(&self, c: &CostInput) -> bool {
-        self.lookup(c.model).and_then(|p| p.long_context.as_ref()).is_some_and(|lc| c.request_input > lc.threshold)
+        self.lookup(c.model).and_then(|p| p.long_tier(c)).is_some()
     }
 
     /// What the long-context tier added to this request over the model's standard rates
     /// (0 below the threshold; `None` for unpriced models).
     pub fn long_context_premium(&self, c: &CostInput) -> Option<f64> {
         let p = self.lookup(c.model)?;
-        if !self.is_long_context(c) {
-            return Some(0.0);
-        }
+        let Some(threshold) = p.long_tier(c).map(|lc| lc.threshold) else { return Some(0.0) };
         let with_tier = self.cost(c)?.total();
         // the same request just under the threshold uses the standard rates
-        let threshold = p.long_context.as_ref().map(|lc| lc.threshold).unwrap_or(0);
         let standard = self.cost(&CostInput { request_input: threshold, ..*c })?.total();
         Some(with_tier - standard)
     }
@@ -573,6 +622,9 @@ mod tests {
         let b = PriceBook::default_book();
         assert_eq!(b.lookup("claude-haiku-4-5-20251001").unwrap().id, "claude-haiku-4-5");
         assert_eq!(b.lookup("claude-sonnet-4-5-20250929").unwrap().id, "claude-sonnet-4-5");
+        assert_eq!(b.lookup("claude-3-7-sonnet-20250219").unwrap().id, "claude-3-7-sonnet");
+        assert_eq!(b.lookup("claude-3-5-sonnet-20240620").unwrap().id, "claude-3-5-sonnet");
+        assert_eq!(b.lookup("claude-3-5-sonnet-latest").unwrap().id, "claude-3-5-sonnet");
         assert_eq!(b.lookup("CLAUDE-OPUS-5").unwrap().id, "claude-opus-5");
         assert_eq!(b.lookup("qwen3.8-max-2026-09-14").unwrap().id, "qwen3.8-max");
         assert!(b.lookup("-2026-09-14").is_none());
@@ -612,6 +664,9 @@ mod tests {
         let b = PriceBook::default_book();
         for id in ["gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-5-nano"] {
             assert_eq!(b.lookup(id).map(|m| m.id.as_str()), Some(id));
+        }
+        for id in ["gpt-5.2-codex", "gpt-5.1-codex-max", "gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex"] {
+            assert_eq!(b.lookup(id).map(|m| m.id.as_str()), Some(id), "older Codex models in old logs");
         }
         assert_eq!(b.lookup("gpt-5.4").unwrap().long_context.as_ref().map(|l| l.threshold), Some(272_000));
     }
@@ -784,7 +839,7 @@ mod tests {
         // a file without a unit (older copies) is per million tokens
         assert!(PriceBook::from_json(r#"{"schema_version":1,"updated_at":"x","models":[]}"#).is_ok());
         assert!(edit(&|f| {
-            let later = |day| LaterRates { from: chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").unwrap(), rates: Rates { input: 1.0, output: 2.0, ..Default::default() } };
+            let later = |day| LaterRates { from: chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").unwrap(), rates: Rates { input: 1.0, output: 2.0, ..Default::default() }, long_context: None };
             f.models[0].later = vec![later("2027-02-01"), later("2027-01-01")];
         })
         .is_err());
@@ -802,21 +857,24 @@ mod tests {
         assert!((at("2027-01-01T00:00:00Z") - 9.0).abs() < 1e-9, "1.50 + 7.50 from the first day");
     }
 
+    fn cost_on(book: &PriceBook, model: &str, request_input: u64, rfc: &str) -> f64 {
+        let t = tokens(1_000_000, 0, 0, 0, 0);
+        let ms = chrono::DateTime::parse_from_rfc3339(rfc).unwrap().timestamp_millis();
+        book.cost(&CostInput { model, tokens: &t, request_input, web_search_requests: 0, speed: None, inference_geo: None, ts_ms: Some(ms) }).unwrap().total()
+    }
+
     #[test]
     fn a_saved_list_keeps_edits_and_follows_the_bundled_list_elsewhere() {
+        // the settings send the dated prices back with the edit
         let mut saved: PricingFile = serde_json::from_str(DEFAULT_PRICING_JSON).unwrap();
-        // a list saved before dated prices existed, with one model edited
-        for m in &mut saved.models {
-            m.later.clear();
-        }
         let edited = saved.models.iter_mut().find(|m| m.id == "gemini-3.7-flash").unwrap();
+        assert!(!edited.later.is_empty());
         edited.rates.input = 0.5;
         let book = PriceBook::from_user_json(&serde_json::to_string(&saved).unwrap(), &bundled()).unwrap();
-        let t = tokens(1_000_000, 0, 0, 0, 0);
-        let ms = chrono::DateTime::parse_from_rfc3339("2027-03-01T00:00:00Z").unwrap().timestamp_millis();
-        let cost = |model| book.cost(&CostInput { model, tokens: &t, request_input: 0, web_search_requests: 0, speed: None, inference_geo: None, ts_ms: Some(ms) }).unwrap().total();
-        assert!((cost("gemini-3.8-flash") - 1.5).abs() < 1e-9, "unedited: the bundled later price");
-        assert!((cost("gemini-3.7-flash") - 0.5).abs() < 1e-9, "edited: the user's price");
+        assert!((cost_on(&book, "gemini-3.8-flash", 0, "2027-03-01T00:00:00Z") - 1.5).abs() < 1e-9, "unedited: the bundled later price");
+        assert!((cost_on(&book, "gemini-3.7-flash", 0, "2026-12-01T00:00:00Z") - 0.5).abs() < 1e-9, "edited: the user's price");
+        assert!((cost_on(&book, "gemini-3.7-flash", 0, "2027-03-01T00:00:00Z") - 0.5).abs() < 1e-9, "and still after the bundled change");
+        assert!(book.lookup("gemini-3.7-flash").unwrap().later.is_empty());
 
         let kept = user_changes(saved, &bundled());
         let ids: Vec<&str> = kept.models.iter().map(|m| m.id.as_str()).collect();
@@ -825,15 +883,18 @@ mod tests {
 
     #[test]
     fn a_newer_shared_list_carries_new_prices_under_the_users_own() {
+        let tomorrow = (chrono::Utc::now().date_naive() + chrono::Days::new(1)).to_string();
         let mut fetched = bundled();
-        fetched.updated_at = "2099-01-01".into();
+        fetched.updated_at.clone_from(&tomorrow);
         fetched.models.iter_mut().find(|m| m.id == "claude-opus-5-5").unwrap().rates.input = 3.0;
+        let later = serde_json::from_value(serde_json::json!({ "from": "2027-01-01", "input": 5, "output": 25 })).unwrap();
+        fetched.models.iter_mut().find(|m| m.id == "claude-sonnet-5-5").unwrap().later = vec![later];
         let mut new = fetched.models[0].clone();
         new.id = "claude-next".into();
         new.aliases.clear();
         fetched.models.push(new);
         let base = base(Some(&serde_json::to_string(&fetched).unwrap()));
-        assert_eq!(base.updated_at, "2099-01-01");
+        assert_eq!(base.updated_at, tomorrow);
 
         // the user typed a price for a model no list has and changed Sonnet's
         let mut mine = bundled();
@@ -849,27 +910,117 @@ mod tests {
         assert_eq!(b.lookup("claude-opus-5-5").unwrap().rates.input, 3.0, "an untouched model takes the new price");
         assert!(b.lookup("claude-next").is_some(), "a new model arrives without an app update");
         assert_eq!(b.lookup("claude-sonnet-5-5").unwrap().rates.input, 9.0, "the user's price stays");
+        assert!((cost_on(&b, "claude-sonnet-5-5", 0, "2027-03-01T00:00:00Z") - 9.0).abs() < 1e-9, "a dated change in the new list does not replace it");
         assert!(b.lookup("my-local-model").is_some(), "and so does the user's own model");
-        assert_eq!(b.file().updated_at, "2099-01-01");
+        assert_eq!(b.file().updated_at, tomorrow);
+    }
+
+    #[test]
+    fn a_dated_price_change_moves_the_long_context_tier_too() {
+        let mut f = bundled();
+        let at_gpt = f.models.iter().position(|m| m.id == "gpt-5.4").unwrap();
+        f.models[at_gpt].later = serde_json::from_value(serde_json::json!([{ "from": "2027-01-01", "input": 3, "output": 18 }])).unwrap();
+        assert!(PriceBook::from_file(f.clone()).is_err(), "a tier left out of a dated change is refused, not read as none");
+        f.models[at_gpt].later = serde_json::from_value(serde_json::json!([
+            { "from": "2027-01-01", "input": 3, "output": 18, "long_context": { "threshold": 272000, "input": 6, "output": 27 } },
+            { "from": "2027-06-01", "input": 4, "output": 20, "long_context": { "threshold": 400000, "input": 8, "output": 30 } }
+        ]))
+        .unwrap();
+        let book = PriceBook::from_file(f).unwrap();
+        let at = |req, rfc| cost_on(&book, "gpt-5.4", req, rfc);
+        assert!((at(300_000, "2026-12-31T23:59:00Z") - 5.0).abs() < 1e-9, "the old long-context price before the day");
+        assert!((at(300_000, "2027-01-01T00:00:00Z") - 6.0).abs() < 1e-9, "the new one from it");
+        assert!((at(100_000, "2027-01-01T00:00:00Z") - 3.0).abs() < 1e-9);
+        assert!((at(300_000, "2027-06-01T00:00:00Z") - 4.0).abs() < 1e-9, "below the later entry's own threshold");
+        assert!((at(500_000, "2027-06-01T00:00:00Z") - 8.0).abs() < 1e-9);
+
+        let t = tokens(1_000_000, 0, 0, 0, 0);
+        let ms = |rfc| chrono::DateTime::parse_from_rfc3339(rfc).unwrap().timestamp_millis();
+        let req = |rfc| CostInput { model: "gpt-5.4", tokens: &t, request_input: 300_000, web_search_requests: 0, speed: None, inference_geo: None, ts_ms: Some(ms(rfc)) };
+        assert!((book.long_context_premium(&req("2027-01-01T00:00:00Z")).unwrap() - 3.0).abs() < 1e-9);
+        assert!(!book.is_long_context(&req("2027-06-01T00:00:00Z")));
+        assert_eq!(book.long_context_premium(&req("2027-06-01T00:00:00Z")), Some(0.0));
+    }
+
+    #[test]
+    fn an_old_full_list_does_not_take_a_since_corrected_price_for_an_edit() {
+        // 0.5.3 and earlier saved every model, Sonnet 5.5 with the 0.2 cache read fixed on 2026-10-10
+        let full = |updated_at: &str, input: f64| {
+            let mut f = bundled();
+            f.updated_at = updated_at.into();
+            let s = f.models.iter_mut().find(|m| m.id == "claude-sonnet-5-5").unwrap();
+            s.rates.cache_read = Some(0.2);
+            s.rates.input = input;
+            serde_json::to_string(&f).unwrap()
+        };
+        let sonnet = |s: &str| PriceBook::from_user_json(s, &bundled()).unwrap().lookup("claude-sonnet-5-5").unwrap().rates.clone();
+        let shipped = bundled().models.into_iter().find(|m| m.id == "claude-sonnet-5-5").unwrap().rates;
+        assert_eq!(sonnet(&full("2026-10-09", 2.0)), shipped);
+        let edited = sonnet(&full("2026-10-09", 9.0));
+        assert_eq!((edited.input, edited.cache_read), (9.0, Some(0.1)), "the user's own edit stays");
+        assert_eq!(sonnet(&full("2026-10-10", 2.0)).cache_read, Some(0.2), "typed after the fix, it is the user's");
+
+        let book = PriceBook::from_user_json(&full("2026-10-09", 2.0), &bundled()).unwrap();
+        assert!(user_changes(book.file().clone(), &bundled()).models.is_empty(), "saving again forgets it");
     }
 
     #[test]
     fn the_repositorys_own_list_passes_as_a_shared_list() {
         // installed apps fetch this very file; one they refuse leaves them on older prices
         checked_list(DEFAULT_PRICING_JSON).unwrap();
+        assert!(bundled().day().is_some());
     }
 
     #[test]
     fn a_shared_list_that_lost_models_or_is_older_is_not_taken() {
         let mut cut = bundled();
-        cut.updated_at = "2099-01-01".into();
         cut.models.truncate(3);
         assert!(checked_list(&serde_json::to_string(&cut).unwrap()).is_err(), "a cut-short download");
-        assert_eq!(base(Some(&serde_json::to_string(&cut).unwrap())).updated_at, bundled().updated_at);
+        assert_eq!(base(Some(&serde_json::to_string(&cut).unwrap())).models.len(), bundled().models.len());
 
         let mut old = bundled();
         old.updated_at = "2020-01-01".into();
         assert_eq!(base(Some(&serde_json::to_string(&old).unwrap())).updated_at, bundled().updated_at, "the app's own list is newer");
         assert_eq!(base(Some("not json")).updated_at, bundled().updated_at);
+    }
+
+    #[test]
+    fn a_shared_list_with_a_bad_or_future_date_is_not_taken() {
+        let today = chrono::Utc::now().date_naive();
+        let dated = |d: &str| {
+            let mut l = bundled();
+            l.updated_at = d.into();
+            l.models.iter_mut().find(|m| m.id == "claude-opus-5-5").unwrap().rates.input = 3.0;
+            serde_json::to_string(&l).unwrap()
+        };
+        let opus = |f: PricingFile| f.models.into_iter().find(|m| m.id == "claude-opus-5-5").unwrap().rates.input;
+        for bad in ["2062-11-12".to_string(), (today + chrono::Days::new(2)).to_string(), "2026-13-01".into(), "soon".into(), String::new()] {
+            assert!(checked_list(&dated(&bad)).is_err(), "{bad}");
+            // a copy saved before this check does not shadow the bundled list either
+            assert_eq!(opus(base(Some(&dated(&bad)))), 4.0, "{bad}");
+        }
+        let tomorrow = (today + chrono::Days::new(1)).to_string();
+        assert_eq!(opus(base(Some(&dated(&tomorrow)))), 3.0, "a day ahead, for time zones");
+    }
+
+    #[test]
+    fn a_shared_list_that_dropped_an_alias_is_not_taken() {
+        let shared = |f: &dyn Fn(&mut PricingFile)| {
+            let mut l = bundled();
+            f(&mut l);
+            checked_list(&serde_json::to_string(&l).unwrap())
+        };
+        let dropped = shared(&|l| l.models.iter_mut().find(|m| m.id == "claude-haiku-4-5").unwrap().aliases.clear());
+        assert!(matches!(dropped, Err(PricingError::Invalid(e)) if e.contains("claude-haiku-4-5-20251001")));
+        // a name that becomes a model of its own still prices its requests
+        assert!(shared(&|l| {
+            let m = l.models.iter_mut().find(|m| m.id == "claude-opus-4-6").unwrap();
+            let mut own = m.clone();
+            m.aliases.clear();
+            own.id = "claude-opus-4-6-thinking".into();
+            own.aliases.clear();
+            l.models.push(own);
+        })
+        .is_ok());
     }
 }
