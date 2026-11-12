@@ -51,6 +51,21 @@ fn took_file(dir: &Path, session: &str) -> PathBuf {
     dir.join(format!("took-{session}"))
 }
 
+fn unasked_file(dir: &Path, session: &str) -> PathBuf {
+    dir.join(format!("unasked-{session}"))
+}
+
+/// The conversation lets every tool run without asking, so the hook does not wait in it: a refresh
+/// turn must not have that power. Kept so the app can say why it cannot be refreshed.
+pub fn unasked(dir: &Path, session: &str) {
+    let _ = fs::create_dir_all(dir);
+    let _ = fs::write(unasked_file(dir, session), "");
+}
+
+pub fn runs_unasked(dir: &Path, session: &str) -> bool {
+    unasked_file(dir, session).exists()
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
     /// Asked to refresh: the message to wake the conversation with.
@@ -80,6 +95,7 @@ pub fn wait(dir: &Path, session: &str, me: &str, transcript: Option<&Path>, tick
     let signal = signal_file(dir, session);
     // a signal left from before this turn ended is out of date
     let _ = fs::remove_file(&signal);
+    let _ = fs::remove_file(unasked_file(dir, session));
     fs::write(&mine, me)?;
     let started = Instant::now();
     let mut seen: Option<Option<SystemTime>> = None;
@@ -154,7 +170,7 @@ pub fn forget_prompts(dir: &Path) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     for e in entries.flatten() {
         let name = e.file_name();
-        if ["prompt-", "woke-", "took-"].iter().any(|p| name.to_string_lossy().starts_with(p)) {
+        if ["prompt-", "woke-", "took-", "unasked-"].iter().any(|p| name.to_string_lossy().starts_with(p)) {
             let _ = fs::remove_file(e.path());
         }
     }
@@ -193,7 +209,7 @@ pub fn drop_stale_signals(dir: &Path, now: SystemTime, max_age: Duration) {
         let name = name.to_string_lossy();
         let limit = if name.starts_with("signal-") || name.starts_with(".signal-") {
             max_age
-        } else if name.starts_with("waiter-") || name.starts_with("woke-") || name.starts_with("took-") {
+        } else if ["waiter-", "woke-", "took-", "unasked-"].iter().any(|p| name.starts_with(p)) {
             WAITER_GONE
         } else if name.starts_with("prompt-") {
             PROMPT_KEPT
@@ -274,6 +290,8 @@ mod tests {
         prompted(&dir, "s", 1_000);
         assert_eq!(waiter.join().unwrap(), Outcome::Moved, "the conversation went on at once");
         assert_eq!(last_prompt(&dir, "s"), Some(1_000));
+        unasked(&dir, "s");
+        assert!(runs_unasked(&dir, "s"));
         woke(&dir, "s", 1_500);
         assert_eq!(took(&dir, "s"), Some(1_500));
         prompted(&dir, "s", 2_000);

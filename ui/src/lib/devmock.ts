@@ -761,6 +761,7 @@ function mockCaches() {
     refreshable: refreshHook && session_id !== 'c-demo-main' && !((refreshedAt.get(session_id) ?? 0) > Date.now()),
     refreshing: (refreshedAt.get(session_id) ?? 0) > Date.now(),
     refresh_failed: false,
+    unasked: false,
     auto: refreshHook && (autoOverride.get(session_id) ?? settings.cache_auto),
     auto_capped: false,
     refreshes: refreshLog.filter((r) => r.session === session_id).length,

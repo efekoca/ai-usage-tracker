@@ -190,6 +190,10 @@ pub fn cache_hook_main() -> i32 {
             rh::retire(&dir, session);
             return 0;
         }
+        _ if json.get("permission_mode").and_then(|v| v.as_str()) == Some("bypassPermissions") => {
+            rh::unasked(&dir, session);
+            return 0;
+        }
         _ if scripted() => return 0,
         _ => {}
     }
@@ -230,10 +234,27 @@ fn scripted() -> bool {
             pid = parent;
         }
     }
+    #[cfg(windows)]
+    if ancestor_command_lines().iter().any(|l| print_run(&l.split_whitespace().map(|w| w.trim_matches('"').to_owned()).collect::<Vec<_>>())) {
+        return true;
+    }
     false
 }
 
-#[cfg(any(unix, test))]
+/// The command lines of the hook's parent and the two above it (the shell, then Claude Code). The
+/// hook waits in the background, so the second or so this takes holds nothing up.
+#[cfg(windows)]
+fn ancestor_command_lines() -> Vec<String> {
+    let script = format!(
+        // no double quotes: they would not reach PowerShell intact through the command line
+        "$p = {}; for ($i = 0; $i -lt 3; $i++) {{ $w = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $p); if (-not $w) {{ break }}; $p = $w.ParentProcessId; $q = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $p); if (-not $q) {{ break }}; [Console]::Out.WriteLine($q.CommandLine) }}",
+        std::process::id()
+    );
+    let mut c = std::process::Command::new(crate::system_exe(r"System32\WindowsPowerShell\v1.0\powershell.exe"));
+    c.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
+    run_command(c, Vec::new(), Duration::from_secs(10)).map(|o| o.lines().map(str::to_owned).collect()).unwrap_or_default()
+}
+
 fn print_run(args: &[String]) -> bool {
     args.iter().skip(1).any(|a| a == "-p" || a == "--print" || a.starts_with("--print="))
 }
@@ -274,15 +295,30 @@ fn parent_alive() -> impl Fn() -> bool {
 /// Set for the user's previous status-line command.
 const CHAINED: &str = "AIUT_STATUSLINE_CHAINED";
 
+/// Telemetry variables the user's login shell exports. An app started from the Dock or at login
+/// does not see them, but Claude Code started from a terminal does, so they would compete with ours.
+#[cfg(unix)]
+fn shell_telemetry_env() -> Vec<String> {
+    const MARK: &str = "__aiut_env__";
+    let Some(shell) = std::env::var("SHELL").ok().filter(|s| s.starts_with('/') && !s.contains('\'')) else { return Vec::new() };
+    // interactive and login, so both profile and rc files are read; the mark skips what they print
+    let out = run_within(&format!("'{shell}' -ilc 'printf \"\\n{MARK}\\n\"; env' </dev/null 2>/dev/null"), Vec::new(), Duration::from_secs(5)).unwrap_or_default();
+    let Some((_, env)) = out.split_once(&format!("\n{MARK}\n")) else { return Vec::new() };
+    env.lines().filter_map(|l| l.split_once('=')).map(|(k, _)| k).filter(|k| k.starts_with("OTEL_") || *k == "CLAUDE_CODE_ENABLE_TELEMETRY").map(str::to_owned).collect()
+}
+
+#[cfg(not(unix))]
+fn shell_telemetry_env() -> Vec<String> {
+    Vec::new()
+}
+
 fn run_chained(cmd: &str, input: Vec<u8>) -> Option<String> {
     run_within(cmd, input, Duration::from_secs(5))
 }
 
-/// I/O goes through helper threads, so a stalled child or its descendants cannot outlast the deadline.
 fn run_within(cmd: &str, input: Vec<u8>, deadline: Duration) -> Option<String> {
-    use std::process::{Command, Stdio};
-    const MAX_OUT: u64 = 64 * 1024;
-    let mut c = match git_bash() {
+    use std::process::Command;
+    let c = match git_bash() {
         Some(bash) => {
             let mut c = Command::new(bash);
             c.arg("-c").arg(cmd);
@@ -299,6 +335,13 @@ fn run_within(cmd: &str, input: Vec<u8>, deadline: Duration) -> Option<String> {
             c
         }
     };
+    run_command(c, input, deadline)
+}
+
+/// I/O goes through helper threads, so a stalled child or its descendants cannot outlast the deadline.
+fn run_command(mut c: std::process::Command, input: Vec<u8>, deadline: Duration) -> Option<String> {
+    use std::process::Stdio;
+    const MAX_OUT: u64 = 64 * 1024;
     c.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).env(CHAINED, "1");
     // its own process group, so a timeout also ends what the command started
     #[cfg(unix)]
@@ -457,15 +500,20 @@ pub fn revert_all_main() -> i32 {
     let (statusline_ok, otel_ok, refresh_ok) = (statusline.is_ok(), otel.is_ok(), refresh.is_ok());
     // only what the uninstaller itself took out is put back; a value the user changed stays theirs
     let restored = |r: &Result<RevertOutcome, _>| matches!(r, Ok(RevertOutcome::Restored));
-    let reverted = Reverted { statusline: had.0 && restored(&statusline), otel: had.1 && restored(&otel), refresh: had.2 && restored(&refresh), at_ms: now_ms() };
+    let store = Store::open(&data_dir.join("tracker.db")).ok();
+    let mut settings = store.as_ref().map(Settings::load);
+    let auto = settings.as_ref().is_some_and(|s| s.cache_auto);
+    let reverted = Reverted { statusline: had.0 && restored(&statusline), otel: had.1 && restored(&otel), refresh: had.2 && restored(&refresh), auto, at_ms: now_ms() };
     if reverted.statusline || reverted.otel || reverted.refresh {
         let _ = std::fs::write(reverted_file(&data_dir), serde_json::to_string(&reverted).unwrap_or_default());
     }
-    if let Ok(store) = Store::open(&data_dir.join("tracker.db")) {
-        let mut s = Settings::load(&store);
+    if let (Some(store), Some(s)) = (&store, settings.as_mut()) {
         s.capture.statusline &= !statusline_ok;
         s.capture.otel &= !otel_ok;
-        let _ = s.save(&store);
+        // a hook added again later must not start refreshing every conversation by itself; an
+        // upgrade puts both back
+        s.cache_auto &= !refresh_ok;
+        let _ = s.save(store);
     }
     if statusline_ok && otel_ok && refresh_ok { 0 } else { 1 }
 }
@@ -478,6 +526,9 @@ struct Reverted {
     otel: bool,
     #[serde(default)]
     refresh: bool,
+    /// Automatic refresh was on with the hook.
+    #[serde(default)]
+    auto: bool,
     at_ms: i64,
 }
 
@@ -496,13 +547,21 @@ impl Reverted {
     }
 }
 
+fn restore_auto(app: &AppHandle, auto: bool) -> Result<String, String> {
+    if auto {
+        let s = app.state::<AppState>().update_settings(|s| s.cache_auto = true)?;
+        let _ = app.emit("settings-changed", &s);
+    }
+    Ok("enabled".into())
+}
+
 fn restore_after_upgrade(app: &AppHandle) {
     let file = reverted_file(&app.state::<AppState>().data_dir);
     let Ok(raw) = std::fs::read_to_string(&file) else { return };
     let _ = std::fs::remove_file(&file);
     let Ok(reverted) = serde_json::from_str::<Reverted>(&raw) else { return };
     for kind in reverted.to_restore(now_ms()) {
-        let done = if kind == "refresh" { crate::refresh::install(app).map(|()| "enabled".to_owned()) } else { set(app, kind, true) };
+        let done = if kind == "refresh" { crate::refresh::install(app).and_then(|()| restore_auto(app, reverted.auto)) } else { set(app, kind, true) };
         match done {
             Ok(r) => log::info!("{kind} turned back on after the upgrade: {r}"),
             Err(e) => log::warn!("{kind} could not be turned back on after the upgrade: {e}"),
@@ -828,7 +887,30 @@ fn code(e: cs::SettingsError) -> String {
     }
 }
 
+/// Copies of the app's data folder that a packaged app (the Claude desktop app on Windows) gave the
+/// programs it starts: their writes to the local app data folder land there instead.
+#[cfg(windows)]
+pub(crate) fn package_data_dirs(data_dir: &Path) -> Vec<PathBuf> {
+    let (Some(folder), Some(local)) = (data_dir.file_name(), data_dir.parent()) else { return Vec::new() };
+    let Ok(entries) = std::fs::read_dir(local.join("Packages")) else { return Vec::new() };
+    entries.flatten().map(|e| e.path().join("LocalCache").join("Local").join(folder)).filter(|d| d.is_dir()).collect()
+}
+
+#[cfg(not(windows))]
+pub(crate) fn package_data_dirs(_: &Path) -> Vec<PathBuf> {
+    Vec::new()
+}
+
+/// Changes to `capture/state.json` and Claude Code's settings go one at a time: each reads the
+/// record, changes it and writes it back.
+static STATE_LOCK: Mutex<()> = Mutex::new(());
+
+pub(crate) fn state_lock() -> std::sync::MutexGuard<'static, ()> {
+    STATE_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
+    let _one_at_a_time = matches!(kind, "statusline" | "otel").then(state_lock);
     let state = app.state::<AppState>();
     let data_dir = state.data_dir.clone();
     let settings = state.settings.read().unwrap().clone();
@@ -918,7 +1000,10 @@ pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
             Ok(note.into())
         }
         ("otel", true) => {
-            let conflict = cs::conflicting_process_env();
+            let mut conflict = cs::conflicting_process_env();
+            conflict.extend(shell_telemetry_env());
+            conflict.sort();
+            conflict.dedup();
             if !conflict.is_empty() {
                 return Err(format!("telemetry_env_conflict:{}", conflict.join(",")));
             }
@@ -931,6 +1016,7 @@ pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
             if cstate.otel.as_ref().is_some_and(|c| c.token().is_none()) {
                 let _ = cs::add_otel_token(&mut cstate, &data_dir, &cs::new_token());
             }
+            let _ = cs::logs_only_header(&mut cstate, &data_dir);
             let token = match &cstate.otel {
                 Some(ch) => ch.token().map(str::to_owned).ok_or(TOKEN_MISSING)?,
                 None => cs::new_token(),
@@ -1014,12 +1100,17 @@ fn start_receiver(app: &AppHandle, port: u16, token: String) -> std::io::Result<
 fn start_otel(app: &AppHandle) {
     let state = app.state::<AppState>();
     let port = state.settings.read().unwrap().capture.otel_port;
+    let guard = state_lock();
     let mut cstate = cs::load_state(&state.data_dir);
     if cstate.otel.as_ref().is_some_and(|c| c.token().is_none())
         && let Err(e) = cs::add_otel_token(&mut cstate, &state.data_dir, &cs::new_token())
     {
         log::warn!("could not add a token to the telemetry settings: {e}");
     }
+    if let Err(e) = cs::logs_only_header(&mut cstate, &state.data_dir) {
+        log::warn!("could not limit the telemetry token to logs: {e}");
+    }
+    drop(guard);
     let Some(token) = cstate.otel.as_ref().and_then(|c| c.token()).map(str::to_owned) else {
         log::warn!("otlp receiver not started: the telemetry settings have no token");
         *state.capture.receiver_error.lock().unwrap() = Some(TOKEN_MISSING.into());
@@ -1286,6 +1377,7 @@ fn refresh_statusline(data_dir: &Path) {
         return;
     }
     let Ok(exe) = crate::app_path() else { return };
+    let _one_at_a_time = state_lock();
     let mut cstate = cs::load_state(data_dir);
     match cs::refresh_statusline(&mut cstate, data_dir, &statusline_command(&exe)) {
         Ok(true) => log::info!("status line now points at this copy of the app"),
@@ -1429,7 +1521,7 @@ mod tests {
 
     #[test]
     fn only_a_recent_uninstall_turns_captures_back_on() {
-        let r = Reverted { statusline: true, otel: false, refresh: true, at_ms: 1_000_000 };
+        let r = Reverted { statusline: true, otel: false, refresh: true, auto: true, at_ms: 1_000_000 };
         assert_eq!(r.to_restore(1_000_000 + 5 * 60_000), ["statusline", "refresh"]);
         let older: Reverted = serde_json::from_str(r#"{"statusline": false, "otel": true, "at_ms": 1000000}"#).unwrap();
         assert_eq!(older.to_restore(1_000_000), ["otel"], "a record written before the refresh hook existed");

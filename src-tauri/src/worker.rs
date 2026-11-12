@@ -49,11 +49,20 @@ pub fn start(app: AppHandle, db_path: PathBuf, rx: std::sync::mpsc::Receiver<Msg
 }
 
 fn run(app: AppHandle, db_path: PathBuf, rx: std::sync::mpsc::Receiver<Msg>, tx: Sender<Msg>) {
-    let mut store = match Store::open(&db_path) {
-        Ok(s) => s,
-        Err(e) => {
-            log::error!("worker cannot open database: {e}");
-            return;
+    // a database locked or a disk full for a while must not stop scanning for good
+    let mut store = loop {
+        match Store::open(&db_path) {
+            Ok(s) => break s,
+            Err(e) => {
+                log::error!("worker cannot open database: {e}");
+                let state = app.state::<AppState>();
+                state.status.lock().unwrap_or_else(|e| e.into_inner()).errors += 1;
+                let _ = app.emit("scan-finished", state.status.lock().unwrap_or_else(|e| e.into_inner()).clone());
+                match rx.recv_timeout(Duration::from_secs(30)) {
+                    Ok(Msg::Shutdown) | Err(RecvTimeoutError::Disconnected) => return,
+                    _ => {}
+                }
+            }
         }
     };
     // an update can change how accounts are told apart, and unchanged logs would not resolve them
@@ -88,7 +97,14 @@ fn run(app: AppHandle, db_path: PathBuf, rx: std::sync::mpsc::Receiver<Msg>, tx:
                     Err(RecvTimeoutError::Disconnected) => return,
                 }
             }
-            scan(&app, &mut store);
+            // one bad file or bug must not end scanning for the rest of the session
+            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| scan(&app, &mut store))).is_err() {
+                log::error!("a scan stopped unexpectedly; the next one starts afresh");
+                let state = app.state::<AppState>();
+                let mut st = state.status.lock().unwrap_or_else(|e| e.into_inner());
+                st.running = false;
+                st.errors += 1;
+            }
             pending = false;
             continue;
         }
@@ -124,9 +140,12 @@ fn scan(app: &AppHandle, store: &mut Store) {
     let mut files = discovery::enumerate_files(&Env::from_system(), &settings.extra_paths, &enabled);
     // this app's own status-line capture (older rotated file first)
     let own_capture = enabled.contains(&SourceId::ClaudeCode) && settings.capture.statusline;
-    for p in [statusline::rotated_file(&state.data_dir), statusline::capture_file(&state.data_dir)] {
-        if own_capture && p.is_file() {
-            files.push(DiscoveredFile { file_id: discovery::file_identity(&p), path: p, parser: ParserKind::StatuslineCapture, source: SourceId::ClaudeCode });
+    // a copy a packaged app (the Claude desktop app) gave the programs it started counts too
+    for dir in std::iter::once(state.data_dir.clone()).chain(crate::capture::package_data_dirs(&state.data_dir)) {
+        for p in [statusline::rotated_file(&dir), statusline::capture_file(&dir)] {
+            if own_capture && p.is_file() {
+                files.push(DiscoveredFile { file_id: discovery::file_identity(&p), path: p, parser: ParserKind::StatuslineCapture, source: SourceId::ClaudeCode });
+            }
         }
     }
     {
@@ -200,6 +219,7 @@ fn watch_roots(env: &Env, s: &Settings) -> Vec<(PathBuf, bool)> {
         }
     }
     v.push((statusline::capture_dir(&crate_data_dir()), false));
+    v.extend(crate::capture::package_data_dirs(&crate_data_dir()).iter().map(|d| (statusline::capture_dir(d), false)));
     if on(SourceId::Codex) {
         for h in discovery::codex_homes(env, &s.extra_paths) {
             v.push((h.join("sessions"), true));

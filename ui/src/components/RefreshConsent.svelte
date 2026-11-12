@@ -37,7 +37,7 @@
   <div class="dialog" bind:this={dialog} role="dialog" aria-modal="true" aria-labelledby="refresh-title" aria-describedby="refresh-text">
     <h2 id="refresh-title">{t('refresh.consent.title')}</h2>
     <p id="refresh-text">{t('refresh.consent.text')}</p>
-    <div class="sample" aria-label={t('refresh.consent.sample')}>
+    <div class="sample" role="group" aria-label={t('refresh.consent.sample')}>
       <span class="dim">⏺ Stop hook feedback</span>
       <span>⏺ {t('refresh.consent.reply')}</span>
     </div>

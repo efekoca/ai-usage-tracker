@@ -292,7 +292,7 @@
             class:busy
             tabindex={edit ? -1 : 0}
             aria-label={t('panel.caches.refresh', { name: cacheName(c) })}
-            title={!data?.cache_refresh ? t('panel.caches.setup') : c.refreshable || busy ? t('cache.live.refresh.help') : t('cache.live.notWaiting')}
+            title={!data?.cache_refresh ? t('panel.caches.setup') : c.refreshable || busy ? t('cache.live.refresh.help') : c.unasked ? t('cache.live.unasked') : t('cache.live.notWaiting')}
             disabled={!!data?.cache_refresh && !c.refreshable && !busy}
             aria-busy={busy}
             onclick={() => refreshRow(c)}><Icon name={busy ? 'sync' : 'refresh'} size={13} /></button

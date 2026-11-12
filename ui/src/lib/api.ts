@@ -330,6 +330,8 @@ export interface LiveCache {
   refreshing: boolean
   /** The last refresh came to nothing: the cache's time did not move on. */
   refresh_failed: boolean
+  /** It runs tools without asking (bypassPermissions), so it is never refreshed. */
+  unasked: boolean
   /** It is refreshed by itself before it runs out. */
   auto: boolean
   /** Its automatic refreshes stopped: more would cost more than writing the cache again. */
