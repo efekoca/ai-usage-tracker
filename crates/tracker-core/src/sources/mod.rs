@@ -88,11 +88,25 @@ pub struct ParseOutput {
     /// Keys an older version stored for this file's records; replaced when the file is re-read.
     pub stale_events: Vec<String>,
     pub stale_tool_calls: Vec<String>,
-    /// (source, ts_ms) of readings an older version stored from copied history.
-    pub stale_limits: Vec<(String, i64)>,
+    /// Readings an older version stored from copied history, as it stored them.
+    pub stale_limits: Vec<LimitSnapshot>,
     /// Events copied from another thread's log: (index in `events`, that thread). The original
     /// may be stored under an older key while its own log is gone.
     pub copies: Vec<(usize, String)>,
+    /// Other conversations the source names as subagents; ones stored before that was known
+    /// join the session that started them.
+    pub links: Vec<SubagentLink>,
+}
+
+/// A subagent conversation whose records are keyed `<events>…` and `<calls>…` (prefixes ending in
+/// `:`), and the session that started it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SubagentLink {
+    pub events: String,
+    pub calls: String,
+    pub thread: String,
+    pub session: String,
+    pub agent: Option<String>,
 }
 
 /// One complete JSONL line with the byte offset at which it starts.
@@ -126,6 +140,15 @@ impl ParseOutput {
         }
     }
 
+    /// Lines whose records were left out for want of a readable time: each counts, one message
+    /// says so, since a changed time format would otherwise lose usage without a sign.
+    pub fn warn_undated(&mut self, lines: u64) {
+        if lines > 0 {
+            self.warn(format!("{lines} lines skipped: their time could not be read"));
+            self.warning_count += lines as usize - 1;
+        }
+    }
+
     /// The parser stops after the line that fills a round; the next round resumes from there.
     pub fn round_full(&self) -> bool {
         // old keys to clear count too: a log of repeated readings stores almost no events
@@ -149,6 +172,8 @@ pub struct JsonlReader {
     buf: Vec<u8>,
     error: Option<std::io::Error>,
     done: bool,
+    packed: bool,
+    damaged_at: Option<u64>,
 }
 
 impl JsonlReader {
@@ -162,12 +187,20 @@ impl JsonlReader {
             f.seek(SeekFrom::Start(offset))?;
             Box::new(BufReader::with_capacity(1 << 16, f))
         };
-        Ok(JsonlReader { r, pos: offset, buf: Vec::with_capacity(4096), error: None, done: false })
+        Ok(JsonlReader { r, pos: offset, buf: Vec::with_capacity(4096), error: None, done: false, packed: is_compressed(path), damaged_at: None })
     }
 
     /// The offset up to which the file has been consumed, or the read error that stopped it.
     pub fn finish(self) -> std::io::Result<u64> {
         self.error.map_or(Ok(self.pos), Err)
+    }
+
+    /// Compressed data damaged partway is read up to the damage, like a file cut short, and
+    /// said so; call once the lines are read.
+    pub fn warn_damage(&self, out: &mut ParseOutput) {
+        if let Some(at) = self.damaged_at {
+            out.warn(format!("damaged compressed data after byte {at}: the rest of the file is not read"));
+        }
     }
 
     /// Reads up to and including the next `\n`; returns the byte count and whether the line
@@ -209,6 +242,11 @@ impl Iterator for JsonlReader {
         while !self.done {
             let (n, over) = match self.read_line() {
                 Ok(r) => r,
+                // zstd reports a damaged frame as `Other`; the file's own I/O errors have kinds of their own
+                Err(e) if self.packed && e.kind() == std::io::ErrorKind::Other => {
+                    self.damaged_at = Some(self.pos);
+                    break;
+                }
                 Err(e) => {
                     self.error = Some(e);
                     break;
@@ -311,6 +349,37 @@ mod tests {
         let lines: Vec<(u64, Option<Value>)> = r.by_ref().map(|l| (l.offset, l.value)).collect();
         assert_eq!(lines, [(8, Some(serde_json::json!({"b": 2}))), (16, Some(serde_json::json!({"c": 3})))]);
         assert_eq!(r.finish().unwrap(), 24);
+    }
+
+    #[test]
+    fn a_compressed_file_damaged_partway_gives_what_comes_before_the_damage() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("r.jsonl.zst");
+        let mut packed = zstd::encode_all(&b"{\"a\":1}\n{\"b\":2}\n"[..], 3).unwrap();
+        packed.extend([0xab; 16]);
+        packed.extend(zstd::encode_all(&b"{\"c\":3}\n"[..], 3).unwrap());
+        std::fs::write(&p, &packed).unwrap();
+        let mut r = JsonlReader::open(&p, 0).unwrap();
+        let values: Vec<Option<Value>> = r.by_ref().map(|l| l.value).collect();
+        assert_eq!(values, [Some(serde_json::json!({"a": 1})), Some(serde_json::json!({"b": 2}))]);
+        let mut out = ParseOutput::default();
+        r.warn_damage(&mut out);
+        assert_eq!(out.warnings, ["damaged compressed data after byte 16: the rest of the file is not read"]);
+        assert_eq!(r.finish().unwrap(), 16);
+    }
+
+    #[test]
+    fn crlf_endings_a_byte_order_mark_and_a_line_longer_than_the_read_buffer_are_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("w.jsonl");
+        let long = format!("{{\"long\":\"{}\"}}", "x".repeat(200 << 10));
+        let text = format!("\u{feff}{{\"a\":1}}\r\n{long}\r\n{{\"b\":2}}\r\n");
+        std::fs::write(&p, &text).unwrap();
+        let mut r = JsonlReader::open(&p, 0).unwrap();
+        let lines: Vec<(u64, Option<Value>)> = r.by_ref().map(|l| (l.offset, l.value)).collect();
+        let long: Value = serde_json::from_str(&long).unwrap();
+        assert_eq!(lines, [(0, Some(serde_json::json!({"a": 1}))), (12, Some(long)), (text.len() as u64 - 9, Some(serde_json::json!({"b": 2})))]);
+        assert_eq!(r.finish().unwrap(), text.len() as u64);
     }
 
     #[test]

@@ -17,7 +17,9 @@
 //!   Versions before 0.2.5 keyed rows by byte offset; a file read from its start reports those
 //!   keys as stale so they are replaced in the same transaction.
 //! * `rate_limits`: `primary`/`secondary` `{used_percent, window_minutes, resets_at}`,
-//!   `plan_type`, `limit_id`. Windows are classified by `window_minutes`, not by slot.
+//!   `plan_type`, `limit_id`. Windows are classified by `window_minutes`, not by slot. Older
+//!   Codex wrote `resets_in_seconds` (from the line's time) instead of `resets_at`, and before
+//!   that flat `primary_used_percent`, `primary_window_minutes` and the same for `secondary`.
 //! * `session_meta.creator_account_id` (Codex ≥ 0.157) is the account selected when the thread
 //!   started. It is never updated: a resumed thread or a desktop account switch goes on under
 //!   another account, so it only vouches for the first requests (see `State::vouch_for`).
@@ -184,6 +186,7 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
     let mut lines = JsonlReader::open(path, offset)?;
     let mut out = ParseOutput::default();
     let mut typed = 0u64;
+    let mut undated = 0u64;
     let mut stopped = false;
 
     for line in lines.by_ref() {
@@ -252,7 +255,11 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
                     out.stale_events.push(format!("cx:{}:{}", st.legacy.as_deref().unwrap_or_default(), line.offset));
                 }
                 let mut recognised = false;
-                let reset = p.get("rate_limits").and_then(longest_reset);
+                let rl = p.get("rate_limits").filter(|r| r.is_object());
+                if ts_ms.is_none() && (rl.is_some() || p.get("info").is_some_and(|i| !i.is_null())) {
+                    undated += 1;
+                }
+                let reset = rl.zip(ts_ms).and_then(|(rl, ts)| longest_reset(rl, ts));
                 if let Some(ts_ms) = ts_ms
                     && !st.in_copy(path)
                 {
@@ -284,11 +291,11 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
                         recognised = true;
                     }
                 }
-                if let (Some(rl), Some(ts_ms)) = (p.get("rate_limits").filter(|r| !r.is_null()), ts_ms) {
+                if let (Some(rl), Some(ts_ms)) = (rl, ts_ms) {
                     if !st.in_copy(path) {
                         rate_limits(rl, ts_ms, &mut out.limits);
                     } else if replay {
-                        out.stale_limits.push((SOURCE.to_owned(), ts_ms));
+                        rate_limits(rl, ts_ms, &mut out.stale_limits);
                     }
                     recognised = true;
                 }
@@ -304,11 +311,15 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
                     st.take_owner(id, path);
                 }
                 let completed = i64_at(p, "completed_at_ms").filter(|&ms| ms > 0).or(ts_ms);
-                if let (Some(item), Some(ts_ms)) = (p.get("item"), completed)
-                    && let Some(call) = action(&st.who(path), line.offset, ts_ms, item)
+                if let Some(item) = p.get("item")
+                    && let Some(call) = action(&st.who(path), line.offset, completed.unwrap_or_default(), item)
                 {
-                    out.tool_calls.push(call);
-                    out.lines_recognised += 1;
+                    if completed.is_some() {
+                        out.tool_calls.push(call);
+                        out.lines_recognised += 1;
+                    } else {
+                        undated += 1;
+                    }
                 }
             }
             _ => {}
@@ -325,6 +336,8 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
     if out.lines_total >= 20 && typed == 0 {
         out.warn("unrecognised format: no line has a `type` field");
     }
+    out.warn_undated(undated);
+    lines.warn_damage(&mut out);
     out.state = serde_json::to_value(&st).unwrap_or(Value::Null);
     out.next_offset = lines.finish()?;
     Ok(out)
@@ -446,15 +459,26 @@ fn action(who: &Who, offset: u64, ts_ms: i64, item: &Value) -> Option<ToolCall> 
     })
 }
 
+/// One window of a reading: (minutes, used %, reset in epoch seconds).
+fn window(rl: &Value, slot: &str, ts_ms: i64) -> Option<(i64, Option<f64>, Option<i64>)> {
+    match rl.get(slot).filter(|w| w.is_object()) {
+        Some(w) => {
+            let reset = i64_at(w, "resets_at").or_else(|| i64_at(w, "resets_in_seconds").map(|s| (ts_ms / 1000).saturating_add(s)));
+            Some((i64_at(w, "window_minutes")?, f64_at(w, "used_percent"), reset))
+        }
+        None => Some((i64_at(rl, &format!("{slot}_window_minutes"))?, f64_at(rl, &format!("{slot}_used_percent")), None)),
+    }
+}
+
 /// When the longest window of the main limit resets: the window a request counted toward.
-fn longest_reset(rl: &Value) -> Option<i64> {
+fn longest_reset(rl: &Value, ts_ms: i64) -> Option<i64> {
     if str_at(rl, "limit_id").is_some_and(|l| l != MAIN_LIMIT) {
         return None;
     }
     ["primary", "secondary"]
         .iter()
-        .filter_map(|slot| rl.get(*slot))
-        .filter_map(|w| Some((i64_at(w, "window_minutes")?, i64_at(w, "resets_at")?)))
+        .filter_map(|slot| window(rl, slot, ts_ms))
+        .filter_map(|(minutes, _, reset)| Some((minutes, reset?)))
         .max_by_key(|(minutes, _)| *minutes)
         .map(|(_, reset)| reset)
 }
@@ -463,8 +487,8 @@ fn rate_limits(rl: &Value, ts_ms: i64, out: &mut Vec<LimitSnapshot>) {
     let plan = str_at(rl, "plan_type").map(str::to_owned);
     let limit_id = str_at(rl, "limit_id").unwrap_or("codex").to_owned();
     for slot in ["primary", "secondary"] {
-        let Some(w) = rl.get(slot).filter(|w| w.is_object()) else { continue };
-        let Some(window) = i64_at(w, "window_minutes").and_then(window_name) else { continue };
+        let Some((minutes, used_pct, resets_at)) = window(rl, slot, ts_ms) else { continue };
+        let Some(window) = window_name(minutes) else { continue };
         out.push(LimitSnapshot {
             ts_ms,
             provider: Provider::OpenAI,
@@ -472,8 +496,8 @@ fn rate_limits(rl: &Value, ts_ms: i64, out: &mut Vec<LimitSnapshot>) {
             account: None,
             limit_id: limit_id.clone(),
             window,
-            used_pct: f64_at(w, "used_percent"),
-            resets_at: i64_at(w, "resets_at"),
+            used_pct,
+            resets_at,
             status: str_at(rl, "rate_limit_reached_type").map(|s| format!("reached:{s}")),
             plan: plan.clone(),
             source: SOURCE.into(),
@@ -507,6 +531,44 @@ mod tests {
         let packed = Path::new("rollout-2026-06-21T11-36-07-019ee952-a384-76a3-bc8c-63d9865696b7.jsonl.zst");
         assert_eq!(session_id_from_filename(packed).as_deref(), Some("019ee952-a384-76a3-bc8c-63d9865696b7"));
         assert_eq!(session_id_from_filename(Path::new("other.jsonl")), None);
+    }
+
+    #[test]
+    fn older_reading_shapes_are_read_like_the_current_one() {
+        let ts = 1_789_000_000_000;
+        let read = |rl: Value| {
+            let mut out = Vec::new();
+            rate_limits(&rl, ts, &mut out);
+            (out.iter().map(|l| (l.window.clone(), l.used_pct, l.resets_at)).collect::<Vec<_>>(), longest_reset(&rl, ts))
+        };
+        let current = serde_json::json!({"primary": {"used_percent": 12.5, "window_minutes": 300, "resets_at": 1_789_003_600}, "secondary": {"used_percent": 40.0, "window_minutes": 10080, "resets_at": 1_789_300_000}});
+        assert_eq!(read(current), (vec![("five_hour".into(), Some(12.5), Some(1_789_003_600)), ("seven_day".into(), Some(40.0), Some(1_789_300_000))], Some(1_789_300_000)));
+        let relative = serde_json::json!({"primary": {"used_percent": 12.5, "window_minutes": 300, "resets_in_seconds": 3600}, "secondary": {"used_percent": 40.0, "window_minutes": 10080, "resets_in_seconds": 300_000}});
+        assert_eq!(read(relative), (vec![("five_hour".into(), Some(12.5), Some(1_789_003_600)), ("seven_day".into(), Some(40.0), Some(1_789_300_000))], Some(1_789_300_000)));
+        let flat = serde_json::json!({"primary_used_percent": 12.5, "secondary_used_percent": 40.0, "primary_to_secondary_ratio_percent": 20.0, "primary_window_minutes": 300, "secondary_window_minutes": 10080});
+        assert_eq!(read(flat), (vec![("five_hour".into(), Some(12.5), None), ("seven_day".into(), Some(40.0), None)], None));
+        assert_eq!(read(serde_json::json!({"primary": null, "secondary": {"used_percent": 1.0}})), (vec![], None));
+    }
+
+    #[test]
+    fn records_whose_time_cannot_be_read_are_counted_in_one_warning() {
+        use serde_json::json;
+        let dir = tempfile::tempdir().unwrap();
+        let id = "0199aaaa-bbbb-7ccc-8ddd-eeeeffff0009";
+        let p = dir.path().join(format!("rollout-2026-09-01T10-00-00-{id}.jsonl"));
+        let usage = |total: u64| json!({"total_token_usage": {"input_tokens": total, "output_tokens": 10}, "last_token_usage": {"input_tokens": 100, "output_tokens": 10}});
+        let lines = [
+            json!({"timestamp": "2026-09-01T10:00:00.000Z", "type": "session_meta", "payload": {"id": id, "cwd": "/w"}}),
+            json!({"timestamp": "2026-09-01T10:00:01.000Z", "type": "event_msg", "payload": {"type": "token_count", "info": usage(100), "rate_limits": null}}),
+            json!({"type": "event_msg", "payload": {"type": "token_count", "info": usage(200), "rate_limits": {"primary": {"used_percent": 5.0, "window_minutes": 300, "resets_at": 1_789_000_000}}}}),
+            json!({"timestamp": "never", "type": "event_msg", "payload": {"type": "item_completed", "item": {"type": "CommandExecution", "id": "call_1", "status": "completed", "exit_code": 0}}}),
+            // no action, so nothing is lost
+            json!({"type": "event_msg", "payload": {"type": "item_completed", "item": {"type": "AgentMessage", "id": "m1"}}}),
+        ];
+        std::fs::write(&p, lines.iter().map(|l| format!("{l}\n")).collect::<String>()).unwrap();
+        let out = parse_file(&p, 0, &Value::Null).unwrap();
+        assert_eq!((out.events.len(), out.limits.len(), out.tool_calls.len()), (1, 0, 0));
+        assert_eq!((out.warning_count, out.warnings.as_slice()), (2, &["2 lines skipped: their time could not be read".to_owned()][..]));
     }
 
     #[test]

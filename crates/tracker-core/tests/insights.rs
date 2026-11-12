@@ -1,4 +1,7 @@
+mod common;
+
 use chrono::{FixedOffset, TimeZone};
+use common::Dst;
 use tracker_core::analytics::{account_key, Filter, Range};
 use tracker_core::insights::{agents_tools, branches, compare_models, context_stats, day_detail, forecast, plan_value, restarted, session_timeline, sessions, subagent_cache, ForecastKind, PromptShare};
 use tracker_core::insights::live_caches;
@@ -798,4 +801,121 @@ fn a_call_from_another_accounts_message_does_not_show_for_the_account() {
     let t = session_timeline(&store, &PriceBook::default_book(), Tool::ClaudeCode, "s1", from, to, &only_a).unwrap();
     assert_eq!(t.requests.len(), 2);
     assert!(t.calls.is_empty() && t.calls_hidden);
+}
+
+#[test]
+fn an_advisor_is_not_the_conversations_cache_context_or_compaction() {
+    let t = ms(2026, 11, 10, 12, 0);
+    let book = PriceBook::default_book();
+    let (sonnet, opus) = ("claude-sonnet-5-5", "claude-opus-5-5");
+    // logged in the line of the request that consulted it, so stored right after it at the same time
+    let store = store_with(&[
+        ev("cc:msg_0", t - MIN, Tool::ClaudeCode, sonnet, Some("s"), "/p", 10, 0, 5).cache_write(60_000, 0),
+        ev("cc:msg_1", t, Tool::ClaudeCode, sonnet, Some("s"), "/p", 10, 60_000, 5).cache_write(1_000, 0),
+        ev("cc:msg_1:claude-opus-5-5", t, Tool::ClaudeCode, opus, Some("s"), "/p", 2_000, 0, 50).cache_write(3_000, 3_000),
+        ev("cc:msg_2", t + 2 * MIN, Tool::ClaudeCode, sonnet, Some("s"), "/p", 25_000, 0, 5),
+    ]);
+
+    let live = live_caches(&store, &book, t + 3 * MIN).unwrap();
+    let got: Vec<(&str, &str, i64, i64, u64)> = live.iter().map(|c| (c.session_id.as_str(), c.model.as_str(), c.ttl_ms, c.expires_ms, c.tokens)).collect();
+    assert_eq!(got, [("s", sonnet, 5 * MIN, t + 5 * MIN, 61_000)]);
+
+    let timeline = session_timeline(&store, &book, Tool::ClaudeCode, "s", t - MIN, t + 2 * MIN, &Filter::default()).unwrap();
+    let marks: Vec<(u64, bool)> = timeline.requests.iter().map(|r| (r.context, r.compacted)).collect();
+    assert_eq!(marks, [(60_010, false), (61_010, false), (5_000, false), (25_000, true)], "the advisor's small prompt is no compaction and hides none");
+    assert_eq!(timeline.requests[3].compacted_from, Some(61_010));
+
+    let list = sessions(&store, &book, all(), &Filter::default()).unwrap();
+    let s = &list.sessions[0];
+    assert_eq!((s.totals.events, s.max_context), (4, 61_010), "the advisor is counted and priced, as its own model");
+    assert!(close(s.avg_context, (60_010.0 + 61_010.0 + 25_000.0) / 3.0), "{}", s.avg_context);
+}
+
+#[test]
+fn telemetry_rows_are_left_out_of_cache_rebuilds_and_compactions() {
+    let t = ms(2026, 9, 10, 9, 0);
+    let opus = "claude-opus-5-5";
+    let store = store_with(&[
+        ev("l0", t, Tool::ClaudeCode, opus, Some("s"), "/p", 1, 0, 10).cache_write(100_000, 100_000),
+        // telemetry names no cache lifetime and no subagent, and also holds helper requests
+        ev("o1", t + 20 * MIN, Tool::ClaudeCode, opus, Some("s"), "/p", 1, 0, 10).cache_write(100_000, 0).captured(),
+        ev("o2", t + 30 * MIN, Tool::ClaudeCode, opus, Some("s"), "/p", 1, 0, 10).cache_write(100_000, 0).captured(),
+        ev("o3", t + 35 * MIN, Tool::ClaudeCode, opus, Some("s"), "/p", 3_000, 0, 10).captured(),
+        ev("l1", t + 40 * MIN, Tool::ClaudeCode, opus, Some("s"), "/p", 1, 100_000, 10).cache_write(500, 500),
+    ]);
+    let book = PriceBook::default_book();
+    let timeline = session_timeline(&store, &book, Tool::ClaudeCode, "s", t, t + 40 * MIN, &Filter::default()).unwrap();
+    assert_eq!(timeline.requests.len(), 5, "still listed");
+    assert!(timeline.requests.iter().all(|r| r.rewritten == 0 && !r.compacted), "{:?}", timeline.requests.iter().map(|r| (r.rewritten, r.compacted)).collect::<Vec<_>>());
+    let evs = store.events_between(0, i64::MAX / 2).unwrap();
+    assert_eq!(cache_rebuilds(&evs, &book).requests, 0);
+}
+
+#[test]
+fn a_day_keeps_each_accounts_limit_peaks_apart() {
+    let at = |h: u32| ms(2026, 9, 10, h, 0);
+    let (a, b) = ("aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb");
+    let mut store = store_with(&[ev("x", at(1), Tool::Codex, "gpt-5.6-terra", Some("x1"), "/p", 100, 0, 0)]);
+    let snap = |ts: i64, provider: Provider, used: f64| LimitSnapshot {
+        ts_ms: ts,
+        provider,
+        tool: if provider == Provider::OpenAI { Tool::Codex } else { Tool::ClaudeCode },
+        account: None,
+        limit_id: if provider == Provider::OpenAI { "codex" } else { "" }.into(),
+        window: "five_hour".into(),
+        used_pct: Some(used),
+        resets_at: None,
+        status: None,
+        plan: None,
+        source: "test".into(),
+        accuracy: Accuracy::Exact,
+    };
+    let mut tx = store.transaction().unwrap();
+    tx.insert_limits(&[snap(at(2), Provider::OpenAI, 30.0), snap(at(3), Provider::OpenAI, 60.0), snap(at(4), Provider::OpenAI, 80.0), snap(at(5), Provider::Anthropic, 40.0)]).unwrap();
+    tx.commit().unwrap();
+    let owner = |account: &str, ts: i64| store.conn().execute("UPDATE limit_snapshot SET owner = ?1 WHERE ts_ms = ?2", tracker_core::rusqlite::params![account, ts]).unwrap();
+    owner(a, at(2));
+    owner(a, at(3));
+    owner(b, at(4));
+
+    let (book, tz, date) = (PriceBook::default_book(), FixedOffset::east_opt(0).unwrap(), chrono::NaiveDate::from_ymd_opt(2026, 9, 10).unwrap());
+    let peaks = |filter: &Filter| -> Vec<(Provider, Option<String>, f64)> {
+        day_detail(&store, &book, date, filter, &tz).unwrap().limit_peaks.into_iter().map(|p| (p.provider, p.account, p.peak_pct)).collect()
+    };
+    assert_eq!(
+        peaks(&Filter::default()),
+        [(Provider::Anthropic, None, 40.0), (Provider::OpenAI, Some(a.to_owned()), 60.0), (Provider::OpenAI, Some(b.to_owned()), 80.0)],
+        "one account's peak is not another's; a provider with one account is shown as before"
+    );
+    let only_a = Filter { accounts: vec![account_key(Provider::OpenAI, Some(a))], ..Default::default() };
+    assert_eq!(peaks(&only_a), [(Provider::OpenAI, Some(a.to_owned()), 60.0)]);
+}
+
+#[test]
+fn a_day_with_a_clock_change_keeps_every_local_hour_once() {
+    let cet = Dst::europe();
+    let local = |m: u32, d: u32, h: u32, mi: u32| cet.with_ymd_and_hms(2026, m, d, h, mi, 0).earliest().unwrap().timestamp_millis();
+    let at = |key: &'static str, ts: i64| ev(key, ts, Tool::ClaudeCode, "claude-sonnet-5", Some("s"), "/p", 100, 0, 10);
+    let store = store_with(&[
+        at("before", local(3, 28, 23, 50)),
+        at("s0", local(3, 29, 0, 10)),
+        at("s1", local(3, 29, 1, 30)),
+        at("s3", local(3, 29, 3, 30)),
+        at("s23", local(3, 29, 23, 50)),
+        at("next", local(3, 30, 0, 10)),
+        // 02:30 came twice on 25 October
+        at("a1", ms(2026, 10, 25, 0, 30)),
+        at("a2", ms(2026, 10, 25, 1, 30)),
+        at("a23", local(10, 25, 23, 50)),
+        at("a_next", local(10, 26, 0, 10)),
+    ]);
+    let book = PriceBook::default_book();
+    let day = |m: u32, d: u32| day_detail(&store, &book, chrono::NaiveDate::from_ymd_opt(2026, m, d).unwrap(), &Filter::default(), &cet).unwrap();
+    let busy = |d: &tracker_core::insights::DayDetail| d.hourly.iter().filter(|h| h.events > 0).map(|h| (h.hour, h.events)).collect::<Vec<_>>();
+    let spring = day(3, 29);
+    assert_eq!((spring.totals.events, spring.hourly.len()), (4, 24), "23 hours long");
+    assert_eq!(busy(&spring), [(0, 1), (1, 1), (3, 1), (23, 1)]);
+    let autumn = day(10, 25);
+    assert_eq!((autumn.totals.events, autumn.hourly.len()), (3, 24), "25 hours long");
+    assert_eq!(busy(&autumn), [(2, 2), (23, 1)]);
 }

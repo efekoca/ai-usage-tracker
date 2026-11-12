@@ -552,3 +552,32 @@ fn the_archive_refuses_an_implausible_count_from_any_source() {
     tx.commit().unwrap();
     assert_eq!(store.event_count().unwrap(), 1);
 }
+
+#[test]
+fn a_subagent_summarised_after_its_last_read_joins_the_conversation_that_started_it() {
+    let g = gemini();
+    let summaries = Connection::open(g.gemini.join("antigravity-cli").join("conversation_summaries.db")).unwrap();
+    summaries.execute("DELETE FROM conversation_summaries WHERE conversation_id = ?1", [SUB_ID]).unwrap();
+    add_step(&g.conns[3], 2, 8, 3, step_meta(T0 + 212, Some(("toolu_s", "read_file"))), None);
+    let mut store = Store::open_in_memory().unwrap();
+    run_ag(&mut store, &g.env);
+    let sub = |store: &Store| rows(store).into_iter().find(|e| e.key == format!("ag:{SUB_ID}:0")).unwrap();
+    assert_eq!((sub(&store).session, sub(&store).thread), (SUB_ID.to_owned(), None), "nothing names its parent yet");
+
+    // the summary arrives once the subagent's own database is no longer written
+    summaries.execute("INSERT INTO conversation_summaries VALUES (?1, ?2, 'research')", [SUB_ID, CLI_ID]).unwrap();
+    add_step(&g.conns[2], 2, 15, 3, step_meta(T0 + 230, None), None);
+    add_gen(&g.conns[2], 1, generation("gemini-3.6-flash", (2_000, 60, 0, 0, 60), &[], 1));
+    run_ag(&mut store, &g.env);
+    let e = sub(&store);
+    assert_eq!((e.session.as_str(), e.agent.as_deref(), e.thread.as_deref()), (CLI_ID, Some("research"), Some(SUB_ID)));
+    let call: (String, Option<String>) = store
+        .conn()
+        .query_row("SELECT session_id, agent FROM tool_call WHERE key = ?1", [format!("agt:{SUB_ID}:toolu_s")], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!(call, (CLI_ID.to_owned(), Some("research".to_owned())));
+    let all = tracker_core::analytics::Range { from_ms: 0, to_ms: i64::MAX };
+    let sessions = tracker_core::insights::sessions(&store, &PriceBook::default_book(), all, &Default::default()).unwrap();
+    assert!(sessions.sessions.iter().all(|s| s.session_id != SUB_ID), "no longer a session of its own");
+    drop(g.conns);
+}

@@ -616,9 +616,9 @@ function mockDay(date: string) {
     first_ms: new Date(date + 'T09:12:00').getTime(),
     last_ms: new Date(date + 'T23:41:00').getTime(),
     limit_peaks: [
-      { provider: 'anthropic', window: 'five_hour', peak_pct: seedDay % 4 === 0 ? 100 : 71, at_ms: new Date(date + 'T16:20:00').getTime() },
-      { provider: 'anthropic', window: 'seven_day', peak_pct: 44, at_ms: new Date(date + 'T23:30:00').getTime() },
-      { provider: 'openai', window: 'five_hour', peak_pct: 18, at_ms: new Date(date + 'T15:05:00').getTime() },
+      { provider: 'anthropic', account: null, window: 'five_hour', peak_pct: seedDay % 4 === 0 ? 100 : 71, at_ms: new Date(date + 'T16:20:00').getTime() },
+      { provider: 'anthropic', account: null, window: 'seven_day', peak_pct: 44, at_ms: new Date(date + 'T23:30:00').getTime() },
+      { provider: 'openai', account: null, window: 'five_hour', peak_pct: 18, at_ms: new Date(date + 'T15:05:00').getTime() },
     ],
   }
 }

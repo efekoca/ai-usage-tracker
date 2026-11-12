@@ -167,7 +167,8 @@ impl Totals {
         self.add_counted(e, cost, savings, e.tool.provider() == Some(Provider::Anthropic))
     }
 
-    fn add_counted(&mut self, e: &EventRow, cost: Option<&Cost>, savings: f64, reuse: bool) {
+    /// `reuse`: whether its cache reads and writes count toward reuse (see [`cache_writers`]).
+    pub(crate) fn add_counted(&mut self, e: &EventRow, cost: Option<&Cost>, savings: f64, reuse: bool) {
         self.events += 1;
         self.cache_savings_usd += savings;
         self.tokens.add(&e.tokens);
@@ -260,7 +261,9 @@ fn savings_of(book: &PriceBook, e: &EventRow) -> f64 {
     book.cache_savings(&input_of(e)).unwrap_or(0.0)
 }
 
-fn cache_writers<'a>(events: impl Iterator<Item = &'a EventRow>) -> impl Fn(&EventRow) -> bool {
+/// Which requests count toward cache reuse: Claude's, and those of a model whose requests among
+/// `events` log any cache write (older Codex logs carry reads only).
+pub(crate) fn cache_writers<'a>(events: impl Iterator<Item = &'a EventRow>) -> impl Fn(&EventRow) -> bool {
     let models: HashSet<String> = events.filter(|e| e.tokens.cache_write > 0).map(|e| e.model.clone()).collect();
     move |e| e.tool.provider() == Some(Provider::Anthropic) || models.contains(&e.model)
 }

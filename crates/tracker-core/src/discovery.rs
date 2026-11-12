@@ -179,6 +179,7 @@ fn packages_matching(local: &Path, prefix: &str) -> Vec<PathBuf> {
     v
 }
 
+/// Only shows the app is installed: nothing in its folders is read, on any system.
 fn chatgpt_desktop_dirs(env: &Env) -> Vec<PathBuf> {
     let mut v = Vec::new();
     if let Some(l) = &env.local {
@@ -187,6 +188,8 @@ fn chatgpt_desktop_dirs(env: &Env) -> Vec<PathBuf> {
     }
     if let Some(r) = &env.roaming {
         v.push(r.join("ChatGPT"));
+        // `~/Library/Application Support/com.openai.chat` on macOS
+        v.push(r.join("com.openai.chat"));
     }
     v
 }
@@ -264,24 +267,35 @@ fn files_with_ext(dir: &Path, ext: &str) -> Vec<PathBuf> {
     v
 }
 
-fn jsonl_under(dir: &Path) -> impl Iterator<Item = PathBuf> {
+/// Past the deepest layout a tool writes (Claude Code's `<project>/<session>/subagents/workflows/<run>/<agent>.jsonl`).
+const MAX_DEPTH: usize = 10;
+
+/// Files under `dir`, through links too: a log or folder kept elsewhere behind a link is read like
+/// one in place. walkdir skips a link back into the walk (a loop), and a link to a folder holding
+/// `dir` (the home folder, the drive) is not followed, so no link takes the walk over the disk.
+fn files_under(dir: &Path) -> impl Iterator<Item = PathBuf> {
+    let held: Vec<PathBuf> = dir.ancestors().filter_map(|a| std::fs::canonicalize(a).ok()).collect();
+    let outward = move |e: &walkdir::DirEntry| {
+        e.depth() > 0 && e.path_is_symlink() && e.file_type().is_dir() && std::fs::canonicalize(e.path()).is_ok_and(|t| held.iter().any(|h| h.starts_with(&t)))
+    };
     WalkDir::new(dir)
-        .follow_links(false)
+        .follow_links(true)
+        .max_depth(MAX_DEPTH)
         .into_iter()
+        .filter_entry(move |e| !outward(e))
         .filter_map(Result::ok)
-        .filter(|e| e.file_type().is_file() && e.path().extension().is_some_and(|x| x == "jsonl"))
+        .filter(|e| e.file_type().is_file())
         .map(|e| e.into_path())
+}
+
+fn jsonl_under(dir: &Path) -> impl Iterator<Item = PathBuf> {
+    files_under(dir).filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
 }
 
 /// Codex rollouts, plain or compressed. While Codex compresses one, both copies exist and the
 /// plain one, which is complete, is read.
 fn rollouts_under(dir: &Path) -> Vec<PathBuf> {
-    let files: Vec<PathBuf> = WalkDir::new(dir)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(Result::ok)
-        .filter(|e| e.file_type().is_file())
-        .map(|e| e.into_path())
+    let files: Vec<PathBuf> = files_under(dir)
         .filter(|p| p.extension().is_some_and(|x| x == "jsonl") || (is_compressed(p) && p.with_extension("").extension().is_some_and(|x| x == "jsonl")))
         .collect();
     let plain: HashSet<PathBuf> = files.iter().filter(|p| !is_compressed(p)).cloned().collect();
@@ -472,5 +486,63 @@ mod tests {
         assert_eq!(codex_homes(&env, &extra), [PathBuf::from("/home/u/.codex")]);
         let twice = Env { claude_config_dir: Some("/a,/b,/a".into()), ..env };
         assert_eq!(claude_config_roots(&twice, &ExtraPaths::default()), [PathBuf::from("/a"), PathBuf::from("/b")]);
+    }
+
+    #[test]
+    fn the_chatgpt_app_is_found_in_its_macos_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let roaming = dir.path().join("Library").join("Application Support");
+        std::fs::create_dir_all(roaming.join("com.openai.chat")).unwrap();
+        let env = Env { home: Some(dir.path().to_owned()), roaming: Some(roaming), ..Default::default() };
+        let chatgpt = detect(&env, &ExtraPaths::default()).into_iter().find(|s| s.id == SourceId::ChatgptDesktop).unwrap();
+        assert!(chatgpt.found && !chatgpt.supported);
+        assert_eq!(chatgpt.file_count, 0, "nothing in it is read");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn logs_behind_links_are_read_once_without_following_links_out_of_the_folder() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let (home, elsewhere) = (dir.path().join("home"), dir.path().join("disk"));
+        let write = |p: PathBuf| {
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, "{}\n").unwrap();
+        };
+        // the whole projects folder, one project, one log and a Codex year kept on another disk
+        let projects = elsewhere.join("projects");
+        write(projects.join("-p1").join("s1.jsonl"));
+        write(elsewhere.join("p2").join("s2.jsonl"));
+        write(elsewhere.join("p2").join("s2").join("subagents").join("agent-a.jsonl"));
+        write(elsewhere.join("s3.jsonl"));
+        write(elsewhere.join("2026").join("09").join("01").join("rollout-2026-09-01T10-00-00-x.jsonl"));
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        symlink(&projects, home.join(".claude").join("projects")).unwrap();
+        symlink(elsewhere.join("p2"), projects.join("-p2")).unwrap();
+        symlink(elsewhere.join("s3.jsonl"), projects.join("-p1").join("s3.jsonl")).unwrap();
+        // a loop, and links out to folders that hold the projects: not followed
+        symlink(&projects, projects.join("-p1").join("loop")).unwrap();
+        symlink(&home, projects.join("-home")).unwrap();
+        symlink(dir.path(), projects.join("-root")).unwrap();
+        std::fs::create_dir_all(home.join(".codex").join("sessions")).unwrap();
+        symlink(elsewhere.join("2026"), home.join(".codex").join("sessions").join("2026")).unwrap();
+
+        let env = Env { home: Some(home.clone()), ..Default::default() };
+        let enabled: HashSet<SourceId> = [SourceId::ClaudeCode, SourceId::Codex].into_iter().collect();
+        let mut found: Vec<String> = enumerate_files(&env, &ExtraPaths::default(), &enabled)
+            .iter()
+            .map(|f| f.path.strip_prefix(&home).unwrap().to_string_lossy().replace('\\', "/"))
+            .collect();
+        found.sort();
+        assert_eq!(
+            found,
+            [
+                ".claude/projects/-p1/s1.jsonl",
+                ".claude/projects/-p1/s3.jsonl",
+                ".claude/projects/-p2/s2.jsonl",
+                ".claude/projects/-p2/s2/subagents/agent-a.jsonl",
+                ".codex/sessions/2026/09/01/rollout-2026-09-01T10-00-00-x.jsonl",
+            ]
+        );
     }
 }

@@ -65,6 +65,7 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
     // sub-directories the agent cd'd into, which would split one project into many.
     let mut root_cwd = str_at(state, "root_cwd").map(str::to_owned);
     let mut typed = 0u64;
+    let mut undated = 0u64;
     for line in lines.by_ref() {
         out.lines_total += 1;
         let Some(v) = &line.value else {
@@ -73,6 +74,9 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
         };
         if v.get("type").is_some() {
             typed += 1;
+        }
+        if carries_records(v) && str_at(v, "timestamp").and_then(parse_ts_ms).is_none() {
+            undated += 1;
         }
         if root_cwd.is_none() {
             root_cwd = str_at(v, "cwd").filter(|s| !s.is_empty()).map(|c| launch_dir(c, folder.as_deref()));
@@ -108,6 +112,7 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
     if out.lines_total >= 20 && typed == 0 {
         out.warn("unrecognised format: no line has a `type` field");
     }
+    out.warn_undated(undated);
     out.state = json!({ "root_cwd": root_cwd });
     out.next_offset = lines.finish()?;
     Ok(out)
@@ -134,6 +139,22 @@ fn consulted_model(it: &Value) -> Option<&str> {
     (str_at(it, "type") == Some("advisor_message")).then(|| str_at(it, "model").unwrap_or("unknown"))
 }
 
+/// SQL that is true for an advisor's event, keyed `<request key>:<model>` below; a request's own
+/// key (`cc:<message id>`, `ccr:<request id>`, `ccu:<uuid>`) holds no `:` after its prefix.
+pub(crate) const ADVISOR_SQL: &str = "(key GLOB 'cc:*:*' OR key GLOB 'ccr:*:*' OR key GLOB 'ccu:*:*')";
+
+/// A line whose records need its time: a response's usage and tool calls, or a limit hit.
+fn carries_records(v: &Value) -> bool {
+    let usage = str_at(v, "type") == Some("assistant") && v.get("message").and_then(|m| m.get("usage")).is_some_and(Value::is_object);
+    usage || v.get("quotaLimits").is_some_and(Value::is_object)
+}
+
+/// A Claude model under its Bedrock or Vertex name becomes Anthropic's id, so it is priced and
+/// grouped as one model; every other id is kept as written.
+fn model_id(model: &str) -> String {
+    super::opencode::cloud_claude_id(model).unwrap_or_else(|| model.to_owned())
+}
+
 /// Every iteration re-sends the conversation, so the prompt size is the largest one, not the sum.
 pub(crate) fn usage_events(v: &Value, ctx: &ClaudeCtx) -> Vec<UsageEvent> {
     if str_at(v, "type") != Some("assistant") {
@@ -141,10 +162,11 @@ pub(crate) fn usage_events(v: &Value, ctx: &ClaudeCtx) -> Vec<UsageEvent> {
     }
     let Some(msg) = v.get("message") else { return Vec::new() };
     let Some(usage) = msg.get("usage").filter(|u| u.is_object()) else { return Vec::new() };
-    let model = str_at(msg, "model").unwrap_or("unknown");
-    if model == "<synthetic>" || v.get("isApiErrorMessage").and_then(Value::as_bool) == Some(true) {
+    let raw_model = str_at(msg, "model").unwrap_or("unknown");
+    if raw_model == "<synthetic>" || v.get("isApiErrorMessage").and_then(Value::as_bool) == Some(true) {
         return Vec::new();
     }
+    let model = model_id(raw_model);
     let key = if let Some(id) = str_at(msg, "id") {
         format!("cc:{id}")
     } else if let Some(rid) = str_at(v, "requestId") {
@@ -222,9 +244,10 @@ pub(crate) fn usage_events(v: &Value, ctx: &ClaudeCtx) -> Vec<UsageEvent> {
     let mut out = vec![UsageEvent {
         web_search_requests,
         speed: str_at(usage, "speed").map(str::to_owned),
-        ..event(key.clone(), model, tokens, prompt)
+        ..event(key.clone(), &model, tokens, prompt)
     }];
-    out.extend(consulted.into_iter().map(|(m, t, p)| event(format!("{key}:{m}"), m, t, p)));
+    // the key keeps the name as logged, so a record read before stays one record
+    out.extend(consulted.into_iter().map(|(m, t, p)| event(format!("{key}:{m}"), &model_id(m), t, p)));
     out
 }
 
@@ -388,6 +411,101 @@ mod tests {
         // without iterations the top-level usage is the single prompt
         let ev = events(json!({"input_tokens": 5, "cache_read_input_tokens": 2000, "cache_creation_input_tokens": 1000, "output_tokens": 10}));
         assert_eq!((ev.len(), ev[0].request_input), (1, 3005));
+    }
+
+    #[test]
+    fn the_archive_tells_an_advisor_event_apart_by_its_key() {
+        let usage = json!({"input_tokens": 10, "output_tokens": 5, "iterations": [
+            {"type": "message", "input_tokens": 10, "output_tokens": 5},
+            {"type": "advisor_message", "model": "us.anthropic.claude-opus-5-v1:0", "input_tokens": 30, "output_tokens": 2}
+        ]});
+        // keyed by message id, by request id, and by the line's own id
+        let lines = [
+            json!({"type": "assistant", "sessionId": "s", "requestId": "req_1", "timestamp": "2026-09-01T08:00:00.000Z", "message": {"id": "msg_1", "model": "claude-sonnet-5", "usage": usage}}),
+            json!({"type": "assistant", "sessionId": "s", "requestId": "req_2", "timestamp": "2026-09-01T08:01:00.000Z", "message": {"model": "claude-sonnet-5", "usage": usage}}),
+            json!({"type": "assistant", "sessionId": "s", "uuid": "u-3", "timestamp": "2026-09-01T08:02:00.000Z", "message": {"model": "claude-sonnet-5", "usage": usage}}),
+        ];
+        let ctx = ClaudeCtx { client_override: None, source: "test" };
+        let events: Vec<UsageEvent> = lines.iter().flat_map(|l| usage_events(l, &ctx)).collect();
+        let keys: Vec<&str> = events.iter().map(|e| e.key.as_str()).collect();
+        let advisor = "us.anthropic.claude-opus-5-v1:0";
+        assert_eq!(keys, ["cc:msg_1".to_owned(), format!("cc:msg_1:{advisor}"), "ccr:req_2".into(), format!("ccr:req_2:{advisor}"), "ccu:u-3".into(), format!("ccu:u-3:{advisor}")]);
+        let mut store = crate::store::Store::open_in_memory().unwrap();
+        let mut tx = store.transaction().unwrap();
+        tx.upsert_events(&events).unwrap();
+        tx.commit().unwrap();
+        let rows: Vec<(String, bool)> = store.events_between(0, i64::MAX).unwrap().into_iter().map(|e| (e.model, e.advisor)).collect();
+        let (sonnet, opus) = (("claude-sonnet-5".to_owned(), false), ("claude-opus-5".to_owned(), true));
+        assert_eq!(rows, [sonnet.clone(), opus.clone(), sonnet.clone(), opus.clone(), sonnet, opus], "the advisor's own model, under Anthropic's name");
+    }
+
+    #[test]
+    fn only_bedrock_and_vertex_names_of_a_claude_model_are_spelt_anew() {
+        // Anthropic's ids, placeholders and other vendors' models behind an Anthropic-style endpoint
+        for id in [
+            "claude-opus-4-5-20251101",
+            "claude-sonnet-4-5-20250929",
+            "claude-haiku-4-5-20251001",
+            "claude-3-5-haiku-20241022",
+            "claude-3-7-sonnet-latest",
+            "claude-opus-4-6",
+            "claude-opus-4-6[1m]",
+            "claude-sonnet-5-5",
+            "claude-fable-5-1",
+            "unknown",
+            "glm-4.6",
+            "glm-5.1",
+            "kimi-k2.5",
+            "kimi-k2-0905-preview",
+            "deepseek-chat",
+            "deepseek-v3.2",
+            "qwen3-coder-plus",
+            "MiniMax-M2.1",
+            "gpt-5.4",
+            "gemini-3.7-flash",
+            "anthropic/claude-sonnet-4.5",
+            "z-ai/glm-4.6",
+            "mistral.devstral-2-v1:0",
+            "gpt-5@2026",
+        ] {
+            assert_eq!(model_id(id), id, "{id}");
+        }
+        for (cloud, id) in [
+            ("anthropic.claude-sonnet-4-5-20250929-v1:0", "claude-sonnet-4-5-20250929"),
+            ("us.anthropic.claude-opus-4-1-20250805-v1:0", "claude-opus-4-1-20250805"),
+            ("global.anthropic.claude-haiku-4-5-20251001-v1:0", "claude-haiku-4-5-20251001"),
+            ("eu.anthropic.claude-opus-5", "claude-opus-5"),
+            ("arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0", "claude-sonnet-4-5-20250929"),
+            ("claude-sonnet-4-5@20250929", "claude-sonnet-4-5-20250929"),
+            ("claude-opus-5@default", "claude-opus-5"),
+        ] {
+            assert_eq!(model_id(cloud), id, "{cloud}");
+        }
+        let ev = usage_events(
+            &json!({"type": "assistant", "sessionId": "s", "timestamp": "2026-09-01T08:00:00.000Z", "message": {"id": "msg_1", "model": "claude-sonnet-4-5@20250929", "usage": {"input_tokens": 1, "output_tokens": 1}}}),
+            &ClaudeCtx { client_override: None, source: "test" },
+        );
+        assert_eq!((ev[0].key.as_str(), ev[0].model.as_str()), ("cc:msg_1", "claude-sonnet-4-5-20250929"));
+    }
+
+    #[test]
+    fn lines_whose_time_cannot_be_read_are_counted_in_one_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("s.jsonl");
+        let lines = [
+            json!({"type": "assistant", "sessionId": "s", "timestamp": "2026-09-01T08:00:00.000Z", "message": {"id": "msg_1", "model": "claude-sonnet-5", "usage": {"input_tokens": 1, "output_tokens": 1}}}),
+            json!({"type": "assistant", "sessionId": "s", "timestamp": "01/09/2026 08:01", "message": {"id": "msg_2", "model": "claude-sonnet-5", "usage": {"input_tokens": 1, "output_tokens": 1}}}),
+            json!({"type": "assistant", "sessionId": "s", "message": {"id": "msg_3", "model": "claude-sonnet-5", "usage": {"input_tokens": 1, "output_tokens": 1}}}),
+            json!({"type": "system", "quotaLimits": {"status": "rejected", "rateLimitType": "five_hour"}}),
+            // nothing to count on these
+            json!({"type": "user", "sessionId": "s", "message": {"content": "hi"}}),
+            json!({"type": "summary", "summary": "x"}),
+        ];
+        std::fs::write(&p, lines.iter().map(|l| format!("{l}\n")).collect::<String>()).unwrap();
+        let out = parse_file(&p, 0, &Value::Null, &ClaudeCtx { client_override: None, source: "test" }).unwrap();
+        assert_eq!((out.events.len(), out.limits.len()), (1, 0));
+        assert_eq!(out.warning_count, 3);
+        assert_eq!(out.warnings, ["3 lines skipped: their time could not be read"]);
     }
 
     #[test]

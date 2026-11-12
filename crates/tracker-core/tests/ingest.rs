@@ -228,6 +228,95 @@ fn a_log_rewritten_in_place_past_its_old_end_is_read_from_the_start() {
 }
 
 #[test]
+fn a_log_that_shrank_below_its_read_offset_is_read_again_without_counting_twice() {
+    let m = machine();
+    let mut store = Store::open_in_memory().unwrap();
+    let file = m.home.join(".claude/projects/C--Projects-demo-app/session-d.jsonl");
+    let line = |id: &str| format!(r#"{{"type":"assistant","sessionId":"s-d","timestamp":"2026-09-03T10:00:00.000Z","message":{{"id":"{id}","model":"claude-opus-5-5","usage":{{"input_tokens":1,"output_tokens":2}}}}}}"#) + "\n";
+    fs::write(&file, line("msg_d1") + &line("msg_d2")).unwrap();
+    run(&mut store, &m.env);
+    let before = sums(&store, "claude_code").events;
+    fs::write(&file, line("msg_d1")).unwrap();
+    let rep = run(&mut store, &m.env);
+    assert!(rep.errors.is_empty() && rep.warnings.is_empty(), "{:?} {:?}", rep.errors, rep.warnings);
+    assert_eq!(sums(&store, "claude_code").events, before, "what was counted stays, and nothing twice");
+    fs::OpenOptions::new().append(true).open(&file).unwrap().write_all(line("msg_d3").as_bytes()).unwrap();
+    assert_eq!(run(&mut store, &m.env).new_events(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_log_that_cannot_be_opened_is_reported_and_read_once_it_can() {
+    use std::os::unix::fs::PermissionsExt;
+    let m = machine();
+    let mut store = Store::open_in_memory().unwrap();
+    let file = m.home.join(".claude/projects/C--Projects-demo-app/session-a.jsonl");
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).unwrap();
+    // a test run as root can read it anyway
+    if fs::File::open(&file).is_ok() {
+        return;
+    }
+    let rep = run(&mut store, &m.env);
+    assert_eq!(rep.errors.len(), 1, "{:?}", rep.errors);
+    assert!(rep.errors[0].0.ends_with("session-a.jsonl"));
+    assert!(rep.files_read > 0, "the other files are read");
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+    let rep = run(&mut store, &m.env);
+    assert_eq!((rep.errors.len(), rep.files_read), (0, 1));
+}
+
+#[test]
+fn a_compressed_rollout_damaged_partway_keeps_the_records_before_the_damage() {
+    let h = codex_home();
+    let lines = parent_log(PARENT_TS);
+    let frame = |l: &[String]| zstd::encode_all((l.join("\n") + "\n").as_bytes(), 3).unwrap();
+    let mut packed = frame(&lines[..3]);
+    packed.extend([0xab; 32]);
+    packed.extend(frame(&lines[3..]));
+    fs::write(h.day.join(format!("rollout-2026-09-10T10-00-00-{P}.jsonl.zst")), packed).unwrap();
+    let mut store = Store::open_in_memory().unwrap();
+    let rep = run(&mut store, &h.env);
+    assert!(rep.errors.is_empty(), "{:?}", rep.errors);
+    assert!(rep.warnings.iter().any(|(_, w)| w.contains("damaged compressed data")), "{:?}", rep.warnings);
+    assert_eq!(codex_rows(&store).len(), 1, "the request before the damage");
+    assert_eq!(count(&store, "SELECT count(*) FROM limit_snapshot WHERE source = 'codex_rollout'"), 1);
+    assert_eq!(run(&mut store, &h.env).files_read, 0, "not read again until it changes");
+}
+
+#[test]
+fn rows_of_a_tool_this_version_does_not_know_are_kept_but_never_counted_as_another() {
+    let dir = tempfile::tempdir().unwrap();
+    let backup = dir.path().join("newer.db");
+    {
+        let newer = Store::open(&backup).unwrap();
+        newer
+            .conn()
+            .execute_batch(
+                "INSERT INTO usage_event(key, ts_ms, tool, model, session_id, input, cache_read, cache_write, cache_write_1h, output,
+                     reasoning, request_input, web_search, accuracy, source) VALUES
+                 ('known', 5000, 'codex', 'gpt-5.6-terra', 'Q', 10, 0, 0, 0, 1, 0, 10, 0, 'exact', 'codex_rollout'),
+                 ('gx:1', 1000, 'gemini_cli', 'gemini-3.7-flash', 'G', 10, 0, 0, 0, 1, 0, 10, 0, 'exact', 'gemini_cli');
+                 INSERT INTO limit_snapshot(ts_ms, provider, tool, window, used_pct, source, accuracy) VALUES
+                 (5000, 'openai', 'codex', 'five_hour', 40.0, 'codex_rollout', 'exact'),
+                 (5000, 'xai', 'grok', 'five_hour', 90.0, 'grok', 'exact'),
+                 (6000, 'google', 'gemini_cli', 'five_hour', 70.0, 'gemini_cli', 'exact');
+                 INSERT INTO tool_call(key, ts_ms, tool, session_id, name) VALUES ('gxt:1', 1000, 'gemini_cli', 'G', 'shell');",
+            )
+            .unwrap();
+    }
+    let mut store = Store::open_in_memory().unwrap();
+    store.merge_from(&backup).unwrap();
+    assert_eq!(count(&store, "SELECT count(*) FROM usage_event"), 2, "kept for a version that knows the tool");
+    let events = store.events_between(0, i64::MAX).unwrap();
+    assert_eq!(events.iter().map(|e| e.model.as_str()).collect::<Vec<_>>(), ["gpt-5.6-terra"]);
+    assert!(store.tool_calls_between(0, i64::MAX).unwrap().is_empty());
+    let limits = store.limits_between(0, i64::MAX).unwrap();
+    assert_eq!(limits.iter().map(|l| l.used_pct).collect::<Vec<_>>(), [Some(40.0)]);
+    assert_eq!(store.latest_limits().unwrap().len(), 1);
+    assert_eq!(store.first_event_ms().unwrap(), Some(5000), "the unknown tool's older row does not stretch all time");
+}
+
+#[test]
 fn appended_lines_are_read_incrementally_and_partial_lines_wait() {
     let m = machine();
     let mut store = Store::open_in_memory().unwrap();
@@ -1132,8 +1221,19 @@ fn readings_an_older_version_copied_into_a_fork_are_removed() {
             [ms(COPY_TS[2])],
         )
         .unwrap();
+    // other logs' readings of the same millisecond: another pool, and the weekly window
+    store
+        .conn()
+        .execute(
+            "INSERT INTO limit_snapshot(ts_ms, provider, tool, limit_id, window, used_pct, resets_at, source, accuracy)
+             VALUES(?1, 'openai', 'codex', 'codex_other', 'five_hour', 7.0, 1789300000, 'codex_rollout', 'exact'),
+                   (?1, 'openai', 'codex', 'codex', 'seven_day', 55.0, 1789900000, 'codex_rollout', 'exact')",
+            [ms(COPY_TS[2])],
+        )
+        .unwrap();
     run(&mut store, &h.env);
-    assert_eq!(count(&store, "SELECT count(*) FROM limit_snapshot WHERE source = 'codex_rollout'"), 2, "the parent's and the fork's own");
+    assert_eq!(count(&store, "SELECT count(*) FROM limit_snapshot WHERE source = 'codex_rollout'"), 4, "the parent's, the fork's own and the other logs' two");
+    assert_eq!(count(&store, "SELECT count(*) FROM limit_snapshot WHERE window = 'five_hour' AND limit_id = 'codex' AND used_pct = 40.0"), 2, "not the copy");
 }
 
 #[test]

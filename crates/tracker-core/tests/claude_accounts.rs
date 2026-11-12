@@ -950,3 +950,22 @@ fn a_sign_in_waits_for_another_connections_write_instead_of_failing() {
     assert!(noted.is_ok(), "{noted:?}");
     let _ = std::fs::remove_file(&path);
 }
+
+#[test]
+fn readings_alone_never_make_a_second_claude_account() {
+    // a status line can carry an idle session's older reading, so two weekly windows read side by
+    // side for hours prove no other account: with one account known, all of it stays that one's
+    let a = org(1);
+    let (w1, w2) = (BASE / 1000 + 2 * 86_400, BASE / 1000 + 5 * 86_400);
+    let mut c = Claude::new();
+    c.signed_in(Some(&a), BASE, BASE + 6 * H).ask("s1", "cli", BASE + 10 * M, "r1").ask("s2", "cli", BASE + 5 * H, "r2");
+    for i in 0..10 {
+        let ts = BASE + i * 30 * M;
+        c.status(ts, BASE / 1000 + 4 * 3600, w1, 10.0 + i as f64, 40.0 + i as f64);
+        c.status(ts + 5 * M, BASE / 1000 + 3 * 3600, w2, 50.0 + i as f64, 20.0 + i as f64);
+    }
+    c.resolve();
+    assert_eq!(c.claude_accounts(), Vec::<Option<String>>::new());
+    assert_eq!((c.owner("r1"), c.owner("r2")), (Some(a.clone()), Some(a.clone())));
+    assert_eq!((c.reading_owner(BASE, "claude_statusline"), c.reading_owner(BASE + 5 * M, "claude_statusline")), (Some(a.clone()), Some(a)));
+}

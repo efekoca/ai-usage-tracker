@@ -65,3 +65,74 @@ pub fn run(store: &mut Store, env: &Env) -> tracker_core::ingest::IngestReport {
     ingest(store, &files, |_| {})
 }
 
+/// A time zone with daylight saving time: `std` seconds east of UTC, and `dst` from `start` until
+/// `end` (UTC seconds). Tests need no time zone database this way.
+#[derive(Debug, Clone, Copy)]
+pub struct Dst {
+    pub std: i32,
+    pub dst: i32,
+    pub start: i64,
+    pub end: i64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DstOffset {
+    zone: Dst,
+    fixed: chrono::FixedOffset,
+}
+
+impl chrono::Offset for DstOffset {
+    fn fix(&self) -> chrono::FixedOffset {
+        self.fixed
+    }
+}
+
+impl Dst {
+    /// Central European time in 2026: clocks go forward at 02:00 on 29 March and back at 03:00
+    /// on 25 October.
+    pub fn europe() -> Dst {
+        Dst { std: 3600, dst: 7200, start: 1_774_746_000, end: 1_792_890_000 }
+    }
+
+    fn offset_at(&self, utc_secs: i64) -> i32 {
+        if (self.start..self.end).contains(&utc_secs) { self.dst } else { self.std }
+    }
+
+    fn offset(&self, secs: i32) -> DstOffset {
+        DstOffset { zone: *self, fixed: chrono::FixedOffset::east_opt(secs).unwrap() }
+    }
+}
+
+impl chrono::TimeZone for Dst {
+    type Offset = DstOffset;
+
+    fn from_offset(offset: &DstOffset) -> Dst {
+        offset.zone
+    }
+
+    fn offset_from_local_date(&self, local: &chrono::NaiveDate) -> chrono::MappedLocalTime<DstOffset> {
+        self.offset_from_local_datetime(&local.and_hms_opt(0, 0, 0).unwrap())
+    }
+
+    fn offset_from_local_datetime(&self, local: &chrono::NaiveDateTime) -> chrono::MappedLocalTime<DstOffset> {
+        let wall = local.and_utc().timestamp();
+        // the offsets under which this wall time exists, the earliest instant first
+        let mut fits: Vec<i32> = [self.std, self.dst].into_iter().filter(|&o| self.offset_at(wall - i64::from(o)) == o).collect();
+        fits.sort_unstable_by(|a, b| b.cmp(a));
+        fits.dedup();
+        match fits[..] {
+            [] => chrono::MappedLocalTime::None,
+            [o] => chrono::MappedLocalTime::Single(self.offset(o)),
+            [a, b, ..] => chrono::MappedLocalTime::Ambiguous(self.offset(a), self.offset(b)),
+        }
+    }
+
+    fn offset_from_utc_date(&self, utc: &chrono::NaiveDate) -> DstOffset {
+        self.offset_from_utc_datetime(&utc.and_hms_opt(0, 0, 0).unwrap())
+    }
+
+    fn offset_from_utc_datetime(&self, utc: &chrono::NaiveDateTime) -> DstOffset {
+        self.offset(self.offset_at(utc.and_utc().timestamp()))
+    }
+}
+

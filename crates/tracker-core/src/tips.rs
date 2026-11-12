@@ -3,7 +3,7 @@
 //! involved. Every rule has a fixed threshold, so a tip appears only when the effect is real.
 
 use crate::analytics::{Filter, Range};
-use crate::model::{Provider, Tokens, Tool};
+use crate::model::{Accuracy, Provider, Tokens, Tool};
 use crate::pricing::{CostInput, PriceBook};
 use crate::store::{EventRow, Store};
 use rusqlite::Result;
@@ -92,11 +92,12 @@ pub struct Rebuilds {
 /// Claude requests that wrote their whole context to the cache again after a pause longer
 /// than the cache lifetime (5 minutes, or an hour for conversations writing 1-hour entries).
 /// Only what the previous request had cached counts, once it is at least 40 % of the prompt
-/// (the shared system prompt usually stays cached, the conversation after it does not).
+/// (the shared system prompt usually stays cached, the conversation after it does not). Captured
+/// telemetry is left out, as in `insights::live_caches`: it names no subagent or cache lifetime.
 pub fn cache_rebuilds(events: &[EventRow], book: &PriceBook) -> Rebuilds {
     // the cache is per model, so each model's requests in a conversation are a sequence of their own
     let mut threads: HashMap<(&str, &str, &str), Vec<&EventRow>> = HashMap::new();
-    for e in events.iter().filter(|e| e.tool.provider() == Some(Provider::Anthropic)) {
+    for e in events.iter().filter(|e| e.tool.provider() == Some(Provider::Anthropic) && e.accuracy != Accuracy::Captured) {
         if let Some(s) = e.session_id.as_deref() {
             threads.entry((s, e.thread_id.as_deref().unwrap_or(""), e.model.as_str())).or_default().push(e);
         }
