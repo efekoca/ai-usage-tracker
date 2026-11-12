@@ -199,7 +199,7 @@ pub fn cache_hook_main() -> i32 {
     let until = Instant::now() + Duration::from_secs(cs::REFRESH_HOOK_TIMEOUT_SECS.saturating_sub(60));
     match rh::wait(&dir, session, &me, transcript.as_deref(), Duration::from_secs(1), until, parent_alive()) {
         Ok(rh::Outcome::Wake(message)) => {
-            rh::woke(&dir, session);
+            rh::woke(&dir, session, now_ms());
             eprint!("{message}");
             2
         }

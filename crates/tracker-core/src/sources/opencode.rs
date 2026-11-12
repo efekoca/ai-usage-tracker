@@ -115,12 +115,20 @@ fn read(path: &Path, state: &Value) -> Result<ParseOutput, Box<dyn std::error::E
     changed.sort_by_key(|id| (sessions.get(id).map_or(0, |s| s.created), id.clone()));
     for id in &changed {
         let (events, calls) = (out.events.len(), out.tool_calls.len());
-        // one session that cannot be read leaves the others counted; it is tried again next time
-        if let Err(e) = read_session(&conn, &sessions, id, &mut out) {
-            out.events.truncate(events);
-            out.tool_calls.truncate(calls);
-            out.warn(format!("session {id} was skipped: {e}"));
-            seen.remove(id);
+        // one session that cannot be read leaves the others counted; it is tried again next time,
+        // as is one with a damaged record, which may be whole by then
+        match read_session(&conn, &sessions, id, &mut out) {
+            Err(e) => {
+                out.events.truncate(events);
+                out.tool_calls.truncate(calls);
+                out.warn(format!("session {id} was skipped: {e}"));
+                seen.remove(id);
+            }
+            Ok(0) => {}
+            Ok(damaged) => {
+                out.warn(format!("{damaged} damaged records in session {id} were skipped"));
+                seen.remove(id);
+            }
         }
     }
     conn.execute_batch("COMMIT")?;
@@ -128,7 +136,13 @@ fn read(path: &Path, state: &Value) -> Result<ParseOutput, Box<dyn std::error::E
     Ok(out)
 }
 
-fn read_session(conn: &Connection, sessions: &HashMap<String, Session>, id: &str, out: &mut ParseOutput) -> rusqlite::Result<()> {
+/// Returns how many of the session's records are not valid JSON and were left out.
+fn read_session(conn: &Connection, sessions: &HashMap<String, Session>, id: &str, out: &mut ParseOutput) -> rusqlite::Result<usize> {
+    let damaged: usize = conn.query_row(
+        "SELECT count(*) FROM part p JOIN message m ON m.id = p.message_id WHERE p.session_id = ?1 AND NOT (json_valid(p.data) AND json_valid(m.data))",
+        [id],
+        |r| r.get::<_, i64>(0),
+    )? as usize;
     let root = root_of(sessions, id);
     let child = root != id;
     let project = sessions.get(id).and_then(|s| s.directory.clone()).or_else(|| sessions.get(root).and_then(|s| s.directory.clone()));
@@ -262,7 +276,7 @@ fn read_session(conn: &Connection, sessions: &HashMap<String, Session>, id: &str
             _ => {}
         }
     }
-    Ok(())
+    Ok(damaged)
 }
 
 struct Row {

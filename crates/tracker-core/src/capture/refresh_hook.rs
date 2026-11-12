@@ -47,6 +47,10 @@ fn woke_file(dir: &Path, session: &str) -> PathBuf {
     dir.join(format!("woke-{session}"))
 }
 
+fn took_file(dir: &Path, session: &str) -> PathBuf {
+    dir.join(format!("took-{session}"))
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
     /// Asked to refresh: the message to wake the conversation with.
@@ -120,9 +124,16 @@ pub fn retire(dir: &Path, session: &str) {
     let _ = fs::remove_file(waiter_file(dir, session));
 }
 
-/// Marks the turn a wake is about to start, so its prompt is not taken for the user's.
-pub fn woke(dir: &Path, session: &str) {
+/// Marks the turn a wake is about to start, so its prompt is not taken for the user's, and keeps
+/// when the signal was taken, so the app counts only refreshes that woke the conversation.
+pub fn woke(dir: &Path, session: &str, now_ms: i64) {
     let _ = fs::write(woke_file(dir, session), "");
+    let _ = fs::write(took_file(dir, session), now_ms.to_string());
+}
+
+/// When the hook last took a signal for `session`.
+pub fn took(dir: &Path, session: &str) -> Option<i64> {
+    fs::read_to_string(took_file(dir, session)).ok()?.trim().parse().ok()
 }
 
 /// A prompt was submitted: the waiter goes, and unless it is the turn a wake just started, its time
@@ -143,7 +154,7 @@ pub fn forget_prompts(dir: &Path) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     for e in entries.flatten() {
         let name = e.file_name();
-        if name.to_string_lossy().starts_with("prompt-") || name.to_string_lossy().starts_with("woke-") {
+        if ["prompt-", "woke-", "took-"].iter().any(|p| name.to_string_lossy().starts_with(p)) {
             let _ = fs::remove_file(e.path());
         }
     }
@@ -182,7 +193,7 @@ pub fn drop_stale_signals(dir: &Path, now: SystemTime, max_age: Duration) {
         let name = name.to_string_lossy();
         let limit = if name.starts_with("signal-") || name.starts_with(".signal-") {
             max_age
-        } else if name.starts_with("waiter-") || name.starts_with("woke-") {
+        } else if name.starts_with("waiter-") || name.starts_with("woke-") || name.starts_with("took-") {
             WAITER_GONE
         } else if name.starts_with("prompt-") {
             PROMPT_KEPT
@@ -263,7 +274,8 @@ mod tests {
         prompted(&dir, "s", 1_000);
         assert_eq!(waiter.join().unwrap(), Outcome::Moved, "the conversation went on at once");
         assert_eq!(last_prompt(&dir, "s"), Some(1_000));
-        woke(&dir, "s");
+        woke(&dir, "s", 1_500);
+        assert_eq!(took(&dir, "s"), Some(1_500));
         prompted(&dir, "s", 2_000);
         assert_eq!(last_prompt(&dir, "s"), Some(1_000), "the turn a wake started is not the user's");
         prompted(&dir, "s", 3_000);

@@ -563,7 +563,7 @@ pub fn live_caches(store: &Store, book: &PriceBook, now_ms: i64) -> Result<Vec<L
         // a failed request logs no tokens and leaves the cache as it was
         let Some(last) = evs.iter().filter(|e| e.tokens.cache_read + e.tokens.cache_write > 0).max_by_key(|e| e.ts_ms) else { continue };
         // the lifetime is the one the cache was last written with, however long reads kept it since
-        let ttl_ms = match store.last_cache_write(session_id, last.ts_ms)? {
+        let ttl_ms = match store.last_cache_write(session_id, &last.model, last.ts_ms)? {
             Some((all, one_hour)) if all > one_hour => FIVE_MINUTES,
             Some(_) => ONE_HOUR,
             None => continue,
