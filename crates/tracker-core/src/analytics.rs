@@ -1,5 +1,6 @@
 //! UI aggregations. Periods and daily buckets use the user's local time zone.
 
+use crate::accounts::MAIN_LIMIT;
 use crate::capture::antigravity_limits::GEMINI_POOL;
 use crate::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool};
 use crate::pricing::{Cost, CostInput, PriceBook};
@@ -458,7 +459,11 @@ pub struct LimitView {
     pub accuracy: Accuracy,
     pub state: LimitState,
     pub window_start_ms: Option<i64>,
-    /// Usage recorded in local logs since the window started (exact counts).
+    /// The local logs tell this window's requests apart; false for a Codex pool besides the main
+    /// one, whose requests do not name it.
+    pub local_usage: bool,
+    /// Usage recorded in local logs since the window started (exact counts). Always empty when
+    /// `local_usage` is false.
     pub window_usage: Totals,
     /// Usage after the reading (`Behind` only): what the reading does not include yet.
     pub usage_since: Totals,
@@ -504,9 +509,15 @@ pub(crate) fn counts_toward(provider: Provider, limit_id: &str, window: &str, e:
         (Provider::Google, "") => true,
         (Provider::Google, GEMINI_POOL) => model.starts_with("gemini"),
         (Provider::Google, _) => !model.starts_with("gemini"),
-        _ => true,
+        _ => logs_pool(provider, limit_id),
     };
     provider_tools(provider).contains(&e.tool) && pool && family.is_none_or(|f| model.contains(f))
+}
+
+/// Whether the local logs tell which requests a pool counted: a Codex request does not name the
+/// pool it used, so only the main one, which every request fills, is credited with them.
+fn logs_pool(provider: Provider, limit_id: &str) -> bool {
+    provider != Provider::OpenAI || limit_id.is_empty() || limit_id == MAIN_LIMIT
 }
 
 /// Another account's limits stay on the Limits page this long after its last reading: by then
@@ -636,9 +647,10 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
             (LimitState::Fresh, Some(r), Some(d), Some(cur)) => Some(crate::insights::forecast(now_ms, cur, r, d, crate::insights::restarted(&reads))),
             _ => None,
         };
+        // with no request to weigh, every rise of a pool the logs cannot tell would read as use elsewhere
         let (usage, shares, unlogged) = match start {
-            Some(st) => window_usage(store, book, &projects, s.provider, &s.limit_id, &s.window, account, unowned, st, now_ms, used, &reads)?,
-            None => (Totals::default(), Vec::new(), None),
+            Some(st) if logs_pool(s.provider, &s.limit_id) => window_usage(store, book, &projects, s.provider, &s.limit_id, &s.window, account, unowned, st, now_ms, used, &reads)?,
+            _ => (Totals::default(), Vec::new(), None),
         };
         out.push(LimitView {
             provider: s.provider,
@@ -656,6 +668,7 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
             accuracy: s.accuracy,
             state,
             window_start_ms: start,
+            local_usage: logs_pool(s.provider, &s.limit_id),
             window_usage: usage,
             usage_since,
             forecast,
@@ -701,6 +714,7 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
             usage_since: Totals::default(),
             forecast: None,
             window_start_ms: Some(start),
+            local_usage: true,
             window_usage: usage,
             projects: shares,
             unlogged_pct: None,

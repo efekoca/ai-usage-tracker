@@ -299,6 +299,27 @@ fn instance_lock(data_dir: &std::path::Path) -> bool {
     false
 }
 
+/// A damaged database, a full disk or a lock held past the busy timeout would otherwise end the
+/// app without a word. It quits once the message is closed and leaves the file as it is.
+fn database_failed(app: &tauri::AppHandle, data_dir: &std::path::Path, error: &str) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+    log::error!("cannot open the database: {error}");
+    let folder = data_dir.display();
+    let (title, text) = if windows::system_is_turkish() {
+        (
+            "Veritabanı açılamadı",
+            format!("AI Usage Tracker veritabanını açamadı:\n\n{error}\n\nVeritabanı bu klasördeki tracker.db dosyası:\n{folder}\n\nDiskte yer açın ya da dosyayı kullanan başka bir programı kapatın, sonra uygulamayı yeniden başlatın. Dosya bozulduysa klasörün dışına taşıyın: uygulama boş bir arşivle başlar, taşıdığınız dosya olduğu gibi kalır."),
+        )
+    } else {
+        (
+            "Cannot open the database",
+            format!("AI Usage Tracker could not open its database:\n\n{error}\n\nThe database is tracker.db in this folder:\n{folder}\n\nFree up disk space or close any other program using the file, then start the app again. If the file is damaged, move it out of the folder: the app starts with an empty archive and the file you moved stays as it is."),
+        )
+    };
+    let handle = app.clone();
+    app.dialog().message(text).title(title).kind(MessageDialogKind::Error).show(move |_| handle.exit(1));
+}
+
 pub fn run() {
     #[cfg(target_os = "linux")]
     prefer_xwayland();
@@ -315,6 +336,10 @@ pub fn run() {
     let app = tauri::Builder::default()
         // must be registered first: a second launch just focuses the running instance
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // the database could not be opened, and only its error shows
+            if app.try_state::<AppState>().is_none() {
+                return;
+            }
             if args.iter().any(|a| a == TOGGLE_WIDGET) {
                 windows::handle_menu(app, "tray:widget");
             } else {
@@ -343,7 +368,13 @@ pub fn run() {
                 std::process::exit(0);
             }
             let db_path = data_dir.join("tracker.db");
-            let store = Store::open(&db_path)?;
+            let store = match Store::open(&db_path) {
+                Ok(store) => store,
+                Err(e) => {
+                    database_failed(app.handle(), &data_dir, &e.to_string());
+                    return Ok(());
+                }
+            };
             let settings = Settings::load(&store);
             let (book, origin) = load_price_book(&data_dir);
             let (worker, rx) = worker::channel_pair();
@@ -474,8 +505,15 @@ pub fn run() {
             commands::get_session_timeline,
             commands::install_update,
         ])
-        .build(tauri::generate_context!())
-        .expect("error while building AI Usage Tracker");
+        .build(tauri::generate_context!());
+    let app = match app {
+        Ok(app) => app,
+        Err(e) => {
+            log::error!("cannot start: {e}");
+            eprintln!("ai-usage-tracker: cannot start: {e}");
+            std::process::exit(1);
+        }
+    };
 
     app.run(|app, event| match event {
         RunEvent::ExitRequested { api, code, .. } => {
@@ -487,7 +525,7 @@ pub fn run() {
         }
         // a Dock click brings back the main window, even while only the widget is open
         #[cfg(target_os = "macos")]
-        RunEvent::Reopen { .. } => windows::show_main(app),
+        RunEvent::Reopen { .. } if app.try_state::<AppState>().is_some() => windows::show_main(app),
         _ => {}
     });
 }

@@ -138,14 +138,15 @@ pub fn start(app: AppHandle) {
     std::thread::Builder::new()
         .name("tray".into())
         .spawn(move || {
-            let mut last = Instant::now() - REFRESH;
+            // the clock may count from boot, where `now - REFRESH` panics in the first seconds
+            let mut last: Option<Instant> = None;
             loop {
                 std::thread::sleep(Duration::from_secs(1));
                 if app.state::<AppState>().quitting.load(Ordering::SeqCst) {
                     return;
                 }
-                if DIRTY.swap(false, Ordering::SeqCst) || last.elapsed() >= REFRESH {
-                    last = Instant::now();
+                if DIRTY.swap(false, Ordering::SeqCst) || last.is_none_or(|t| t.elapsed() >= REFRESH) {
+                    last = Some(Instant::now());
                     update(&app);
                 }
             }

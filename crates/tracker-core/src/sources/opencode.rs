@@ -68,7 +68,13 @@ fn read(path: &Path, state: &Value) -> Result<ParseOutput, Box<dyn std::error::E
             Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<String>>(2)?, r.get::<_, Option<String>>(3)?, r.get::<_, Option<i64>>(4)?))
         })?;
         for row in rows {
-            let (id, parent, directory, version, created) = row?;
+            let (id, parent, directory, version, created) = match row {
+                Err(e) if unexpected_field(&e) => {
+                    out.warn("a session with unexpected fields was skipped");
+                    continue;
+                }
+                r => r?,
+            };
             let counted = supported(version.as_deref(), created);
             skipped += usize::from(!counted);
             let directory = directory.filter(|d| !d.is_empty()).map(native_path);
@@ -108,7 +114,14 @@ fn read(path: &Path, state: &Value) -> Result<ParseOutput, Box<dyn std::error::E
 
     changed.sort_by_key(|id| (sessions.get(id).map_or(0, |s| s.created), id.clone()));
     for id in &changed {
-        read_session(&conn, &sessions, id, &mut out)?;
+        let (events, calls) = (out.events.len(), out.tool_calls.len());
+        // one session that cannot be read leaves the others counted; it is tried again next time
+        if let Err(e) = read_session(&conn, &sessions, id, &mut out) {
+            out.events.truncate(events);
+            out.tool_calls.truncate(calls);
+            out.warn(format!("session {id} was skipped: {e}"));
+            seen.remove(id);
+        }
     }
     conn.execute_batch("COMMIT")?;
     out.state = json!({ "sessions": seen });
@@ -133,7 +146,8 @@ fn read_session(conn: &Connection, sessions: &HashMap<String, Session>, id: &str
                 row_number() OVER (PARTITION BY p.message_id, json_extract(p.data, '$.type') ORDER BY p.time_created, p.id),
                 json_extract(p.data, '$.callID')
          FROM part p JOIN message m ON m.id = p.message_id
-         WHERE p.session_id = ?1 AND json_extract(p.data, '$.type') IN ('step-finish', 'tool')
+         WHERE p.session_id = ?1 AND json_valid(p.data) AND json_valid(m.data)
+           AND json_extract(p.data, '$.type') IN ('step-finish', 'tool')
          ORDER BY p.time_created, p.id",
     )?;
     let rows = q.query_map([id], |r| {
@@ -159,7 +173,7 @@ fn read_session(conn: &Connection, sessions: &HashMap<String, Session>, id: &str
         out.lines_total += 1;
         // a field of an unexpected type damages only its own row
         let row = match row {
-            Err(rusqlite::Error::InvalidColumnType(..) | rusqlite::Error::FromSqlConversionFailure(..) | rusqlite::Error::IntegralValueOutOfRange(..)) => {
+            Err(e) if unexpected_field(&e) => {
                 out.warn(format!("session {id}: a part with unexpected fields was skipped"));
                 continue;
             }
@@ -268,6 +282,10 @@ struct Row {
     /// Position among the message's parts of the same type; a copy keeps the order.
     step: i64,
     call: Option<String>,
+}
+
+fn unexpected_field(e: &rusqlite::Error) -> bool {
+    matches!(e, rusqlite::Error::InvalidColumnType(..) | rusqlite::Error::FromSqlConversionFailure(..) | rusqlite::Error::IntegralValueOutOfRange(..))
 }
 
 /// `[input, output, reasoning, cache read, cache write]` in OpenCode's meaning (output without

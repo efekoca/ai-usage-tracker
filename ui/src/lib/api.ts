@@ -273,6 +273,8 @@ export interface LimitView {
   accuracy: Accuracy
   state: LimitState
   window_start_ms: number | null
+  /** The local logs tell this window's requests apart; false for a Codex pool besides the main one. */
+  local_usage: boolean
   window_usage: Totals
   usage_since: Totals
   forecast: Forecast | null

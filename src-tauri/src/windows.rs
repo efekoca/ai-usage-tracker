@@ -747,25 +747,33 @@ pub fn start_fullscreen_watch(app: AppHandle) {
         .expect("spawn fullscreen watcher");
 }
 
+/// The front window is full screen when it covers the widget's display.
 /// `QUNS_BUSY` is not trusted: always-on-top full-screen overlays (e.g. GPU overlays) report it
-/// permanently, so the foreground window's rect is checked instead.
+/// permanently, so the foreground window's rect is checked instead. A maximized window never
+/// counts: its hidden borders reach past the work area, so it covers a display without a taskbar.
 #[cfg(windows)]
-fn fullscreen_app_active(_: &AppHandle) -> bool {
+fn fullscreen_app_active(app: &AppHandle) -> bool {
     use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST};
     use windows_sys::Win32::UI::Shell::{SHQueryUserNotificationState, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible, IsZoomed};
 
-    let mut state = 0;
-    if unsafe { SHQueryUserNotificationState(&mut state) } == 0
-        && (state == QUNS_RUNNING_D3D_FULL_SCREEN || state == QUNS_PRESENTATION_MODE)
-    {
-        return true;
-    }
+    // Tauri's HWND wraps the same pointer windows-sys takes
+    let Some(widget) = app.get_webview_window(WIDGET).and_then(|w| w.hwnd().ok()) else { return false };
     unsafe {
         let hwnd = GetForegroundWindow();
         if hwnd.is_null() || IsWindowVisible(hwnd) == 0 {
             return false;
+        }
+        // a hidden window keeps its place, so the widget's display is known while it is hidden
+        let display = MonitorFromWindow(widget.0, MONITOR_DEFAULTTONEAREST);
+        if MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) != display {
+            return false;
+        }
+        // the state names no display; a full-screen game or presentation is the window in front
+        let mut state = 0;
+        if SHQueryUserNotificationState(&mut state) == 0 && (state == QUNS_RUNNING_D3D_FULL_SCREEN || state == QUNS_PRESENTATION_MODE) {
+            return true;
         }
         let mut pid = 0u32;
         GetWindowThreadProcessId(hwnd, &mut pid);
@@ -779,13 +787,16 @@ fn fullscreen_app_active(_: &AppHandle) -> bool {
         if matches!(class.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd") {
             return false;
         }
+        if IsZoomed(hwnd) != 0 {
+            return false;
+        }
         let mut r: RECT = std::mem::zeroed();
         if GetWindowRect(hwnd, &mut r) == 0 {
             return false;
         }
         let mut mi: MONITORINFO = std::mem::zeroed();
         mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
-        if GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut mi) == 0 {
+        if GetMonitorInfoW(display, &mut mi) == 0 {
             return false;
         }
         let m = mi.rcMonitor;
