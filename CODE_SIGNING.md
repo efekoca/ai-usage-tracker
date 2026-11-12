@@ -10,4 +10,4 @@ The Windows installer and the Linux packages are built from this repository's so
 
 ## Privacy
 
-See the [Privacy](README.md#privacy) section of the README. The app never sends your usage data anywhere. It connects only to check for updates, which you can turn off under **Settings → Updates**.
+See the [Privacy](README.md#privacy) section of the README. The app never sends your usage data anywhere. It connects only to check for updates and for a newer price list, and each check downloads one file and sends nothing; you can turn them off under **Settings → Updates** and **Settings → Prices**. The limit reads run your own Claude Code, Codex and Antigravity CLI, which ask their own services for your plan's limits; you can turn them off under **Sources → Live capture**. If you install one of these tools from the app, its installer is downloaded from the maker's site.

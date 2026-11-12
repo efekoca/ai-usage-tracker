@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::Duration;
 use zbus::blocking::{Connection, Proxy};
 use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Value};
 
@@ -17,6 +18,10 @@ const APP_ID: &str = "ai-usage-tracker";
 const REGISTRY: &str = "org.freedesktop.host.portal.Registry";
 /// Starts the error when the portal found no `ai-usage-tracker.desktop` for this app.
 pub const UNREGISTERED: &str = "portal: app not registered";
+/// The portal answers each call at once and the user's choice later, in a signal, which this does not limit.
+const CALL_TIMEOUT: Duration = Duration::from_secs(5);
+/// A newer registration or a clear started while this one waited for the desktop.
+const SUPERSEDED: &str = "portal: superseded";
 
 /// The live session; replacing it closes the old one, which also ends its listener.
 static SESSION: Mutex<Option<Session>> = Mutex::new(None);
@@ -45,7 +50,7 @@ pub fn wayland_session() -> bool {
 /// Whether this desktop's portal offers global shortcuts and lets an unsandboxed app name itself.
 /// Older portals (before 1.19) accept the binding but the desktop drops it for want of an app ID.
 pub fn available() -> bool {
-    let Ok(c) = Connection::session() else { return false };
+    let Ok(c) = connect() else { return false };
     let has = |iface: &str| Proxy::new(&c, DEST, PATH, iface).ok().and_then(|p| p.get_property::<u32>("version").ok()).is_some();
     has(IFACE) && has(REGISTRY)
 }
@@ -55,18 +60,29 @@ pub fn active() -> bool {
     SESSION.lock().unwrap().is_some()
 }
 
-pub fn clear() {
-    GENERATION.fetch_add(1, Ordering::SeqCst);
+/// Ends the session, and with it any registration still waiting for the desktop. Returns the
+/// number a registration started next passes to `bind`.
+pub fn clear() -> u64 {
+    let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     SESSION.lock().unwrap().take();
+    generation
+}
+
+/// Whether nothing newer has started since `clear` returned `generation`.
+pub fn current(generation: u64) -> bool {
+    GENERATION.load(Ordering::SeqCst) == generation
+}
+
+fn connect() -> zbus::Result<Connection> {
+    zbus::blocking::connection::Builder::session()?.method_timeout(CALL_TIMEOUT).build()
 }
 
 /// Binds `hotkey` (`Ctrl+Alt+Shift+W`) in a new session and calls `on_press` for each press.
-/// Blocks until the desktop answers, which may wait for the user.
-pub fn bind(hotkey: &str, description: &str, on_press: impl Fn() + Send + 'static) -> Result<(), String> {
+/// Blocks until the desktop answers, which may wait for the user. A registration that finishes
+/// after a newer one started is closed again, so the newer one keeps the shortcut.
+pub fn bind(generation: u64, hotkey: &str, description: &str, on_press: impl Fn() + Send + 'static) -> Result<(), String> {
     let preferred = trigger(hotkey)?;
-    let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
-    SESSION.lock().unwrap().take();
-    let conn = Connection::session().map_err(err)?;
+    let conn = connect().map_err(err)?;
     // once per connection and before any other portal call, so each binding gets a fresh connection
     write_appimage_entry();
     Proxy::new(&conn, DEST, PATH, REGISTRY)
@@ -90,12 +106,19 @@ pub fn bind(hotkey: &str, description: &str, on_press: impl Fn() + Send + 'stati
 
     let activated = portal.receive_signal("Activated").map_err(err)?;
     let mine = handle.clone();
-    *SESSION.lock().unwrap() = Some(Session { conn, handle });
+    let mut held = SESSION.lock().unwrap();
+    if !current(generation) {
+        drop(held);
+        drop(Session { conn, handle });
+        return Err(SUPERSEDED.into());
+    }
+    *held = Some(Session { conn, handle });
+    drop(held);
     std::thread::Builder::new()
         .name("portal-shortcut".into())
         .spawn(move || {
             for msg in activated {
-                if GENERATION.load(Ordering::SeqCst) != generation {
+                if !current(generation) {
                     return;
                 }
                 if let Ok((session, id, _ts, _opts)) = msg.body().deserialize::<(OwnedObjectPath, String, u64, HashMap<String, OwnedValue>)>()
@@ -144,7 +167,7 @@ fn trigger(hotkey: &str) -> Result<String, String> {
 /// The portal names the app by a .desktop file whose program exists. The packages install one; an
 /// AppImage gets one in the user's applications folder that points at the AppImage itself.
 fn write_appimage_entry() {
-    let Some(appimage) = std::env::var_os("APPIMAGE").map(std::path::PathBuf::from).filter(|p| p.is_file()) else { return };
+    let Some(appimage) = crate::appimage() else { return };
     let data = std::env::var_os("XDG_DATA_HOME")
         .map(std::path::PathBuf::from)
         .filter(|p| p.is_absolute())

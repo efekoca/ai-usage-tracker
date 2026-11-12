@@ -1,4 +1,5 @@
 use crate::state::AppState;
+use std::sync::{Mutex, PoisonError};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
@@ -43,13 +44,17 @@ pub(crate) fn xkb_key(key: &str) -> Option<String> {
     Some(named.to_owned())
 }
 
+/// One change at a time, so an older one finishing late cannot replace a newer one's shortcut or error.
+static APPLYING: Mutex<()> = Mutex::new(());
+
 /// The error is kept for the settings screen: another program may already own the combination.
 /// `chosen` is true when the user picked this shortcut just now rather than at startup.
 pub fn apply(app: &AppHandle, hotkey: &str, chosen: bool) -> Result<(), String> {
+    let _one = APPLYING.lock().unwrap_or_else(PoisonError::into_inner);
     let _ = app.global_shortcut().unregister_all();
     #[cfg(target_os = "linux")]
     {
-        crate::portal_shortcut::clear();
+        let generation = crate::portal_shortcut::clear();
         crate::kde_shortcut::clear();
         if !hotkey.trim().is_empty() && crate::portal_shortcut::wayland_session() && crate::portal_shortcut::available() {
             parse(hotkey)?;
@@ -62,9 +67,13 @@ pub fn apply(app: &AppHandle, hotkey: &str, chosen: bool) -> Result<(), String> 
             // the desktop may ask the user first, so the answer is awaited off the caller's thread
             std::thread::spawn(move || {
                 let press = app.clone();
-                let r = crate::portal_shortcut::bind(&hotkey, "Show or hide the AI Usage Tracker widget", move || {
+                let r = crate::portal_shortcut::bind(generation, &hotkey, "Show or hide the AI Usage Tracker widget", move || {
                     crate::windows::handle_menu(&press, "tray:widget");
                 });
+                let _one = APPLYING.lock().unwrap_or_else(PoisonError::into_inner);
+                if !crate::portal_shortcut::current(generation) {
+                    return;
+                }
                 match r {
                     Ok(()) => *app.state::<AppState>().hotkey_error.lock().unwrap() = None,
                     // the portal could not tell which app this is; the other ways still give a shortcut

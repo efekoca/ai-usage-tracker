@@ -164,7 +164,7 @@ if (mac) {
   if (signing) platforms[`linux-${arch}`] = platforms[`linux-${arch}-appimage`]
 } else {
   const nsis = join(bundle, 'nsis')
-  const setup = readdirSync(nsis).find((f) => f.endsWith(`_${version}_x64-setup.exe`))
+  const setup = existsSync(nsis) && readdirSync(nsis).find((f) => f.endsWith(`_${version}_x64-setup.exe`))
   if (!setup) fail(`No installer for v${version} in ${nsis}`)
   const asset = `AI-Usage-Tracker_${version}_x64-setup.exe`
   take(nsis, setup, asset)

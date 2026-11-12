@@ -37,7 +37,7 @@ pub(crate) const TOGGLE_WIDGET: &str = "--toggle-widget";
 pub(crate) fn app_path() -> Result<std::path::PathBuf, String> {
     // an AppImage runs from a temporary mount; the file it was started from stays put
     #[cfg(target_os = "linux")]
-    if let Some(p) = std::env::var_os("APPIMAGE").map(std::path::PathBuf::from).filter(|p| p.is_file()) {
+    if let Some(p) = appimage() {
         return Ok(p);
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -46,6 +46,22 @@ pub(crate) fn app_path() -> Result<std::path::PathBuf, String> {
         return Err("app_not_installed".into());
     }
     Ok(exe)
+}
+
+/// The AppImage this copy runs from. A program started from another AppImage (an IDE's terminal)
+/// inherits its `APPIMAGE` and `APPDIR`, so they count only while this program runs inside `APPDIR`.
+#[cfg(target_os = "linux")]
+pub(crate) fn appimage() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    // the mount sits in TMPDIR, which may be reached through a link; the exe's path never is
+    let appdir = std::env::var_os("APPDIR").map(std::path::PathBuf::from).map(|d| std::fs::canonicalize(&d).unwrap_or(d));
+    own_appimage(&exe, std::env::var_os("APPIMAGE").map(std::path::PathBuf::from), appdir).filter(|p| p.is_file())
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn own_appimage(exe: &std::path::Path, appimage: Option<std::path::PathBuf>, appdir: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
+    let appdir = appdir.filter(|d| d.has_root() && d.parent().is_some())?;
+    appimage.filter(|p| p.has_root() && exe.starts_with(&appdir))
 }
 
 /// A copy opened from the disk image or moved aside by App Translocation disappears later.
@@ -408,7 +424,16 @@ pub fn run() {
                 windows::apply_dock(app.handle(), &settings);
             }
             // a combination another program owns is reported in settings, not fatal
+            #[cfg(not(target_os = "linux"))]
             let _ = hotkey::apply(app.handle(), &settings.widget.hotkey, false);
+            // the desktop's shortcut services answer over D-Bus, which must not hold up the start
+            #[cfg(target_os = "linux")]
+            {
+                let (app, keys) = (app.handle().clone(), settings.widget.hotkey.clone());
+                std::thread::spawn(move || {
+                    let _ = hotkey::apply(&app, &keys, false);
+                });
+            }
             if !started_hidden || !settings.onboarded {
                 windows::show_main(app.handle());
             }
@@ -530,13 +555,29 @@ pub fn run() {
     });
 }
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(test)]
 mod tests {
-    use super::temporary_location;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     #[test]
+    fn only_the_appimage_this_copy_runs_from_counts() {
+        let own = |exe: &str, appimage: Option<&str>, appdir: Option<&str>| super::own_appimage(Path::new(exe), appimage.map(PathBuf::from), appdir.map(PathBuf::from));
+        let mounted = "/tmp/.mount_AIUsagXy12/usr/bin/ai-usage-tracker";
+        assert_eq!(own(mounted, Some("/home/u/Apps/AI Usage Tracker.AppImage"), Some("/tmp/.mount_AIUsagXy12")), Some(PathBuf::from("/home/u/Apps/AI Usage Tracker.AppImage")));
+        // a package started from an AppImage IDE's terminal
+        assert_eq!(own("/usr/bin/ai-usage-tracker", Some("/home/u/Apps/Cursor.AppImage"), Some("/tmp/.mount_CursorAb34")), None);
+        // a mount whose name merely starts the same
+        assert_eq!(own("/tmp/.mount_AIUsagXy12x/usr/bin/ai-usage-tracker", Some("/home/u/a.AppImage"), Some("/tmp/.mount_AIUsagXy12")), None);
+        assert_eq!(own(mounted, Some("/home/u/a.AppImage"), None), None);
+        assert_eq!(own(mounted, None, Some("/tmp/.mount_AIUsagXy12")), None);
+        assert_eq!(own(mounted, Some("/home/u/a.AppImage"), Some("/")), None);
+        assert_eq!(own(mounted, Some("a.AppImage"), Some("/tmp/.mount_AIUsagXy12")), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
     fn disk_images_and_translocated_copies_are_temporary() {
+        use super::temporary_location;
         assert!(temporary_location(Path::new("/private/var/folders/x/T/AppTranslocation/ABC/d/AI Usage Tracker.app/Contents/MacOS/ai-usage-tracker")));
         // the sealed system volume is mounted read-only, like a disk image
         assert!(temporary_location(Path::new("/System/Applications/Calculator.app/Contents/MacOS/Calculator")));

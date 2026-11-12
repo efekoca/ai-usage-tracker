@@ -4,7 +4,7 @@ use crate::tray_text::{needs_usage, shown_value, Data, Format, Reading, Usage};
 use crate::state::AppState;
 use crate::windows::{handle_menu, system_is_turkish};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -147,11 +147,25 @@ pub fn start(app: AppHandle) {
                 }
                 if DIRTY.swap(false, Ordering::SeqCst) || last.is_none_or(|t| t.elapsed() >= REFRESH) {
                     last = Some(Instant::now());
-                    update(&app);
+                    guarded("update", || update(&app));
                 }
             }
         })
         .expect("spawn tray updater");
+}
+
+/// A panic in one step is logged and the next update tries again, so the badge, tooltip,
+/// notifications and automatic refreshes outlive a bug in any one of them.
+fn guarded(step: &str, f: impl FnOnce()) {
+    static LOGGED: Mutex<Option<Instant>> = Mutex::new(None);
+    let Err(e) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) else { return };
+    // a lasting fault would otherwise fill the log every second
+    let mut logged = LOGGED.lock().unwrap_or_else(PoisonError::into_inner);
+    if logged.is_none_or(|t| t.elapsed() >= Duration::from_secs(600)) {
+        *logged = Some(Instant::now());
+        let why = e.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| e.downcast_ref::<String>().cloned()).unwrap_or_default();
+        log::error!("tray {step} stopped: {why}");
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -396,7 +410,7 @@ pub fn level(used: f64, warn_at: f64, high_at: f64) -> Level {
 
 /// The followed caches' time left in whole minutes rounded up (the tray refreshes every 20
 /// seconds): the soonest for the menu bar ("notes 2 dk"), the first two for the tooltip, which
-/// Windows cuts at 127 characters.
+/// Windows cuts at 127 UTF-16 units.
 fn cache_text(caches: &[Cache], now_ms: i64, tr: bool) -> Option<(String, String)> {
     let first = caches.first()?;
     let minutes = |c: &Cache| (c.expires_ms - now_ms + 59_999) / 60_000;
@@ -453,12 +467,27 @@ fn tooltip(limits: &[Current], s: &Settings, update: Option<&str>, cache: Option
     if let Some(v) = update {
         lines.push(if tr { format!("Güncelleme hazır: v{v}") } else { format!("Update ready: v{v}") });
     }
-    // Windows shows at most 127 characters
-    let mut text = lines.join("\n");
-    if text.chars().count() > 127 {
-        text = text.chars().take(126).collect::<String>() + "…";
+    fit_tooltip(lines.join("\n"))
+}
+
+/// Windows keeps 127 UTF-16 units of a tooltip; a longer one is cut at a whole character and
+/// ends in "…", so an emoji never loses half of its surrogate pair.
+fn fit_tooltip(text: String) -> String {
+    const MAX: usize = 127;
+    if text.encode_utf16().count() <= MAX {
+        return text;
     }
-    text
+    let mut units = 0;
+    let mut kept: String = text
+        .chars()
+        .take_while(|c| {
+            units += c.len_utf16();
+            // one unit stays for the "…"
+            units < MAX
+        })
+        .collect();
+    kept.push('…');
+    kept
 }
 
 fn update(app: &AppHandle) {
@@ -466,8 +495,8 @@ fn update(app: &AppHandle) {
     let Some(readings) = readings(app, &s) else { return };
     let now = chrono::Utc::now().timestamp_millis();
     let caches = crate::caches::followed(&app.state::<AppState>(), &s, now);
-    crate::refresh::tick(app, &s, &caches, now);
-    crate::alerts::check(app, &s, &readings, &caches);
+    guarded("refresh", || crate::refresh::tick(app, &s, &caches, now));
+    guarded("alerts", || crate::alerts::check(app, &s, &readings, &caches));
     let Some(tray) = app.tray_by_id(ID) else { return };
     let limits = current_limits(&readings);
     let update = app.state::<AppState>().updates.lock().unwrap().available.as_ref().map(|a| a.version.clone());
@@ -490,7 +519,7 @@ fn update(app: &AppHandle) {
         tooltip: tooltip(&limits, &s, update.as_deref(), cache.as_ref().map(|c| c.1.as_str())),
         menu: (turkish(&s), update.clone(), s.widget.hotkey.clone()),
     };
-    let mut shown = SHOWN.lock().unwrap();
+    let mut shown = SHOWN.lock().unwrap_or_else(PoisonError::into_inner);
     let prev = shown.clone().unwrap_or_default();
     if shown.is_some() && prev == next {
         return;
@@ -1042,6 +1071,18 @@ mod tests {
         assert_eq!(level(69.0, 70.0, 90.0), Level::Normal);
         assert_eq!(level(70.0, 70.0, 90.0), Level::Warn);
         assert_eq!(level(95.0, 70.0, 90.0), Level::High);
+    }
+
+    #[test]
+    fn a_long_tooltip_is_cut_in_utf16_units_at_a_whole_character() {
+        let a = |n: usize| "a".repeat(n);
+        assert_eq!(fit_tooltip(a(127)), a(127));
+        assert_eq!(fit_tooltip(a(128)), a(126) + "…");
+        // 127 characters, but the lock takes two units
+        assert_eq!(fit_tooltip(a(126) + "🔒"), a(126) + "…");
+        assert_eq!(fit_tooltip(a(125) + "🔒 week full"), a(125) + "…");
+        assert_eq!(fit_tooltip(a(124) + "🔒 week full"), a(124) + "🔒…");
+        assert!([a(126) + "🔒", a(125) + "🔒 week full", a(124) + "🔒 week full"].into_iter().all(|t| fit_tooltip(t).encode_utf16().count() <= 127));
     }
 
     #[test]
