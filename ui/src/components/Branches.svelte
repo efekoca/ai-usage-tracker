@@ -50,7 +50,7 @@
             <th scope="col" class="num">{t('branches.col.sessions')}</th>
             <th scope="col" class="num">{t('branches.col.requests')}</th>
             <th scope="col" class="num">{t('metric.tokens')}</th>
-            <th scope="col" class="num">{t('metric.apiEq')}</th>
+            <th scope="col" class="num">{t('metric.cost')}</th>
             <th scope="col" class="num">{t('breakdown.share')}</th>
             <th scope="col" class="num">{t('branches.col.last')}</th>
           </tr>
@@ -60,13 +60,13 @@
             <tr>
               <th scope="row">
                 {#if r.project_id !== null}
-                  <button class="link" onclick={() => focus(r.project_id)} title={t('branches.filter')}><Icon name="folder" size={14} />{project(r)}</button>
+                  <button class="link" onclick={() => focus(r.project_id)} title={t('branches.filter')}><Icon name="folder" size={14} /><span class="clip" title={project(r)}>{project(r)}</span></button>
                 {:else}
-                  <span class="muted">{project(r)}</span>
+                  <span class="muted clip" title={project(r)}>{project(r)}</span>
                 {/if}
               </th>
               <td>
-                {#if r.branch}<code>{r.branch}</code>{:else if r.branch_hidden}<span class="subtle">{t('branches.hidden')}</span>{:else}<span class="subtle" title={t('branches.noneHelp')}>{t('branches.none')}</span>{/if}
+                {#if r.branch}<code class="clip" title={r.branch}>{r.branch}</code>{:else if r.branch_hidden}<span class="subtle">{t('branches.hidden')}</span>{:else}<span class="subtle" title={t('branches.noneHelp')}>{t('branches.none')}</span>{/if}
               </td>
               <td class="opt">
                 <span class="tools" aria-label={r.tools.map(toolLabel).join(', ')}>{#each r.tools as tool (tool)}<i class="dot" style="background:{toolColor[tool]}" title={toolLabel(tool)}></i>{/each}</span>
@@ -98,8 +98,9 @@
     overflow-x: auto;
     margin-top: 16px;
   }
+  /* the same inset as the project list above */
   .pad {
-    padding: 10px 16px 0;
+    padding: 10px 20px 0;
   }
   .lead {
     margin: 4px 0 8px;
@@ -121,11 +122,25 @@
     border-bottom: 0.5px solid var(--hairline);
     white-space: nowrap;
   }
+  th:first-child,
+  td:first-child {
+    padding-left: 20px;
+  }
+  th:last-child,
+  td:last-child {
+    padding-right: 20px;
+  }
   thead th {
     color: var(--ink-2);
     font-weight: 500;
     font-size: 12px;
-    white-space: normal;
+  }
+  /* a long project or branch name is cut short, so the numbers keep their room and the headings one line */
+  .clip {
+    display: inline-block;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
     vertical-align: bottom;
   }
   tbody th {
@@ -182,6 +197,9 @@
     }
     .opt {
       display: none;
+    }
+    .clip {
+      max-width: 170px;
     }
   }
 </style>

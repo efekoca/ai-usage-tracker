@@ -66,9 +66,8 @@
     <section class="card">
       <h2>{t('onb.detected')}</h2>
       {#if loadError}
-        <div class="banner" role="alert">
-          <Icon name="warning" size={16} />
-          <span class="grow">{t('common.error', { e: loadError })}</span>
+        <div class="banner center" role="alert">
+          <span class="icon-text"><Icon name="warning" size={16} /><span>{t('common.error', { e: loadError })}</span></span>
           <button class="btn" onclick={detect}>{t('common.retry')}</button>
         </div>
       {:else if !loaded}

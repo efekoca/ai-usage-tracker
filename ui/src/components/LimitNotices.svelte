@@ -65,9 +65,7 @@
 {#each signedOut as s (s.kind)}
   <div class="banner col" role="status">
     <div class="line">
-      <Icon name="warning" size={16} />
-      <span>{t(`limits.signIn.${s.kind}`)}</span>
-      <span class="spacer"></span>
+      <span class="icon-text"><Icon name="warning" size={16} /><span>{t(`limits.signIn.${s.kind}`)}</span></span>
       <button class="btn small" aria-expanded={open === s.kind} onclick={() => (open = open === s.kind ? null : s.kind)}>{t('limits.signIn.how')}</button>
     </div>
     {#if open === s.kind}<SignInSteps kind={s.kind} binary={s.binary} />{/if}
@@ -75,9 +73,7 @@
 {/each}
 {#if agy}
   <div class="banner" role="status">
-    <Icon name="info" size={16} />
-    <span>{t('limits.agyMissing')}</span>
-    <span class="spacer"></span>
+    <span class="icon-text"><Icon name="info" size={16} /><span>{t('limits.agyMissing')}</span></span>
     <button class="btn small" onclick={() => (app.view = 'sources')}>{t('limits.agyMissing.action')}</button>
   </div>
 {/if}
@@ -95,8 +91,5 @@
     display: flex;
     align-items: center;
     gap: 8px;
-  }
-  .spacer {
-    flex: 1;
   }
 </style>

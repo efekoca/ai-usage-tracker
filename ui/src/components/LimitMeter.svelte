@@ -102,7 +102,7 @@
   <!-- a full window needs no forecast of when it fills -->
   {#if known && level !== 'full' && forecast && (!compact || forecast.kind === 'fills')}
     {@const f = forecast}
-    <p class="forecast" class:warn={f.kind === 'fills'} title={t('forecast.help')}>
+    <p class="forecast icon-text" class:warn={f.kind === 'fills'} title={t('forecast.help')}>
       <Icon name={f.kind === 'fills' ? 'warning' : f.kind === 'insufficient' ? 'clock' : 'chart'} size={13} />
       <span>
         {#if f.kind === 'fills' && f.fills_at_ms}
@@ -203,7 +203,7 @@
   }
   .forecast {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 6px;
     margin: 0;
     font-size: 12px;

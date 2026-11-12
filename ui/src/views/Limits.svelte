@@ -141,9 +141,7 @@
 {:else}
 {#each routes as r (r.provider)}
   <div class="banner route" role="status">
-    <Icon name="sync" size={16} />
-    <span><b>{t('route.title')}</b> {routeText(r)}</span>
-    <span class="spacer"></span>
+    <span class="icon-text"><Icon name="sync" size={16} /><span><b>{t('route.title')}</b> {routeText(r)}</span></span>
     <button class="btn ghost small" onclick={() => saveSettings({ router_page: false })}>{t('route.off')}</button>
   </div>
 {/each}
@@ -333,9 +331,6 @@
   .route :global(svg) {
     flex: none;
     color: var(--accent);
-  }
-  .route .spacer {
-    flex: 1;
   }
   .price {
     display: inline-flex;

@@ -32,9 +32,18 @@
   const name = (p: ProjectRow) => (hideAll || p.hidden ? `${t('projects.hidden')} #${p.id}` : p.name)
 </script>
 
-<p class="subtle small help"><Icon name="lock" size={13} /> {t('projects.help')}</p>
+<p class="subtle small help icon-text"><Icon name="lock" size={13} /> {t('projects.help')}</p>
 
 <section class="card list-card">
+  {#if sorted.length || noProject}
+    <div class="list-row head">
+      <span>{t('branches.col.project')}</span>
+      <span class="num">{t('metric.tokens')}</span>
+      <span class="num">{t('metric.cost')}</span>
+      <span class="num">{t('breakdown.share')}</span>
+      <span class="hide">{t('projects.hide')}</span>
+    </div>
+  {/if}
   {#each sorted as p (p.id)}
     {@const g = byId.get(String(p.id))}
     <div class="list-row">
@@ -50,10 +59,9 @@
       {:else}
         <span class="subtle small idle">—</span>
       {/if}
-      <label class="hide">
-        <span class="small muted">{t('projects.hide')}</span>
+      <span class="hide">
         <Toggle checked={p.hidden} label="{t('projects.hide')}: {name(p)}" onchange={(v) => toggle(p, v)} />
-      </label>
+      </span>
     </div>
   {:else}
     <p class="muted">{t('common.empty')}</p>
@@ -84,8 +92,20 @@
   }
   .list-row {
     display: grid;
-    grid-template-columns: 1fr 90px 90px 60px 150px;
+    grid-template-columns: 1fr 90px 100px 60px 110px;
     gap: 14px;
+    align-items: center;
+  }
+  .head {
+    min-height: 0;
+    padding: 10px 0 6px;
+    border-bottom: 0.5px solid var(--hairline);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink-2);
+  }
+  .head .num {
+    white-space: nowrap;
   }
   .name {
     display: flex;

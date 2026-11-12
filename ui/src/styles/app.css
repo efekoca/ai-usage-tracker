@@ -356,6 +356,26 @@ select.field {
   font-size: 13px;
   color: var(--ink-2);
 }
+.banner.center {
+  align-items: center;
+}
+
+/* an icon in front of text keeps to the text's first line, however many lines follow:
+   a line tall, the icon is drawn in the middle of it */
+.icon-text {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+/* in a banner the text takes the room before its buttons */
+.banner .icon-text {
+  flex: 1;
+}
+.icon-text > svg,
+.banner > svg {
+  height: 1lh;
+}
 
 @media (prefers-reduced-motion: reduce) {
   *,

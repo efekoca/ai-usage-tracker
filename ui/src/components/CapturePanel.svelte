@@ -150,7 +150,7 @@
             </dd>
           {/if}
           <dt>{t('cap.status')}</dt>
-          <dd>
+          <dd class="status">
             {#if busy === kind}
               <span class="spin" aria-hidden="true"></span> {t(missing(kind) ? `cap.${kind}.installing` : 'cap.working')}
             {:else if kind === 'claude'}
@@ -184,7 +184,7 @@
         {#if note[kind]}
           <p class="note small" class:bad={!note[kind].ok}>{note[kind].text}</p>
         {/if}
-        <p class="subtle small risk"><Icon name="info" size={12} /> {t(`cap.${kind}.note`)}</p>
+        <p class="subtle small risk icon-text"><Icon name="info" size={12} /> {t(`cap.${kind}.note`)}</p>
       </div>
     {/each}
   {/if}
@@ -239,6 +239,16 @@
     align-items: center;
     gap: 5px;
     flex-wrap: wrap;
+  }
+  /* a status message can wrap; its icon stays on the first line */
+  .status {
+    align-items: flex-start;
+  }
+  .status > :global(svg) {
+    height: 1lh;
+  }
+  .status > .spin {
+    align-self: center;
   }
   .install {
     flex-basis: 100%;

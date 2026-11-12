@@ -21,9 +21,7 @@
 {#if early}
   <div class="banner col" role="status">
     <div class="line">
-      <Icon name="info" size={16} />
-      <span>{t('limits.early', { date: fmtDate(early.at_ms, 'short'), n: days })}</span>
-      <span class="spacer"></span>
+      <span class="icon-text"><Icon name="info" size={16} /><span>{t('limits.early', { date: fmtDate(early.at_ms, 'short'), n: days })}</span></span>
       <button class="btn small" aria-expanded={open} onclick={() => (open = !open)}>{t('limits.early.how')}</button>
     </div>
     {#if open}
@@ -50,9 +48,6 @@
     display: flex;
     align-items: center;
     gap: 8px;
-  }
-  .spacer {
-    flex: 1;
   }
   ol {
     margin: 4px 0 0;
