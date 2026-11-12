@@ -4,6 +4,12 @@ import { app, saveSettings } from './store.svelte'
 
 export type CacheTone = 'ok' | 'soon' | 'urgent'
 
+/** Why a refresh could not be asked for, in words. */
+export function refreshError(e: unknown): string {
+  const code = String(e)
+  return has(`cache.live.error.${code}`) ? t(`cache.live.error.${code}`) : t('cache.live.error.other', { why: code })
+}
+
 /** "1:36": minutes and seconds left, rounded up so 0:00 means it ran out. */
 export function mmss(ms: number): string {
   const s = Math.max(0, Math.ceil(ms / 1000))

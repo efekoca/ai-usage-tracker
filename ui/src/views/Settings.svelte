@@ -428,9 +428,10 @@
         </div>
         {#if s.cache_projects === 'picked' && cacheChoices}
           {#each cacheChoices as p (p.path)}
+            {@const name = p.hidden ? `${t('projects.hidden')} #${p.id}` : p.name}
             <div class="choice plain">
-              <span class="label" title={p.path}>{p.name}</span>
-              <Toggle small checked={s.cache_picked.includes(p.path)} label={t('settings.cacheTimer.follow', { name: p.name })} onchange={(v) => follow(p.path, v)} />
+              <span class="label" title={p.hidden ? undefined : p.path}>{name}</span>
+              <Toggle small checked={s.cache_picked.includes(p.path)} label={t('settings.cacheTimer.follow', { name })} onchange={(v) => follow(p.path, v)} />
             </div>
           {:else}
             <div class="choice plain"><span class="label subtle small">{t('settings.cacheTimer.noProjects')}</span></div>

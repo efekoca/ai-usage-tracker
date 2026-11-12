@@ -1,7 +1,7 @@
 //! Derived views over the archive, computed from stored counts only.
 
 use crate::analytics::{local_date, Filter, Range, Totals};
-use crate::model::{Provider, Tool};
+use crate::model::{Accuracy, Provider, Tool};
 use crate::pricing::{CostInput, PriceBook};
 use crate::store::{EventRow, ProjectRow, Store};
 use chrono::{NaiveDate, TimeZone};
@@ -552,7 +552,8 @@ const ONE_HOUR: i64 = 60 * 60_000;
 pub fn live_caches(store: &Store, book: &PriceBook, now_ms: i64) -> Result<Vec<LiveCache>> {
     let events = store.events_between(now_ms - ONE_HOUR, now_ms + 1)?;
     let mut sessions: BTreeMap<&str, Vec<&EventRow>> = BTreeMap::new();
-    for e in events.iter().filter(|e| e.tool == Tool::ClaudeCode && e.agent.is_none()) {
+    // captured telemetry also holds helper requests and does not tell the two cache lifetimes apart
+    for e in events.iter().filter(|e| e.tool == Tool::ClaudeCode && e.agent.is_none() && e.accuracy != Accuracy::Captured) {
         if let Some(s) = e.session_id.as_deref() {
             sessions.entry(s).or_default().push(e);
         }
@@ -561,12 +562,11 @@ pub fn live_caches(store: &Store, book: &PriceBook, now_ms: i64) -> Result<Vec<L
     for (session_id, evs) in sessions {
         // a failed request logs no tokens and leaves the cache as it was
         let Some(last) = evs.iter().filter(|e| e.tokens.cache_read + e.tokens.cache_write > 0).max_by_key(|e| e.ts_ms) else { continue };
-        let ttl_ms = if evs.iter().any(|e| e.tokens.cache_write > e.tokens.cache_write_1h) {
-            FIVE_MINUTES
-        } else if evs.iter().any(|e| e.tokens.cache_write_1h > 0) {
-            ONE_HOUR
-        } else {
-            continue;
+        // the lifetime is the one the cache was last written with, however long reads kept it since
+        let ttl_ms = match store.last_cache_write(session_id, last.ts_ms)? {
+            Some((all, one_hour)) if all > one_hour => FIVE_MINUTES,
+            Some(_) => ONE_HOUR,
+            None => continue,
         };
         let expires_ms = last.ts_ms + ttl_ms;
         if expires_ms <= now_ms {

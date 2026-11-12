@@ -3,7 +3,7 @@
   import { api, on, type LiveCache } from '../lib/api'
   import { app } from '../lib/store.svelte'
   import { clockCase, fmtCompact, fmtMoney, t } from '../lib/i18n.svelte'
-  import { cacheClient, cacheName, cacheTone, mmss, shortModel } from '../lib/caches'
+  import { cacheClient, cacheName, cacheTone, mmss, refreshError, shortModel } from '../lib/caches'
   import { ensureRefresh, loadRefreshInfo, refresh } from '../lib/refresh.svelte'
   import CachePie from './CachePie.svelte'
   import Icon from './Icon.svelte'
@@ -52,6 +52,16 @@
 
   // a row waits for its refresh to reach the logs, then shows the cache's new time
   let asked = $state<string[]>([])
+  // why a refresh asked for here did not go, on its row for a few seconds
+  let errors = $state<Record<string, string>>({})
+  function showError(id: string, e: unknown) {
+    errors = { ...errors, [id]: refreshError(e) }
+    setTimeout(() => {
+      const next = { ...errors }
+      delete next[id]
+      errors = next
+    }, 6000)
+  }
   async function refreshNow(c: LiveCache) {
     if (!refresh.info?.installed) {
       if (!(await ensureRefresh())) return
@@ -63,8 +73,8 @@
     asked = [...asked, c.session_id]
     try {
       await api.refreshCache(c.session_id)
-    } catch {
-      /* it ran out or went on meanwhile; the reload shows how it is now */
+    } catch (e) {
+      showError(c.session_id, e)
     }
     asked = asked.filter((id) => id !== c.session_id)
     load()
@@ -73,19 +83,24 @@
     menu = null
     if (!c.auto && !(await ensureRefresh())) return
     await api.setCacheAuto(c.session_id, !c.auto).catch(() => {})
+    triggers[c.session_id]?.focus()
     load()
   }
   // when an automatic refresh comes: the lead set in Settings, a 5-minute cache in its last minute
   const autoAt = (c: LiveCache) => c.expires_ms - (c.ttl_ms <= 300_000 ? 1 : (app.settings?.cache_lead ?? 2)) * 60_000
-  function status(c: LiveCache): { text: string; tone: string; auto: boolean } {
+  function status(c: LiveCache): { text: string; tone: string; auto: boolean; help?: string } {
+    if (errors[c.session_id]) return { text: errors[c.session_id], tone: 'bad', auto: false }
     if (c.refreshing || asked.includes(c.session_id)) return { text: t('cache.live.refreshing'), tone: 'busy', auto: false }
-    if (c.auto && c.auto_capped) return { text: t('cache.live.autoStopped'), tone: '', auto: true }
+    if (c.refresh_failed) return { text: t('cache.live.failed'), tone: 'bad', auto: false, help: t('cache.live.failed.help') }
+    if (c.auto && c.auto_capped) return { text: t('cache.live.autoStopped'), tone: '', auto: true, help: t('cache.live.autoStopped.help') }
     if (c.auto && c.refreshable) return { text: t('cache.live.refreshAt', { at: clockCase(autoAt(c), 'at') }), tone: '', auto: true }
     return { text: t('cache.live.endsAt', { at: clockCase(c.expires_ms, 'at') }), tone: '', auto: false }
   }
 
   function untrack(c: LiveCache) {
     menu = null
+    // a list already on its way would bring the row back
+    gen++
     caches = caches.filter((x) => x.session_id !== c.session_id)
     api.dropCache(c.session_id).catch(load)
   }
@@ -93,6 +108,25 @@
   const meta = (c: LiveCache) =>
     [shortModel(c.model), cacheClient(c.client), t(c.ttl_ms <= 300_000 ? 'cache.live.ttl.5' : 'cache.live.ttl.60'), c.branch ? '' : t('cache.live.since', { at: clockCase(c.started_ms, 'from') })].filter(Boolean).join(' · ')
   const money = (usd: number | null) => (usd === null ? '—' : fmtMoney(usd))
+
+  // the row menu takes the focus when it opens and gives it back to its button when it closes
+  const triggers: Record<string, HTMLButtonElement> = {}
+  function focusFirst(node: HTMLElement) {
+    node.querySelector<HTMLElement>('[role^="menuitem"]')?.focus()
+  }
+  function menuKeys(e: KeyboardEvent, id: string) {
+    const items = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role^="menuitem"]')]
+    const i = items.indexOf(document.activeElement as HTMLElement)
+    if (e.key === 'Escape') {
+      menu = null
+      triggers[id]?.focus()
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus()
+    } else if (e.key === 'Tab') {
+      menu = null
+    }
+  }
 </script>
 
 {#if app.settings?.cache_timer}
@@ -130,7 +164,7 @@
                   <span class="meta">{meta(c)}</span>
                 </span>
               </button>
-              <span class="status {st.tone}" class:urgent={tone === 'urgent' && !st.auto && st.tone !== 'busy'} title={st.auto && c.auto_capped ? t('cache.live.autoStopped.help') : undefined}>
+              <span class="status {st.tone}" class:urgent={tone === 'urgent' && !st.auto && !st.tone} title={st.help}>
                 {#if st.auto}<Icon name="refresh" size={12} />{/if}{st.text}
               </span>
               <button
@@ -140,9 +174,9 @@
                 onclick={() => refreshNow(c)}>{t('cache.live.refresh')}</button
               >
               <div class="menu-wrap">
-                <button class="btn ghost square" aria-label={t('cache.live.more', { name })} aria-haspopup="menu" aria-expanded={menu === c.session_id} onclick={() => (menu = menu === c.session_id ? null : c.session_id)}><Icon name="more" size={16} /></button>
+                <button class="btn ghost square" bind:this={triggers[c.session_id]} aria-label={t('cache.live.more', { name })} aria-haspopup="menu" aria-expanded={menu === c.session_id} onclick={() => (menu = menu === c.session_id ? null : c.session_id)}><Icon name="more" size={16} /></button>
                 {#if menu === c.session_id}
-                  <div class="menu" role="menu" tabindex="-1" onkeydown={(e) => e.key === 'Escape' && (menu = null)}>
+                  <div class="menu" role="menu" tabindex="-1" use:focusFirst onkeydown={(e) => menuKeys(e, c.session_id)}>
                     <button role="menuitemcheckbox" aria-checked={c.auto} onclick={() => flipAuto(c)}><span class="check" class:on={c.auto}><Icon name="check" size={13} /></span>{t('cache.live.auto')}</button>
                     <button role="menuitem" onclick={() => untrack(c)}><span class="check"></span>{t('cache.live.untrack')}</button>
                   </div>
@@ -311,6 +345,9 @@
   }
   .status.busy {
     color: var(--accent);
+  }
+  .status.bad {
+    color: var(--bad-ink);
   }
   .today {
     display: inline-flex;

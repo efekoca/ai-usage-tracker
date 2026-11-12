@@ -18,13 +18,13 @@
 
 <script lang="ts">
   import { api, type LiveCache, type Settings } from '../../lib/api'
-  import { fmtClock, fmtCompact, fmtMoney, fmtPct, fmtSpan, fmtTime, limitName, limitShown, t, toolLabel, windowLabel, type LimitMode } from '../../lib/i18n.svelte'
+  import { fmtClock, fmtCompact, fmtInt, fmtMoney, fmtPct, fmtSpan, fmtTime, limitName, limitShown, t, toolLabel, windowLabel, type LimitMode } from '../../lib/i18n.svelte'
   import { nameAccount } from '../../lib/store.svelte'
   import BrandIcon from '../BrandIcon.svelte'
   import Icon from '../Icon.svelte'
   import Ring from './Ring.svelte'
   import CachePie from '../CachePie.svelte'
-  import { cacheClient, cacheName, cacheTone, mmss } from '../../lib/caches'
+  import { cacheClient, cacheName, cacheTone, mmss, refreshError } from '../../lib/caches'
 
   let {
     m,
@@ -127,6 +127,8 @@
   const caches = $derived(m.kind === 'caches' ? (data?.caches ?? []).filter((c) => c.expires_ms > clock) : [])
   // until its refresh reaches the logs, a row's button keeps turning
   let asked = $state<string[]>([])
+  // why a refresh did not go, in place of the row's second line for a few seconds
+  let failed = $state<Record<string, string>>({})
   function refreshRow(c: LiveCache) {
     if (edit) return
     // the hook is added from the app, which asks first
@@ -135,7 +137,14 @@
     asked = [...asked, c.session_id]
     api
       .refreshCache(c.session_id)
-      .catch(() => {})
+      .catch((e) => {
+        failed = { ...failed, [c.session_id]: refreshError(e) }
+        setTimeout(() => {
+          const next = { ...failed }
+          delete next[c.session_id]
+          failed = next
+        }, 6000)
+      })
       .finally(() => setTimeout(() => (asked = asked.filter((id) => id !== c.session_id)), 1500))
   }
 </script>
@@ -273,9 +282,10 @@
         {@const left = c.expires_ms - clock}
         {@const tone = cacheTone(c, left)}
         {@const busy = c.refreshing || asked.includes(c.session_id)}
+        {@const why = failed[c.session_id] ?? (c.refresh_failed ? t('cache.live.failed') : null)}
         <span class="crow">
           <CachePie frac={left / c.ttl_ms} {tone} size={16} />
-          <span class="txt grow"><span class="lbl">{cacheName(c)}</span><span class="sub">{c.branch ?? cacheClient(c.client)}</span></span>
+          <span class="txt grow"><span class="lbl">{cacheName(c)}</span><span class="sub" class:bad={!!why}>{why ?? c.branch ?? cacheClient(c.client)}</span></span>
           <b class="num ctime {tone}">{mmss(left)}</b>
           <button
             class="rf"
@@ -318,7 +328,7 @@
       <span class="stats">
         <span><span class="tiny dim">{t('panel.tokens')}</span><b class="num">{fmtCompact(usage.tokens)}</b></span>
         <span title={t('panel.cost')}><span class="tiny dim">{t('panel.costShort')}</span><b class="num">{fmtMoney(usage.cost_usd, { compact: true })}</b></span>
-        <span><span class="tiny dim">{t('panel.sessionsLabel')}</span><b class="num">{usage.sessions}</b></span>
+        <span><span class="tiny dim">{t('panel.sessionsLabel')}</span><b class="num">{fmtInt(usage.sessions)}</b></span>
         <span><span class="tiny dim">{t('panel.cache')}</span><b class="num">{hit === null ? '—' : fmtPct(hit)}</b></span>
       </span>
     {/if}
@@ -427,6 +437,9 @@
   }
   .plus {
     flex: none;
+  }
+  .crow .sub.bad {
+    color: var(--bad-ink);
   }
   .rf {
     flex: none;

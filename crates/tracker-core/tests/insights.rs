@@ -26,6 +26,7 @@ struct Ev {
     agent: Option<&'static str>,
     thread: Option<&'static str>,
     speed: Option<&'static str>,
+    accuracy: Accuracy,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -42,6 +43,7 @@ fn ev(key: &'static str, ts: i64, tool: Tool, model: &'static str, session: Opti
         agent: None,
         thread: None,
         speed: None,
+        accuracy: Accuracy::Exact,
     }
 }
 
@@ -54,6 +56,9 @@ impl Ev {
     }
     fn speed(self, s: &'static str) -> Ev {
         Ev { speed: Some(s), ..self }
+    }
+    fn captured(self) -> Ev {
+        Ev { accuracy: Accuracy::Captured, ..self }
     }
     fn cache_write(mut self, all: u64, one_hour: u64) -> Ev {
         self.tokens.cache_write = all;
@@ -81,7 +86,7 @@ fn store_with(evs: &[Ev]) -> Store {
             service_tier: None,
             inference_geo: None,
             request_id: None,
-            accuracy: Accuracy::Exact,
+            accuracy: e.accuracy,
             source: "test".into(),
             branch: e.branch.map(Into::into),
             agent: e.agent.map(Into::into),
@@ -121,6 +126,29 @@ fn each_conversation_keeps_its_own_cache_counted_from_its_last_request() {
     assert_eq!((live[1].expires_ms, live[1].ttl_ms, live[1].tokens), (t + MIN + HOUR, HOUR, 2_000));
     assert!(live[1].rewrite_usd.unwrap() > book.cost(&CostInput { model: "claude-sonnet-5-5", tokens: &Tokens { cache_write: 2_000, ..Default::default() }, request_input: 2_000, web_search_requests: 0, speed: None, inference_geo: None, ts_ms: None }).unwrap().total(), "an hour's cache costs more to write");
     assert_eq!(live_caches(&store, &book, t + 8 * MIN).unwrap().iter().map(|c| c.session_id.as_str()).collect::<Vec<_>>(), ["h"], "run out");
+}
+
+#[test]
+fn a_cache_keeps_the_lifetime_it_was_last_written_with() {
+    let t = ms(2026, 11, 10, 12, 0);
+    let book = PriceBook::default_book();
+    let opus = "claude-opus-5-5";
+    // a 5-minute cache only read for an hour; its write is older than the hour looked at
+    let mut evs = vec![ev("w", t, Tool::ClaudeCode, opus, Some("r"), "/p", 10, 0, 5).cache_write(1_000, 0)];
+    evs.extend((1..=15).map(|i| ev(Box::leak(format!("r{i}").into_boxed_str()), t + i * 4 * MIN, Tool::ClaudeCode, opus, Some("r"), "/p", 10, 1_000, 5)));
+    evs.extend([
+        // a 5-minute cache that ran out, then written again whole for an hour
+        ev("x1", t, Tool::ClaudeCode, opus, Some("x"), "/p", 10, 0, 5).cache_write(1_000, 0),
+        ev("x2", t + 10 * MIN, Tool::ClaudeCode, opus, Some("x"), "/p", 10, 0, 5).cache_write(2_000, 2_000),
+        // a helper request seen only through telemetry, which cannot tell the lifetimes apart
+        ev("c1", t + 50 * MIN, Tool::ClaudeCode, opus, Some("c"), "/p", 10, 0, 5).cache_write(3_000, 3_000),
+        ev("c2", t + 55 * MIN, Tool::ClaudeCode, "claude-haiku-5-5", Some("c"), "/p", 10, 900, 5).cache_write(500, 0).captured(),
+    ]);
+    let store = store_with(&evs);
+    let live = live_caches(&store, &book, t + 61 * MIN).unwrap();
+    let got: Vec<(&str, i64, i64)> = live.iter().map(|c| (c.session_id.as_str(), c.ttl_ms, c.expires_ms)).collect();
+    assert_eq!(got, [("r", 5 * MIN, t + 65 * MIN), ("x", HOUR, t + 70 * MIN), ("c", HOUR, t + 110 * MIN)]);
+    assert_eq!(live[2].model, opus);
 }
 
 fn all() -> Range {

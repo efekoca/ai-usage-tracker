@@ -1,7 +1,8 @@
 //! Opt-in, reversible edits to the user's Claude Code `settings.json`:
 //! * `statusLine` → our bridge command (the previous value is kept and chained),
 //! * `env` → OpenTelemetry *log* export to our loopback receiver,
-//! * `hooks.Stop` → our cache refresh hook, next to any hooks of the user's own.
+//! * `hooks.Stop`, `hooks.UserPromptSubmit`, `hooks.SessionEnd` → our cache refresh hook, next to
+//!   any hooks of the user's own.
 //!
 //! Rules: a backup is written before every change, unrelated keys and their order are kept,
 //! nothing is installed over an existing telemetry setup or a file that changed meanwhile, and
@@ -62,8 +63,40 @@ pub struct RefreshHookChange {
     pub settings_file: PathBuf,
     /// Exactly the group we added to `hooks.Stop`.
     pub installed: Value,
+    /// The groups we added to the other events, by event; empty for installs made before them.
+    #[serde(default)]
+    pub also: BTreeMap<String, Value>,
     pub backup: PathBuf,
     pub installed_at_ms: i64,
+}
+
+impl RefreshHookChange {
+    fn groups(&self) -> Vec<(&str, &Value)> {
+        std::iter::once((STOP, &self.installed)).chain(self.also.iter().map(|(e, g)| (e.as_str(), g))).collect()
+    }
+}
+
+/// A recorded change and the backup made before it.
+trait Change: Clone {
+    fn backup(&self) -> &Path;
+}
+
+impl Change for StatuslineChange {
+    fn backup(&self) -> &Path {
+        &self.backup
+    }
+}
+
+impl Change for OtelChange {
+    fn backup(&self) -> &Path {
+        &self.backup
+    }
+}
+
+impl Change for RefreshHookChange {
+    fn backup(&self) -> &Path {
+        &self.backup
+    }
 }
 
 /// What this app has changed outside its own folder. Persisted as `capture/state.json` so the
@@ -204,7 +237,7 @@ fn backup(path: &Path, data_dir: &Path, now_ms: i64) -> std::io::Result<PathBuf>
 }
 
 /// The record is rolled back if the write fails, so neither exists without the other.
-fn record_then_write<T: Clone>(
+fn record_then_write<T: Change>(
     st: &mut CaptureState,
     data_dir: &Path,
     slot: fn(&mut CaptureState) -> &mut Option<T>,
@@ -219,6 +252,10 @@ fn record_then_write<T: Clone>(
         let _ = save_state(data_dir, st);
         let _ = fs::remove_file(backup);
         return Err(e);
+    }
+    // a change made again replaces the record, and with it the older backup
+    if let Some(old) = before.filter(|o| o.backup() != backup) {
+        let _ = fs::remove_file(old.backup());
     }
     Ok(change)
 }
@@ -299,32 +336,42 @@ pub fn uninstall_statusline(st: &mut CaptureState, data_dir: &Path) -> Result<Re
 /// Longer than an hour's cache, so a waiting conversation can still be woken shortly before it runs out.
 pub const REFRESH_HOOK_TIMEOUT_SECS: u64 = 3900;
 
+const STOP: &str = "Stop";
+
 /// After each turn the hook waits in the background; when the app asks, it wakes the conversation
 /// for one short turn, which reads the cache and starts its lifetime again.
 pub fn refresh_hook_value(command: &str) -> Value {
     serde_json::json!({ "hooks": [{ "type": "command", "command": command, "asyncRewake": true, "timeout": REFRESH_HOOK_TIMEOUT_SECS }] })
 }
 
-/// `hooks.Stop`, made where missing; an unexpected shape is refused rather than replaced.
-fn stop_groups(doc: &mut Map<String, Value>) -> Result<&mut Vec<Value>, SettingsError> {
+/// A new prompt and the end of a conversation (`/clear`, `/resume`, exit) send the waiting hook away
+/// at once; the prompt's time also tells the user's own turns from the refreshes.
+fn refresh_hook_others(command: &str) -> BTreeMap<String, Value> {
+    let quick = serde_json::json!({ "hooks": [{ "type": "command", "command": command, "timeout": 10 }] });
+    ["UserPromptSubmit", "SessionEnd"].into_iter().map(|e| (e.to_owned(), quick.clone())).collect()
+}
+
+/// `hooks.<event>`, made where missing; an unexpected shape is refused rather than replaced.
+fn event_groups<'a>(doc: &'a mut Map<String, Value>, event: &str) -> Result<&'a mut Vec<Value>, SettingsError> {
     let hooks = doc.entry("hooks").or_insert_with(|| Value::Object(Map::new()));
     let Value::Object(hooks) = hooks else { return Err(SettingsError::Unparseable("hooks is not an object".into())) };
-    let stop = hooks.entry("Stop").or_insert_with(|| Value::Array(Vec::new()));
-    match stop {
+    match hooks.entry(event).or_insert_with(|| Value::Array(Vec::new())) {
         Value::Array(groups) => Ok(groups),
-        _ => Err(SettingsError::Unparseable("hooks.Stop is not a list".into())),
+        _ => Err(SettingsError::Unparseable(format!("hooks.{event} is not a list"))),
     }
 }
 
-fn has_group(doc: &Map<String, Value>, group: &Value) -> bool {
-    doc.get("hooks").and_then(|h| h.get("Stop")).and_then(Value::as_array).is_some_and(|a| a.contains(group))
+fn has_group(doc: &Map<String, Value>, event: &str, group: &Value) -> bool {
+    doc.get("hooks").and_then(|h| h.get(event)).and_then(Value::as_array).is_some_and(|a| a.contains(group))
 }
 
-/// Drops `hooks.Stop` and then `hooks` once nothing is left in them.
-fn tidy_hooks(doc: &mut Map<String, Value>) {
+/// Drops our events' lists and then `hooks` once nothing is left in them.
+fn tidy_hooks(doc: &mut Map<String, Value>, events: &[&str]) {
     let Some(Value::Object(hooks)) = doc.get_mut("hooks") else { return };
-    if hooks.get("Stop").and_then(Value::as_array).is_some_and(Vec::is_empty) {
-        hooks.remove("Stop");
+    for e in events {
+        if hooks.get(*e).and_then(Value::as_array).is_some_and(Vec::is_empty) {
+            hooks.remove(*e);
+        }
     }
     if hooks.is_empty() {
         doc.remove("hooks");
@@ -334,48 +381,63 @@ fn tidy_hooks(doc: &mut Map<String, Value>) {
 pub fn install_refresh_hook(st: &mut CaptureState, data_dir: &Path, settings_file: &Path, command: &str, now_ms: i64) -> Result<RefreshHookChange, SettingsError> {
     let (mut doc, original) = read_doc(settings_file)?;
     let installed = refresh_hook_value(command);
-    let groups = stop_groups(&mut doc)?;
-    if !groups.contains(&installed) {
-        groups.push(installed.clone());
+    let also = refresh_hook_others(command);
+    for (event, group) in std::iter::once((STOP, &installed)).chain(also.iter().map(|(e, g)| (e.as_str(), g))) {
+        let groups = event_groups(&mut doc, event)?;
+        if !groups.contains(group) {
+            groups.push(group.clone());
+        }
     }
     let backup = backup(settings_file, data_dir, now_ms)?;
-    let change = RefreshHookChange { settings_file: settings_file.to_owned(), installed, backup: backup.clone(), installed_at_ms: now_ms };
+    let change = RefreshHookChange { settings_file: settings_file.to_owned(), installed, also, backup: backup.clone(), installed_at_ms: now_ms };
     record_then_write(st, data_dir, |s| &mut s.refresh, change, &backup, || write_doc(settings_file, &doc, &original))
 }
 
 /// Whether Claude Code's settings still hold our hook (the user may have removed it since).
 pub fn refresh_hook_in_place(change: &RefreshHookChange) -> bool {
-    read_doc(&change.settings_file).is_ok_and(|(doc, _)| has_group(&doc, &change.installed))
+    read_doc(&change.settings_file).is_ok_and(|(doc, _)| has_group(&doc, STOP, &change.installed))
 }
 
-/// Removes our group only; the user's own Stop hooks stay as they are.
+/// Removes our groups only; the user's own hooks stay as they are.
 pub fn revert_refresh_hook(change: &RefreshHookChange) -> Result<RevertOutcome, SettingsError> {
     let (mut doc, original) = read_doc(&change.settings_file)?;
-    if !has_group(&doc, &change.installed) {
+    let ours: Vec<(&str, &Value)> = change.groups().into_iter().filter(|(e, g)| has_group(&doc, e, g)).collect();
+    if ours.is_empty() {
         return Ok(RevertOutcome::NothingToDo);
     }
-    stop_groups(&mut doc)?.retain(|g| g != &change.installed);
-    tidy_hooks(&mut doc);
+    for (event, group) in &ours {
+        event_groups(&mut doc, event)?.retain(|g| g != *group);
+    }
+    tidy_hooks(&mut doc, &ours.iter().map(|(e, _)| *e).collect::<Vec<_>>());
     write_doc(&change.settings_file, &doc, &original)?;
     Ok(RevertOutcome::Restored)
 }
 
-/// Points our hook at `command` when it changed (the app moved). A hook the user removed meanwhile
-/// is not put back. Returns whether it rewrote.
+/// Points our hook at `command` when it changed (the app moved), and adds the groups an older
+/// install lacks. A hook the user removed meanwhile is not put back. Returns whether it rewrote.
 pub fn refresh_refresh_hook(st: &mut CaptureState, data_dir: &Path, command: &str) -> Result<bool, SettingsError> {
     let Some(old) = st.refresh.clone() else { return Ok(false) };
-    let wanted = refresh_hook_value(command);
-    if old.installed == wanted {
+    let wanted = RefreshHookChange { installed: refresh_hook_value(command), also: refresh_hook_others(command), ..old.clone() };
+    if old == wanted {
         return Ok(false);
     }
     let (mut doc, original) = read_doc(&old.settings_file)?;
-    if !has_group(&doc, &old.installed) {
+    if !has_group(&doc, STOP, &old.installed) {
         return Ok(false);
     }
-    for g in stop_groups(&mut doc)?.iter_mut().filter(|g| **g == old.installed) {
-        *g = wanted.clone();
+    let before: BTreeMap<&str, &Value> = old.groups().into_iter().collect();
+    for (event, group) in wanted.groups() {
+        let groups = event_groups(&mut doc, event)?;
+        let mut found = false;
+        for g in groups.iter_mut().filter(|g| before.get(event).is_some_and(|b| **g == **b)) {
+            *g = group.clone();
+            found = true;
+        }
+        if !found && !groups.contains(group) {
+            groups.push(group.clone());
+        }
     }
-    st.refresh = Some(RefreshHookChange { installed: wanted, ..old.clone() });
+    st.refresh = Some(wanted);
     // the record goes first, so a revert never meets a value it does not know
     let result = save_state(data_dir, st).map_err(SettingsError::from).and_then(|_| write_doc(&old.settings_file, &doc, &original));
     if let Err(e) = result {
@@ -858,12 +920,16 @@ mod tests {
         let after = read(&file);
         assert_eq!(after["hooks"]["Stop"], json!([mine, refresh_hook_value("aiut --cache-hook")]));
         assert_eq!(after["hooks"]["Stop"][1]["hooks"][0]["asyncRewake"], true);
+        for event in ["UserPromptSubmit", "SessionEnd"] {
+            assert_eq!(after["hooks"][event], json!([{"hooks": [{"type": "command", "command": "aiut --cache-hook", "timeout": 10}]}]));
+        }
         assert!(refresh_hook_in_place(&ch));
         assert_eq!(read_state(&data).unwrap().refresh, Some(ch.clone()));
 
         // the app moved: our hook follows it, the user's stays
         assert!(refresh_refresh_hook(&mut st, &data, "aiut2 --cache-hook").unwrap());
         assert_eq!(read(&file)["hooks"]["Stop"][1]["hooks"][0]["command"], "aiut2 --cache-hook");
+        assert_eq!(read(&file)["hooks"]["SessionEnd"][0]["hooks"][0]["command"], "aiut2 --cache-hook");
         assert!(!refresh_refresh_hook(&mut st, &data, "aiut2 --cache-hook").unwrap(), "nothing to do twice");
 
         assert_eq!(uninstall_refresh_hook(&mut st, &data).unwrap(), RevertOutcome::Restored);
@@ -885,6 +951,32 @@ mod tests {
         assert!(!refresh_refresh_hook(&mut st, &data, "elsewhere --cache-hook").unwrap());
         assert_eq!(uninstall_refresh_hook(&mut st, &data).unwrap(), RevertOutcome::NothingToDo);
         assert_eq!(read(&file), json!({"model": "opus", "hooks": {"Stop": []}}), "the user's own edit is left as it is");
+    }
+
+    #[test]
+    fn an_older_install_gets_the_prompt_and_end_hooks() {
+        let (_d, file, data) = setup(Some(r#"{"model": "opus"}"#));
+        let mut st = CaptureState::default();
+        let ch = install_refresh_hook(&mut st, &data, &file, "aiut --cache-hook", 1).unwrap();
+        // as recorded before the other events were added
+        let legacy = RefreshHookChange { also: BTreeMap::new(), ..ch };
+        st.refresh = Some(legacy.clone());
+        fs::write(&file, json!({"model": "opus", "hooks": {"Stop": [legacy.installed.clone()]}}).to_string()).unwrap();
+        assert!(refresh_refresh_hook(&mut st, &data, "aiut --cache-hook").unwrap());
+        assert_eq!(read(&file)["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"], "aiut --cache-hook");
+        assert!(!refresh_refresh_hook(&mut st, &data, "aiut --cache-hook").unwrap());
+        assert_eq!(uninstall_refresh_hook(&mut st, &data).unwrap(), RevertOutcome::Restored);
+        assert_eq!(read(&file), json!({"model": "opus"}));
+    }
+
+    #[test]
+    fn a_change_made_again_keeps_one_backup() {
+        let (_d, file, data) = setup(Some(r#"{"model": "opus"}"#));
+        let mut st = CaptureState::default();
+        install_statusline(&mut st, &data, &file, "aiut --statusline", 1).unwrap();
+        fs::write(&file, r#"{"model": "opus", "statusLine": {"type": "command", "command": "mine"}}"#).unwrap();
+        install_statusline(&mut st, &data, &file, "aiut --statusline", 2).unwrap();
+        assert_eq!(fs::read_dir(data.join("backups")).unwrap().count(), 1);
     }
 
     #[test]
