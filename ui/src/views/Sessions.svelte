@@ -266,7 +266,7 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 16px 18px 10px;
+    padding: 16px 20px 10px;
     flex-wrap: wrap;
   }
   .search {
@@ -293,6 +293,11 @@
     font-size: 12px;
     white-space: nowrap;
   }
+  /* the last cells and the expand arrow line up with the card's heading */
+  th:last-child,
+  td:last-child {
+    padding-right: 20px;
+  }
   .num {
     text-align: right;
     font-variant-numeric: tabular-nums;
@@ -312,7 +317,7 @@
   }
   .toggle-col {
     width: 34px;
-    padding-left: 12px;
+    padding-left: 13px;
     padding-right: 0;
   }
   .icon {
@@ -369,7 +374,7 @@
   .grid {
     position: sticky;
     left: 0;
-    max-width: calc(var(--visible, 100%) - 34px - 32px);
+    max-width: calc(var(--visible, 100%) - 34px - 42px);
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -503,7 +508,7 @@
     padding: 12px;
   }
   .pad {
-    padding: 0 18px;
+    padding: 0 20px;
   }
   .note {
     padding-top: 10px;
