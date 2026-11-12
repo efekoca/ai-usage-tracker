@@ -8,6 +8,7 @@
   import Icon from '../components/Icon.svelte'
   import BarValue from '../components/BarValue.svelte'
   import SubagentCache from '../components/SubagentCache.svelte'
+  import LiveCaches from '../components/LiveCaches.svelte'
 
   const r = $derived(app.report)
   const prompt = (k: Tokens) => k.input + k.cache_read + k.cache_write
@@ -33,6 +34,8 @@
   const values = $derived(days.map((d) => ({ hit: d.prompt_tokens > 0 ? (d.cache_read / d.prompt_tokens) * 100 : NaN })))
   const tk = $derived(r?.totals.tokens)
 </script>
+
+<LiveCaches />
 
 {#if !r || !tk}
   <p class="muted">{t('common.loading')}</p>

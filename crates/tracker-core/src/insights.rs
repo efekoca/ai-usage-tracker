@@ -520,39 +520,81 @@ pub struct PlanValue {
     pub providers: Vec<ProviderValue>,
 }
 
-/// API-equivalent cost per provider over `range`, with a daily running total (unfiltered).
-/// Over 401 days only the newest are shown; earlier use starts the first day's running total.
-/// When the prompt cache of the latest Claude Code conversation runs out.
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-pub struct CacheTimer {
-    pub expires_ms: i64,
+/// A Claude Code conversation whose prompt cache still lasts.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct LiveCache {
+    pub session_id: String,
+    pub project_id: Option<i64>,
+    pub branch: Option<String>,
+    pub model: String,
+    /// How the conversation runs: "cli", "claude-desktop", "claude-vscode" and so on.
+    pub client: Option<String>,
     /// The lifetime it was written with: 5 minutes or an hour.
     pub ttl_ms: i64,
+    pub expires_ms: i64,
+    /// The conversation's first request, which tells apart two of one project on the same branch.
+    pub started_ms: i64,
+    /// The prompt the last request left in the cache: what the next request reads.
+    pub tokens: u64,
+    /// API-equivalent cost of reading the cache once, and of writing it again after it runs out;
+    /// `None` for a model without a price.
+    pub refresh_usd: Option<f64>,
+    pub rewrite_usd: Option<f64>,
 }
 
 const FIVE_MINUTES: i64 = 5 * 60_000;
 const ONE_HOUR: i64 = 60 * 60_000;
 
-/// The latest Claude Code conversation's cache: a request that reads it renews it, so it runs out
-/// its lifetime after the last request. A conversation that wrote both lifetimes loses its
-/// five-minute part first. Subagents keep caches of their own and are left out. `None` once it
-/// has run out, or when the conversation wrote no cache.
-pub fn cache_timer(store: &Store, now_ms: i64) -> Result<Option<CacheTimer>> {
+/// Every Claude Code conversation whose cache still lasts, the soonest to run out first. A request
+/// that reads a cache renews it, so it runs out its lifetime after the conversation's last request
+/// that used it; one that wrote both lifetimes loses its five-minute part first. Subagents keep
+/// caches of their own and are left out.
+pub fn live_caches(store: &Store, book: &PriceBook, now_ms: i64) -> Result<Vec<LiveCache>> {
     let events = store.events_between(now_ms - ONE_HOUR, now_ms + 1)?;
-    let main: Vec<&EventRow> = events.iter().filter(|e| e.tool == Tool::ClaudeCode && e.agent.is_none() && e.session_id.is_some()).collect();
-    let Some(last) = main.iter().max_by_key(|e| e.ts_ms) else { return Ok(None) };
-    let session: Vec<&&EventRow> = main.iter().filter(|e| e.session_id == last.session_id).collect();
-    let ttl_ms = if session.iter().any(|e| e.tokens.cache_write > e.tokens.cache_write_1h) {
-        FIVE_MINUTES
-    } else if session.iter().any(|e| e.tokens.cache_write_1h > 0) {
-        ONE_HOUR
-    } else {
-        return Ok(None);
-    };
-    let expires_ms = last.ts_ms + ttl_ms;
-    Ok((expires_ms > now_ms).then_some(CacheTimer { expires_ms, ttl_ms }))
+    let mut sessions: BTreeMap<&str, Vec<&EventRow>> = BTreeMap::new();
+    for e in events.iter().filter(|e| e.tool == Tool::ClaudeCode && e.agent.is_none()) {
+        if let Some(s) = e.session_id.as_deref() {
+            sessions.entry(s).or_default().push(e);
+        }
+    }
+    let mut out = Vec::new();
+    for (session_id, evs) in sessions {
+        // a failed request logs no tokens and leaves the cache as it was
+        let Some(last) = evs.iter().filter(|e| e.tokens.cache_read + e.tokens.cache_write > 0).max_by_key(|e| e.ts_ms) else { continue };
+        let ttl_ms = if evs.iter().any(|e| e.tokens.cache_write > e.tokens.cache_write_1h) {
+            FIVE_MINUTES
+        } else if evs.iter().any(|e| e.tokens.cache_write_1h > 0) {
+            ONE_HOUR
+        } else {
+            continue;
+        };
+        let expires_ms = last.ts_ms + ttl_ms;
+        if expires_ms <= now_ms {
+            continue;
+        }
+        let tokens = last.tokens.cache_read + last.tokens.cache_write;
+        let cost = |t: crate::model::Tokens| book.cost(&CostInput { tokens: &t, request_input: tokens, web_search_requests: 0, ..input_of(last) }).map(|c| c.total());
+        let one_hour = if ttl_ms == ONE_HOUR { tokens } else { 0 };
+        out.push(LiveCache {
+            session_id: session_id.to_owned(),
+            project_id: last.project_id,
+            branch: last.branch.clone(),
+            model: last.model.clone(),
+            client: last.client.clone(),
+            ttl_ms,
+            expires_ms,
+            started_ms: store.session_started_ms(session_id)?.unwrap_or(last.ts_ms),
+            tokens,
+            refresh_usd: cost(crate::model::Tokens { cache_read: tokens, ..Default::default() }),
+            rewrite_usd: cost(crate::model::Tokens { cache_write: tokens, cache_write_1h: one_hour, ..Default::default() }),
+        });
+    }
+    out.sort_by(|a, b| a.expires_ms.cmp(&b.expires_ms).then_with(|| a.session_id.cmp(&b.session_id)));
+    Ok(out)
 }
 
+/// API-equivalent cost per provider over `range`, with a daily running total (unfiltered).
+/// Over 401 days only the newest are shown; earlier use starts the first day's running total.
 pub fn plan_value<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, tz: &Tz) -> Result<PlanValue> {
     let last = local_date(tz, range.to_ms - 1);
     let first = local_date(tz, range.from_ms).max(last.checked_sub_days(chrono::Days::new(400)).unwrap_or(last));

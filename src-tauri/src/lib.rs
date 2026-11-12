@@ -1,4 +1,5 @@
 mod alerts;
+mod caches;
 mod capture;
 mod commands;
 mod fonts;
@@ -404,6 +405,9 @@ pub fn run() {
             commands::get_limits,
             commands::account_routes,
             commands::get_widget_data,
+            caches::live_caches,
+            caches::drop_cache,
+            caches::cache_project_choices,
             commands::list_projects,
             commands::list_projects_for_settings,
             commands::set_project_hidden,

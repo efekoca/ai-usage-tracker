@@ -48,6 +48,13 @@
     void settings
     fit()
   })
+  // when the soonest cache runs out, the next one takes its place at once
+  $effect(() => {
+    const at = data?.cache?.expires_ms
+    if (!at) return
+    const id = setTimeout(load, Math.max(0, at - Date.now()) + 500)
+    return () => clearTimeout(id)
+  })
 
   onMount(() => {
     ;(async () => {

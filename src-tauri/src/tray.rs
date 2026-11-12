@@ -1,3 +1,4 @@
+use crate::caches::Cache;
 use crate::settings::{Settings, TraySettings};
 use crate::tray_text::{needs_usage, shown_value, Data, Format, Reading, Usage};
 use crate::state::AppState;
@@ -392,18 +393,33 @@ pub fn level(used: f64, warn_at: f64, high_at: f64) -> Level {
 }
 
 
-/// Claude Code's cache time left, short for the menu bar and long for the tooltip, in whole
-/// minutes rounded up: the tray refreshes every 20 seconds.
-fn cache_left(t: tracker_core::insights::CacheTimer, now_ms: i64, tr: bool) -> (String, String) {
-    cache_text((t.expires_ms - now_ms + 59_999) / 60_000, tr)
+/// The followed caches' time left in whole minutes rounded up (the tray refreshes every 20
+/// seconds): the soonest for the menu bar ("notes 2 dk"), the first two for the tooltip, which
+/// Windows cuts at 127 characters.
+fn cache_text(caches: &[Cache], now_ms: i64, tr: bool) -> Option<(String, String)> {
+    let first = caches.first()?;
+    let minutes = |c: &Cache| (c.expires_ms - now_ms + 59_999) / 60_000;
+    let word = if tr { "Önbellek" } else { "Cache" };
+    let unit = |c: &Cache| if tr { format!("{} dk", minutes(c)) } else { format!("{}m", minutes(c)) };
+    let short = if first.project.is_empty() { format!("{word} {}", unit(first)) } else { format!("{} {}", first.project, unit(first)) };
+    let hidden = if tr { "gizli proje" } else { "hidden project" };
+    let list = caches.iter().take(2).map(|c| format!("{} {}", if c.project.is_empty() { hidden } else { &c.project }, unit(c))).collect::<Vec<_>>().join(" · ");
+    let more = caches.len().saturating_sub(2);
+    let more = if more > 0 { format!(" +{more}") } else { String::new() };
+    Some((short, format!("{word}: {list}{more}")))
 }
 
-fn cache_text(minutes: i64, tr: bool) -> (String, String) {
-    if tr {
-        (format!("Önbellek {minutes} dk"), format!("Önbelleğin kalan süresi: {minutes} dk"))
-    } else {
-        (format!("Cache {minutes}m"), format!("Cache time left: {minutes} min"))
+/// The menu bar text with the soonest cache after it ("%46  notes 2 dk").
+pub(crate) fn with_cache(title: String, cache: Option<&str>) -> String {
+    [title.as_str(), cache.unwrap_or_default()].into_iter().filter(|x| !x.is_empty()).collect::<Vec<_>>().join("  ")
+}
+
+/// The soonest cache as the menu bar shows it, while it does.
+pub(crate) fn cache_title(app: &AppHandle, s: &Settings, now_ms: i64) -> Option<String> {
+    if !s.cache_menubar {
+        return None;
     }
+    cache_text(&crate::caches::followed(&app.state::<AppState>(), s, now_ms), now_ms, turkish(s)).map(|c| c.0)
 }
 
 fn tooltip(limits: &[Current], s: &Settings, update: Option<&str>, cache: Option<&str>) -> String {
@@ -448,23 +464,20 @@ fn update(app: &AppHandle) {
     let s = app.state::<AppState>().settings.read().unwrap().clone();
     let Some(readings) = readings(app, &s) else { return };
     let now = chrono::Utc::now().timestamp_millis();
-    let timer = if s.cache_timer && (s.cache_menubar || (s.notify.enabled && s.notify.cache)) {
-        tracker_core::insights::cache_timer(&app.state::<AppState>().db(), now).ok().flatten()
+    let caches = if s.cache_timer && (s.cache_menubar || (s.notify.enabled && s.notify.cache)) {
+        crate::caches::followed(&app.state::<AppState>(), &s, now)
     } else {
-        None
+        Vec::new()
     };
-    crate::alerts::check(app, &s, &readings, timer);
+    crate::alerts::check(app, &s, &readings, &caches);
     let Some(tray) = app.tray_by_id(ID) else { return };
     let limits = current_limits(&readings);
     let update = app.state::<AppState>().updates.lock().unwrap().available.as_ref().map(|a| a.version.clone());
     let size = icon_size(app);
     let icon = badge(&s, &s.tray, &limits).map(|b| (b, size));
-    let cache = timer.filter(|_| s.cache_menubar).map(|t| cache_left(t, now, turkish(&s)));
+    let cache = if s.cache_menubar { cache_text(&caches, now, turkish(&s)) } else { None };
     let title = if s.onboarded { title(app, &s, &s.tray, &readings) } else { String::new() };
-    let title = match &cache {
-        Some((short, _)) if s.onboarded => [title, short.clone()].into_iter().filter(|x| !x.is_empty()).collect::<Vec<_>>().join("  "),
-        _ => title,
-    };
+    let title = if s.onboarded { with_cache(title, cache.as_ref().map(|c| c.0.as_str())) } else { title };
     // a menu bar item needs something to show: the icon stays while the text is empty
     let icon_hidden = cfg!(target_os = "macos") && s.tray.hide_icon && !title.is_empty();
     #[cfg(windows)]
@@ -1046,9 +1059,24 @@ mod tests {
         s.limit_display = "remaining".into();
         assert_eq!(tooltip(&l, &s, None, None), "AI Usage Tracker\nClaude · 5h 59% left · week ~57% left\nCodex · 5h 93% left");
         assert!(tooltip(&[], &s, None, None).ends_with("No current limit reading"));
-        let (short, long) = cache_text(4, true);
-        assert_eq!(short, "Önbellek 4 dk");
-        assert!(tooltip(&l, &s, None, Some(&long)).ends_with("\nÖnbelleğin kalan süresi: 4 dk"));
+        let cache = |project: &str, minutes: i64| Cache {
+            session_id: project.into(),
+            project: project.into(),
+            branch: None,
+            model: String::new(),
+            client: None,
+            ttl_ms: 3_600_000,
+            expires_ms: minutes * 60_000 - 30_000,
+            started_ms: 0,
+            tokens: 0,
+            refresh_usd: None,
+            rewrite_usd: None,
+        };
+        assert_eq!(cache_text(&[], 0, true), None);
+        let (short, long) = cache_text(&[cache("notes", 2), cache("", 4), cache("eklenti", 41), cache("x", 50)], 0, true).unwrap();
+        assert_eq!(short, "notes 2 dk");
+        assert!(tooltip(&l, &s, None, Some(&long)).ends_with("\nÖnbellek: notes 2 dk · gizli proje 4 dk +2"));
+        assert_eq!(cache_text(&[cache("", 3)], 0, false).unwrap(), ("Cache 3m".into(), "Cache: hidden project 3m".into()));
     }
 
     #[test]

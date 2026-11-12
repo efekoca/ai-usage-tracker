@@ -397,8 +397,9 @@ pub struct PanelSettings {
 
 /// `kind`: "limit" (one window), "provider" (both windows of a pool), "usage" (a period, of every
 /// tool or with `provider` "opencode" of OpenCode alone),
-/// "forecast", "scan" or "action" (`action`: "open", "widget", "rescan", "settings").
-/// `size`: "s" 1×1, "w" 2×1, "m" 2×2 or "l" 4×1 cells. `style`: "ring" or "bar" for limits.
+/// "forecast", "caches" (the followed prompt caches), "scan" or "action" (`action`: "open", "widget",
+/// "rescan", "settings").
+/// `size`: "s" 1×1, "w" 2×1, "m" 2×2, "l" 4×1 or "t" 4×3 cells. `style`: "ring" or "bar" for limits.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(default)]
 pub struct PanelModule {
@@ -427,6 +428,7 @@ impl PanelModule {
             "provider" => &["m", "w", "l"],
             "usage" => &["w", "s", "m"],
             "forecast" => &["w", "l"],
+            "caches" => &["t", "l"],
             "scan" => &["w"],
             "action" => &["s", "w"],
             _ => &[],
@@ -458,6 +460,7 @@ pub fn panel_catalog() -> Vec<PanelModule> {
             out.push(PanelModule { provider: provider.into(), period: period.into(), ..m("usage") });
         }
     }
+    out.push(m("caches"));
     out.push(m("scan"));
     for action in ["open", "widget", "rescan", "settings"] {
         out.push(PanelModule { action: action.into(), ..m("action") });
@@ -619,6 +622,10 @@ pub struct Settings {
     pub cache_widget: bool,
     /// The same in minutes, next to the tray icon and in its tooltip.
     pub cache_menubar: bool,
+    /// "all" or "picked": whose caches are followed.
+    pub cache_projects: String,
+    /// The projects followed while `cache_projects` is "picked", by path.
+    pub cache_picked: Vec<String>,
     /// Provider → `#rrggbb` for its limit bars and mark; a missing one uses the accent color.
     pub provider_colors: std::collections::BTreeMap<String, String>,
     /// Marks take the tool's color too; off keeps them in the text color.
@@ -680,6 +687,7 @@ impl CardSettings {
 
 /// Long enough for "Work (team)", short enough for a limit card's header.
 const MAX_ACCOUNT_NAME: usize = 32;
+const MAX_CACHE_PROJECTS: usize = 500;
 
 impl Default for Settings {
     fn default() -> Self {
@@ -718,6 +726,8 @@ impl Default for Settings {
             cache_timer: true,
             cache_widget: true,
             cache_menubar: true,
+            cache_projects: "all".into(),
+            cache_picked: Vec::new(),
             provider_colors: Default::default(),
             tint_icons: false,
             show_icons: true,
@@ -826,6 +836,13 @@ impl Settings {
         self.account_plans.retain(|id, plan| is_digest(id) && !plan.is_empty());
         self.account_prices.retain(|key, usd| key.split_once(':').is_some_and(|(id, plan)| is_digest(id) && !plan.is_empty()) && usd.is_finite() && *usd > 0.0);
         self.renewal_days.retain(|key, day| (is_digest(key) || tracker_core::model::Provider::parse(key).is_some()) && (1..=31).contains(day));
+        if self.cache_projects != "picked" {
+            self.cache_projects = "all".into();
+        }
+        self.cache_picked.retain(|p| !p.is_empty());
+        self.cache_picked.sort();
+        self.cache_picked.dedup();
+        self.cache_picked.truncate(MAX_CACHE_PROJECTS);
     }
 
     /// The fields a page changed (`base` → `next`) applied to the current settings, so a change
@@ -846,6 +863,14 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn followed_projects_are_kept_tidy() {
+        let mut s = Settings { cache_projects: "some".into(), cache_picked: vec!["/b".into(), String::new(), "/a".into(), "/b".into()], ..Default::default() };
+        s.normalize();
+        assert_eq!(s.cache_projects, "all");
+        assert_eq!(s.cache_picked, ["/a", "/b"]);
+    }
 
     #[test]
     fn a_page_save_keeps_what_the_tray_changed_meanwhile() {

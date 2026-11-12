@@ -23,6 +23,8 @@
   import BrandIcon from '../BrandIcon.svelte'
   import Icon from '../Icon.svelte'
   import Ring from './Ring.svelte'
+  import CachePie from '../CachePie.svelte'
+  import { cacheClient, cacheName, cacheTone, mmss } from '../../lib/caches'
 
   let {
     m,
@@ -113,6 +115,16 @@
     m.action === 'widget' ? t(data?.widget_visible ? 'panel.action.widget.on' : 'panel.action.widget.off') : m.action === 'rescan' && scanning ? t('panel.scan.running') : m.action === 'rescan' && scanned ? t('panel.scan.done') : t(`panel.action.${m.action}`),
   )
   const act = (a: string) => () => !edit && onaction?.(a)
+
+  // the cache countdown ticks by the second, and only while there is one to show
+  let clock = $state(Date.now())
+  $effect(() => {
+    if (m.kind !== 'caches' || !data?.caches.length) return
+    clock = Date.now()
+    const id = setInterval(() => (clock = Date.now()), 1000)
+    return () => clearInterval(id)
+  })
+  const caches = $derived(m.kind === 'caches' ? (data?.caches ?? []).filter((c) => c.expires_ms > clock) : [])
 </script>
 
 {#snippet logo(size: number)}
@@ -232,6 +244,30 @@
       {#if m.size === 'l' && s.value !== null}{@render bar(s, m.provider)}{/if}
     </span>
   </div>
+{:else if m.kind === 'caches'}
+  <div class="mod caches {m.size}" role="group" aria-label={t('panel.caches.title')}>
+    {#if m.size === 't'}
+      <span class="head top">
+        <Icon name="clock" size={14} />
+        <span class="lbl">{t('panel.caches.title')}</span>
+        {#if caches.length}<button class="more push" tabindex={edit ? -1 : 0} onclick={act('cache')}>{t('panel.caches.count', { n: caches.length })}<Icon name="chevron" size={10} /></button>{/if}
+      </span>
+    {/if}
+    {#if !settings.cache_timer || !caches.length}
+      <span class="sub none">{settings.cache_timer ? t('panel.caches.none') : t('panel.caches.off')}</span>
+    {:else}
+      {#each caches.slice(0, m.size === 't' ? 3 : 1) as c (c.session_id)}
+        {@const left = c.expires_ms - clock}
+        {@const tone = cacheTone(c, left)}
+        <span class="crow">
+          <CachePie frac={left / c.ttl_ms} {tone} size={16} />
+          <span class="txt grow"><span class="lbl">{cacheName(c)}</span><span class="sub">{c.branch ?? cacheClient(c.client)}</span></span>
+          <b class="num ctime {tone}">{mmss(left)}</b>
+        </span>
+      {/each}
+      {#if m.size === 'l' && caches.length > 1}<span class="tiny dim plus">+{caches.length - 1}</span>{/if}
+    {/if}
+  </div>
 {:else if m.kind === 'usage'}
   {@const period = t(`widget.period.${m.period}`)}
   {@const label = oc ? toolLabel('opencode') : period}
@@ -316,6 +352,57 @@
     flex-direction: column;
     gap: 1px;
     min-width: 0;
+  }
+  .mod.caches.t {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 0;
+    padding: 10px 11px 6px;
+  }
+  .caches .top {
+    margin-bottom: 4px;
+  }
+  .crow {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+    height: 52px;
+  }
+  .caches.l .crow {
+    flex: 1;
+  }
+  .caches .none {
+    margin: auto;
+    text-align: center;
+  }
+  .ctime {
+    flex: none;
+    font-size: 13px;
+  }
+  .ctime.soon {
+    color: color-mix(in srgb, var(--warning) 72%, var(--ink));
+  }
+  .ctime.urgent {
+    color: color-mix(in srgb, var(--critical) 82%, var(--ink));
+  }
+  .more {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--ink-3);
+    font: inherit;
+    font-size: 11px;
+  }
+  .more:hover {
+    color: var(--ink);
+  }
+  .plus {
+    flex: none;
   }
   .grow {
     flex: 1;
