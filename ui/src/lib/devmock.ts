@@ -134,6 +134,7 @@ const models = [
   ['big-pickle', 'opencode', 0.005, 0, 0, 0],
 ] as const
 const projects = ['demo-app', 'website', 'notes', 'data-pipeline', 'mobile-client']
+const hiddenProjects = new Set([5])
 
 function totals(tokens: number, cost: number, unpriced = false): Totals {
   const input = Math.round(tokens * 0.004)
@@ -851,6 +852,7 @@ export function installMock() {
           console.info('save image', a.path, (a.bytes as number[]).length)
           return null
         case 'open_last_image':
+        case 'open_last_report':
           return null
         case 'save_images':
           console.info('save images', a.dir, (a.images as { name: string }[]).map((i) => i.name))
@@ -876,6 +878,13 @@ export function installMock() {
           return mockTrayPreview(a.tray as TraySettings)
         case 'panel_data':
           return mockPanelData()
+        case 'set_widget_visible':
+          settings.widget.visible = !!a.visible
+          return null
+        case 'rescan':
+          mockScanning = true
+          setTimeout(() => (mockScanning = false), 2500)
+          return null
         case 'panel_action':
           if (a.action === 'widget') settings.widget.visible = !settings.widget.visible
           if (a.action === 'rescan') {
@@ -960,7 +969,11 @@ export function installMock() {
           return ocMissing ? [] : [{ path: 'C:\\Users\\you\\.local\\share\\opencode\\opencode.db', parser: 'opencode_db', count: 1, last: '3 sessions from OpenCode before 1.3.16 are not counted' }]
         case 'list_projects':
         case 'list_projects_for_settings':
-          return projects.map((p, i) => ({ id: i + 1, name: p, path: `C:\\Projects\\${p}`, hidden: i === 4 }))
+          return projects.map((p, i) => ({ id: i + 1, name: p, path: `C:\\Projects\\${p}`, hidden: hiddenProjects.has(i + 1) }))
+        case 'set_project_hidden':
+          if (a.hidden) hiddenProjects.add(Number(a.id))
+          else hiddenProjects.delete(Number(a.id))
+          return null
         case 'list_models':
           return [...models.map((m) => m[0]), ...(ocMissing ? [] : ['deepseek-chat'])]
         case 'get_pricing':
@@ -968,6 +981,16 @@ export function installMock() {
         case 'save_pricing':
           Object.assign(pricing, a.file)
           pricingOrigin = 'user'
+          return null
+        case 'reset_pricing':
+          Object.assign(pricing, { models: priceBase.map((m) => ({ ...m })), user_aliases: {} })
+          pricingOrigin = 'bundled'
+          return null
+        case 'export_data':
+          console.info('export', a.path, a.granularity, a.format)
+          return a.granularity === 'daily' ? 90 : 1180
+        case 'wipe_all_data':
+          console.info('wipe all data')
           return null
         case 'check_prices':
           return new Promise((done) => setTimeout(() => done(false), 800))
@@ -998,6 +1021,14 @@ export function installMock() {
           return update
         case 'test_notification':
           return 'shown'
+        case 'install_update':
+          update.installing = true
+          return new Promise((done) =>
+            setTimeout(() => {
+              update.installing = false
+              done(null)
+            }, 1500),
+          )
         case 'check_update':
           update.last_check_ms = Date.now()
           update.available = new URLSearchParams(location.search).get('update') === '1' ? { version: '0.3.1', notes: 'Bug fixes', date: null } : null

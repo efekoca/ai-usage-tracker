@@ -57,10 +57,11 @@
   type Row = WindowRecord & { provider: Provider; limit_id: string; account: string | null }
   const startOf = (w: WindowRecord) => w.start_ms ?? w.first_ms
   const toFull = (w: WindowRecord) => (w.full_at_ms !== null && w.start_ms !== null ? w.full_at_ms - w.start_ms : null)
+  const highAt = $derived(app.settings?.widget.high_at ?? 90)
   const all = $derived<Row[]>(series.flatMap((s) => s.windows.map((w) => ({ ...w, provider: s.provider, limit_id: s.limit_id, account: s.account }))))
   const rows = $derived.by(() => {
     const kept = all.filter((w) =>
-      status === 'full' ? w.full : status === 'high' ? w.peak_pct >= 80 : status === 'complete' ? w.complete && !w.in_progress : true,
+      status === 'full' ? w.full : status === 'high' ? w.peak_pct >= highAt : status === 'complete' ? w.complete && !w.in_progress : true,
     )
     const key = (w: Row) => (sortKey === 'peak' ? w.peak_pct : sortKey === 'toFull' ? (toFull(w) ?? -1) : sortKey === 'local' ? w.local.cost_usd : startOf(w))
     return kept.sort((a, b) => (sortDesc ? key(b) - key(a) : key(a) - key(b)))
@@ -147,7 +148,7 @@
       label={t('history.filter.status')}
       value={status}
       minWidth={190}
-      options={[{ value: 'all', label: t('history.status.all') }, { value: 'full', label: t('history.status.full') }, { value: 'high', label: t('history.status.high') }, { value: 'complete', label: t('history.status.complete') }]}
+      options={[{ value: 'all', label: t('history.status.all') }, { value: 'full', label: t('history.status.full') }, { value: 'high', label: t('history.status.high', { pct: fmtPct(highAt) }) }, { value: 'complete', label: t('history.status.complete') }]}
       onchange={(v) => (status = v as typeof status)}
     />
   </div>

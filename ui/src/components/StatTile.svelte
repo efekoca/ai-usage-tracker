@@ -10,6 +10,7 @@
     previous = null,
     hint = '',
     hero = false,
+    points = false,
     children,
   }: {
     label: string
@@ -18,10 +19,14 @@
     previous?: number | null
     hint?: string
     hero?: boolean
+    /** the value is a percentage: its change is shown in points, as 60 % to 66 % is 6 points and not 10 % */
+    points?: boolean
     children?: Snippet
   } = $props()
 
-  const delta = $derived(current !== null && previous !== null && previous > 0 ? (current - previous) / previous : null)
+  const delta = $derived(current === null || previous === null ? null : points ? current - previous : previous > 0 ? (current - previous) / previous : null)
+  // a change that prints as zero has no direction to announce
+  const flat = $derived(delta === null || (points ? Math.abs(delta) < 0.05 : Math.abs(delta) < 0.005))
 </script>
 
 <div class="tile" class:hero>
@@ -31,8 +36,9 @@
     {#if delta !== null && Number.isFinite(delta)}
       <span class="delta" class:up={delta > 0} class:down={delta < 0}>
         <Icon name={delta >= 0 ? 'up' : 'down'} size={12} />
+        {#if !flat}<span class="sr-only">{t(delta > 0 ? 'overview.deltaUp' : 'overview.deltaDown')}</span>{/if}
         <!-- beyond +200 % a multiplier reads better than a four-digit percentage -->
-        {delta >= 2 ? `${fmtDec(1 + delta, delta >= 9 ? 0 : 1)}×` : fmtPct(Math.abs(delta) * 100)}
+        {points ? t('overview.deltaPoints', { pts: fmtDec(Math.abs(delta), 1) }) : delta >= 2 ? `${fmtDec(1 + delta, delta >= 9 ? 0 : 1)}×` : fmtPct(Math.abs(delta) * 100)}
       </span>
       <span class="subtle">{t('overview.vsPrev')}</span>
     {/if}

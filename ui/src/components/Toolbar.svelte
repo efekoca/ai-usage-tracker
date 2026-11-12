@@ -39,8 +39,14 @@
   const customError = $derived(!from || !to ? t('period.invalid.empty') : from > to ? t('period.invalid.order') : '')
   function pick(k: Kind) {
     // the dates shown apply at once, so the selected period always matches the data
-    if (k !== 'custom') setPeriod({ kind: k } as Period)
-    else applyCustom()
+    if (k !== 'custom') return setPeriod({ kind: k } as Period)
+    // dates left half-typed give way to the range in use, else the last two weeks
+    if (customError) {
+      const r = app.period.kind === 'custom' ? app.period : twoWeeks(app.today)
+      from = r.from
+      to = r.to
+    }
+    applyCustom()
   }
   function applyCustom() {
     if (customError) return

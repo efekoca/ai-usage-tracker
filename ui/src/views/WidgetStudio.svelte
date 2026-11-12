@@ -44,6 +44,26 @@
     const q = searchKey(fontQuery.trim())
     return q ? fonts.filter((f) => searchKey(f).includes(q)) : fonts
   })
+  // the list is one Tab stop, the chosen font where it first shows; arrow keys move through it
+  const fontStop = $derived.by(() => {
+    const listed = fontQuery.trim() ? fontMatches : ['', ...suggested, ...fonts]
+    return listed.includes(ws.font_family) ? ws.font_family : (listed[0] ?? '')
+  })
+  let fontList: HTMLDivElement | undefined = $state()
+  const fontOptions = () => [...(fontList?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [])]
+  function fontKey(e: KeyboardEvent) {
+    const opts = fontOptions()
+    const at = opts.indexOf(document.activeElement as HTMLButtonElement)
+    const to = e.key === 'ArrowDown' ? at + 1 : e.key === 'ArrowUp' ? at - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? opts.length - 1 : null
+    if (to === null || !opts.length) return
+    e.preventDefault()
+    opts[Math.max(0, Math.min(opts.length - 1, to))].focus()
+  }
+  function searchKeyDown(e: KeyboardEvent) {
+    if (e.key !== 'ArrowDown') return
+    e.preventDefault()
+    fontOptions().find((o) => o.tabIndex === 0)?.focus()
+  }
 
   // only fields edited here are saved, so a stale copy never overwrites the tray's or shortcut's changes
   type Key = keyof WidgetSettings
@@ -255,7 +275,7 @@
       </div>
       <div class="item">
         <span>{t('ws.accent')}</span>
-        <ColorPick value={ws.accent} label={t('ws.accent')} defaultLabel={t('ws.accent.system')} customLabel={t('ws.accent.custom')} swatches={['#2f6feb', '#1baf7a', '#eb6834', '#e87ba4', '#4a3aa7', '#52514e']} onchange={(v) => set('accent', v)} />
+        <ColorPick value={ws.accent} label={t('ws.accent')} defaultLabel={t('ws.accent.system')} customLabel={t('ws.accent.custom')} swatches={[['#2f6feb', 'blue'], ['#1baf7a', 'green'], ['#eb6834', 'orange'], ['#e87ba4', 'pink'], ['#4a3aa7', 'purple'], ['#52514e', 'gray']]} onchange={(v) => set('accent', v)} />
       </div>
       {#each [['scale', 0.6, 2, 0.05, (v: number) => fmtPct(v * 100)], ['opacity', 0.3, 1, 0.05, (v: number) => fmtPct(v * 100)], ['corner_radius', 0, 28, 1, (v: number) => `${v}px`]] as const as [key, min, max, step, fmt] (key)}
         <div class="item">
@@ -281,10 +301,10 @@
           <span>{t('ws.font')}</span>
           <span class="subtle small current" style="font-family:{ws.font_family ? `'${ws.font_family}', var(--font)` : 'var(--font)'}">{ws.font_family || t('ws.font.app')}</span>
         </div>
-        <input type="search" class="field" placeholder={t('ws.font.search')} aria-label={t('ws.font.search')} bind:value={fontQuery} />
-        <div class="fontlist" role="listbox" aria-label={t('ws.font')}>
-          {#snippet fontOption(name: string, label: string)}
-            <button role="option" aria-selected={ws.font_family === name} class:sel={ws.font_family === name} style="font-family:{name ? `'${name}', var(--font)` : 'var(--font)'}" onclick={() => set('font_family', name)}>
+        <input type="search" class="field" placeholder={t('ws.font.search')} aria-label={t('ws.font.search')} bind:value={fontQuery} onkeydown={searchKeyDown} />
+        <div class="fontlist" role="listbox" aria-label={t('ws.font')} tabindex="-1" bind:this={fontList} onkeydown={fontKey}>
+          {#snippet fontOption(name: string, label: string, first = true)}
+            <button role="option" aria-selected={ws.font_family === name} tabindex={first && name === fontStop ? 0 : -1} class:sel={ws.font_family === name} style="font-family:{name ? `'${name}', var(--font)` : 'var(--font)'}" onclick={() => set('font_family', name)}>
               <span>{label}</span>
               {#if ws.font_family === name}<Icon name="check" size={14} />{/if}
             </button>
@@ -297,7 +317,7 @@
             {/if}
             {#if fonts.length}<div class="fgh" role="presentation">{t('ws.font.all', { n: fonts.length })}</div>{/if}
           {/if}
-          {#each fontMatches as f (f)}{@render fontOption(f, f)}{/each}
+          {#each fontMatches as f (f)}{@render fontOption(f, f, !!fontQuery.trim() || !suggested.includes(f))}{/each}
           {#if fontQuery.trim() && !fontMatches.length}<p class="subtle small none">{t('ws.font.none')}</p>{/if}
         </div>
       </div>

@@ -103,7 +103,6 @@
     --cc-tile-hover: rgba(255, 255, 255, 0.16);
     --cc-edge: rgba(255, 255, 255, 0.07);
     --cc-track: rgba(255, 255, 255, 0.15);
-  --stage: rgba(0, 0, 0, 0.3);
     --stage: rgba(0, 0, 0, 0.3);
   }
 }
@@ -147,6 +146,7 @@
   --cc-tile-hover: rgba(255, 255, 255, 0.16);
   --cc-edge: rgba(255, 255, 255, 0.07);
   --cc-track: rgba(255, 255, 255, 0.15);
+  --stage: rgba(0, 0, 0, 0.3);
 }
 
 /* With Mica the window itself is translucent; the page plane stays clear. */

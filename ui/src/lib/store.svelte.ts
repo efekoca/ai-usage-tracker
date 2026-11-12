@@ -60,9 +60,17 @@ function inkOn(hex: string): string {
 let refreshTimer: ReturnType<typeof setTimeout> | undefined
 let refreshGen = 0
 let refreshedAt = 0
+/** New data not yet passed on through `app.tick`; a newer refresh that replaces this one passes it on. */
+let fresh = false
 
-export async function refresh() {
+export function refresh() {
+  return reload(true)
+}
+
+/** `data` is false when only the period or filter changed: views that read them reload on their own, so the tick stays. */
+async function reload(data: boolean) {
   if (!app.settings?.onboarded) return
+  if (data) fresh = true
   refreshedAt = Date.now()
   const gen = ++refreshGen
   app.loading = true
@@ -78,7 +86,8 @@ export async function refresh() {
   } finally {
     if (gen === refreshGen) {
       app.loading = false
-      app.tick++
+      if (fresh) app.tick++
+      fresh = false
     }
   }
 }
@@ -182,12 +191,12 @@ export async function init() {
 
 export function setPeriod(p: Period) {
   app.period = p
-  refresh()
+  reload(false)
 }
 
 export function setFilter(f: Filter) {
   app.filter = f
-  refresh()
+  reload(false)
 }
 
 /** The account a provider's limit or series belongs to, named beside the provider; empty while that provider has one account. */

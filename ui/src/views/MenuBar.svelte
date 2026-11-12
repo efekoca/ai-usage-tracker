@@ -634,7 +634,7 @@
           </div>
         </div>
         <div class="item">
-          <div><span>{t('menubar.warn')}</span><div class="subtle small">{t('menubar.warn.help', { warn: fmtPct(app.settings?.widget.warn_at ?? 80) })}</div></div>
+          <div><span>{t('menubar.warn')}</span><div class="subtle small">{t('menubar.warn.help', { warn: fmtPct(app.settings?.widget.warn_at ?? 70) })}</div></div>
           <Toggle checked={tray.warn_mark} label={t('menubar.warn')} onchange={(v) => set('warn_mark', v)} />
         </div>
         {#if mac}
@@ -655,7 +655,7 @@
     <h2>{t('menubar.icon')}</h2>
     {#if windows}<p class="subtle small">{t('settings.tray.help')}</p>{/if}
     <div class="item">
-      <div><span>{t('settings.tray.show')}</span><div class="subtle small">{t('settings.tray.showHelp', { warn: fmtPct(app.settings?.widget.warn_at ?? 80), high: fmtPct(app.settings?.widget.high_at ?? 95) })}</div></div>
+      <div><span>{t('settings.tray.show')}</span><div class="subtle small">{t('settings.tray.showHelp', { warn: fmtPct(app.settings?.widget.warn_at ?? 70), high: fmtPct(app.settings?.widget.high_at ?? 90) })}</div></div>
       <Select label={t('settings.tray.show')} value={tray.show_percent ? tray.mark : 'app'} minWidth={220} options={markOptions} onchange={setMark} />
     </div>
     <div class="item">

@@ -93,8 +93,8 @@
       <p class="muted empty">{t('subcache.none')}</p>
     {:else}
       <div class="tiles">
-        <StatTile label={t('subcache.subHit')} hint={t('cache.hitRate.help')} value={pct(subHit)} current={subHit} previous={shareHit(data.previous_subagents)} />
-        <StatTile label={t('subcache.mainHit')} hint={t('cache.hitRate.help')} value={pct(mainHit)} current={mainHit} previous={shareHit(data.previous_main)} />
+        <StatTile label={t('subcache.subHit')} hint={t('cache.hitRate.help')} value={pct(subHit)} current={subHit} previous={shareHit(data.previous_subagents)} points />
+        <StatTile label={t('subcache.mainHit')} hint={t('cache.hitRate.help')} value={pct(mainHit)} current={mainHit} previous={shareHit(data.previous_main)} points />
         <StatTile label={t('subcache.writeShare')} hint={t('subcache.writeShare.help')} value={priced(data.subagents) ? pct(writeShare) : '—'}>
           {#if priced(data.subagents)}<span class="subtle">{fmtMoney(data.subagents.cost.cache_write)}</span>{/if}
         </StatTile>
