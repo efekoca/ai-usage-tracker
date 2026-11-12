@@ -2,7 +2,7 @@
   import { onDestroy, untrack } from 'svelte'
   import { app, latest, nameAccount, saveSettings } from '../lib/store.svelte'
   import { api, type PanelData, type PanelModule, type PanelSize, type Provider, type TrayItem, type TrayMark, type TrayPreview, type TraySettings } from '../lib/api'
-  import { fmtClock, fmtPct, limitName, t, toolLabel, windowLabel } from '../lib/i18n.svelte'
+  import { fmtClock, fmtPct, limitName, searchKey, t, toolLabel, windowLabel } from '../lib/i18n.svelte'
   import { cacheShown, setCacheShown } from '../lib/caches'
   import Segmented from '../components/Segmented.svelte'
   import Select from '../components/Select.svelte'
@@ -145,8 +145,8 @@
   let cat = $state('all')
   let query = $state('')
   const groups = $derived.by(() => {
-    const q = query.trim().toLocaleLowerCase()
-    const shown = catalog.filter((m) => (cat === 'all' || category(m) === cat) && modName(m).toLocaleLowerCase().includes(q))
+    const q = searchKey(query.trim())
+    const shown = catalog.filter((m) => (cat === 'all' || category(m) === cat) && searchKey(modName(m)).includes(q))
     return (['limits', 'forecast', 'usage', 'controls'] as const).map((c) => ({ c, items: shown.filter((m) => category(m) === c) })).filter((g) => g.items.length)
   })
 

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, type SessionRow, type SessionTimeline, type TimelineRequest } from '../lib/api'
   import { app } from '../lib/store.svelte'
-  import { fmtClock, fmtCompact, fmtDuration, fmtInt, fmtMoney, fmtPct, t } from '../lib/i18n.svelte'
+  import { agentLabel, fmtClock, fmtCompact, fmtDuration, fmtInt, fmtMoney, fmtPct, t } from '../lib/i18n.svelte'
 
   let { session }: { session: SessionRow } = $props()
 
@@ -50,6 +50,8 @@
   /** A subagent may have no name, but always has its own thread. */
   const sub = (r: TimelineRequest) => !!r.agent || !!r.thread
   const agentOf = (r: TimelineRequest) => r.agent ?? 'subagent'
+  // the unnamed one's label already says it is a subagent
+  const agentNote = (a: string) => (a === 'subagent' ? agentLabel(a) : t('timeline.ev.agent', { a: agentLabel(a) }))
 
   const family = getComputedStyle(document.body).fontFamily
   let pen: CanvasRenderingContext2D | null = null
@@ -274,7 +276,7 @@
       out.push({
         ms: rs[0].ts_ms,
         cls: 'agent',
-        title: t('timeline.ev.agent', { a: run.agent }),
+        title: agentNote(run.agent),
         detail: t('timeline.ev.agent.detail', { n: rs.length, max: fmtCompact(Math.max(...rs.map((r) => r.context))) }),
         value: costOf(rs),
       })
@@ -298,7 +300,7 @@
     const above = top - 14 - tipH
     // above the column when it fits, else beside it
     const left = above >= 0 ? Math.min(Math.max(cx - 106, 0), width - 212) : cx + 16 + 212 <= width ? cx + 16 : cx - 16 - 212
-    const note = hr.rewritten > 0 ? t('timeline.tip.rewrite', { d: fmtDuration(hr.pause_ms ?? 0) }) : sub(hr) ? t('timeline.ev.agent', { a: agentOf(hr) }) : hr.compacted ? t('timeline.tip.compact') : ''
+    const note = hr.rewritten > 0 ? t('timeline.tip.rewrite', { d: fmtDuration(hr.pause_ms ?? 0) }) : sub(hr) ? agentNote(agentOf(hr)) : hr.compacted ? t('timeline.tip.compact') : ''
     return { left, top: above >= 0 ? above : 4, note, cls: hr.rewritten > 0 ? 'rewrite' : sub(hr) ? 'agent' : '' }
   })
 
@@ -332,7 +334,7 @@
   const spoken = $derived.by(() => {
     const r = reqs[hover ?? n - 1]
     if (!r) return ''
-    const note = r.rewritten > 0 ? t('timeline.note.rewrite') : r.compacted ? t('timeline.note.compact') : sub(r) ? t('timeline.ev.agent', { a: agentOf(r) }) : ''
+    const note = r.rewritten > 0 ? t('timeline.note.rewrite') : r.compacted ? t('timeline.note.compact') : sub(r) ? agentNote(agentOf(r)) : ''
     return [fmtClock(r.ts_ms), `${t('timeline.context')} ${fmtCompact(r.context)}`, `${t('metric.cost')} ${r.cost_usd === null ? '—' : fmtMoney(r.cost_usd)}`, note].filter(Boolean).join(', ')
   })
 

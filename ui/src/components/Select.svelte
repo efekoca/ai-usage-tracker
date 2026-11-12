@@ -143,7 +143,8 @@
         hide()
         break
       case 'Tab':
-        hide(false)
+        // the list sits at the end of the page, so Tab moves on from the trigger instead
+        hide()
         break
       default:
         if (!withSearch && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {

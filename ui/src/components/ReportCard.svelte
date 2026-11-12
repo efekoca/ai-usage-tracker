@@ -26,7 +26,7 @@
     if (w === 'thisYear') return { from: localDate(new Date(y, 0, 1)), to: localDate(today) }
     return { from: localDate(addDays(today, -6)), to: localDate(today) }
   }
-  const range = $derived(rangeOf(which))
+  const range = $derived(rangeOf(which, new Date(`${app.today}T00:00:00`)))
 
   async function run() {
     status = null

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import { accountKey, app, latest, providerAccount, setFilter, setPeriod } from '../lib/store.svelte'
   import { localDate, t, toolLabel } from '../lib/i18n.svelte'
   import { api, type Period, type Tool } from '../lib/api'
@@ -8,10 +9,21 @@
 
   type Kind = Period['kind']
   const kinds: Kind[] = ['today', 'days7', 'month1', 'months3', 'months6', 'year1', 'all', 'custom']
-  const today = new Date()
+  const twoWeeks = (today: string) => {
+    const d = new Date(`${today}T00:00:00`)
+    return { from: localDate(new Date(d.getFullYear(), d.getMonth(), d.getDate() - 13)), to: today }
+  }
+  const start = app.period.kind === 'custom' ? app.period : twoWeeks(app.today)
   let kind: Kind = $state(app.period.kind)
-  let from = $state(app.period.kind === 'custom' ? app.period.from : localDate(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 13)))
-  let to = $state(app.period.kind === 'custom' ? app.period.to : localDate(today))
+  let from = $state(start.from)
+  let to = $state(start.to)
+  // until a custom range is applied, the one offered moves on at midnight
+  $effect(() => {
+    const next = twoWeeks(app.today)
+    if (untrack(() => app.period.kind) === 'custom') return
+    from = next.from
+    to = next.to
+  })
   let showFilters = $state(false)
   let models: string[] = $state([])
   let projects: { id: number; name: string; hidden: boolean }[] = $state([])

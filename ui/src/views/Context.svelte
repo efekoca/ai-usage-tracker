@@ -1,7 +1,7 @@
 <script lang="ts">
   import { app, latest } from '../lib/store.svelte'
   import { api, type ContextStats } from '../lib/api'
-  import { fmtCompact, fmtInt, fmtMoney, fmtPct, localDate, lower, t } from '../lib/i18n.svelte'
+  import { fmtCompact, fmtInt, fmtMoney, fmtPct, localDate, t } from '../lib/i18n.svelte'
   import StatTile from '../components/StatTile.svelte'
   import Histogram from '../components/charts/Histogram.svelte'
   import AreaChart from '../components/charts/AreaChart.svelte'
@@ -60,7 +60,7 @@
 {:else}
   <section class="tiles card">
     <StatTile hero label={t('context.avg')} value={fmtCompact(c.avg)}>
-      <span class="subtle">{fmtInt(c.requests)} {lower(t('context.requests'))}</span>
+      <span class="subtle">{t('context.requestCount', { n: fmtInt(c.requests) })}</span>
     </StatTile>
     <StatTile label={t('context.median')} value={fmtCompact(c.median)} />
     <StatTile label={t('context.p90')} hint={t('context.p90Help')} value={fmtCompact(c.p90)} />
@@ -154,6 +154,9 @@
   h2 {
     margin-bottom: 12px;
   }
+  .table-card {
+    padding: 6px 0;
+  }
   .scroll {
     overflow-x: auto;
   }
@@ -193,7 +196,7 @@
     white-space: nowrap;
   }
   .pad {
-    padding: 16px 20px 6px;
+    padding: 12px 20px 6px;
   }
   .note {
     display: flex;

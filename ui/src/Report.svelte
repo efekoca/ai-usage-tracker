@@ -5,7 +5,7 @@
   import { accountKey, applyAppearance, toolColor } from './lib/store.svelte'
   import { api, providerOfSource, providersOf, type Account, type ContextStats, type LimitView, type PlansFile, type Provider, type Report, type Sessions, type Settings } from './lib/api'
   import { accountPlan, planPrice } from './lib/plans'
-  import { fmtCompact, fmtDate, fmtDateTime, fmtDec, fmtInt, fmtLimit, fmtMoney, fmtPct, fmtSpan, i18n, limitName, t, toolLabel, windowLabel } from './lib/i18n.svelte'
+  import { fmtCompact, fmtDate, fmtDateTime, fmtDec, fmtInt, fmtLimit, fmtMoney, fmtPct, fmtSpan, limitName, t, toolLabel, windowLabel } from './lib/i18n.svelte'
   import Columns from './components/charts/Columns.svelte'
 
   const qs = new URLSearchParams(location.search)
@@ -326,7 +326,7 @@
         <p class="small muted">{t('rep.note2')}</p>
         {#if r.unpriced_models.length}<p class="small muted">{t('rep.note3', { m: r.unpriced_models.join(', ') })}</p>{/if}
         {#if r.catalog_models?.length}<p class="small muted">{t('rep.note4', { m: r.catalog_models.join(', ') })}</p>{/if}
-        <p class="small muted">AI Usage Tracker · {i18n.lang === 'tr' ? 'yerel rapor' : 'local report'}</p>
+        <p class="small muted">{t('rep.footer')}</p>
       </section>
     {/if}
   {/if}

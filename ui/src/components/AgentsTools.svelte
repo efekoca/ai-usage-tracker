@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, type AgentsTools, type Tool, type ToolRow } from '../lib/api'
   import { app, latest, toolColor } from '../lib/store.svelte'
-  import { fmtCompact, fmtInt, fmtMoney, fmtPct, has, t, toolLabel } from '../lib/i18n.svelte'
+  import { agentLabel, fmtCompact, fmtInt, fmtMoney, fmtPct, has, t, toolLabel } from '../lib/i18n.svelte'
   import Segmented from './Segmented.svelte'
   import Icon from './Icon.svelte'
   import BarValue from './BarValue.svelte'
@@ -23,7 +23,6 @@
     )
   })
 
-  const agentLabel = (a: string | null) => (a === null ? t('agent.main') : has(`agent.${a}`) ? t(`agent.${a}`) : a)
   const tools = $derived([...new Set((data?.agents ?? []).map((a) => a.tool))] as Tool[])
   function shareOf(tool: Tool, cost: number, tokens: number) {
     const rows = (data?.agents ?? []).filter((a) => a.tool === tool)

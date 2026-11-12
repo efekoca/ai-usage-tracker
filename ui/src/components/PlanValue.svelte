@@ -4,7 +4,7 @@
   import { accountName, app, latest, providerColor, saveSettings, tint, markTint } from '../lib/store.svelte'
   import { api, providersOf, type PlansFile, type PlanValue, type Provider, type ProviderValue } from '../lib/api'
   import { cycleOf, priceKey, valueRow, valueSplit, type Cycle } from '../lib/plans'
-  import { fmtDate, fmtDec, fmtInt, fmtMoney, i18n, parseNumber, t } from '../lib/i18n.svelte'
+  import { fmtDate, fmtDec, fmtInt, fmtMoney, i18n, localDate, parseNumber, t } from '../lib/i18n.svelte'
   import Icon from './Icon.svelte'
   import BrandIcon from './BrandIcon.svelte'
   import AccuracyBadge from './AccuracyBadge.svelte'
@@ -14,12 +14,11 @@
   let value = $state<PlanValue | null>(null)
   let failed = $state('')
 
-  const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const today = $derived(new Date(`${app.today}T00:00:00`))
   // a billing period can start a day before the last 30 days
   const reach = $derived.by(() => {
-    const now = new Date()
-    const month = ymd(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29))
-    const first = Object.values(app.settings?.renewal_days ?? {}).map((d) => cycleOf(d, now).from).sort()[0]
+    const month = localDate(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29))
+    const first = Object.values(app.settings?.renewal_days ?? {}).map((d) => cycleOf(d, today).from).sort()[0]
     return first && first < month ? first : ''
   })
 
@@ -27,8 +26,9 @@
     void app.tick
     const known = untrack(() => plans)
     const from = reach
+    const to = app.today
     return latest(
-      () => Promise.all([known ? Promise.resolve(known) : api.plans(), api.planValue(from ? { kind: 'custom', from, to: ymd(new Date()) } : undefined)]),
+      () => Promise.all([known ? Promise.resolve(known) : api.plans(), api.planValue(from ? { kind: 'custom', from, to } : undefined)]),
       ([p, v]) => {
         plans = p
         value = v
@@ -66,7 +66,7 @@
     saveSettings((c) => ({ account_prices: { ...c.account_prices, [key]: v } }))
   }
 
-  const input = $derived({ plans, settings: app.settings, accounts: app.accounts, value, cycles: true })
+  const input = $derived({ plans, settings: app.settings, accounts: app.accounts, value, cycles: true, today })
   const row = (p: Provider) => valueRow(input, p)
   const split = (p: Provider) => valueSplit(input, p)
   const multiple = (r: number | null) => t('value.multiple', { n: fmtDec(r ?? 0, r !== null && r < 10 ? 1 : 0) })
@@ -84,7 +84,7 @@
   const shift = (day: string, n: number) => {
     const d = new Date(`${day}T12:00:00`)
     d.setDate(d.getDate() + n)
-    return ymd(d)
+    return localDate(d)
   }
   const renewsOn = (c: Cycle) => t(c.renews.length === 1 ? 'value.renews' : 'value.renewsMany', { d: c.renews.join(', ') })
   const cycles = $derived(used.map((p) => (app.accounts.some((a) => a.provider === p) && split(p).parts.length ? split(p).cycle : row(p).cycle)))
@@ -201,7 +201,7 @@
             {:else if m.events === 0}
               <p class="muted small">{t('value.noUse')}</p>
             {:else}
-              {@render compare(p, m.cost, m.share, m.ratio, m.day, m.cumulative, `${fmtMoney(m.monthly)}/${i18n.lang === 'tr' ? 'ay' : 'mo'} ${m.custom ? t('value.customPrice') : t('value.listPrice')} · ${t('value.accounts', { n: m.accounts })}`, m.cycle)}
+              {@render compare(p, m.cost, m.share, m.ratio, m.day, m.cumulative, `${t('value.perMonth', { price: fmtMoney(m.monthly) })} ${m.custom ? t('value.customPrice') : t('value.listPrice')} · ${t('value.accounts', { n: m.accounts })}`, m.cycle)}
               <ul class="parts small">
                 {#each m.parts as x (x.id)}
                   <li>
@@ -261,7 +261,7 @@
           {:else if !r.pv || r.pv.events === 0}
             <p class="muted small">{t('value.noUse')}</p>
           {:else}
-            {@render compare(p, r.cost, r.share ?? 0, r.ratio, r.day, r.cumulative, `${fmtMoney(r.price.usd)}/${i18n.lang === 'tr' ? 'ay' : 'mo'} ${r.price.custom ? t('value.customPrice') : t('value.listPrice')}`, r.cycle)}
+            {@render compare(p, r.cost, r.share ?? 0, r.ratio, r.day, r.cumulative, `${t('value.perMonth', { price: fmtMoney(r.price.usd) })} ${r.price.custom ? t('value.customPrice') : t('value.listPrice')}`, r.cycle)}
             {#if r.pv.unpriced_events > 0}<p class="subtle small">{t('value.unpriced', { n: fmtInt(r.pv.unpriced_events) })}</p>{/if}
           {/if}
         </div>

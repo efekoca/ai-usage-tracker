@@ -499,5 +499,9 @@
     .opt {
       display: none;
     }
+    .table-card th:nth-last-child(2),
+    .table-card td:nth-last-child(2) {
+      padding-right: 20px;
+    }
   }
 </style>
