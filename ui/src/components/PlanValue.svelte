@@ -136,7 +136,7 @@
       <span title={t('value.cycleDay', { n: cyc.elapsed, of: cyc.days })}>{fmtDate(cyc.from, 'short')} – {fmtDate(shift(cyc.to, -1), 'short')}</span>
     {:else if value}<span>{fmtDate(value.dates[0], 'short')} – {fmtDate(value.dates[value.dates.length - 1], 'short')}</span>{/if}
   </div>
-  <p class="verdict small">
+  <p class="verdict small icon-text">
     {#if (ratio ?? 0) >= 1}
       <Icon name="check" size={13} />
       {t('value.saved', { v: fmtMoney(cost - share) })} · {day >= 0 ? t(cyc ? 'value.breakevenCycle' : 'value.breakeven', { d: day + 1 }) : t('value.notYet')}
@@ -387,7 +387,7 @@
   .verdict {
     display: flex;
     gap: 6px;
-    align-items: center;
+    align-items: flex-start;
     margin: 0;
   }
   .verdict :global(svg) {

@@ -155,10 +155,8 @@ import Cards from './views/Cards.svelte'
           <div class="banner" role="alert"><Icon name="warning" size={16} />{t('common.error', { e: app.error })}</div>
         {/if}
         {#if update && app.view !== 'settings'}
-          <div class="banner update" role="status">
-            <Icon name="download" size={16} />
-            <span>{t('update.banner', { v: update.version })}</span>
-            <span class="grow"></span>
+          <div class="banner center update" role="status">
+            <span class="icon-text"><Icon name="download" size={16} /><span>{t('update.banner', { v: update.version })}</span></span>
             <button class="btn ghost small" onclick={() => (app.view = 'settings')}>{t('update.banner.details')}</button>
             <button class="btn primary small" disabled={app.update?.installing} onclick={() => installUpdate(update.version)}>{t('update.banner.install')}</button>
             <button class="btn ghost small" aria-label={t('common.close')} onclick={() => (updateDismissed = update.version)}><Icon name="close" size={14} /></button>
@@ -410,8 +408,5 @@ import Cards from './views/Cards.svelte'
   }
   .banner.update {
     align-items: center;
-  }
-  .grow {
-    flex: 1;
   }
 </style>

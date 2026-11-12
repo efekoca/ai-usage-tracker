@@ -69,7 +69,7 @@
   {/if}
   <button class="btn" onclick={() => api.rescan()} disabled={app.scan?.running}><Icon name="refresh" size={15} />{t('sources.rescan')}</button>
 </header>
-<p class="subtle small help"><Icon name="lock" size={13} /> {t('sources.help')}</p>
+<p class="subtle small help icon-text"><Icon name="lock" size={13} /> {t('sources.help')}</p>
 
 <section class="card list-card">
   {#each sources as s (s.id)}
@@ -162,7 +162,6 @@
     place-items: center;
     background: var(--surface-hover);
     color: var(--ink-3);
-    margin-top: 1px;
   }
   .state.found {
     color: var(--good-ink);

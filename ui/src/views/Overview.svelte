@@ -63,13 +63,14 @@
 {:else}
   {#if unpriced.length || cataloged.length}
     <div class="banner" role="status">
-      <Icon name="info" size={16} />
-      <span>
-        {#if unpriced.length}{t('overview.unpriced', { n: unpriced.length, models: unpriced.join(', ') })}{/if}
-        {#if unpriced.length && cataloged.length}<br />{/if}
-        {#if cataloged.length}{t('overview.catalog', { n: cataloged.length, models: cataloged.join(', ') })}{/if}
+      <span class="icon-text">
+        <Icon name="info" size={16} />
+        <span>
+          {#if unpriced.length}{t('overview.unpriced', { n: unpriced.length, models: unpriced.join(', ') })}{/if}
+          {#if unpriced.length && cataloged.length}<br />{/if}
+          {#if cataloged.length}{t('overview.catalog', { n: cataloged.length, models: cataloged.join(', ') })}{/if}
+        </span>
       </span>
-      <span class="spacer"></span>
       <button class="btn" onclick={() => (app.view = 'settings')}>{t('overview.unpricedAction')}</button>
       <button class="btn ghost dismiss" aria-label={t('overview.unpricedDismiss')} title={t('overview.unpricedDismiss')} onclick={dismissUnpriced}><Icon name="close" size={14} /></button>
     </div>
@@ -173,7 +174,7 @@
   </div>
 
   {#if hasClaude}
-    <p class="footnote subtle small"><Icon name="info" size={13} /> {t('overview.excludesAux')}</p>
+    <p class="footnote subtle small icon-text"><Icon name="info" size={13} /> {t('overview.excludesAux')}</p>
   {/if}
 {/if}
 
