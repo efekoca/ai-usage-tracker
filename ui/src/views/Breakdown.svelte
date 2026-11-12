@@ -109,7 +109,7 @@
     margin-bottom: 12px;
   }
   .pad {
-    padding: 12px 16px 0;
+    padding: 12px 20px 0;
   }
   .grid2 {
     display: grid;
@@ -143,6 +143,15 @@
     font-size: 12px;
     white-space: normal;
     vertical-align: bottom;
+  }
+  /* the first and last cells line up with the card's heading */
+  .table-card th:first-child,
+  .table-card td:first-child {
+    padding-left: 20px;
+  }
+  .table-card th:last-child,
+  .table-card td:last-child {
+    padding-right: 20px;
   }
   tbody th {
     font-weight: 500;

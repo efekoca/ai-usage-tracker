@@ -416,7 +416,7 @@
     overflow-x: auto;
   }
   .pad {
-    padding: 10px 16px 0;
+    padding: 10px 20px 0;
   }
   .foot {
     padding-bottom: 10px;
@@ -440,6 +440,15 @@
     font-size: 12px;
     white-space: normal;
     vertical-align: bottom;
+  }
+  /* the first and last cells line up with the card's heading */
+  .table-card th:first-child,
+  .table-card td:first-child {
+    padding-left: 20px;
+  }
+  .table-card th:last-child,
+  .table-card td:last-child {
+    padding-right: 20px;
   }
   tbody tr:last-child td {
     border-bottom: 0;
