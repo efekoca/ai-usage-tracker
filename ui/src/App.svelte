@@ -20,6 +20,7 @@
   import Tips from './views/Tips.svelte'
 import Cards from './views/Cards.svelte'
   import CommandPalette from './components/CommandPalette.svelte'
+  import RefreshConsent from './components/RefreshConsent.svelte'
   import { NAV } from './lib/nav'
   import { ask } from '@tauri-apps/plugin-dialog'
   import { api } from './lib/api'
@@ -181,6 +182,7 @@ import Cards from './views/Cards.svelte'
     </main>
   </div>
   <CommandPalette bind:open={palette} />
+  <RefreshConsent />
 {/if}
 
 <style>

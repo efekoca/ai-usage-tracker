@@ -115,7 +115,8 @@ pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading], caches:
     let budget = budget(app, s, now_ms);
     let live = |p| readings.iter().any(|r| r.active && r.provider == p && r.observed_ms.is_some_and(|t| now_ms - t < LIVE_READING_MS));
     let signed_out = newly_out(&mut SIGNED_OUT.lock().unwrap(), &crate::capture::sign_ins(app, s), live);
-    let cache = cache_due(&mut CACHE_TOLD.lock().unwrap(), caches, now_ms);
+    let caches: Vec<Cache> = caches.iter().filter(|c| !(c.auto && c.refreshable && !c.auto_capped)).cloned().collect();
+    let cache = cache_due(&mut CACHE_TOLD.lock().unwrap(), &caches, now_ms);
     if !n.enabled {
         return;
     }
@@ -158,7 +159,8 @@ pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading], caches:
     for (c, minutes) in cache.into_iter().filter(|_| s.cache_timer && n.cache) {
         let (title, body) = cache_text(c, minutes, f.tr);
         log::info!("cache notification");
-        send(app, &format!("cache-{}", c.session_id), &title, &body, |_| {});
+        let button = c.refreshable.then_some(if f.tr { "Tazele" } else { "Refresh" });
+        send_with(app, &format!("cache-{}", c.session_id), &title, &body, button, |_| {});
     }
 }
 
@@ -308,6 +310,26 @@ pub(crate) fn test(app: &AppHandle, s: &Settings) -> Sent {
 
 /// The budget is on the Overview and the cache on the Cache page; every other notification is
 /// about the Limits page.
+const REFRESH: &str = "refresh";
+
+/// A notification's button: Refresh on a cache's. A click, or a refresh that cannot go, opens the
+/// app on the page the notification is about.
+fn act(app: &AppHandle, tag: &str, action: &str) {
+    if action == REFRESH
+        && let Some(session) = tag.strip_prefix("cache-")
+    {
+        match crate::refresh::refresh_now(app, session) {
+            Ok(()) => return,
+            Err(e) => log::info!("refresh from a notification: {e}"),
+        }
+    }
+    open(app, tag);
+}
+
+fn send(app: &AppHandle, tag: &str, title: &str, body: &str, done: impl FnOnce(Sent) + Send + 'static) {
+    send_with(app, tag, title, body, None, done);
+}
+
 fn open(app: &AppHandle, tag: &str) {
     crate::windows::show_main_at(app, Some(match tag {
         "budget" => "overview",
@@ -456,7 +478,7 @@ pub(crate) fn init(app: &AppHandle) {
 
             #[unsafe(method(userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler:))]
             fn did_receive(&self, _: &UNUserNotificationCenter, response: &UNNotificationResponse, done: &block2::DynBlock<dyn Fn()>) {
-                open(self.ivars(), &response.notification().request().identifier().to_string());
+                act(self.ivars(), &response.notification().request().identifier().to_string(), &response.actionIdentifier().to_string());
                 done.call(());
             }
         }
@@ -512,18 +534,21 @@ fn finish(done: &Done, r: Sent) {
 
 /// A newer notification of the same limit replaces the older one.
 #[cfg(target_os = "macos")]
-fn send(_: &AppHandle, tag: &str, title: &str, body: &str, done: impl FnOnce(Sent) + Send + 'static) {
+fn send_with(_: &AppHandle, tag: &str, title: &str, body: &str, button: Option<&str>, done: impl FnOnce(Sent) + Send + 'static) {
     use block2::RcBlock;
     use objc2::runtime::Bool;
-    use objc2_foundation::{NSError, NSString};
-    use objc2_user_notifications::{UNAuthorizationOptions, UNMutableNotificationContent, UNNotificationRequest, UNUserNotificationCenter};
+    use objc2_foundation::{NSArray, NSError, NSSet, NSString};
+    use objc2_user_notifications::{
+        UNAuthorizationOptions, UNMutableNotificationContent, UNNotificationAction, UNNotificationActionOptions, UNNotificationCategory, UNNotificationCategoryOptions,
+        UNNotificationRequest, UNUserNotificationCenter,
+    };
 
     let done: Done = std::sync::Arc::new(Mutex::new(Some(Box::new(done))));
     if !in_bundle() {
         log::info!("notifications need the app bundle");
         return finish(&done, Sent::Failed);
     }
-    let (tag, title, body) = (tag.to_owned(), title.to_owned(), body.to_owned());
+    let (tag, title, body, button) = (tag.to_owned(), title.to_owned(), body.to_owned(), button.map(str::to_owned));
     // macOS asks once; later calls answer at once
     let then = RcBlock::new(move |granted: Bool, error: *mut NSError| {
         if !granted.as_bool() {
@@ -535,6 +560,19 @@ fn send(_: &AppHandle, tag: &str, title: &str, body: &str, done: impl FnOnce(Sen
         let content = UNMutableNotificationContent::new();
         content.setTitle(&NSString::from_str(&title));
         content.setBody(&NSString::from_str(&body));
+        if let Some(label) = &button {
+            // the button lives in a category, set again each time so it follows the app's language
+            const CATEGORY: &str = "cache";
+            let action = UNNotificationAction::actionWithIdentifier_title_options(&NSString::from_str(REFRESH), &NSString::from_str(label), UNNotificationActionOptions::empty());
+            let category = UNNotificationCategory::categoryWithIdentifier_actions_intentIdentifiers_options(
+                &NSString::from_str(CATEGORY),
+                &NSArray::from_retained_slice(&[action]),
+                &NSArray::new(),
+                UNNotificationCategoryOptions::empty(),
+            );
+            UNUserNotificationCenter::currentNotificationCenter().setNotificationCategories(&NSSet::from_retained_slice(&[category]));
+            content.setCategoryIdentifier(&NSString::from_str(CATEGORY));
+        }
         let request = UNNotificationRequest::requestWithIdentifier_content_trigger(&NSString::from_str(&tag), &content, None);
         let done = done.clone();
         let added = RcBlock::new(move |error: *mut NSError| {
@@ -581,11 +619,11 @@ pub(crate) fn init(app: &AppHandle) {
 }
 
 #[cfg(windows)]
-fn send(app: &AppHandle, tag: &str, title: &str, body: &str, done: impl FnOnce(Sent) + Send + 'static) {
-    use windows::core::{IInspectable, HSTRING};
+fn send_with(app: &AppHandle, tag: &str, title: &str, body: &str, button: Option<&str>, done: impl FnOnce(Sent) + Send + 'static) {
+    use windows::core::{IInspectable, Interface, HSTRING};
     use windows::Data::Xml::Dom::XmlDocument;
     use windows::Foundation::TypedEventHandler;
-    use windows::UI::Notifications::{NotificationSetting, ToastNotification, ToastNotificationManager};
+    use windows::UI::Notifications::{NotificationSetting, ToastActivatedEventArgs, ToastNotification, ToastNotificationManager};
 
     let show = || -> windows::core::Result<Sent> {
         let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app.config().identifier.as_str()))?;
@@ -594,16 +632,19 @@ fn send(app: &AppHandle, tag: &str, title: &str, body: &str, done: impl FnOnce(S
             return Ok(Sent::Denied);
         }
         let xml = XmlDocument::new()?;
+        let actions = button.map_or(String::new(), |label| format!(r#"<actions><action content="{}" arguments="{REFRESH}" activationType="foreground"/></actions>"#, escape(label)));
         xml.LoadXml(&HSTRING::from(format!(
-            r#"<toast><visual><binding template="ToastGeneric"><text>{}</text><text>{}</text></binding></visual></toast>"#,
+            r#"<toast><visual><binding template="ToastGeneric"><text>{}</text><text>{}</text></binding></visual>{actions}</toast>"#,
             escape(title),
             escape(body)
         )))?;
         let toast = ToastNotification::CreateToastNotification(&xml)?;
         toast.SetTag(&HSTRING::from(tag))?;
         let (clicked, page) = (app.clone(), tag.to_owned());
-        toast.Activated(&TypedEventHandler::<ToastNotification, IInspectable>::new(move |_, _| {
-            open(&clicked, &page);
+        toast.Activated(&TypedEventHandler::<ToastNotification, IInspectable>::new(move |_, args| {
+            // the body gives no arguments, a button its own
+            let action = args.as_ref().and_then(|a| a.cast::<ToastActivatedEventArgs>().ok()).and_then(|a| a.Arguments().ok()).map(|h| h.to_string()).unwrap_or_default();
+            act(&clicked, &page, &action);
             Ok(())
         }))?;
         notifier.Show(&toast)?;
@@ -655,7 +696,7 @@ fn session() -> zbus::Result<zbus::blocking::Connection> {
 }
 
 #[cfg(target_os = "linux")]
-fn send(app: &AppHandle, tag: &str, title: &str, body: &str, done: impl FnOnce(Sent) + Send + 'static) {
+fn send_with(app: &AppHandle, tag: &str, title: &str, body: &str, button: Option<&str>, done: impl FnOnce(Sent) + Send + 'static) {
     use zbus::zvariant::Value;
     static LISTENING: std::sync::Once = std::sync::Once::new();
 
@@ -667,7 +708,7 @@ fn send(app: &AppHandle, tag: &str, title: &str, body: &str, done: impl FnOnce(S
             BUS_PATH,
             Some(BUS),
             "Notify",
-            &("AI Usage Tracker", replaces, "ai-usage-tracker", title, body, vec!["default", ""], hints, -1i32),
+            &("AI Usage Tracker", replaces, "ai-usage-tracker", title, body, button.map_or(vec!["default", ""], |label| vec!["default", "", REFRESH, label]), hints, -1i32),
         )?;
         reply.body().deserialize::<u32>()
     };
@@ -692,8 +733,8 @@ fn listen_for_clicks(app: AppHandle) {
             for m in zbus::blocking::Proxy::new(&c, BUS, BUS_PATH, BUS)?.receive_signal("ActionInvoked")? {
                 let (id, key): (u32, String) = m.body().deserialize()?;
                 let tag = IDS.lock().unwrap().iter().find(|(_, v)| **v == id).map(|(t, _)| t.clone());
-                if let (Some(tag), "default") = (tag, key.as_str()) {
-                    open(&app, &tag);
+                if let Some(tag) = tag {
+                    act(&app, &tag, &key);
                 }
             }
             Ok(())
@@ -905,19 +946,7 @@ mod tests {
     #[test]
     fn each_cache_is_told_once_while_there_is_still_time() {
         const MIN: i64 = 60_000;
-        let cache = |id: &str, expires_ms, ttl_ms| Cache {
-            session_id: id.into(),
-            project: "notes".into(),
-            branch: Some("main".into()),
-            model: String::new(),
-            client: None,
-            ttl_ms,
-            expires_ms,
-            started_ms: 0,
-            tokens: 0,
-            refresh_usd: None,
-            rewrite_usd: None,
-        };
+        let cache = |id: &str, expires_ms, ttl_ms| Cache { session_id: id.into(), project: "notes".into(), branch: Some("main".into()), ttl_ms, expires_ms, ..Cache::default() };
         let ids = |due: Vec<(&Cache, i64)>| due.into_iter().map(|(c, m)| (c.session_id.clone(), m)).collect::<Vec<_>>();
         let mut told = HashMap::new();
         let first = [cache("a", 10 * MIN, 5 * MIN), cache("b", 60 * MIN, 60 * MIN)];

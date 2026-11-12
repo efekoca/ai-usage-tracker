@@ -464,11 +464,8 @@ fn update(app: &AppHandle) {
     let s = app.state::<AppState>().settings.read().unwrap().clone();
     let Some(readings) = readings(app, &s) else { return };
     let now = chrono::Utc::now().timestamp_millis();
-    let caches = if s.cache_timer && (s.cache_menubar || (s.notify.enabled && s.notify.cache)) {
-        crate::caches::followed(&app.state::<AppState>(), &s, now)
-    } else {
-        Vec::new()
-    };
+    let caches = crate::caches::followed(&app.state::<AppState>(), &s, now);
+    crate::refresh::tick(app, &s, &caches, now);
     crate::alerts::check(app, &s, &readings, &caches);
     let Some(tray) = app.tray_by_id(ID) else { return };
     let limits = current_limits(&readings);
@@ -1059,19 +1056,7 @@ mod tests {
         s.limit_display = "remaining".into();
         assert_eq!(tooltip(&l, &s, None, None), "AI Usage Tracker\nClaude · 5h 59% left · week ~57% left\nCodex · 5h 93% left");
         assert!(tooltip(&[], &s, None, None).ends_with("No current limit reading"));
-        let cache = |project: &str, minutes: i64| Cache {
-            session_id: project.into(),
-            project: project.into(),
-            branch: None,
-            model: String::new(),
-            client: None,
-            ttl_ms: 3_600_000,
-            expires_ms: minutes * 60_000 - 30_000,
-            started_ms: 0,
-            tokens: 0,
-            refresh_usd: None,
-            rewrite_usd: None,
-        };
+        let cache = |project: &str, minutes: i64| Cache { session_id: project.into(), project: project.into(), ttl_ms: 3_600_000, expires_ms: minutes * 60_000 - 30_000, ..Cache::default() };
         assert_eq!(cache_text(&[], 0, true), None);
         let (short, long) = cache_text(&[cache("notes", 2), cache("", 4), cache("eklenti", 41), cache("x", 50)], 0, true).unwrap();
         assert_eq!(short, "notes 2 dk");

@@ -220,6 +220,8 @@ pub struct PanelData {
     accounts: Vec<crate::commands::KnownAccount>,
     /// The followed caches, the soonest to run out first; empty while the feature is off.
     caches: Vec<crate::caches::Cache>,
+    /// The refresh hook is in Claude Code's settings.
+    cache_refresh: bool,
 }
 
 /// Everything the panel's modules show; the Menu bar page's preview reads it too.
@@ -276,6 +278,7 @@ pub async fn panel_data(app: AppHandle) -> Result<PanelData, String> {
         signed_out,
         accounts,
         caches,
+        cache_refresh: crate::refresh::installed(&state),
     })
 }
 

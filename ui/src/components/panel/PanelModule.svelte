@@ -17,7 +17,7 @@
 </script>
 
 <script lang="ts">
-  import type { Settings } from '../../lib/api'
+  import { api, type LiveCache, type Settings } from '../../lib/api'
   import { fmtClock, fmtCompact, fmtMoney, fmtPct, fmtSpan, fmtTime, limitName, limitShown, t, toolLabel, windowLabel, type LimitMode } from '../../lib/i18n.svelte'
   import { nameAccount } from '../../lib/store.svelte'
   import BrandIcon from '../BrandIcon.svelte'
@@ -125,6 +125,19 @@
     return () => clearInterval(id)
   })
   const caches = $derived(m.kind === 'caches' ? (data?.caches ?? []).filter((c) => c.expires_ms > clock) : [])
+  // until its refresh reaches the logs, a row's button keeps turning
+  let asked = $state<string[]>([])
+  function refreshRow(c: LiveCache) {
+    if (edit) return
+    // the hook is added from the app, which asks first
+    if (!data?.cache_refresh) return onaction?.('cache')
+    if (!c.refreshable) return
+    asked = [...asked, c.session_id]
+    api
+      .refreshCache(c.session_id)
+      .catch(() => {})
+      .finally(() => setTimeout(() => (asked = asked.filter((id) => id !== c.session_id)), 1500))
+  }
 </script>
 
 {#snippet logo(size: number)}
@@ -259,10 +272,21 @@
       {#each caches.slice(0, m.size === 't' ? 3 : 1) as c (c.session_id)}
         {@const left = c.expires_ms - clock}
         {@const tone = cacheTone(c, left)}
+        {@const busy = c.refreshing || asked.includes(c.session_id)}
         <span class="crow">
           <CachePie frac={left / c.ttl_ms} {tone} size={16} />
           <span class="txt grow"><span class="lbl">{cacheName(c)}</span><span class="sub">{c.branch ?? cacheClient(c.client)}</span></span>
           <b class="num ctime {tone}">{mmss(left)}</b>
+          <button
+            class="rf"
+            class:busy
+            tabindex={edit ? -1 : 0}
+            aria-label={t('panel.caches.refresh', { name: cacheName(c) })}
+            title={!data?.cache_refresh ? t('panel.caches.setup') : c.refreshable || busy ? t('cache.live.refresh.help') : t('cache.live.notWaiting')}
+            disabled={!!data?.cache_refresh && !c.refreshable && !busy}
+            aria-busy={busy}
+            onclick={() => refreshRow(c)}><Icon name={busy ? 'sync' : 'refresh'} size={13} /></button
+          >
         </span>
       {/each}
       {#if m.size === 'l' && caches.length > 1}<span class="tiny dim plus">+{caches.length - 1}</span>{/if}
@@ -403,6 +427,45 @@
   }
   .plus {
     flex: none;
+  }
+  .rf {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--ink) 9%, transparent);
+    color: var(--ink);
+  }
+  .rf:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--ink) 15%, transparent);
+  }
+  .rf:disabled {
+    opacity: 0.4;
+  }
+  .rf.busy {
+    background: color-mix(in srgb, var(--accent) 20%, transparent);
+    color: var(--accent);
+  }
+  .rf.busy :global(svg) {
+    animation: rf-spin 0.9s linear infinite;
+  }
+  .rf:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  @keyframes rf-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .rf.busy :global(svg) {
+      animation: none;
+    }
   }
   .grow {
     flex: 1;

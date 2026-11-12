@@ -15,7 +15,7 @@ static DROPPED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 const MONTH_MS: i64 = 30 * 86_400_000;
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
 pub struct Cache {
     pub session_id: String,
     /// The project's name; empty while it is hidden or not known.
@@ -30,6 +30,17 @@ pub struct Cache {
     pub tokens: u64,
     pub refresh_usd: Option<f64>,
     pub rewrite_usd: Option<f64>,
+    /// A hook waits in this conversation, so it can be refreshed now.
+    pub refreshable: bool,
+    /// A refresh was asked for and has not reached the logs yet.
+    pub refreshing: bool,
+    /// It is refreshed by itself before it runs out.
+    pub auto: bool,
+    /// Its automatic refreshes stopped: more would cost more than writing the cache again.
+    pub auto_capped: bool,
+    /// Refreshes in the last two days and their API-equivalent cost.
+    pub refreshes: u32,
+    pub refreshes_usd: f64,
 }
 
 /// The caches the user follows, the soonest to run out first; none while the feature is off.
@@ -48,7 +59,8 @@ pub fn followed(state: &AppState, s: &Settings, now_ms: i64) -> Vec<Cache> {
     };
     let projects: HashMap<i64, _> = projects.into_iter().map(|p| (p.id, p)).collect();
     let dropped = DROPPED.lock().unwrap();
-    live.into_iter()
+    let mut out: Vec<Cache> = live
+        .into_iter()
         .filter(|c| !dropped.contains(&c.session_id))
         .filter_map(|c| {
             let p = c.project_id.and_then(|id| projects.get(&id));
@@ -68,9 +80,13 @@ pub fn followed(state: &AppState, s: &Settings, now_ms: i64) -> Vec<Cache> {
                 tokens: c.tokens,
                 refresh_usd: c.refresh_usd,
                 rewrite_usd: c.rewrite_usd,
+                ..Cache::default()
             })
         })
-        .collect()
+        .collect();
+    drop(dropped);
+    crate::refresh::annotate(state, s, &mut out, now_ms);
+    out
 }
 
 /// Where a conversation runs, for a notification: "Terminal", "Claude desktop" and so on.
@@ -143,19 +159,7 @@ mod tests {
     use super::*;
 
     fn cache(project: &str, branch: Option<&str>, client: Option<&str>) -> Cache {
-        Cache {
-            session_id: "s".into(),
-            project: project.into(),
-            branch: branch.map(Into::into),
-            model: "claude-opus-5-5".into(),
-            client: client.map(Into::into),
-            ttl_ms: 300_000,
-            expires_ms: 0,
-            started_ms: 0,
-            tokens: 0,
-            refresh_usd: None,
-            rewrite_usd: None,
-        }
+        Cache { session_id: "s".into(), project: project.into(), branch: branch.map(Into::into), client: client.map(Into::into), ..Cache::default() }
     }
 
     #[test]

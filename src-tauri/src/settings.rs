@@ -626,6 +626,10 @@ pub struct Settings {
     pub cache_projects: String,
     /// The projects followed while `cache_projects` is "picked", by path.
     pub cache_picked: Vec<String>,
+    /// Refreshes a waiting conversation's cache by itself shortly before it runs out.
+    pub cache_auto: bool,
+    /// How many minutes before an hour's cache runs out: 1, 2 or 5 (a 5-minute cache: in its last minute).
+    pub cache_lead: u32,
     /// Provider → `#rrggbb` for its limit bars and mark; a missing one uses the accent color.
     pub provider_colors: std::collections::BTreeMap<String, String>,
     /// Marks take the tool's color too; off keeps them in the text color.
@@ -728,6 +732,8 @@ impl Default for Settings {
             cache_menubar: true,
             cache_projects: "all".into(),
             cache_picked: Vec::new(),
+            cache_auto: false,
+            cache_lead: 2,
             provider_colors: Default::default(),
             tint_icons: false,
             show_icons: true,
@@ -843,6 +849,9 @@ impl Settings {
         self.cache_picked.sort();
         self.cache_picked.dedup();
         self.cache_picked.truncate(MAX_CACHE_PROJECTS);
+        if ![1, 2, 5].contains(&self.cache_lead) {
+            self.cache_lead = 2;
+        }
     }
 
     /// The fields a page changed (`base` → `next`) applied to the current settings, so a change
@@ -866,9 +875,9 @@ mod tests {
 
     #[test]
     fn followed_projects_are_kept_tidy() {
-        let mut s = Settings { cache_projects: "some".into(), cache_picked: vec!["/b".into(), String::new(), "/a".into(), "/b".into()], ..Default::default() };
+        let mut s = Settings { cache_projects: "some".into(), cache_picked: vec!["/b".into(), String::new(), "/a".into(), "/b".into()], cache_lead: 3, ..Default::default() };
         s.normalize();
-        assert_eq!(s.cache_projects, "all");
+        assert_eq!((s.cache_projects.as_str(), s.cache_lead), ("all", 2));
         assert_eq!(s.cache_picked, ["/a", "/b"]);
     }
 

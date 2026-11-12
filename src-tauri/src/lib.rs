@@ -1,5 +1,6 @@
 mod alerts;
 mod caches;
+mod refresh;
 mod capture;
 mod commands;
 mod fonts;
@@ -86,6 +87,9 @@ pub fn cli_mode() -> Option<i32> {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--statusline") {
         return Some(capture::statusline_main());
+    }
+    if args.iter().any(|a| a == "--cache-hook") {
+        return Some(capture::cache_hook_main());
     }
     if args.iter().any(|a| a == "--revert-capture") {
         return Some(capture::revert_all_main());
@@ -408,6 +412,10 @@ pub fn run() {
             caches::live_caches,
             caches::drop_cache,
             caches::cache_project_choices,
+            refresh::refresh_cache,
+            refresh::set_cache_auto,
+            refresh::cache_refresh_info,
+            refresh::set_cache_refresh,
             commands::list_projects,
             commands::list_projects_for_settings,
             commands::set_project_hidden,

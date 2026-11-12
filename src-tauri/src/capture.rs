@@ -120,21 +120,26 @@ pub fn git_bash() -> Option<PathBuf> {
 
 /// Must work under both Git Bash and PowerShell on Windows, whichever Claude Code uses.
 pub fn statusline_command(exe: &Path) -> String {
-    quoted_command(&exe.to_string_lossy(), short_path(exe).as_deref(), !cfg!(windows) || git_bash().is_some())
+    quoted_command(&exe.to_string_lossy(), short_path(exe).as_deref(), !cfg!(windows) || git_bash().is_some(), "--statusline")
+}
+
+/// The cache refresh hook runs the same way: Claude Code picks the shell by the same rule.
+pub fn cache_hook_command(exe: &Path) -> String {
+    quoted_command(&exe.to_string_lossy(), short_path(exe).as_deref(), !cfg!(windows) || git_bash().is_some(), "--cache-hook")
 }
 
 /// Single quotes: inside double quotes both shells would still expand `$` and backticks.
-fn quoted_command(full: &str, short: Option<&str>, bash: bool) -> String {
+fn quoted_command(full: &str, short: Option<&str>, bash: bool, flag: &str) -> String {
     // only Windows paths are turned into forward slashes; a backslash is an ordinary file name character elsewhere
     let fwd = |s: &str| if cfg!(windows) { s.replace('\\', "/") } else { s.to_owned() };
     let plain = |s: &str| s.chars().all(|c| c.is_ascii_alphanumeric() || "/:._-~".contains(c));
     if let Some(short) = short.map(fwd).filter(|s| plain(s)) {
-        return format!("{short} --statusline");
+        return format!("{short} {flag}");
     }
     let full = fwd(full);
     // PowerShell also ends a single-quoted string at the typographic single quotes
     let ps = |s: &str| s.chars().flat_map(|c| if matches!(c, '\'' | '\u{2018}'..='\u{201B}') { vec![c, c] } else { vec![c] }).collect::<String>();
-    if bash { format!("'{}' --statusline", full.replace('\'', r"'\''")) } else { format!("& '{}' --statusline", ps(&full)) }
+    if bash { format!("'{}' {flag}", full.replace('\'', r"'\''")) } else { format!("& '{}' {flag}", ps(&full)) }
 }
 
 /// Run by Claude Code as its status-line command; chains to the user's previous one if any.
@@ -159,6 +164,41 @@ pub fn statusline_main() -> i32 {
     let _ = stdout.write_all(out.as_bytes());
     let _ = stdout.flush();
     0
+}
+
+/// Run by Claude Code after each turn: waits in the background and, when the app asks, wakes the
+/// conversation for one short turn, so its prompt cache is read before it runs out.
+pub fn cache_hook_main() -> i32 {
+    use tracker_core::capture::refresh_hook as rh;
+    let Some(data_dir) = tracker_core::store::default_data_dir() else { return 0 };
+    let mut input = Vec::new();
+    let _ = std::io::stdin().take(1024 * 1024).read_to_end(&mut input);
+    let json: serde_json::Value = serde_json::from_slice(&input).unwrap_or(serde_json::Value::Null);
+    let Some(session) = json.get("session_id").and_then(|v| v.as_str()).filter(|s| rh::valid_session(s)) else { return 0 };
+    let transcript = json.get("transcript_path").and_then(|v| v.as_str()).map(PathBuf::from);
+    let me = format!("{}-{}", std::process::id(), now_ms());
+    // ends before Claude Code's own timeout, so the wait is never cut off mid-signal
+    let until = Instant::now() + Duration::from_secs(cs::REFRESH_HOOK_TIMEOUT_SECS.saturating_sub(60));
+    match rh::wait(&rh::dir(&data_dir), session, &me, transcript.as_deref(), Duration::from_secs(1), until, parent_alive()) {
+        Ok(rh::Outcome::Wake(message)) => {
+            eprint!("{message}");
+            2
+        }
+        _ => 0,
+    }
+}
+
+/// Whether the Claude Code that started the hook still runs: an orphan gets a new parent.
+#[cfg(unix)]
+fn parent_alive() -> impl Fn() -> bool {
+    let first = std::os::unix::process::parent_id();
+    move || std::os::unix::process::parent_id() == first
+}
+
+/// Windows keeps no such link; the hook's own time limit ends a wait that outlives Claude Code.
+#[cfg(not(unix))]
+fn parent_alive() -> impl Fn() -> bool {
+    || true
 }
 
 /// Set for the user's previous status-line command.
@@ -343,6 +383,7 @@ pub fn revert_all_main() -> i32 {
     let had = (state.statusline.is_some(), state.otel.is_some());
     let statusline = cs::uninstall_statusline(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: status line: {e}"));
     let otel = cs::uninstall_otel(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: telemetry: {e}"));
+    let refresh_ok = cs::uninstall_refresh_hook(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: cache refresh: {e}")).is_ok();
     let (statusline_ok, otel_ok) = (statusline.is_ok(), otel.is_ok());
     // only what the uninstaller itself took out is put back; a value the user changed stays theirs
     let restored = |r: &Result<RevertOutcome, _>| matches!(r, Ok(RevertOutcome::Restored));
@@ -356,7 +397,7 @@ pub fn revert_all_main() -> i32 {
         s.capture.otel &= !otel_ok;
         let _ = s.save(&store);
     }
-    if statusline_ok && otel_ok { 0 } else { 1 }
+    if statusline_ok && otel_ok && refresh_ok { 0 } else { 1 }
 }
 
 /// What an uninstaller turned off. A manual upgrade runs the old uninstaller first, so a start
@@ -1193,6 +1234,7 @@ pub fn start(app: &AppHandle) {
         if s.capture.statusline {
             refresh_statusline(&app.state::<AppState>().data_dir);
         }
+        crate::refresh::follow_app(&app.state::<AppState>());
         restore_after_upgrade(app);
     }
     start_claude_poller(app);
@@ -1328,18 +1370,20 @@ mod tests {
     fn status_line_paths_are_quoted_literally_for_sh() {
         let app = "/Applications/AI Usage Tracker.app/Contents/MacOS/ai-usage-tracker";
         assert_eq!(statusline_command(Path::new(app)), format!("'{app}' --statusline"));
+        assert_eq!(cache_hook_command(Path::new(app)), format!("'{app}' --cache-hook"));
         let odd = r"/Users/o'neil/$HOME `x` a\b/ai-usage-tracker";
-        assert_eq!(quoted_command(odd, None, true), r"'/Users/o'\''neil/$HOME `x` a\b/ai-usage-tracker' --statusline");
+        assert_eq!(quoted_command(odd, None, true, "--statusline"), r"'/Users/o'\''neil/$HOME `x` a\b/ai-usage-tracker' --statusline");
         // the PowerShell form doubles every kind of single quote it would end a string at
-        assert_eq!(quoted_command("/x/O\u{2019}Neil/O'K/app", None, false), "& '/x/O\u{2019}\u{2019}Neil/O''K/app' --statusline");
+        assert_eq!(quoted_command("/x/O\u{2019}Neil/O'K/app", None, false, "--statusline"), "& '/x/O\u{2019}\u{2019}Neil/O''K/app' --statusline");
     }
 
     #[cfg(windows)]
     #[test]
     fn status_line_paths_are_quoted_literally_for_each_shell() {
-        assert_eq!(quoted_command(r"C:\Users\A\x.exe", Some(r"C:\Users\A\x.exe"), true), "C:/Users/A/x.exe --statusline");
+        assert_eq!(quoted_command(r"C:\Users\A\x.exe", Some(r"C:\Users\A\x.exe"), true, "--statusline"), "C:/Users/A/x.exe --statusline");
+        assert_eq!(quoted_command(r"C:\Users\A\x.exe", Some(r"C:\Users\A\x.exe"), true, "--cache-hook"), "C:/Users/A/x.exe --cache-hook");
         let odd = r"C:\Users\O'Neil $HOME `x`\app.exe";
-        assert_eq!(quoted_command(odd, None, true), r"'C:/Users/O'\''Neil $HOME `x`/app.exe' --statusline");
-        assert_eq!(quoted_command(odd, Some(r"C:\Users\ONEIL$~1\app.exe"), false), "& 'C:/Users/O''Neil $HOME `x`/app.exe' --statusline");
+        assert_eq!(quoted_command(odd, None, true, "--statusline"), r"'C:/Users/O'\''Neil $HOME `x`/app.exe' --statusline");
+        assert_eq!(quoted_command(odd, Some(r"C:\Users\ONEIL$~1\app.exe"), false, "--statusline"), "& 'C:/Users/O''Neil $HOME `x`/app.exe' --statusline");
     }
 }
