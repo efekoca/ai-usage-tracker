@@ -74,7 +74,9 @@
     // 'behind': the current value is unknown, so only the last reading is shown
     const last = !locked && l.state === 'behind' && l.used_pct !== null ? { pct: limitShown(l.used_pct, mode), ago: l.observed_ms ? fmtDuration(now - l.observed_ms) : '' } : null
     const pct = known ? Math.max(0, Math.min(100, l.used_pct as number)) : null
-    return { pct, val: pct === null ? null : limitShown(pct, mode), last, locked, resets: locked ? null : l.resets_at, estimated: l.accuracy === 'estimated', captured: l.accuracy === 'captured' }
+    // a window that has reset keeps its past reset time
+    const resets = !locked && l.resets_at !== null && l.resets_at * 1000 > now ? l.resets_at : null
+    return { pct, val: pct === null ? null : limitShown(pct, mode), last, locked, resets, estimated: l.accuracy === 'estimated', captured: l.accuracy === 'captured' }
   }
   // a tool's own color only for the calm range; warnings keep their colors
   const level = (pct: number, p: Provider) => (pct >= ws.high_at ? 'var(--critical)' : pct >= ws.warn_at ? 'var(--serious)' : colors?.[p] || 'var(--w-accent)')

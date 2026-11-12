@@ -12,11 +12,27 @@
 
   let width = $state(600)
   let hover: number | null = $state(null)
-  const m = { top: 22, right: 8, bottom: 30, left: 8 }
+  const m = { top: 22, right: 8, left: 8 }
   const iw = $derived(Math.max(10, width - m.left - m.right))
-  const ih = $derived(height - m.top - m.bottom)
-  const y = $derived(scaleLinear().domain([0, Math.max(1e-9, ...bars.map((b) => b.value))]).range([ih, 0]))
   const band = $derived(iw / Math.max(1, bars.length))
+
+  const family = getComputedStyle(document.body).fontFamily
+  let pen: CanvasRenderingContext2D | null = null
+  function textW(s: string): number {
+    pen ??= document.createElement('canvas').getContext('2d')
+    if (!pen) return s.length * 6.5
+    pen.font = `11px ${family}`
+    return pen.measureText(s).width
+  }
+  // in a narrow chart a range breaks after its dash ("100–" over "200K") instead of running into the next one
+  const wrap = $derived(bars.some((b) => textW(b.label) > band - 6))
+  const lines = (s: string) => {
+    const i = s.indexOf('–')
+    return wrap && i > 0 ? [s.slice(0, i + 1), s.slice(i + 1)] : [s]
+  }
+  const bottom = $derived(wrap ? 43 : 30)
+  const ih = $derived(height - m.top - bottom)
+  const y = $derived(scaleLinear().domain([0, Math.max(1e-9, ...bars.map((b) => b.value))]).range([ih, 0]))
   const bw = $derived(Math.max(6, Math.min(40, band * 0.6)))
   const R = 4
 
@@ -39,12 +55,12 @@
           onmouseenter={() => (hover = i)}
           onmouseleave={() => (hover = null)}
         >
-          <rect x={i * band} y="0" width={band} height={ih + m.bottom} fill="transparent" />
+          <rect x={i * band} y="0" width={band} height={ih + bottom} fill="transparent" />
           <path d={bar(cx - bw / 2, y(b.value), bw, h)} fill={color} opacity={hover === null || hover === i ? 1 : 0.55} />
           {#if b.value > 0}
             <text x={cx} y={y(b.value) - 6} text-anchor="middle" class="val">{format(b.value)}</text>
           {/if}
-          <text x={cx} y={ih + 18} text-anchor="middle" class="lab">{b.label}</text>
+          <text x={cx} y={ih + 18} text-anchor="middle" class="lab">{#each lines(b.label) as line, j (j)}<tspan x={cx} dy={j ? 13 : 0}>{line}</tspan>{/each}</text>
         </g>
       {/each}
     </g>

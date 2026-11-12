@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, type PromptShare, type SubagentCache, type Tokens, type Tool, type Totals } from '../lib/api'
   import { app, latest, toolColor } from '../lib/store.svelte'
-  import { fmtCompact, fmtDec, fmtInt, fmtMoney, fmtPct, has, t, toolLabel } from '../lib/i18n.svelte'
+  import { agentLabel, fmtCompact, fmtDec, fmtInt, fmtMoney, fmtPct, t, toolLabel } from '../lib/i18n.svelte'
   import StatTile from './StatTile.svelte'
   import BarValue from './BarValue.svelte'
   import Icon from './Icon.svelte'
@@ -33,7 +33,6 @@
   const reuse = (x: Totals) => (x.cache_write_with_reads > 0 ? x.cache_read_with_writes / x.cache_write_with_reads : null)
   const oneHour = (k: Tokens) => (k.cache_write > 0 ? (k.cache_write_1h / k.cache_write) * 100 : null)
   const priced = (x: Totals) => x.events > 0 && x.unpriced_events < x.events
-  const agentLabel = (a: string | null) => (a === null ? t('agent.main') : has(`agent.${a}`) ? t(`agent.${a}`) : a)
   const pct = (v: number | null, digits = 1) => (v === null ? '—' : fmtPct(v, digits))
   const times = (v: number | null) => (v === null ? '—' : `${fmtDec(v, 1)}×`)
 

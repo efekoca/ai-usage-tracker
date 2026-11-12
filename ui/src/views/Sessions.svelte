@@ -1,7 +1,7 @@
 <script lang="ts">
   import { app, latest, toolColor } from '../lib/store.svelte'
   import { api, type SessionRow, type Sessions } from '../lib/api'
-  import { clientLabel, fmtCompact, fmtDateTime, fmtInt, fmtSpan, fmtMoney, fmtPct, lower, searchKey, t, toolLabel } from '../lib/i18n.svelte'
+  import { clientLabel, fmtCompact, fmtDateTime, fmtInt, fmtSpan, fmtMoney, fmtPct, searchKey, t, toolLabel } from '../lib/i18n.svelte'
   import StatTile from '../components/StatTile.svelte'
   import Icon from '../components/Icon.svelte'
   import SessionTimeline from '../components/SessionTimeline.svelte'
@@ -210,7 +210,7 @@
                             {#each s.models as m (m.model)}
                               <span class="model">
                                 <span class="chip" title={m.model}>{m.model}</span>
-                                <span class="subtle">{fmtInt(m.events)} {lower(t('sessions.requests'))}</span>
+                                <span class="subtle">{t('sessions.requestCount', { n: fmtInt(m.events) })}</span>
                                 <span class="num">{fmtCompact(m.total_tokens)}</span>
                                 <b class="num">{m.unpriced ? '—' : fmtMoney(m.cost_usd)}</b>
                               </span>
@@ -262,11 +262,14 @@
       grid-template-columns: 1fr 1fr;
     }
   }
+  .table-card {
+    padding: 6px 0;
+  }
   .head {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 16px 20px 10px;
+    padding: 12px 20px 10px;
     flex-wrap: wrap;
   }
   .search {
@@ -370,11 +373,11 @@
     padding-top: 14px;
     padding-bottom: 16px;
   }
-  /* a wide table scrolls sideways; the details keep to what is in view */
+  /* a wide table scrolls sideways; the details keep to what is in view, less the arrow column (39px) and the cell's padding */
   .grid {
     position: sticky;
     left: 0;
-    max-width: calc(var(--visible, 100%) - 34px - 42px);
+    max-width: calc(var(--visible, 100%) - 39px - 30px);
     display: flex;
     flex-direction: column;
     gap: 8px;

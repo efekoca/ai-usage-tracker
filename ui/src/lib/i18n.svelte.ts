@@ -1127,6 +1127,7 @@ const tr: Dict = {
   "sessions.project": "Proje",
   "sessions.models": "Modeller",
   "sessions.requests": "İstek",
+  "sessions.requestCount": "{n} istek",
   "sessions.hit": "Önbellek isabeti",
   "sessions.maxContext": "En büyük bağlam",
   "sessions.avgContext": "Ortalama bağlam",
@@ -1149,6 +1150,7 @@ const tr: Dict = {
   "context.max": "En büyük",
   "context.dist": "Bağlam boyutu dağılımı",
   "context.requests": "İstek",
+  "context.requestCount": "{n} istek",
   "context.share": "Pay",
   "context.cost": "API eşdeğeri",
   "context.long": "Uzun bağlam ek ücreti",
@@ -1203,6 +1205,7 @@ const tr: Dict = {
   "value.price": "Aylık ücret (USD)",
   "value.listPrice": "liste fiyatı",
   "value.customPrice": "sizin girdiğiniz",
+  "value.perMonth": "{price}/ay",
   "value.reset": "Liste fiyatına dön",
   "value.lowerBound": "Claude ve ChatGPT'de sohbet kullanımı yerel kayıtlarda bulunmadığı için hesaba girmez; gerçek değer daha yüksek olabilir.",
   "value.unpriced": "{n} fiyatsız istek hesaba girmedi.",
@@ -1298,6 +1301,7 @@ const tr: Dict = {
   "rep.note2": "Bu rapor yalnızca bu bilgisayardaki yerel kayıtlardan üretildi; istem ve yanıt içeriği kullanılmaz. Claude ve ChatGPT sohbet kullanımı yerel kayıtlarda olmadığından dahil değildir.",
   "rep.note3": "Fiyatı tanımlı olmayan modeller maliyete dahil değildir: {m}.",
   "rep.note4": "Şu modellerin fiyatı OpenCode'un model kataloğundan alındı ve doğrulanmadı: {m}.",
+  "rep.footer": "AI Usage Tracker · yerel rapor",
   "report.title": "Kullanım özeti (PDF)",
   "report.help": "Seçilen dönemin özetini PDF olarak kaydeder: toplamlar, günlük grafik, araçlar, modeller, projeler, en maliyetli oturumlar, bağlam, limitler ve abonelik değeri.",
   "report.lastWeek": "Geçen hafta",
@@ -2677,6 +2681,7 @@ const en: Dict = {
   "sessions.project": "Project",
   "sessions.models": "Models",
   "sessions.requests": "Requests",
+  "sessions.requestCount": "{n} {n|request|requests}",
   "sessions.hit": "Cache hit",
   "sessions.maxContext": "Largest context",
   "sessions.avgContext": "Average context",
@@ -2699,6 +2704,7 @@ const en: Dict = {
   "context.max": "Largest",
   "context.dist": "Context size distribution",
   "context.requests": "Requests",
+  "context.requestCount": "{n} {n|request|requests}",
   "context.share": "Share",
   "context.cost": "API equivalent",
   "context.long": "Long-context surcharge",
@@ -2753,6 +2759,7 @@ const en: Dict = {
   "value.price": "Monthly price (USD)",
   "value.listPrice": "list price",
   "value.customPrice": "your price",
+  "value.perMonth": "{price}/mo",
   "value.reset": "Use the list price",
   "value.lowerBound": "Chat use in Claude and ChatGPT is not in local logs, so it is not counted; the real value can be higher.",
   "value.unpriced": "{n} unpriced {n|request is|requests are} not counted.",
@@ -2848,6 +2855,7 @@ const en: Dict = {
   "rep.note2": "This report was made only from local logs on this computer; no prompt or response content is used. Chat use in Claude and ChatGPT is not in local logs and is not included.",
   "rep.note3": "Models without a price are not in the cost: {m}.",
   "rep.note4": "These models are priced from OpenCode's model catalog, not verified: {m}.",
+  "rep.footer": "AI Usage Tracker · local report",
   "report.title": "Usage summary (PDF)",
   "report.help": "Saves a summary of the chosen period as a PDF: totals, a daily chart, tools, models, projects, the most expensive sessions, context, limits and plan value.",
   "report.lastWeek": "Last week",
@@ -3304,6 +3312,11 @@ const OPENCODE_PROVIDERS: Record<string, string> = {
 export function clientLabel(key: string, label: string): string {
   if (key.startsWith('opencode:') && label !== 'unknown') return OPENCODE_PROVIDERS[label] ?? label
   return has(`client.${label}`) ? t(`client.${label}`) : label
+}
+
+/** A subagent's type, or the main conversation when there is none. */
+export function agentLabel(agent: string | null): string {
+  return agent === null ? t('agent.main') : has(`agent.${agent}`) ? t(`agent.${agent}`) : agent
 }
 
 /** Provider name, plus the pool when a provider has more than one (Antigravity). */

@@ -34,8 +34,9 @@
   let plans: PlansFile | null = null
   /** The period on screen, so a data refresh keeps the card and the saved note in place. */
   let shown = ''
-  /** The choice just made, shown until the saved settings come back with it. */
+  /** The choice just made, shown until its save succeeds or fails. */
   let chosen = $state<CardSettings | null>(null)
+  let choices = 0
 
   const prefs = $derived(chosen ?? app.settings?.cards ?? DEFAULT_PREFS)
   const designs = $derived(designsFor(kind))
@@ -50,7 +51,7 @@
   const moved = (k: CardKind, d: Date, n: number) =>
     k === 'day' ? addDays(d, n) : k === 'week' ? addDays(d, 7 * n) : k === 'month' ? new Date(d.getFullYear(), d.getMonth() + n, 1) : new Date(d.getFullYear() + n, 0, 1)
   const range = $derived(periodBounds(kind, at))
-  const canNext = $derived(periodBounds(kind, moved(kind, at, 1)).from <= new Date())
+  const canNext = $derived(localDate(periodBounds(kind, moved(kind, at, 1)).from) <= app.today)
   const label = $derived(
     kind === 'day' ? fmtDate(at, 'long') : kind === 'week' ? weekTitle(range.from, range.to, true) : kind === 'month' ? fmtDate(at, 'monthLong') : String(at.getFullYear()),
   )
@@ -147,7 +148,13 @@
     const next = { ...prefs, ...patch }
     chosen = next
     status = null
-    saveSettings((s) => ({ cards: { ...s.cards, ...next } })).catch((e) => (status = { ok: false, text: t('common.error', { e: String(e) }) }))
+    const mine = ++choices
+    saveSettings((s) => ({ cards: { ...s.cards, ...next } }))
+      .catch((e) => (status = { ok: false, text: t('common.error', { e: String(e) }) }))
+      .finally(() => {
+        // a quicker second choice keeps showing until its own save ends
+        if (mine === choices) chosen = null
+      })
   }
 
   function toggleInfo(x: CardInfo, on: boolean) {

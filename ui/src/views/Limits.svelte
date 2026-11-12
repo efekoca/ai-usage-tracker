@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { accountName, accountOf, app, saveSettings, markTint } from '../lib/store.svelte'
+  import { accountName, accountOf, app, latest, saveSettings, markTint } from '../lib/store.svelte'
   import { api, providersOf, type PlanDef, type PlansFile, type Provider, type Route, type Threshold } from '../lib/api'
   import { accountPlan, autoPlan, priceKey } from '../lib/plans'
   import { fmtCompact, fmtDate, fmtInput, fmtMoney, fmtPct, i18n, limitName, parseNumber, t, windowLabel } from '../lib/i18n.svelte'
@@ -29,7 +29,11 @@
       routes = []
       return
     }
-    api.accountRoutes().then((r) => (routes = r)).catch(() => (routes = []))
+    return latest(
+      () => api.accountRoutes(),
+      (r) => (routes = r),
+      () => (routes = []),
+    )
   })
   function routeText(r: Route): string {
     const to = accountName(r.to, r.provider)

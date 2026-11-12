@@ -1,5 +1,5 @@
 import { api, on, type Account, type AppInfo, type Filter, type LimitView, type Period, type Provider, type Report, type ScanStatus, type Settings, type UpdateStatus } from './api'
-import { i18n, resolveLang, t } from './i18n.svelte'
+import { i18n, localDate, resolveLang, t } from './i18n.svelte'
 
 const VIEWS = ['overview', 'tips', 'daily', 'breakdown', 'sessions', 'cache', 'context', 'limits', 'projects', 'cards', 'sources', 'widget', 'menubar', 'settings'] as const
 export type View = (typeof VIEWS)[number]
@@ -24,6 +24,8 @@ export const app = $state({
   openSession: null as string | null,
   /** bumps whenever backend data changes, so views can refetch their own data */
   tick: 0,
+  /** The local date (YYYY-MM-DD); it moves on at midnight, so "today" and the periods do too. */
+  today: localDate(),
 })
 
 export function applyAppearance(s: Settings, info: AppInfo | null) {
@@ -158,8 +160,18 @@ export async function init() {
   app.update = await api.updateStatus().catch(() => null)
   // follow OS light/dark switches live
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => app.tick++)
+  // a window left open overnight gets no new data to reload on
+  const checkDay = () => {
+    const d = localDate()
+    if (d === app.today) return
+    app.today = d
+    refresh()
+  }
+  window.addEventListener('focus', checkDay)
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && checkDay())
   // limit states (reset/stale, countdowns) move with time
   setInterval(() => {
+    checkDay()
     if (!app.settings?.onboarded) return
     const gen = refreshGen
     api.limits().then((l) => gen === refreshGen && (app.limits = l)).catch(() => {})

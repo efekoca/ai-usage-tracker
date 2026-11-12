@@ -193,9 +193,11 @@
   const usedPrices = $derived.by(() => pricing?.models.filter(used) ?? [])
   const shownPrices = $derived.by(() => (allPrices || !usedPrices.length ? (pricing?.models ?? []) : usedPrices))
 
+  let noticeTimer: ReturnType<typeof setTimeout> | undefined
   function flash(msg: string) {
+    clearTimeout(noticeTimer)
     notice = msg
-    setTimeout(() => (notice = ''), 4000)
+    noticeTimer = setTimeout(() => (notice = ''), 4000)
   }
   async function guard(fn: () => Promise<void>) {
     try {
@@ -288,8 +290,8 @@
     input: t('metric.input'),
     output: t('metric.output'),
     cache_read: t('metric.cacheRead'),
-    cache_write_5m: `${t('metric.cacheWrite')} 5m`,
-    cache_write_1h: `${t('metric.cacheWrite')} 1h`,
+    cache_write_5m: t('cache.write5m'),
+    cache_write_1h: t('cache.write1h'),
   })
   function num(v: string): number | null {
     const n = parseNumber(v)
@@ -678,8 +680,8 @@
             <th scope="col" class="num">{t('metric.input')}</th>
             <th scope="col" class="num">{t('metric.output')}</th>
             <th scope="col" class="num">{t('metric.cacheRead')}</th>
-            <th scope="col" class="num">{t('metric.cacheWrite')} 5m</th>
-            <th scope="col" class="num">{t('metric.cacheWrite')} 1h</th>
+            <th scope="col" class="num">{t('cache.write5m')}</th>
+            <th scope="col" class="num">{t('cache.write1h')}</th>
             <th scope="col"><span class="sr-only">{t('settings.pricing.rowActions')}</span></th>
           </tr>
         </thead>
@@ -759,7 +761,7 @@
       <h3 class="sub">{t('settings.pricing.own')}</h3>
       <div class="row wrap own">
         <Select label={t('common.model')} bind:value={own.model} minWidth={190} searchable placeholder="—" options={unpriced.map((m) => ({ value: m, label: m }))} />
-        {#each [['input', t('metric.input')], ['output', t('metric.output')], ['cache_read', t('metric.cacheRead')], ['cache_write_5m', `${t('metric.cacheWrite')} 5m`]] as const as [k, label] (k)}
+        {#each [['input', t('metric.input')], ['output', t('metric.output')], ['cache_read', t('metric.cacheRead')], ['cache_write_5m', t('cache.write5m')]] as const as [k, label] (k)}
           <label class="own-field">
             <span class="subtle small">{label}</span>
             <input class="field" inputmode="decimal" placeholder={k === 'input' || k === 'output' ? '$' : '—'} bind:value={own[k]} oninput={() => (ownError = '')} />
