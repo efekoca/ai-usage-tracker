@@ -3,6 +3,7 @@
   import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window'
   import { api, on, type AppInfo, type PanelData, type Settings } from './lib/api'
   import { applyAppearance } from './lib/store.svelte'
+  import { page } from './lib/page.svelte'
   import { fmtClock, t } from './lib/i18n.svelte'
   import PanelGrid from './components/panel/PanelGrid.svelte'
   import Icon from './components/Icon.svelte'
@@ -84,6 +85,15 @@
   }
   const view = $derived(data ? { ...data, scanning: data.scanning || busy } : null)
 
+  // a hidden panel reads nothing and its clock stands still; opening it reads at once (focus)
+  const update = () => page.visible && load()
+  $effect(() => {
+    if (!page.visible) return
+    now = Date.now()
+    const clock = setInterval(() => (now = Date.now()), 15_000)
+    return () => clearInterval(clock)
+  })
+
   const act = (a: string) => (a === 'rescan' ? rescan() : api.panelAction(a).catch(() => {}))
 
   onMount(() => {
@@ -95,17 +105,17 @@
       await load()
     })()
     const subs = [
-      on('data-changed', load),
-      on('scan-progress', () => data && !data.scanning && load()),
+      on('data-changed', update),
+      on('scan-progress', () => data && !data.scanning && update()),
       on('scan-finished', () => {
-        load()
+        update()
         finished()
       }),
-      on('update-status', load),
+      on('update-status', update),
       on<Settings>('settings-changed', (s) => {
         settings = s
         apply(s)
-        load()
+        update()
       }),
     ]
     // opened again: show fresh values at once
@@ -113,14 +123,12 @@
     window.addEventListener('focus', focus)
     const keys = (e: KeyboardEvent) => e.key === 'Escape' && act('close')
     window.addEventListener('keydown', keys)
-    const clock = setInterval(() => (now = Date.now()), 15_000)
     const refresh = setInterval(() => document.hasFocus() && load(), 60_000)
     const ro = new ResizeObserver(() => fit())
     if (host) ro.observe(host)
     return () => {
       ro.disconnect()
       timers.forEach(clearTimeout)
-      clearInterval(clock)
       clearInterval(refresh)
       window.removeEventListener('focus', focus)
       window.removeEventListener('keydown', keys)

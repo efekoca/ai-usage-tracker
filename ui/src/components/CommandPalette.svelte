@@ -32,7 +32,7 @@
     app.view = view
     if (section) {
       // after the page has rendered and scrolled to its top
-      tick().then(() => requestAnimationFrame(() => document.getElementById(`settings-${section}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })))
+      tick().then(() => requestAnimationFrame(() => document.getElementById(`settings-${section}`)?.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })))
     }
   }
 

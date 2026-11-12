@@ -27,6 +27,8 @@
       /* backend busy; the next tick retries */
     }
   }
+  // a hidden widget reads nothing; it reads once when shown again
+  const update = () => !document.hidden && load()
 
   let lastSize = ''
   async function fit() {
@@ -52,7 +54,7 @@
   $effect(() => {
     const at = data?.cache?.expires_ms
     if (!at) return
-    const id = setTimeout(load, Math.max(0, at - Date.now()) + 500)
+    const id = setTimeout(update, Math.max(0, at - Date.now()) + 500)
     return () => clearTimeout(id)
   })
 
@@ -65,20 +67,22 @@
       await load()
     })()
     const subs = [
-      on('data-changed', load),
+      on('data-changed', update),
       on<Settings>('settings-changed', (s) => {
         settings = s
         apply(s)
-        load()
+        update()
       }),
     ]
-    const id = setInterval(load, 60_000)
+    const id = setInterval(update, 60_000)
+    document.addEventListener('visibilitychange', update)
     // a web font that finishes loading late changes the size without any data change
     const ro = new ResizeObserver(() => fit())
     if (host) ro.observe(host)
     return () => {
       ro.disconnect()
       clearInterval(id)
+      document.removeEventListener('visibilitychange', update)
       subs.forEach((p) => p.then((u) => u()))
     }
   })

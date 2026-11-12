@@ -43,7 +43,7 @@
   <div class="banner"><Icon name="info" size={16} />{t('common.empty')}</div>
 {:else}
   <section class="tiles card">
-    <StatTile hero label={t('cache.hitRate')} hint={t('cache.hitRate.help')} value={fmtPct(hit(tk) ?? 0, 1)} current={hit(tk)} previous={hit(r.previous.tokens)} />
+    <StatTile hero label={t('cache.hitRate')} hint={t('cache.hitRate.help')} value={fmtPct(hit(tk) ?? 0, 1)} current={hit(tk)} previous={hit(r.previous.tokens)} points />
     <StatTile label={t('cache.savings')} hint={t('cache.savings.help')} value={fmtMoney(r.totals.cache_savings_usd)} current={r.totals.cache_savings_usd} previous={r.previous.cache_savings_usd} />
     <StatTile label={t('cache.reuse')} hint={t('cache.reuse.help')} value={reuse(r.totals) !== null ? `${fmtDec(reuse(r.totals) ?? 0, 1)}×` : '—'} />
     <StatTile label={t('cache.promptTokens')} value={fmtCompact(prompt(tk))}>

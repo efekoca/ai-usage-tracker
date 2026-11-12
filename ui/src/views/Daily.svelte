@@ -62,7 +62,8 @@
     }
     // today without use yet does not break the current streak
     let now = 0
-    const list = days.at(-1)?.events === 0 ? days.slice(0, -1) : days
+    const last = days.at(-1)
+    const list = last?.events === 0 && last.date === app.today ? days.slice(0, -1) : days
     for (let i = list.length - 1; i >= 0 && list[i].events > 0; i--) now++
     return { best, now }
   })

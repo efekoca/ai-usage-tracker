@@ -2,6 +2,7 @@
   import type { Provider, WidgetData, WidgetItemKind, WidgetPeriod, WidgetSettings } from '../lib/api'
   import { fmtCompact, fmtDec, fmtDuration, fmtMoney, fmtPct, fmtTime, has, limitShown, lower, t, toolLabel, type LimitMode } from '../lib/i18n.svelte'
   import { nameAccount, toolColor } from '../lib/store.svelte'
+  import { page } from '../lib/page.svelte'
   import BrandIcon from './BrandIcon.svelte'
   import Icon from './Icon.svelte'
   import CachePie from './CachePie.svelte'
@@ -84,13 +85,15 @@
 
   let now = $state(Date.now())
   $effect(() => {
+    if (!page.visible) return
+    now = Date.now()
     const id = setInterval(() => (now = Date.now()), 30_000)
     return () => clearInterval(id)
   })
-  // the cache countdown ticks by the second, and only while there is one
+  // the cache countdown ticks by the second, and only while there is one on screen
   let tick = $state(Date.now())
   $effect(() => {
-    if (!data?.cache) return
+    if (!data?.cache || !page.visible) return
     tick = Date.now()
     const id = setInterval(() => (tick = Date.now()), 1000)
     return () => clearInterval(id)

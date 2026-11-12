@@ -26,7 +26,8 @@
     void app.tick
     const known = untrack(() => plans)
     const from = reach
-    const to = app.today
+    // a new day refreshes the data, and its tick reloads this
+    const to = untrack(() => app.today)
     return latest(
       () => Promise.all([known ? Promise.resolve(known) : api.plans(), api.planValue(from ? { kind: 'custom', from, to } : undefined)]),
       ([p, v]) => {

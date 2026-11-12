@@ -54,8 +54,11 @@
   const known = $derived(!locked && lstate === 'fresh' && used !== null)
   const behind = $derived(!locked && lstate === 'behind' && used !== null)
   const pct = $derived(known ? Math.max(0, Math.min(100, used as number)) : 0)
+  // the user's levels, as on the widget and the tray
+  const warnAt = $derived(app.settings?.widget.warn_at ?? 70)
+  const highAt = $derived(app.settings?.widget.high_at ?? 90)
   // 99.5 already prints as 100 %, so it counts as full here too (as in the limit history)
-  const level = $derived(locked ? 'locked' : behind ? 'outdated' : !known ? 'unknown' : pct >= 99.5 ? 'full' : pct >= 90 ? 'high' : pct >= 70 ? 'warn' : 'ok')
+  const level = $derived(locked ? 'locked' : behind ? 'outdated' : !known ? 'unknown' : pct >= 99.5 ? 'full' : pct >= highAt ? 'high' : pct >= warnAt ? 'warn' : 'ok')
   const icon = $derived(level === 'ok' ? 'check' : level === 'locked' ? 'lock' : level === 'unknown' || level === 'outdated' ? 'clock' : 'warning')
   // severity always follows usage; only the number and the bar follow the chosen reading
   const mode = $derived(app.settings?.limit_display ?? 'used')

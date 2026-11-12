@@ -15,8 +15,13 @@
   import EarlyRestartNotice from '../components/EarlyRestartNotice.svelte'
 
   let plans: PlansFile | null = $state(null)
+  let plansFailed = $state('')
   onMount(async () => {
-    plans = await api.plans()
+    try {
+      plans = await api.plans()
+    } catch (e) {
+      plansFailed = String(e)
+    }
   })
 
   const providers = $derived(providersOf(app.settings?.enabled_sources ?? []))
@@ -149,6 +154,9 @@
     <button class="btn ghost small" onclick={() => saveSettings({ router_page: false })}>{t('route.off')}</button>
   </div>
 {/each}
+{#if plansFailed}
+  <div class="banner failed" role="alert"><Icon name="warning" size={16} />{t('common.error', { e: plansFailed })}</div>
+{/if}
 {#if plans}
   <section class="card plans">
     {#each providers as p (p)}
@@ -360,7 +368,8 @@
   header .spacer {
     flex: 1;
   }
-  section {
+  section,
+  .failed {
     margin-bottom: 16px;
   }
   .plans {

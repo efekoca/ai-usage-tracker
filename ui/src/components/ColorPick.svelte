@@ -1,4 +1,11 @@
+<script lang="ts" module>
+  /** A color and its name, which screen readers say instead of the hex code. */
+  export type Swatch = [color: string, name: 'orange' | 'green' | 'blue' | 'purple' | 'pink' | 'gray']
+</script>
+
 <script lang="ts">
+  import { t } from '../lib/i18n.svelte'
+
   // '' is the theme's accent color
   let {
     value,
@@ -7,12 +14,13 @@
     customLabel,
     swatches,
     onchange,
-  }: { value: string; label: string; defaultLabel: string; customLabel: string; swatches: string[]; onchange: (v: string) => void } = $props()
+  }: { value: string; label: string; defaultLabel: string; customLabel: string; swatches: Swatch[]; onchange: (v: string) => void } = $props()
 </script>
 
 <div class="row pick" role="group" aria-label={label}>
-  {#each ['', ...swatches] as c (c)}
-    <button class="swatchbtn" class:sel={value.toLowerCase() === c} style="--c:{c || 'var(--accent)'}" aria-label={c || defaultLabel} aria-pressed={value.toLowerCase() === c} title={c || defaultLabel} onclick={() => onchange(c)}>
+  {#each [['', ''] as const, ...swatches] as [c, name] (c)}
+    {@const said = name ? t(`color.${name}`) : defaultLabel}
+    <button class="swatchbtn" class:sel={value.toLowerCase() === c} style="--c:{c || 'var(--accent)'}" aria-label={said} aria-pressed={value.toLowerCase() === c} title={said} onclick={() => onchange(c)}>
       {#if !c}<span aria-hidden="true">A</span>{/if}
     </button>
   {/each}

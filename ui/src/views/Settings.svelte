@@ -10,14 +10,14 @@
   import Toggle from '../components/Toggle.svelte'
   import Icon from '../components/Icon.svelte'
   import BrandIcon from '../components/BrandIcon.svelte'
-  import ColorPick from '../components/ColorPick.svelte'
+  import ColorPick, { type Swatch } from '../components/ColorPick.svelte'
   import ReportCard from '../components/ReportCard.svelte'
   import { ensureRefresh, loadRefreshInfo, refresh as hook, removeRefresh } from '../lib/refresh.svelte'
 
   const s = $derived(app.settings!)
 
   // brand-like hues, then neutral ones; warnings keep their own colors whatever is picked
-  const TOOL_SWATCHES = ['#d97757', '#10a37f', '#4285f4', '#8b5cf6', '#e87ba4', '#52514e']
+  const TOOL_SWATCHES: Swatch[] = [['#d97757', 'orange'], ['#10a37f', 'green'], ['#4285f4', 'blue'], ['#8b5cf6', 'purple'], ['#e87ba4', 'pink'], ['#52514e', 'gray']]
   function setTint(p: Provider, color: string) {
     saveSettings((c) => {
       const next = { ...c.provider_colors }
@@ -28,6 +28,21 @@
   }
   // "Start with Windows" only on Windows; elsewhere it starts at login
   const fx = $derived(s.currency === 'USD' ? 1 : s.fx_rate)
+  // another currency waits for its own rate, so amounts never show at the old currency's rate
+  let newCurrency = $state('')
+  function pickCurrency(c: string) {
+    newCurrency = c === s.currency || c === 'USD' ? '' : c
+    if (c === 'USD' && s.currency !== 'USD') saveSettings({ currency: c })
+  }
+  function setRate(el: HTMLInputElement) {
+    const n = num(el.value)
+    if (!n) {
+      el.value = newCurrency ? '' : fmtInput(s.fx_rate)
+      return
+    }
+    saveSettings(newCurrency ? { currency: newCurrency, fx_rate: n } : { fx_rate: n })
+    newCurrency = ''
+  }
   function setBudget(el: HTMLInputElement) {
     const n = el.value.trim() ? num(el.value) : 0
     // a budget of 0 is off, and the field then shows "Off" as for an empty one
@@ -78,10 +93,16 @@
     saveSettings({ cache_auto: on })
   }
 
+  let loadFailed = $state('')
   onMount(async () => {
     hk = await api.hotkeyStatus().catch(() => null)
-    await loadPricing()
-    models = await api.models()
+    try {
+      await loadPricing()
+      models = await api.models()
+    } catch (e) {
+      loadFailed = String(e)
+      return
+    }
     cataloged = await api.catalogPrices(models).catch(() => [])
   })
 
@@ -334,6 +355,9 @@
   <h1>{t('settings.title')}</h1>
   {#if notice}<span class="notice" role="status"><Icon name="check" size={14} />{notice}</span>{/if}
 </header>
+{#if loadFailed}
+  <div class="banner failed" role="alert"><Icon name="warning" size={16} />{t('common.error', { e: loadFailed })}</div>
+{/if}
 
 <section class="card group" id="settings-general">
   <h2>{t('settings.general')}</h2>
@@ -478,13 +502,17 @@
     </div>
   {/if}
   <div class="item">
-    <div><span>{t('settings.currency')}</span><div class="subtle small">{t('settings.currency.help')}</div></div>
+    <div>
+      <span>{t('settings.currency')}</span>
+      <div class="subtle small">{t('settings.currency.help')}</div>
+      {#if newCurrency}<div class="small err" role="alert">{t('settings.fxRate.needed', { c: newCurrency, old: s.currency })}</div>{/if}
+    </div>
     <div class="row">
-      <Select label={t('settings.currency')} value={s.currency} minWidth={110} options={['USD', 'TRY', 'EUR', 'GBP'].map((c) => ({ value: c, label: c }))} onchange={(v) => saveSettings({ currency: v })} />
-      {#if s.currency !== 'USD'}
+      <Select label={t('settings.currency')} value={newCurrency || s.currency} minWidth={110} options={['USD', 'TRY', 'EUR', 'GBP'].map((c) => ({ value: c, label: c }))} onchange={pickCurrency} />
+      {#if (newCurrency || s.currency) !== 'USD'}
         <label class="row small muted">{t('settings.fxRate')}
-          <input class="field rate" inputmode="decimal" value={fmtInput(s.fx_rate)} onchange={(e) => { const n = num(e.currentTarget.value); if (n) saveSettings({ fx_rate: n }); else e.currentTarget.value = fmtInput(s.fx_rate) }} />
-          {s.currency}</label>
+          <input class="field rate" inputmode="decimal" value={newCurrency ? '' : fmtInput(s.fx_rate)} aria-invalid={!!newCurrency || undefined} onchange={(e) => setRate(e.currentTarget)} />
+          {newCurrency || s.currency}</label>
       {/if}
     </div>
   </div>
@@ -585,7 +613,7 @@
           {t('settings.hotkey.record')}
         </div>
       {:else if s.widget.hotkey}
-        <span class="keys" aria-label={s.widget.hotkey}>{#each keycaps(s.widget.hotkey) as k, i (i)}<kbd>{k}</kbd>{/each}</span>
+        <span class="keys"><span class="sr-only">{s.widget.hotkey}</span>{#each keycaps(s.widget.hotkey) as k, i (i)}<kbd aria-hidden="true">{k}</kbd>{/each}</span>
       {:else}
         <span class="subtle small">{t('settings.hotkey.none')}</span>
       {/if}
@@ -865,7 +893,8 @@
     padding: 4px 10px;
     border-radius: 8px;
   }
-  .group {
+  .group,
+  .failed {
     margin-bottom: 16px;
   }
   .group h2 {

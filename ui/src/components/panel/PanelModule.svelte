@@ -20,6 +20,7 @@
   import { api, type LiveCache, type Settings } from '../../lib/api'
   import { fmtClock, fmtCompact, fmtInt, fmtMoney, fmtPct, fmtSpan, fmtTime, limitName, limitShown, t, toolLabel, windowLabel, type LimitMode } from '../../lib/i18n.svelte'
   import { nameAccount } from '../../lib/store.svelte'
+  import { page } from '../../lib/page.svelte'
   import BrandIcon from '../BrandIcon.svelte'
   import Icon from '../Icon.svelte'
   import Ring from './Ring.svelte'
@@ -119,7 +120,7 @@
   // the cache countdown ticks by the second, and only while there is one to show
   let clock = $state(Date.now())
   $effect(() => {
-    if (m.kind !== 'caches' || !data?.caches.length) return
+    if (m.kind !== 'caches' || !data?.caches.length || !page.visible) return
     clock = Date.now()
     const id = setInterval(() => (clock = Date.now()), 1000)
     return () => clearInterval(id)

@@ -7,9 +7,18 @@
   import Branches from '../components/Branches.svelte'
 
   let rows: ProjectRow[] = $state([])
+  let loadFailed = $state('')
+  let saveFailed = $state('')
   $effect(() => {
     void app.tick
-    return latest(() => api.projectsForSettings(), (r) => (rows = r))
+    return latest(
+      () => api.projectsForSettings(),
+      (r) => {
+        rows = r
+        loadFailed = ''
+      },
+      (e) => (loadFailed = String(e)),
+    )
   })
 
   const byId = $derived(new Map((app.report?.by_project ?? []).map((g) => [g.key, g])))
@@ -21,7 +30,13 @@
   const noProject = $derived(byId.get('none'))
 
   async function toggle(p: ProjectRow, hidden: boolean) {
-    await api.setProjectHidden(p.id, hidden)
+    try {
+      await api.setProjectHidden(p.id, hidden)
+    } catch (e) {
+      saveFailed = String(e)
+      return
+    }
+    saveFailed = ''
     p.hidden = hidden
     refresh()
   }
@@ -33,6 +48,9 @@
 </script>
 
 <p class="subtle small help icon-text"><Icon name="lock" size={13} /> {t('projects.help')}</p>
+{#if saveFailed || loadFailed}
+  <div class="banner failed" role="alert"><Icon name="warning" size={16} />{t('common.error', { e: saveFailed || loadFailed })}</div>
+{/if}
 
 <section class="card list-card">
   {#if sorted.length || noProject}
@@ -43,6 +61,8 @@
       <span class="num">{t('breakdown.share')}</span>
       <span class="hide">{t('projects.hide')}</span>
     </div>
+  {:else}
+    <p class="muted">{t('common.empty')}</p>
   {/if}
   {#each sorted as p (p.id)}
     {@const g = byId.get(String(p.id))}
@@ -63,8 +83,6 @@
         <Toggle checked={p.hidden} label="{t('projects.hide')}: {name(p)}" onchange={(v) => toggle(p, v)} />
       </span>
     </div>
-  {:else}
-    <p class="muted">{t('common.empty')}</p>
   {/each}
   {#if noProject}
     <div class="list-row">
@@ -86,6 +104,9 @@
     align-items: flex-start;
     margin-bottom: 12px;
     max-width: 760px;
+  }
+  .failed {
+    margin-bottom: 12px;
   }
   .list-card {
     padding: 4px 20px;

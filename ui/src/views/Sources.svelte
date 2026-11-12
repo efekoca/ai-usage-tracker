@@ -1,6 +1,6 @@
 <script lang="ts">
   import { open } from '@tauri-apps/plugin-dialog'
-  import { app, saveSettings } from '../lib/store.svelte'
+  import { app, saveSettings, type SettingsPatch } from '../lib/store.svelte'
   import { api, type ParserWarning, type SourceId, type SourceInfo } from '../lib/api'
   import { fmtDuration, t } from '../lib/i18n.svelte'
   import Toggle from '../components/Toggle.svelte'
@@ -11,51 +11,73 @@
   let warnings: ParserWarning[] = $state([])
   let now = $state(Date.now())
 
+  let loadFailed = $state('')
+  let failed = $state('')
+
   let gen = 0
   async function load() {
     const mine = ++gen
-    const [s, w] = await Promise.all([api.detectSources(), api.parserWarnings()])
-    if (mine !== gen) return
-    sources = s
-    warnings = w
-    now = Date.now()
+    try {
+      const [s, w] = await Promise.all([api.detectSources(), api.parserWarnings()])
+      if (mine !== gen) return
+      sources = s
+      warnings = w
+      now = Date.now()
+      loadFailed = ''
+    } catch (e) {
+      if (mine === gen) loadFailed = String(e)
+    }
   }
   $effect(() => {
     void app.tick
     void app.scan?.last_scan_ms
-    load().catch(() => {})
+    load()
     return () => gen++
   })
 
-  async function setEnabled(id: SourceId, on: boolean) {
-    await saveSettings((c) => {
+  async function save(patch: SettingsPatch) {
+    try {
+      await saveSettings(patch)
+      failed = ''
+    } catch (e) {
+      failed = String(e)
+      return
+    }
+    load()
+  }
+  function rescan() {
+    api.rescan().then(
+      () => (failed = ''),
+      (e) => (failed = String(e)),
+    )
+  }
+
+  function setEnabled(id: SourceId, on: boolean) {
+    save((c) => {
       const cur = new Set(c.enabled_sources)
       if (on) cur.add(id)
       else cur.delete(id)
       return { enabled_sources: [...cur] }
     })
-    load()
   }
 
   async function addFolder(kind: 'claude' | 'codex') {
     const dir = await open({ directory: true, multiple: false })
     if (typeof dir !== 'string') return
-    await saveSettings((c) => {
+    save((c) => {
       const ep = { ...c.extra_paths }
       if (kind === 'claude') ep.claude_config_dirs = [...new Set([...ep.claude_config_dirs, dir])]
       else ep.codex_homes = [...new Set([...ep.codex_homes, dir])]
       return { extra_paths: ep }
     })
-    load()
   }
-  async function removeFolder(kind: 'claude' | 'codex', dir: string) {
-    await saveSettings((c) => {
+  function removeFolder(kind: 'claude' | 'codex', dir: string) {
+    save((c) => {
       const ep = { ...c.extra_paths }
       if (kind === 'claude') ep.claude_config_dirs = ep.claude_config_dirs.filter((d) => d !== dir)
       else ep.codex_homes = ep.codex_homes.filter((d) => d !== dir)
       return { extra_paths: ep }
     })
-    load()
   }
 </script>
 
@@ -67,9 +89,12 @@
   {:else if app.scan?.last_scan_ms}
     <span class="muted small">{t('sources.lastScan', { t: fmtDuration(now - app.scan.last_scan_ms) })}</span>
   {/if}
-  <button class="btn" onclick={() => api.rescan()} disabled={app.scan?.running}><Icon name="refresh" size={15} />{t('sources.rescan')}</button>
+  <button class="btn" onclick={rescan} disabled={app.scan?.running}><Icon name="refresh" size={15} />{t('sources.rescan')}</button>
 </header>
 <p class="subtle small help icon-text"><Icon name="lock" size={13} /> {t('sources.help')}</p>
+{#if failed || loadFailed}
+  <div class="banner failed" role="alert"><Icon name="warning" size={16} />{t('common.error', { e: failed || loadFailed })}</div>
+{/if}
 
 <section class="card list-card">
   {#each sources as s (s.id)}
@@ -144,7 +169,8 @@
     margin-bottom: 14px;
     max-width: 760px;
   }
-  section {
+  section,
+  .failed {
     margin-bottom: 16px;
   }
   .list-card {
