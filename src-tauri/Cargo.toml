@@ -42,7 +42,7 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls-no-p
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_Foundation", "Win32_System_Registry", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp"] }
+windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_Foundation", "Win32_Globalization", "Win32_System_Registry", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp"] }
 # must match the versions Tauri's own WebView2 binding uses (PrintToPdf)
 webview2-com = "0.39"
 windows = { version = "0.62", features = ["Data_Xml_Dom", "Foundation", "UI_Notifications"] }

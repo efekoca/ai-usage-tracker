@@ -1,4 +1,5 @@
-//! Missing or unknown fields fall back to defaults so older or newer settings never break startup.
+//! Missing fields, and fields whose type no longer fits, fall back to their defaults, and fields
+//! this version does not know are kept, so older or newer settings never break startup or get lost.
 
 use serde::{Deserialize, Serialize};
 use tracker_core::analytics::Threshold;
@@ -89,6 +90,9 @@ pub struct WidgetSettings {
     pub tabular_nums: bool,
     /// Empty = no shortcut.
     pub hotkey: String,
+    /// Fields this version does not know (a newer one wrote them), kept so saving does not drop them.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl Default for WidgetSettings {
@@ -130,6 +134,7 @@ impl Default for WidgetSettings {
             number_weight: 700,
             tabular_nums: true,
             hotkey: DEFAULT_HOTKEY.into(),
+            extra: Default::default(),
         }
     }
 }
@@ -239,6 +244,9 @@ pub struct TraySettings {
     pub warn_mark: bool,
     /// Text only, without the icon (macOS).
     pub hide_icon: bool,
+    /// Fields this version does not know (a newer one wrote them), kept so saving does not drop them.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 /// One piece of the text next to the icon. `kind`: "limit", "forecast" (when a limit fills at
@@ -312,6 +320,7 @@ impl Default for TraySettings {
             suffix: String::new(),
             warn_mark: true,
             hide_icon: false,
+            extra: Default::default(),
         }
     }
 }
@@ -378,11 +387,14 @@ pub struct NotifySettings {
     /// Shortly before Claude Code's prompt cache runs out. Off at first: a five-minute cache
     /// would tell every short pause.
     pub cache: bool,
+    /// Fields this version does not know (a newer one wrote them), kept so saving does not drop them.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl Default for NotifySettings {
     fn default() -> Self {
-        NotifySettings { enabled: true, early: "warn".into(), full: true, reset: true, five_hour: true, seven_day: true, budget: true, sign_in: true, route: true, cache: false }
+        NotifySettings { enabled: true, early: "warn".into(), full: true, reset: true, five_hour: true, seven_day: true, budget: true, sign_in: true, route: true, cache: false, extra: Default::default() }
     }
 }
 
@@ -393,6 +405,9 @@ pub struct PanelSettings {
     pub modules: Vec<PanelModule>,
     /// "app" (the app's used/remaining choice), "used" or "remaining".
     pub value: String,
+    /// Fields this version does not know (a newer one wrote them), kept so saving does not drop them.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 /// `kind`: "limit" (one window), "provider" (both windows of a pool), "usage" (a period, of every
@@ -483,6 +498,7 @@ impl Default for PanelSettings {
                 find(&|x| x.action == "rescan"),
                 find(&|x| x.action == "settings"),
             ],
+            extra: Default::default(),
         }
     }
 }
@@ -534,6 +550,9 @@ pub struct CaptureSettings {
     pub antigravity_poll_minutes: u64,
     /// Empty = auto-detect.
     pub antigravity_path: String,
+    /// Fields this version does not know (a newer one wrote them), kept so saving does not drop them.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl Default for CaptureSettings {
@@ -551,6 +570,7 @@ impl Default for CaptureSettings {
             antigravity_poll: true,
             antigravity_poll_minutes: 5,
             antigravity_path: String::new(),
+            extra: Default::default(),
         }
     }
 }
@@ -648,6 +668,9 @@ pub struct Settings {
     /// renews; with one, plan value counts from the last renewal instead of the last 30 days.
     pub renewal_days: std::collections::BTreeMap<String, u8>,
     pub cards: CardSettings,
+    /// Fields this version does not know (a newer one wrote them), kept so saving does not drop them.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 /// How the Summary cards page draws a card.
@@ -662,11 +685,14 @@ pub struct CardSettings {
     pub format: String,
     /// What the cards leave out: "cost", "plan", "change", "tools", "models", "badges", "arc".
     pub hide: Vec<String>,
+    /// Fields this version does not know (a newer one wrote them), kept so saving does not drop them.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl Default for CardSettings {
     fn default() -> Self {
-        CardSettings { theme: "navy".into(), accent: "theme".into(), format: "story".into(), hide: Vec::new() }
+        CardSettings { theme: "navy".into(), accent: "theme".into(), format: "story".into(), hide: Vec::new(), extra: Default::default() }
     }
 }
 
@@ -742,6 +768,7 @@ impl Default for Settings {
             account_prices: Default::default(),
             renewal_days: Default::default(),
             cards: CardSettings::default(),
+            extra: Default::default(),
         }
     }
 }
@@ -779,28 +806,64 @@ fn apply_changes(cur: &mut serde_json::Value, base: &serde_json::Value, next: &s
     }
 }
 
+/// What still reads of settings another version wrote: a field whose type no longer fits (after
+/// going back to an older version) takes its default, and every other field is kept.
+fn readable_part(stored: &serde_json::Value) -> Settings {
+    let mut kept = serde_json::Value::Object(Default::default());
+    keep_readable(&mut kept, &[], stored);
+    Settings::deserialize(&kept).unwrap_or_default()
+}
+
+/// Adds the fields of `stored` at `at` one by one, each only while the settings still read with
+/// it; an object that does not read whole is tried field by field.
+fn keep_readable(kept: &mut serde_json::Value, at: &[&str], stored: &serde_json::Value) {
+    let serde_json::Value::Object(fields) = stored else { return };
+    for (k, v) in fields {
+        let path: Vec<&str> = at.iter().copied().chain([k.as_str()]).collect();
+        if !put_if_readable(kept, &path, v.clone()) && v.is_object() && put_if_readable(kept, &path, serde_json::Value::Object(Default::default())) {
+            keep_readable(kept, &path, v);
+        }
+    }
+}
+
+fn put_if_readable(kept: &mut serde_json::Value, path: &[&str], value: serde_json::Value) -> bool {
+    let Some((last, parents)) = path.split_last() else { return false };
+    let mut trial = kept.clone();
+    let Some(parent) = parents.iter().try_fold(&mut trial, |v, k| v.get_mut(*k)).and_then(serde_json::Value::as_object_mut) else { return false };
+    parent.insert((*last).to_owned(), value);
+    if Settings::deserialize(&trial).is_err() {
+        return false;
+    }
+    *kept = trial;
+    true
+}
+
 fn sources_before_antigravity() -> Vec<SourceId> {
     vec![SourceId::ClaudeCode, SourceId::Cowork, SourceId::ClaudeDesktop, SourceId::Codex, SourceId::ChatgptDesktop]
 }
 
 impl Settings {
     pub fn load(store: &Store) -> Settings {
-        match store.setting(KEY) {
-            Ok(Some(s)) => serde_json::from_str::<Settings>(&s)
-                .map(|mut s| {
-                    s.widget.normalize();
-                    s.tray.normalize();
-                    s.panel.normalize();
-                    s.cards.normalize();
-                    s.adopt_new_sources();
-                    s
-                })
-                .unwrap_or_else(|e| {
+        let Ok(Some(text)) = store.setting(KEY) else { return Settings::default() };
+        let mut s = match serde_json::from_str::<Settings>(&text) {
+            Ok(s) => s,
+            Err(e) => match serde_json::from_str::<serde_json::Value>(&text) {
+                Ok(stored) => {
+                    log::warn!("some settings unreadable, using their defaults: {e}");
+                    readable_part(&stored)
+                }
+                Err(_) => {
                     log::warn!("settings unreadable, using defaults: {e}");
-                    Settings::default()
-                }),
-            _ => Settings::default(),
-        }
+                    return Settings::default();
+                }
+            },
+        };
+        s.widget.normalize();
+        s.tray.normalize();
+        s.panel.normalize();
+        s.cards.normalize();
+        s.adopt_new_sources();
+        s
     }
 
     /// A source the user switched off stays off; one they were never offered is switched on.
@@ -925,7 +988,7 @@ mod tests {
         let mut s: Settings = serde_json::from_str(r##"{"cards":{"theme":"neon","accent":"red","format":"a4","hide":["cost","cost","projects","badges"]}}"##).unwrap();
         s.normalize();
         assert_eq!(s.cards, CardSettings { hide: vec!["cost".into(), "badges".into()], ..CardSettings::default() });
-        let mut kept = CardSettings { theme: "aurora".into(), accent: "#ff8a4c".into(), format: "wallpaper".into(), hide: vec![] };
+        let mut kept = CardSettings { theme: "aurora".into(), accent: "#ff8a4c".into(), format: "wallpaper".into(), ..CardSettings::default() };
         kept.normalize();
         assert_eq!((kept.theme.as_str(), kept.accent.as_str(), kept.format.as_str()), ("aurora", "#ff8a4c", "wallpaper"));
     }
@@ -1039,11 +1102,11 @@ mod tests {
         assert_eq!(got, [("usage", "w", ""), ("provider", "l", "bar"), ("limit", "m", "ring")]);
 
         assert_eq!(p.value, "app", "a panel saved without the choice follows the app");
-        let mut p = PanelSettings { modules: panel_catalog(), value: "left".into() };
+        let mut p = PanelSettings { modules: panel_catalog(), value: "left".into(), ..PanelSettings::default() };
         p.normalize();
         assert_eq!((p.modules.len(), p.value.as_str()), (MAX_PANEL_MODULES, "app"));
         assert!(panel_catalog().iter().all(|m| PanelModule::sizes(&m.kind).first() == Some(&m.size.as_str())));
-        let mut empty = PanelSettings { modules: vec![], value: "remaining".into() };
+        let mut empty = PanelSettings { modules: vec![], value: "remaining".into(), ..PanelSettings::default() };
         empty.normalize();
         assert!(empty.modules.is_empty(), "an emptied panel stays empty");
     }
@@ -1132,6 +1195,40 @@ mod tests {
         let old: Settings = serde_json::from_str(r#"{"onboarded":true}"#).unwrap();
         assert!(old.show_icons, "icons stay on for settings saved before the switch");
         assert_eq!(old.widget.provider_order, ["anthropic", "google", "openai"]);
+    }
+
+    #[test]
+    fn a_field_that_no_longer_reads_takes_its_default_and_the_rest_stays() {
+        let store = Store::open_in_memory().unwrap();
+        let saved = r#"{"onboarded":true,"language":"tr","cache_lead":"two","plans":{"anthropic":"max5x","openai":7},"later_feature":{"on":true},
+            "widget":{"opacity":"high","hotkey":"Ctrl+Alt+K","layout":"vertical"},"notify":{"cache":true,"early":["high"]}}"#;
+        store.set_setting(KEY, saved).unwrap();
+        let s = Settings::load(&store);
+        assert!(s.onboarded, "one unreadable field does not reset the others");
+        assert_eq!((s.language.as_str(), s.cache_lead), ("tr", 2));
+        assert_eq!(s.plans.iter().collect::<Vec<_>>(), [(&"anthropic".to_owned(), &"max5x".to_owned())]);
+        assert_eq!((s.widget.opacity, s.widget.hotkey.as_str(), s.widget.layout.as_str()), (0.85, "Ctrl+Alt+K", "vertical"));
+        assert_eq!((s.notify.cache, s.notify.early.as_str()), (true, "warn"));
+        assert!(s.extra.contains_key("later_feature"));
+
+        store.set_setting(KEY, "{\"onboarded\":true,").unwrap();
+        assert!(!Settings::load(&store).onboarded, "a damaged file still starts with the defaults");
+    }
+
+    #[test]
+    fn fields_a_newer_version_wrote_survive_a_save() {
+        let store = Store::open_in_memory().unwrap();
+        store.set_setting(KEY, r#"{"onboarded":true,"later_feature":{"on":true},"widget":{"glow":0.4},"notify":{"weekly":true},"cards":{"frame":"gold"}}"#).unwrap();
+        let mut s = Settings::load(&store);
+        s.fx_rate = 2.0;
+        s.save(&store).unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&store.setting(KEY).unwrap().unwrap()).unwrap();
+        assert_eq!((saved["later_feature"]["on"].as_bool(), saved["widget"]["glow"].as_f64()), (Some(true), Some(0.4)));
+        assert_eq!((saved["notify"]["weekly"].as_bool(), saved["cards"]["frame"].as_str()), (Some(true), Some("gold")));
+        assert_eq!((saved["fx_rate"].as_f64(), saved["onboarded"].as_bool()), (Some(2.0), Some(true)));
+        assert!(saved.get("extra").is_none() && saved["widget"].get("extra").is_none(), "kept beside the known fields, as they were");
+        let page = s.clone();
+        assert!(s.with_changes(&page, &page).extra.contains_key("later_feature"), "a page save keeps them too");
     }
 
     #[test]

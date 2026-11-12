@@ -431,15 +431,24 @@ pub fn system_is_turkish() -> bool {
     return std::env::var("LANG").map(|l| l.starts_with("tr")).unwrap_or(false) || user_locale().starts_with("tr");
 }
 
+/// The first display language, as the panel's `navigator.languages` has it; the regional format
+/// may be another language.
 #[cfg(windows)]
 fn user_locale() -> String {
-    #[link(name = "kernel32")]
-    unsafe extern "system" {
-        fn GetUserDefaultLocaleName(name: *mut u16, len: i32) -> i32;
+    use windows_sys::Win32::Globalization::{GetUserPreferredUILanguages, MUI_LANGUAGE_NAME};
+    let (mut count, mut len) = (0u32, 0u32);
+    // SAFETY: a null buffer asks only for the length, written to `len`
+    if unsafe { GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &mut count, std::ptr::null_mut(), &mut len) } == 0 || len == 0 {
+        return String::new();
     }
-    let mut buf = [0u16; 85];
-    let n = unsafe { GetUserDefaultLocaleName(buf.as_mut_ptr(), buf.len() as i32) };
-    if n > 1 { String::from_utf16_lossy(&buf[..(n - 1) as usize]) } else { String::new() }
+    let mut buf = vec![0u16; len as usize];
+    // SAFETY: `buf` holds the `len` units asked for
+    if unsafe { GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &mut count, buf.as_mut_ptr(), &mut len) } == 0 {
+        return String::new();
+    }
+    // a list of names, each ending in NUL
+    let first = buf.split(|&u| u == 0).next().unwrap_or_default();
+    String::from_utf16_lossy(first)
 }
 
 /// Apps opened from Finder or at login get no `LANG`, so the system's language list decides.
@@ -641,8 +650,13 @@ mod launch_agent {
                 _ => Ok(()),
             };
         }
+        let plist = plist(exe);
+        // every write tells the user a background item was added, and this runs at each start
+        if std::fs::read_to_string(&file).is_ok_and(|s| s == plist) {
+            return Ok(());
+        }
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        std::fs::write(&file, plist(exe)).map_err(|e| e.to_string())
+        std::fs::write(&file, plist).map_err(|e| e.to_string())
     }
 
     pub fn plist(exe: &Path) -> String {
@@ -992,6 +1006,13 @@ mod tests {
         let exe = std::path::Path::new("/Applications/AI Usage Tracker.app/Contents/MacOS/ai-usage-tracker");
         launch_agent::apply_in(&home, exe, true).unwrap();
         assert!(std::fs::read_to_string(&file).unwrap().contains("<string>/Applications/AI Usage Tracker.app/Contents/MacOS/ai-usage-tracker</string>"));
+        let written = std::fs::metadata(&file).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        launch_agent::apply_in(&home, exe, true).unwrap();
+        assert_eq!(std::fs::metadata(&file).unwrap().modified().unwrap(), written, "the same agent is not written again");
+        let moved = std::path::Path::new("/Users/u/Applications/AI Usage Tracker.app/Contents/MacOS/ai-usage-tracker");
+        launch_agent::apply_in(&home, moved, true).unwrap();
+        assert!(std::fs::read_to_string(&file).unwrap().contains("<string>/Users/u/Applications/AI Usage Tracker.app/"), "a moved app is followed");
         launch_agent::apply_in(&home, exe, false).unwrap();
         assert!(!file.exists());
         launch_agent::apply_in(&home, exe, false).expect("removing twice is fine");

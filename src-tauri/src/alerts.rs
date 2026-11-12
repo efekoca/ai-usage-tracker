@@ -696,9 +696,27 @@ fn session() -> zbus::Result<zbus::blocking::Connection> {
     if let Some(c) = held.as_ref() {
         return Ok(c.clone());
     }
-    let c = zbus::blocking::Connection::session()?;
+    // a notification service that stopped answering costs seconds, not the thread waiting on it
+    let c = zbus::blocking::connection::Builder::session()?.method_timeout(std::time::Duration::from_secs(5)).build()?;
     *held = Some(c.clone());
     Ok(c)
+}
+
+/// Runs `job` on the notification thread, in the order given, so the tray thread (which also
+/// checks the alerts and refreshes caches) never waits for the notification service.
+#[cfg(target_os = "linux")]
+fn in_turn(job: impl FnOnce() + Send + 'static) {
+    type Job = Box<dyn FnOnce() + Send>;
+    static QUEUE: LazyLock<std::sync::mpsc::Sender<Job>> = LazyLock::new(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<Job>();
+        let _ = std::thread::Builder::new().name("notifications".into()).spawn(move || {
+            for job in rx {
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+            }
+        });
+        tx
+    });
+    let _ = QUEUE.send(Box::new(job));
 }
 
 #[cfg(target_os = "linux")]
@@ -706,29 +724,27 @@ fn send_with(app: &AppHandle, tag: &str, title: &str, body: &str, button: Option
     use zbus::zvariant::Value;
     static LISTENING: std::sync::Once = std::sync::Once::new();
 
-    let replaces = IDS.lock().unwrap().get(tag).copied().unwrap_or(0);
-    let show = || -> zbus::Result<u32> {
-        let hints = HashMap::from([("desktop-entry", Value::from("ai-usage-tracker"))]);
-        let reply = session()?.call_method(
-            Some(BUS),
-            BUS_PATH,
-            Some(BUS),
-            "Notify",
-            &("AI Usage Tracker", replaces, "ai-usage-tracker", title, body, button.map_or(vec!["default", ""], |label| vec!["default", "", REFRESH, label]), hints, -1i32),
-        )?;
-        reply.body().deserialize::<u32>()
-    };
-    match show() {
-        Ok(id) => {
-            IDS.lock().unwrap().insert(tag.to_owned(), id);
-            LISTENING.call_once(|| listen_for_clicks(app.clone()));
-            done(Sent::Shown);
+    let (app, tag, title, body, button) = (app.clone(), tag.to_owned(), title.to_owned(), body.to_owned(), button.map(str::to_owned));
+    in_turn(move || {
+        let replaces = IDS.lock().unwrap().get(&tag).copied().unwrap_or(0);
+        let show = || -> zbus::Result<u32> {
+            let hints = HashMap::from([("desktop-entry", Value::from("ai-usage-tracker"))]);
+            let actions = button.as_deref().map_or(vec!["default", ""], |label| vec!["default", "", REFRESH, label]);
+            let reply = session()?.call_method(Some(BUS), BUS_PATH, Some(BUS), "Notify", &("AI Usage Tracker", replaces, "ai-usage-tracker", title.as_str(), body.as_str(), actions, hints, -1i32))?;
+            reply.body().deserialize::<u32>()
+        };
+        match show() {
+            Ok(id) => {
+                IDS.lock().unwrap().insert(tag, id);
+                LISTENING.call_once(|| listen_for_clicks(app));
+                done(Sent::Shown);
+            }
+            Err(e) => {
+                log::warn!("notification: {e}");
+                done(Sent::Failed);
+            }
         }
-        Err(e) => {
-            log::warn!("notification: {e}");
-            done(Sent::Failed);
-        }
-    }
+    });
 }
 
 #[cfg(target_os = "linux")]
