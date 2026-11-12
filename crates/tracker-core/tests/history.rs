@@ -17,6 +17,22 @@ fn r(ts: i64, used: f64, resets: Option<i64>) -> Reading {
 }
 
 #[test]
+fn a_reading_shown_again_after_its_window_reset_does_not_complete_it() {
+    let reset = NOW - 2 * HOUR;
+    // last read two hours before its end; a status line then showed the same 40 % after the reset
+    let w = build_windows(&[r(reset - 4 * HOUR, 20.0, Some(reset)), r(reset - 2 * HOUR, 40.0, Some(reset)), r(reset + 30 * MIN, 40.0, Some(reset))], FIVE, NOW);
+    assert_eq!(w.len(), 1);
+    assert!(!w[0].complete, "its peak may have come after the last real reading");
+    assert_eq!(w[0].last_ms, reset - 2 * HOUR);
+    // a reading stamped a moment past the reset (sources round) still watched it to its end
+    let w = build_windows(&[r(reset - 4 * HOUR, 20.0, Some(reset)), r(reset + MIN, 40.0, Some(reset))], FIVE, NOW);
+    assert!(w[0].complete);
+    // nor does a window read only after its end count as watched
+    let w = build_windows(&[r(reset + 30 * MIN, 40.0, Some(reset))], FIVE, NOW);
+    assert!(!w[0].complete);
+}
+
+#[test]
 fn readings_naming_almost_the_same_reset_are_one_window() {
     let reset = NOW - 2 * HOUR;
     let w = build_windows(

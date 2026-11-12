@@ -143,7 +143,7 @@ impl State {
         }
         match (reset, self.vouch_reset) {
             (Some(r), None) => self.vouch_reset = Some(r),
-            (Some(r), Some(v)) if (r - v).abs() > SAME_WINDOW_S => self.vouch = None,
+            (Some(r), Some(v)) if r.abs_diff(v) > SAME_WINDOW_S.unsigned_abs() => self.vouch = None,
             _ => {}
         }
     }
@@ -507,5 +507,13 @@ mod tests {
         let packed = Path::new("rollout-2026-06-21T11-36-07-019ee952-a384-76a3-bc8c-63d9865696b7.jsonl.zst");
         assert_eq!(session_id_from_filename(packed).as_deref(), Some("019ee952-a384-76a3-bc8c-63d9865696b7"));
         assert_eq!(session_id_from_filename(Path::new("other.jsonl")), None);
+    }
+
+    #[test]
+    fn a_damaged_reset_time_ends_the_vouch_without_overflowing() {
+        let mut st = State { vouch: Some("a".into()), started_ms: Some(0), ..Default::default() };
+        st.vouch_for(1, Some(i64::MAX));
+        st.vouch_for(2, Some(i64::MIN));
+        assert_eq!(st.vouch, None);
     }
 }

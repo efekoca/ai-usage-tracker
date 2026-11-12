@@ -260,14 +260,16 @@
         {#if acct && l.active}<span class="pill in-use">{t('accounts.inUse')}</span>{/if}
       </div>
       <LimitMeter window={l.window} used={l.used_pct} state={l.state} accuracy={l.accuracy} resetsAt={l.resets_at} observedMs={l.observed_ms} source={l.source} sinceTokens={l.usage_since.total_tokens} provider={l.provider} forecast={l.forecast} blocked={l.blocked} />
-      <div class="usage">
-        <div class="small muted">{t('limits.windowUsage')}</div>
-        <div class="row">
-          <b class="num">{fmtCompact(l.window_usage.total_tokens)}</b><span class="muted small">{t('metric.tokens')}</span>
-          <span class="spacer"></span>
-          <b class="num">{fmtMoney(l.window_usage.cost_usd)}</b><span class="muted small">{t('metric.cost')}</span>
+      {#if l.local_usage}
+        <div class="usage">
+          <div class="small muted">{t('limits.windowUsage')}</div>
+          <div class="row">
+            <b class="num">{fmtCompact(l.window_usage.total_tokens)}</b><span class="muted small">{t('metric.tokens')}</span>
+            <span class="spacer"></span>
+            <b class="num">{fmtMoney(l.window_usage.cost_usd)}</b><span class="muted small">{t('metric.cost')}</span>
+          </div>
         </div>
-      </div>
+      {/if}
       {#if l.projects.length || l.unlogged_pct !== null}
         <div class="projects">
           <div class="row small muted" title={t('limits.byProject.help')}>

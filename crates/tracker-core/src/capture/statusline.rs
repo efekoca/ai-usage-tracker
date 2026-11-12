@@ -17,6 +17,8 @@ pub const SOURCE: &str = "claude_statusline";
 const ROTATE_BYTES: u64 = 4 * 1024 * 1024;
 /// Write an unchanged reading again after this long, so the series shows it is still current.
 const HEARTBEAT_MS: i64 = 5 * 60 * 1000;
+/// A rotation takes milliseconds; a lock this old was left by a bridge that ended mid-way.
+const STALE_LOCK: std::time::Duration = std::time::Duration::from_secs(60);
 
 pub fn capture_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("capture")
@@ -32,6 +34,9 @@ fn last_file(data_dir: &Path) -> PathBuf {
 }
 fn paused_file(data_dir: &Path) -> PathBuf {
     capture_dir(data_dir).join("paused")
+}
+fn rotate_lock(data_dir: &Path) -> PathBuf {
+    capture_dir(data_dir).join("statusline.rotate.lock")
 }
 
 /// While paused the bridge still shows the status line but records nothing.
@@ -85,7 +90,7 @@ pub fn record(data_dir: &Path, windows: &Map<String, Value>, now_ms: i64) -> boo
     let line = json!({ "ts": now_ms, "windows": windows }).to_string();
     let path = capture_file(data_dir);
     if fs::metadata(&path).is_ok_and(|m| m.len() > ROTATE_BYTES) {
-        let _ = fs::rename(&path, rotated_file(data_dir));
+        rotate(data_dir, &path);
     }
     // one write per line: several sessions append at once and must not interleave
     let ok = OpenOptions::new()
@@ -98,6 +103,24 @@ pub fn record(data_dir: &Path, windows: &Map<String, Value>, now_ms: i64) -> boo
         let _ = fs::write(last_file(data_dir), line);
     }
     ok
+}
+
+/// Several bridges run at once: without the lock a second one that also saw the full file would
+/// move a fresh one over the rotated file before it was read.
+fn rotate(data_dir: &Path, path: &Path) {
+    let lock = rotate_lock(data_dir);
+    if OpenOptions::new().write(true).create_new(true).open(&lock).is_err() {
+        // a bridge that ended while holding it must not stop rotation for good
+        let stale = fs::metadata(&lock).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > STALE_LOCK);
+        if stale {
+            let _ = fs::remove_file(&lock);
+        }
+        return;
+    }
+    if fs::metadata(path).is_ok_and(|m| m.len() > ROTATE_BYTES) {
+        let _ = fs::rename(path, rotated_file(data_dir));
+    }
+    let _ = fs::remove_file(&lock);
 }
 
 /// One-line status shown when the user had no status line of their own.
@@ -184,6 +207,39 @@ mod tests {
         assert_eq!(out.limits.len(), 6);
         assert!(out.limits.iter().all(|l| l.accuracy == Accuracy::Captured && l.source == SOURCE));
         assert_eq!(out.limits.last().unwrap().used_pct, Some(41.2));
+    }
+
+    #[test]
+    fn a_full_file_is_rotated_once_by_the_bridge_holding_the_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let (data, path, old, lock) = (dir.path(), capture_file(dir.path()), rotated_file(dir.path()), rotate_lock(dir.path()));
+        let mut w = extract_windows(&input()).unwrap();
+        let mut next = |at: i64| {
+            w.insert("five_hour".into(), json!({"used_percentage": at as f64, "resets_at": 1738425600}));
+            record(data, &w, at)
+        };
+        let fill = || OpenOptions::new().write(true).open(&path).unwrap().set_len(ROTATE_BYTES + 1).unwrap();
+        assert!(next(1));
+        fill();
+        fs::write(&lock, b"").unwrap();
+        assert!(next(2));
+        assert!(!old.exists(), "another bridge is rotating");
+        fs::remove_file(&lock).unwrap();
+        assert!(next(3));
+        assert!(fs::metadata(&old).unwrap().len() > ROTATE_BYTES && !lock.exists());
+        // a bridge that saw the full file before the rotation leaves the fresh one where it is
+        rotate(data, &path);
+        assert!(fs::metadata(&old).unwrap().len() > ROTATE_BYTES);
+        assert_eq!(parse_file(&path, 0).unwrap().lines_recognised, 1);
+
+        fill();
+        let held = fs::File::create(&lock).unwrap();
+        held.set_modified(std::time::SystemTime::now() - 2 * STALE_LOCK).unwrap();
+        drop(held);
+        assert!(next(4));
+        assert!(!lock.exists(), "a lock left behind is cleared");
+        assert!(next(5));
+        assert_eq!(parse_file(&path, 0).unwrap().lines_recognised, 1);
     }
 
     #[test]

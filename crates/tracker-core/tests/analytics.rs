@@ -256,6 +256,7 @@ fn view(account: &str, active: bool, window: &str, used: f64, state: LimitState)
         account: Some(account.into()),
         active,
         limit_id: String::new(),
+        local_usage: true,
         window: window.into(),
         window_minutes: None,
         used_pct: Some(used),
@@ -913,6 +914,44 @@ fn antigravity_pools_count_only_their_own_models() {
     let v = limits_view(&store, &PriceBook::default_book(), now, &th).unwrap();
     let b = v.iter().find(|v| v.provider == Provider::Google && v.window == "seven_day").unwrap();
     assert_eq!((b.window_usage.events, b.used_pct), (3, Some(10.0)));
+}
+
+#[test]
+fn a_codex_pool_besides_the_main_one_counts_no_local_request() {
+    use tracker_core::history::{add_local_usage, limit_history};
+    let now = 1_791_440_000_000;
+    let resets = Some((now + 3_600_000) / 1000);
+    let mut store = Store::open_in_memory().unwrap();
+    {
+        let mut tx = store.transaction().unwrap();
+        tx.upsert_events(&[
+            ev("a", now - 3_600_000, Tool::Codex, "gpt-5.6-terra", r"C:\p\a", 4_000, 0),
+            // sent after the newest readings
+            ev("b", now - 300_000, Tool::Codex, "gpt-5.6-terra", r"C:\p\a", 1_000, 0),
+        ])
+        .unwrap();
+        let read = |id: &str, ago: i64, used: f64| LimitSnapshot {
+            limit_id: id.into(),
+            ..snap(now - ago, Provider::OpenAI, Tool::Codex, "five_hour", used, resets, Some("pro"), "codex_rollout")
+        };
+        tx.insert_limits(&[read("codex", 7_200_000, 10.0), read("codex", 1_800_000, 30.0), read("codex_premium", 7_200_000, 5.0), read("codex_premium", 1_800_000, 20.0)]).unwrap();
+        tx.commit().unwrap();
+    }
+    let book = PriceBook::default_book();
+    let views = limits_view(&store, &book, now, &[]).unwrap();
+    let find = |id: &str| views.iter().find(|v| v.limit_id == id).unwrap();
+    let main = find("codex");
+    assert_eq!((main.window_usage.events, main.state), (2, LimitState::Behind));
+    let other = find("codex_premium");
+    assert_eq!((other.used_pct, other.state), (Some(20.0), LimitState::Fresh), "a request that names no pool does not put it behind");
+    assert_eq!((other.window_usage.events, other.usage_since.events), (0, 0));
+    assert!(other.projects.is_empty());
+    assert_eq!(other.unlogged_pct, None, "nor do its rises read as use from elsewhere");
+
+    let mut h = limit_history(&store, now, 7).unwrap();
+    add_local_usage(&mut h, &store, &book).unwrap();
+    let local = |id: &str| h.series.iter().find(|s| s.limit_id == id).unwrap().windows[0].local.requests;
+    assert_eq!((local("codex"), local("codex_premium")), (2, 0));
 }
 
 #[test]

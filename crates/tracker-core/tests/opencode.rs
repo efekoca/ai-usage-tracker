@@ -371,6 +371,27 @@ fn a_file_that_is_not_opencodes_database_is_reported_not_read() {
 }
 
 #[test]
+fn rows_that_are_not_json_or_a_damaged_session_do_not_stop_the_rest() {
+    let db = opencode();
+    let c = &db.conn;
+    c.execute("INSERT INTO part VALUES('prt_cut', 'msg_001', ?1, ?2, ?2, '{\"type\":\"step-finish\",\"tokens\":{\"in')", params![MAIN, T0 + 1700]).unwrap();
+    c.execute("INSERT INTO message VALUES('msg_cut', ?1, ?2, ?2, 'not json')", params![MAIN, T0 + 50_000]).unwrap();
+    c.execute(
+        "INSERT INTO part VALUES('prt_050_step', 'msg_cut', ?1, ?2, ?2, ?3)",
+        params![MAIN, T0 + 50_500, r#"{"type":"step-finish","tokens":{"input":10,"output":5,"reasoning":0,"cache":{"read":0,"write":0}}}"#],
+    )
+    .unwrap();
+    session(c, "ses_bad", None, "1.19.4", "/work/app");
+    c.execute("UPDATE session SET time_created = 'yesterday' WHERE id = 'ses_bad'", []).unwrap();
+    step(c, 51, "ses_bad", "openai", "gpt-5", "build", [10, 5, 0, 0, 0], "");
+    let mut store = Store::open_in_memory().unwrap();
+    let rep = run(&mut store, &db.env);
+    assert!(rep.errors.is_empty(), "{:?}", rep.errors);
+    assert!(rep.warnings.iter().any(|(_, w)| w.contains("a session with unexpected fields")), "{:?}", rep.warnings);
+    assert_eq!(events(&store).len(), 4);
+}
+
+#[test]
 fn a_part_with_a_count_of_the_wrong_type_is_skipped_and_the_rest_is_read() {
     let db = opencode();
     db.conn

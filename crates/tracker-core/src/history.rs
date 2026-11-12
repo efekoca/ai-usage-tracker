@@ -257,7 +257,10 @@ pub fn build_windows(readings: &[Reading], dur_ms: i64, now_ms: i64) -> Vec<Wind
 /// `reset`: (the named reset time, when the window actually ended).
 fn record(items: &[&Reading], reset: Option<(i64, i64)>, dur_ms: i64, now_ms: i64, next_first: Option<i64>) -> WindowRecord {
     let first = items.iter().map(|r| r.ts_ms).min().unwrap_or(now_ms);
-    let last = items.iter().map(|r| r.ts_ms).max().unwrap_or(now_ms);
+    // a status line can show a window's last values again after it reset, stamped with the time
+    // they were shown: such a reading did not watch the window to its end
+    let watched = items.iter().map(|r| r.ts_ms).filter(|&t| reset.is_none_or(|(_, end)| t <= end + SAME_RESET_MS)).max();
+    let last = watched.unwrap_or(first);
     let peak = items.iter().map(|r| r.used).fold(0.0, f64::max);
     let peak_ms = items.iter().filter(|r| r.used >= peak).map(|r| r.ts_ms).min().unwrap_or(first);
     let full_at = items.iter().filter(|r| r.used >= FULL_PCT).map(|r| r.ts_ms).min();
@@ -270,7 +273,7 @@ fn record(items: &[&Reading], reset: Option<(i64, i64)>, dur_ms: i64, now_ms: i6
     let tail = tail_ms(dur_ms);
     let complete = full_at.is_some()
         || match reset {
-            Some((_, end)) => !in_progress && last >= end - tail,
+            Some((_, end)) => !in_progress && watched.is_some_and(|l| l >= end - tail),
             // the reset fell between this window's last reading and the next reading
             None => next_first.is_some_and(|n| n - last <= tail),
         };
