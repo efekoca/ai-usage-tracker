@@ -165,11 +165,9 @@ pub fn statusline_main() -> i32 {
     };
     // a static clock time: Claude Code redraws the line only when the conversation changes
     let options = statusline::read_options(&data_dir);
-    let cache = json
-        .get("transcript_path")
-        .and_then(|t| t.as_str())
-        .filter(|_| options.cache && std::env::var_os(CHAINED).is_none())
-        .and_then(|t| statusline::cache_expiry(Path::new(t), now_ms()))
+    let cache = (options.cache && std::env::var_os(CHAINED).is_none())
+        .then(|| statusline::session_cache_expiry(&json, now_ms()))
+        .flatten()
         .and_then(|at| statusline::cache_text(at, options.turkish, &chrono::Local));
     if let Some(part) = cache {
         out = statusline::append(&out, &part);
