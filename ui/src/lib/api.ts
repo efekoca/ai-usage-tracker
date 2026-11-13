@@ -743,6 +743,61 @@ export interface SessionModel {
   cost_usd: number
   unpriced: boolean
 }
+/** What happened to a conversation's cache between two reports: usually one miss or one rebuild. */
+export interface MissEvent {
+  ts_ms: number
+  session_id: string
+  branch: string | null
+  model: string | null
+  misses: number
+  rebuilds: number
+  recached_tokens: number
+  /** Empty when Claude Code could not tell, or for a rebuild alone. */
+  causes: string[]
+}
+
+export interface MissCause {
+  cause: string
+  misses: number
+}
+
+export interface MissProject {
+  project_id: number | null
+  project: string
+  hidden: boolean
+  misses: number
+  rebuilds: number
+  recached_tokens: number
+  /** The latest miss, or the latest rebuild when there was none. */
+  last_ms: number
+  /** `null` when most misses had no cause Claude Code could tell, or for rebuilds alone. */
+  cause: string | null
+  /** The latest first, at most 50. */
+  events: MissEvent[]
+  /** How many more there were. */
+  more: number
+}
+
+/** Prompt cache misses Claude Code reported over a period: in all, day by day and project by project. */
+export interface CacheMisses {
+  /** Whether Claude Code has reported any here at all, in any period. */
+  reported: boolean
+  /** Conversations with a miss. */
+  sessions: number
+  misses: number
+  /** Rebuilds after a compaction or a clearing of old tool results, which Claude Code expects. */
+  rebuilds: number
+  recached_tokens: number
+  /** One miss can have several causes. */
+  causes: MissCause[]
+  /** Misses Claude Code gave no cause for. */
+  undetermined: number
+  /** Days with a miss, `YYYY-MM-DD`, the earliest first. */
+  days: { date: string; causes: MissCause[]; undetermined: number }[]
+  /** The most misses first. */
+  projects: MissProject[]
+}
+
 export interface SessionRow {
   session_id: string
   tool: Tool
@@ -1084,6 +1139,7 @@ export const api = {
   branches: (period: Period, filter?: Filter) => invoke<Branches>('get_branches', { period, filter }),
   agentsTools: (period: Period, filter?: Filter) => invoke<AgentsTools>('get_agents_tools', { period, filter }),
   subagentCache: (period: Period, filter?: Filter) => invoke<SubagentCache>('get_subagent_cache', { period, filter }),
+  cacheMisses: (period: Period, filter?: Filter) => invoke<CacheMisses>('get_cache_misses', { period, filter }),
   tips: (period: Period, filter?: Filter) => invoke<Tips>('get_tips', { period, filter }),
   limitHistory: (days?: number) => invoke<LimitHistoryView>('get_limit_history', { days }),
   earlyRestart: () => invoke<EarlyRestart | null>('early_restart'),

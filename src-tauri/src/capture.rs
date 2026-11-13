@@ -155,6 +155,7 @@ pub fn statusline_main() -> i32 {
     if let Some(w) = &windows {
         statusline::record(&data_dir, w, now_ms());
     }
+    statusline::record_cache_misses(&data_dir, &json, now_ms());
     let state = cs::load_state(&data_dir);
     // a bridge run as someone's previous command (another copy of the app) does not chain again,
     // so two bridges can never call each other without end

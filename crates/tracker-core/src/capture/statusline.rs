@@ -1,15 +1,16 @@
 //! Claude Code statusLine bridge (opt-in). Claude Code runs the configured command on every
 //! status update with session JSON on stdin; we keep only the documented `rate_limits` windows
 //! (`used_percentage` 0–100, `resets_at` epoch seconds) and append them to a local capture
-//! file, which the ingest worker then reads like any other source.
+//! file, which the ingest worker then reads like any other source. Each conversation's
+//! `prompt_cache` miss counts and causes are kept the same way, once each time they change.
 //!
 //! The bridge is transparent: if the user already had a status line, that command is run with
 //! the same stdin and its output is printed unchanged. When the user asks for it, the time the
 //! conversation's prompt cache runs out is added at the end.
 
-use crate::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool};
+use crate::model::{Accuracy, CacheMissReport, LimitSnapshot, Provider, Tokens, Tool};
 use crate::sources::claude_code::{usage_events, ClaudeCtx};
-use crate::sources::{f64_at, i64_at, JsonlReader, ParseOutput};
+use crate::sources::{f64_at, i64_at, str_at, u64_at, JsonlReader, ParseOutput};
 use chrono::{TimeZone, Timelike};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -37,6 +38,9 @@ pub fn rotated_file(data_dir: &Path) -> PathBuf {
 fn last_file(data_dir: &Path) -> PathBuf {
     capture_dir(data_dir).join("statusline.last.json")
 }
+fn misses_file(data_dir: &Path) -> PathBuf {
+    capture_dir(data_dir).join("statusline.misses.json")
+}
 fn options_file(data_dir: &Path) -> PathBuf {
     capture_dir(data_dir).join("statusline.options.json")
 }
@@ -61,7 +65,7 @@ pub fn set_paused(data_dir: &Path, paused: bool) -> std::io::Result<()> {
 }
 
 pub fn delete_records(data_dir: &Path) -> std::io::Result<()> {
-    for p in [capture_file(data_dir), rotated_file(data_dir), last_file(data_dir)] {
+    for p in [capture_file(data_dir), rotated_file(data_dir), last_file(data_dir), misses_file(data_dir)] {
         match fs::remove_file(&p) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
             _ => {}
@@ -96,21 +100,63 @@ pub fn record(data_dir: &Path, windows: &Map<String, Value>, now_ms: i64) -> boo
         return false;
     }
     let line = json!({ "ts": now_ms, "windows": windows }).to_string();
+    let ok = append_line(data_dir, &line);
+    if ok {
+        let _ = fs::write(last_file(data_dir), line);
+    }
+    ok
+}
+
+/// Conversations whose miss counts were last written, the newest last.
+const MISSES_KEPT: usize = 64;
+/// Claude Code names a cause in lower case with underscores; anything else is not kept.
+fn cause_name(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 48 && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
+/// Notes the cache misses Claude Code reports for the conversation, once each time their counts
+/// change. Returns whether a line was written.
+pub fn record_cache_misses(data_dir: &Path, input: &Value, now_ms: i64) -> bool {
+    let session = str_at(input, "session_id").filter(|s| crate::capture::refresh_hook::valid_session(s));
+    let (Some(session), Some(cache)) = (session, input.get("prompt_cache").filter(|c| c.is_object())) else { return false };
+    let (misses, rebuilds) = (u64_at(cache, "misses"), u64_at(cache, "expected_rebuilds"));
+    if (misses == 0 && rebuilds == 0) || paused_file(data_dir).exists() {
+        return false;
+    }
+    let mut seen: Vec<(String, u64, u64)> = fs::read(misses_file(data_dir)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    if seen.iter().any(|(s, m, r)| s == session && *m == misses && *r == rebuilds) {
+        return false;
+    }
+    let causes: Map<String, Value> = cache
+        .get("miss_causes")
+        .and_then(Value::as_object)
+        .map(|m| m.iter().filter(|(k, v)| cause_name(k) && v.as_u64().is_some_and(|n| n > 0)).take(32).map(|(k, v)| (k.clone(), v.clone())).collect())
+        .unwrap_or_default();
+    let last = i64_at(cache, "last_miss_at").and_then(|s| s.checked_mul(1000));
+    let report = json!({ "requests": u64_at(cache, "requests"), "misses": misses, "rebuilds": rebuilds, "recached": u64_at(cache, "miss_recache_tokens"), "last": last, "causes": causes });
+    let _ = fs::create_dir_all(capture_dir(data_dir));
+    if !append_line(data_dir, &json!({ "ts": now_ms, "session": session, "cache": report }).to_string()) {
+        return false;
+    }
+    seen.retain(|(s, _, _)| s != session);
+    seen.push((session.to_owned(), misses, rebuilds));
+    let drop = seen.len().saturating_sub(MISSES_KEPT);
+    seen.drain(..drop);
+    // several bridges write it at once; a note lost to another only writes the line once more
+    let tmp = capture_dir(data_dir).join(format!(".statusline.misses.{}", std::process::id()));
+    if serde_json::to_vec(&seen).ok().is_some_and(|b| fs::write(&tmp, b).is_ok()) && fs::rename(&tmp, misses_file(data_dir)).is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    true
+}
+
+fn append_line(data_dir: &Path, line: &str) -> bool {
     let path = capture_file(data_dir);
     if fs::metadata(&path).is_ok_and(|m| m.len() > ROTATE_BYTES) {
         rotate(data_dir, &path);
     }
     // one write per line: several sessions append at once and must not interleave
-    let ok = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .and_then(|mut f| f.write_all(format!("{line}\n").as_bytes()))
-        .is_ok();
-    if ok {
-        let _ = fs::write(last_file(data_dir), line);
-    }
-    ok
+    OpenOptions::new().create(true).append(true).open(&path).and_then(|mut f| f.write_all(format!("{line}\n").as_bytes())).is_ok()
 }
 
 /// Several bridges run at once: without the lock a second one that also saw the full file would
@@ -261,7 +307,23 @@ pub fn parse_file(path: &Path, offset: u64) -> std::io::Result<ParseOutput> {
             out.warn(format!("invalid JSON at byte {}", line.offset));
             continue;
         };
-        let (Some(ts), Some(windows)) = (i64_at(v, "ts"), v.get("windows").and_then(Value::as_object)) else { continue };
+        let Some(ts) = i64_at(v, "ts") else { continue };
+        if let (Some(session), Some(c)) = (str_at(v, "session"), v.get("cache").filter(|c| c.is_object())) {
+            let causes = c.get("causes").and_then(Value::as_object).map(|m| m.iter().filter_map(|(k, n)| Some((k.clone(), n.as_u64()?))).collect()).unwrap_or_default();
+            out.cache_misses.push(CacheMissReport {
+                session_id: session.to_owned(),
+                ts_ms: ts,
+                last_miss_ms: i64_at(c, "last"),
+                requests: u64_at(c, "requests"),
+                misses: u64_at(c, "misses"),
+                rebuilds: u64_at(c, "rebuilds"),
+                recached_tokens: u64_at(c, "recached"),
+                causes,
+            });
+            out.lines_recognised += 1;
+            continue;
+        }
+        let Some(windows) = v.get("windows").and_then(Value::as_object) else { continue };
         for (name, w) in windows {
             out.limits.push(LimitSnapshot {
                 ts_ms: ts,
@@ -457,5 +519,31 @@ mod tests {
         assert_eq!(read_options(dir.path()), on);
         fs::write(options_file(dir.path()), b"{").unwrap();
         assert_eq!(read_options(dir.path()), Options::default());
+    }
+
+    #[test]
+    fn cache_misses_are_written_once_each_time_they_change_and_read_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let report = |misses: u64, rebuilds: u64, causes: Value| json!({"session_id": "s-1", "prompt_cache": {"requests": 14, "misses": misses, "expected_rebuilds": rebuilds, "miss_recache_tokens": 310_200, "last_miss_at": 1_738_425_230, "miss_causes": causes}});
+        assert!(!record_cache_misses(dir.path(), &report(0, 0, json!({})), 1_000), "nothing to tell");
+        assert!(record_cache_misses(dir.path(), &report(1, 0, json!({"tools_changed": 1})), 2_000));
+        assert!(!record_cache_misses(dir.path(), &report(1, 0, json!({"tools_changed": 1})), 3_000), "unchanged");
+        assert!(record_cache_misses(dir.path(), &report(2, 1, json!({"tools_changed": 1, "ttl_expired_5m": 1, "Bad Name": 3, "negative": -1})), 4_000));
+        assert!(!record_cache_misses(dir.path(), &json!({"session_id": "s-1"}), 5_000), "an older Claude Code sends none");
+        assert!(!record_cache_misses(dir.path(), &json!({"session_id": "../x", "prompt_cache": {"misses": 1}}), 5_000));
+
+        let out = parse_file(&capture_file(dir.path()), 0).unwrap();
+        assert_eq!(out.cache_misses.len(), 2);
+        let last = &out.cache_misses[1];
+        assert_eq!((last.session_id.as_str(), last.ts_ms, last.requests, last.misses, last.rebuilds, last.recached_tokens), ("s-1", 4_000, 14, 2, 1, 310_200));
+        assert_eq!(last.last_miss_ms, Some(1_738_425_230_000));
+        assert_eq!(last.causes, [("tools_changed".to_owned(), 1), ("ttl_expired_5m".to_owned(), 1)], "only names as Claude Code writes them");
+        assert!(out.limits.is_empty());
+
+        set_paused(dir.path(), true).unwrap();
+        assert!(!record_cache_misses(dir.path(), &report(3, 1, json!({})), 6_000));
+        set_paused(dir.path(), false).unwrap();
+        delete_records(dir.path()).unwrap();
+        assert!(record_cache_misses(dir.path(), &report(2, 1, json!({})), 7_000), "deleted with the records");
     }
 }

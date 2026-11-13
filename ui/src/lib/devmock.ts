@@ -360,6 +360,50 @@ function mockSessions() {
   return { sessions, events_without_session: 3 }
 }
 
+function mockMisses() {
+  const now = Date.now()
+  const hide = settings.hide_project_names
+  const ev = (minAgo: number, session_id: string, branch: string | null, model: string, misses: number, rebuilds: number, recached: number, causes: string[]) => ({
+    ts_ms: now - minAgo * 60e3, session_id, branch: hide ? null : branch, model, misses, rebuilds, recached_tokens: recached, causes,
+  })
+  const project = (project_id: number, name: string, cause: string | null, events: ReturnType<typeof ev>[]) => {
+    const misses = events.reduce((n, e) => n + e.misses, 0)
+    const missed = events.filter((e) => e.misses)
+    return {
+      project_id, project: hide ? '' : name, hidden: hide, misses, rebuilds: events.reduce((n, e) => n + e.rebuilds, 0),
+      recached_tokens: events.reduce((n, e) => n + e.recached_tokens, 0),
+      last_ms: Math.max(...(missed.length ? missed : events).map((e) => e.ts_ms)), cause, events, more: 0,
+    }
+  }
+  const projects = [
+    project(3, 'website', 'ttl_expired_5m', [ev(180, 'c-web', 'main', 'claude-opus-5-5', 2, 0, 284_000, ['ttl_expired_5m']), ev(27 * 60, 'c-web', 'main', 'claude-opus-5-5', 1, 0, 140_000, ['tools_changed', 'system_prompt_changed'])]),
+    project(1, 'notes', 'ttl_expired_5m', [ev(12, 'c-notes', null, 'claude-sonnet-5-5', 1, 0, 64_000, ['ttl_expired_5m']), ev(26 * 60, 'c-notes', null, 'claude-sonnet-5-5', 1, 0, 61_000, ['ttl_expired_5m']), ev(74 * 60, 'c-notes', null, 'claude-sonnet-5-5', 0, 1, 0, [])]),
+    project(4, 'data-pipeline', 'likely_server_side', [ev(50 * 60, 'c-api', 'feature/etl', 'claude-opus-5-5', 1, 0, 512_000, ['likely_server_side']), ev(51 * 60, 'c-api', 'feature/etl', 'claude-opus-5-5', 1, 0, 391_000, [])]),
+    project(2, 'demo-app', 'tools_changed', [ev(48, 'c-demo', 'cache-refresh', 'claude-opus-5-5', 1, 0, 388_000, ['tools_changed']), ev(95, 'c-demo', 'cache-refresh', 'claude-opus-5-5', 0, 1, 0, [])]),
+  ]
+  const events = projects.flatMap((p) => p.events)
+  const day = (ms: number) => { const d = new Date(ms); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
+  const days = new Map<string, { date: string; causes: Map<string, number>; undetermined: number }>()
+  for (const e of events.filter((e) => e.misses)) {
+    const d = days.get(day(e.ts_ms)) ?? { date: day(e.ts_ms), causes: new Map(), undetermined: 0 }
+    if (!e.causes.length) d.undetermined += e.misses
+    for (const c of e.causes) d.causes.set(c, (d.causes.get(c) ?? 0) + e.misses)
+    days.set(d.date, d)
+  }
+  const count = (c: string) => events.filter((e) => e.causes.includes(c)).reduce((n, e) => n + e.misses, 0)
+  return {
+    reported: true,
+    sessions: 4,
+    misses: events.reduce((n, e) => n + e.misses, 0),
+    rebuilds: events.reduce((n, e) => n + e.rebuilds, 0),
+    recached_tokens: events.reduce((n, e) => n + e.recached_tokens, 0),
+    causes: ['ttl_expired_5m', 'tools_changed', 'likely_server_side', 'system_prompt_changed'].map((cause) => ({ cause, misses: count(cause) })),
+    undetermined: events.filter((e) => e.misses && !e.causes.length).reduce((n, e) => n + e.misses, 0),
+    days: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)).map((d) => ({ date: d.date, causes: [...d.causes].map(([cause, misses]) => ({ cause, misses })), undetermined: d.undetermined })),
+    projects,
+  }
+}
+
 function mockCompare() {
   const actual = 288.1
   const ids: [string, 'anthropic' | 'openai' | 'google', number][] = [['gpt-5.6-luna', 'openai', 0.07], ['gemini-3.8-flash', 'google', 0.15], ['claude-haiku-4-5', 'anthropic', 0.24], ['gpt-5.3-codex', 'openai', 0.38], ['claude-sonnet-5', 'anthropic', 0.48], ['gpt-5.6-terra', 'openai', 0.52], ['claude-opus-5-5', 'anthropic', 0.9], ['gpt-5.6-sol', 'openai', 1.05], ['claude-opus-5', 'anthropic', 1.21], ['claude-fable-5-1', 'anthropic', 1.63], ['claude-opus-4-1', 'anthropic', 3.6]]
@@ -1008,6 +1052,11 @@ export function installMock() {
           return mockAgentsTools()
         case 'get_subagent_cache':
           return mockSubagentCache()
+        case 'get_cache_misses':
+          // `?misses=0`: Claude Code has reported nothing yet
+          return scenario.get('misses') === '0'
+            ? { reported: false, sessions: 0, misses: 0, rebuilds: 0, recached_tokens: 0, causes: [], undetermined: 0, days: [], projects: [] }
+            : mockMisses()
         case 'get_tips':
           return mockTips()
         case 'get_limit_history':

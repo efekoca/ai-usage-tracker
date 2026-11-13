@@ -4,9 +4,9 @@ use chrono::{FixedOffset, TimeZone};
 use common::Dst;
 use tracker_core::analytics::{account_key, Filter, Range};
 use tracker_core::insights::{agents_tools, branches, compare_models, context_stats, day_detail, forecast, plan_value, restarted, session_timeline, sessions, subagent_cache, ForecastKind, PromptShare};
-use tracker_core::insights::live_caches;
+use tracker_core::insights::{cache_misses, live_caches, MissCause};
 use tracker_core::tips::{cache_rebuilds, tips, Tip, Tips};
-use tracker_core::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
+use tracker_core::model::{Accuracy, CacheMissReport, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
 use tracker_core::pricing::{CostInput, PriceBook};
 use tracker_core::store::Store;
 
@@ -129,6 +129,85 @@ fn each_conversation_keeps_its_own_cache_counted_from_its_last_request() {
     assert_eq!((live[1].expires_ms, live[1].ttl_ms, live[1].tokens), (t + MIN + HOUR, HOUR, 2_000));
     assert!(live[1].rewrite_usd.unwrap() > book.cost(&CostInput { model: "claude-sonnet-5-5", tokens: &Tokens { cache_write: 2_000, ..Default::default() }, request_input: 2_000, web_search_requests: 0, speed: None, inference_geo: None, ts_ms: None }).unwrap().total(), "an hour's cache costs more to write");
     assert_eq!(live_caches(&store, &book, t + 8 * MIN).unwrap().iter().map(|c| c.session_id.as_str()).collect::<Vec<_>>(), ["h"], "run out");
+}
+
+#[test]
+fn cache_misses_are_told_by_project_and_day_each_when_it_happened() {
+    let t = ms(2026, 11, 10, 12, 0);
+    let mut store = store_with(&[
+        ev("a", t, Tool::ClaudeCode, "claude-opus-5-5", Some("s1"), "/p/notes", 10, 100, 5).branch("main"),
+        ev("b", t + 20 * MIN, Tool::ClaudeCode, "claude-sonnet-5-5", Some("s1"), "/p/notes", 10, 100, 5).branch("fix"),
+        // a subagent's request tells nothing about the main conversation's cache
+        ev("c", t + 23 * MIN, Tool::ClaudeCode, "claude-haiku-5-5", Some("s1"), "/p/notes", 10, 100, 5).agent("Explore", "x1"),
+        ev("d", t, Tool::ClaudeCode, "claude-opus-5-5", Some("s2"), "/q/site", 10, 100, 5),
+        ev("e", t + 50 * MIN, Tool::ClaudeCode, "claude-opus-5-5", Some("s3"), "/q/site", 10, 100, 5),
+        ev("f", t, Tool::Codex, "gpt-5.6-terra", Some("x"), "/p/notes", 10, 100, 5),
+    ]);
+    let range = Range { from_ms: t - HOUR, to_ms: t + HOUR };
+    let utc = chrono::Utc;
+    assert!(!cache_misses(&store, range, &Filter::default(), &utc).unwrap().reported);
+
+    let report = |s: &str, ts_ms: i64, last: Option<i64>, misses: u64, rebuilds: u64, recached_tokens: u64, causes: &[(&str, u64)]| CacheMissReport {
+        session_id: s.into(),
+        ts_ms,
+        last_miss_ms: last,
+        requests: 20,
+        misses,
+        rebuilds,
+        recached_tokens,
+        causes: causes.iter().map(|(c, n)| ((*c).into(), *n)).collect(),
+    };
+    let mut tx = store.transaction().unwrap();
+    tx.insert_cache_miss_reports(&[
+        report("s1", t + 5 * MIN, Some(t + 4 * MIN), 1, 0, 100_000, &[("tools_changed", 1)]),
+        report("s1", t + 15 * MIN, Some(t + 4 * MIN), 1, 1, 100_000, &[("tools_changed", 1)]),
+        report("s1", t + 25 * MIN, Some(t + 24 * MIN), 2, 1, 160_000, &[("tools_changed", 1), ("ttl_expired_5m", 1)]),
+        // the same count reported again later changes nothing
+        report("s1", t + 26 * MIN, Some(t + 24 * MIN), 2, 1, 160_000, &[("tools_changed", 1), ("ttl_expired_5m", 1)]),
+        // the counts start over: a run of its own, with no cause told
+        report("s1", t + 40 * MIN, Some(t + 39 * MIN), 1, 0, 40_000, &[]),
+        report("s2", t + 10 * MIN, None, 2, 0, 50_000, &[("likely_server_side", 2)]),
+        // reported after the period, about a miss inside it
+        report("s3", t + HOUR + 5 * MIN, Some(t + 59 * MIN), 1, 0, 30_000, &[("likely_server_side", 1)]),
+        // no request of it is known
+        report("gone", t + 3 * MIN, None, 9, 0, 1, &[("likely_server_side", 9)]),
+    ])
+    .unwrap();
+    tx.commit().unwrap();
+
+    let m = cache_misses(&store, range, &Filter::default(), &utc).unwrap();
+    assert!(m.reported);
+    assert_eq!((m.sessions, m.misses, m.rebuilds, m.recached_tokens, m.undetermined), (3, 6, 1, 280_000, 1));
+    assert_eq!(m.causes, [MissCause { cause: "likely_server_side".into(), misses: 3 }, MissCause { cause: "tools_changed".into(), misses: 1 }, MissCause { cause: "ttl_expired_5m".into(), misses: 1 }]);
+    assert_eq!(m.days.len(), 1);
+    assert_eq!((m.days[0].date.as_str(), m.days[0].causes.len(), m.days[0].undetermined), ("2026-11-10", 3, 1));
+
+    let names: Vec<(&str, u64, i64, Option<&str>)> = m.projects.iter().map(|p| (p.project.as_str(), p.misses, p.last_ms - t, p.cause.as_deref())).collect();
+    assert_eq!(names, [("site", 3, 59 * MIN, Some("likely_server_side")), ("notes", 3, 39 * MIN, Some("tools_changed"))], "the most misses first, then the latest");
+    let notes = &m.projects[1];
+    type Row<'a> = (i64, u64, u64, u64, Vec<String>);
+    let ev: Vec<Row> = notes.events.iter().map(|e| (e.ts_ms - t, e.misses, e.rebuilds, e.recached_tokens, e.causes.clone())).collect();
+    assert_eq!(
+        ev,
+        [
+            (39 * MIN, 1, 0, 40_000, vec![]),
+            (24 * MIN, 1, 0, 60_000, vec!["ttl_expired_5m".to_owned()]),
+            (15 * MIN, 0, 1, 0, vec![]),
+            (4 * MIN, 1, 0, 100_000, vec!["tools_changed".to_owned()]),
+        ],
+        "the latest first, each when it happened"
+    );
+    assert_eq!((notes.rebuilds, notes.more), (1, 0));
+    assert_eq!((notes.events[3].branch.as_deref(), notes.events[3].model.as_deref()), (Some("main"), Some("claude-opus-5-5")), "the request before the miss");
+    assert_eq!((notes.events[1].branch.as_deref(), notes.events[1].model.as_deref()), (Some("fix"), Some("claude-sonnet-5-5")), "not the subagent's");
+
+    let codex = Filter { tools: vec![Tool::Codex], ..Filter::default() };
+    assert_eq!(cache_misses(&store, range, &codex, &utc).unwrap().sessions, 0, "another tool's filter keeps none");
+    let later = cache_misses(&store, Range { from_ms: t + 30 * MIN, to_ms: t + HOUR }, &Filter::default(), &utc).unwrap();
+    assert_eq!((later.misses, later.projects.len()), (2, 2), "only what happened in the period");
+
+    store.wipe_data().unwrap();
+    assert!(!store.has_cache_misses().unwrap());
 }
 
 #[test]
