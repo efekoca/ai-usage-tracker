@@ -491,33 +491,142 @@ fn start_change(starts: &[Start]) -> Option<StartChange> {
     step_at(starts, at)
 }
 
+/// The first main-conversation request of every conversation that began in `range`, the oldest
+/// first: subagents, advisors and captured telemetry (which also holds helper requests) are left
+/// out, and so is a conversation that began before the range and only goes on in it.
+fn first_requests(store: &Store, range: Range, filter: &Filter) -> Result<Vec<EventRow>> {
+    firsts_among(store, store.events_between(range.from_ms, range.to_ms)?, range, filter)
+}
+
+/// [`first_requests`] of a range whose events, the oldest first, are already read.
+fn firsts_among(store: &Store, events: Vec<EventRow>, range: Range, filter: &Filter) -> Result<Vec<EventRow>> {
+    let mut firsts: BTreeMap<(&str, String), EventRow> = BTreeMap::new();
+    for e in events {
+        if e.agent.is_some() || e.advisor || e.accuracy == Accuracy::Captured || e.request_input == 0 {
+            continue;
+        }
+        if let Some(session) = e.session_id.clone() {
+            // events come oldest first
+            firsts.entry((e.tool.as_str(), session)).or_insert(e);
+        }
+    }
+    let mut out = Vec::new();
+    for ((_, session), e) in firsts {
+        if filter.matches(&e) && !store.session_started_ms(&session)?.is_some_and(|t| t < range.from_ms) {
+            out.push(e);
+        }
+    }
+    out.sort_by_key(|e| e.ts_ms);
+    Ok(out)
+}
+
+/// One side of a before-and-after comparison: the use in `from_ms <= ts < to_ms`.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct ExperimentSide {
+    pub from_ms: i64,
+    pub to_ms: i64,
+    /// Conversations with a request in it.
+    pub sessions: u64,
+    pub requests: u64,
+    /// API-equivalent cost of its priced requests.
+    pub cost_usd: f64,
+    /// Requests that used tokens of a model without a price: they are in no cost.
+    pub unpriced_requests: u64,
+    /// The cost of the conversations' priced requests ÷ the conversations that have one; `None`
+    /// without such a conversation.
+    pub cost_per_session: Option<f64>,
+    /// Conversations that began in it, and the median of their first requests' prompt size.
+    pub started: u64,
+    pub starting_load: Option<u64>,
+    /// Tool calls whose outcome is known, and those of them that failed.
+    pub tool_calls: u64,
+    pub tool_failed: u64,
+    /// `None` without a call whose outcome is known.
+    pub tool_error_pct: Option<f64>,
+    /// Cache read ÷ prompt tokens; `None` without a prompt token.
+    pub cache_hit_pct: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct Experiment {
+    pub before: ExperimentSide,
+    pub after: ExperimentSide,
+}
+
+fn experiment_side(store: &Store, book: &PriceBook, range: Range, filter: &Filter) -> Result<ExperimentSide> {
+    let mut side = ExperimentSide { from_ms: range.from_ms, to_ms: range.to_ms, ..Default::default() };
+    if range.to_ms <= range.from_ms {
+        return Ok(side);
+    }
+    let mut sessions = std::collections::HashSet::new();
+    // a conversation counts towards the cost per session only with a request that has a price,
+    // so a model without one does not make conversations look cheaper
+    let (mut priced, mut priced_usd) = (std::collections::HashSet::new(), 0.0);
+    let mut share = PromptShare::default();
+    let events = store.events_between(range.from_ms, range.to_ms)?;
+    for e in events.iter().filter(|e| filter.matches(e)) {
+        side.requests += 1;
+        share.add(&e.tokens);
+        let session = e.session_id.as_ref().map(|s| (e.tool.as_str(), s.clone()));
+        match book.cost(&input_of(e)).map(|c| c.total()) {
+            Some(usd) => {
+                side.cost_usd += usd;
+                if let Some(s) = session.clone() {
+                    priced.insert(s);
+                    priced_usd += usd;
+                }
+            }
+            // a request that used no token, such as one that failed, would cost nothing at any price
+            None if e.tokens.total() > 0 => side.unpriced_requests += 1,
+            None => {}
+        }
+        sessions.extend(session);
+    }
+    side.sessions = sessions.len() as u64;
+    side.cost_per_session = (!priced.is_empty()).then(|| priced_usd / priced.len() as f64);
+    side.cache_hit_pct = (share.prompt > 0).then(|| share.cache_read as f64 * 100.0 / share.prompt as f64);
+    let starts: Vec<u64> = firsts_among(store, events, range, filter)?.iter().map(|e| e.request_input).collect();
+    side.started = starts.len() as u64;
+    side.starting_load = (!starts.is_empty()).then(|| median(&starts));
+    // tool calls carry a tool and a project, which is all a comparison is narrowed by
+    for c in store.tool_calls_between(range.from_ms, range.to_ms)? {
+        let wanted = (filter.tools.is_empty() || filter.tools.contains(&c.tool)) && (filter.projects.is_empty() || c.project_id.is_some_and(|p| filter.projects.contains(&p)));
+        if let Some(failed) = c.failed.filter(|_| wanted) {
+            side.tool_calls += 1;
+            side.tool_failed += u64::from(failed);
+        }
+    }
+    side.tool_error_pct = (side.tool_calls > 0).then(|| side.tool_failed as f64 * 100.0 / side.tool_calls as f64);
+    Ok(side)
+}
+
+/// The use in the `days` days before `at_ms` against the same number of days from it on, as far
+/// as they have passed by `now_ms`: what changed after something the user did at `at_ms`. Only
+/// the tool and the project of `filter` narrow it.
+pub fn experiment(store: &Store, book: &PriceBook, at_ms: i64, days: u32, now_ms: i64, filter: &Filter) -> Result<Experiment> {
+    let span = i64::from(days) * 86_400_000;
+    let filter = Filter { tools: filter.tools.clone(), projects: filter.projects.clone(), ..Default::default() };
+    Ok(Experiment {
+        before: experiment_side(store, book, Range { from_ms: at_ms - span, to_ms: at_ms }, &filter)?,
+        after: experiment_side(store, book, Range { from_ms: at_ms, to_ms: (at_ms + span).min(now_ms) }, &filter)?,
+    })
+}
+
 /// The starting load of each project, per tool and where it runs, from the conversations that
 /// began in `range`; the projects with the most conversations first. A conversation's first
 /// request is its first main-conversation one: subagents, advisors and captured telemetry (which
 /// also holds helper requests) are left out.
 pub fn starting_loads(store: &Store, book: &PriceBook, range: Range, filter: &Filter) -> Result<Vec<StartingLoad>> {
-    let mut firsts: BTreeMap<(&str, &str), &EventRow> = BTreeMap::new();
-    let events = store.events_between(range.from_ms, range.to_ms)?;
-    for e in events.iter().filter(|e| e.agent.is_none() && !e.advisor && e.accuracy != Accuracy::Captured && e.request_input > 0) {
-        if let Some(session) = e.session_id.as_deref() {
-            // events come oldest first
-            firsts.entry((e.tool.as_str(), session)).or_insert(e);
-        }
-    }
+    let firsts = first_requests(store, range, filter)?;
     type Key<'a> = (Option<i64>, &'a str, Option<String>);
     let mut groups: BTreeMap<Key, Vec<&EventRow>> = BTreeMap::new();
-    for ((_, session), e) in firsts {
-        // one that began before the range only goes on in it
-        if !filter.matches(e) || store.session_started_ms(session)?.is_some_and(|t| t < range.from_ms) {
-            continue;
-        }
+    for e in &firsts {
         groups.entry((e.project_id, e.tool.as_str(), e.client.clone())).or_default().push(e);
     }
     let projects: HashMap<i64, ProjectRow> = store.projects()?.into_iter().map(|p| (p.id, p)).collect();
     let mut out: Vec<StartingLoad> = groups
         .into_iter()
-        .map(|((project_id, _, client), mut evs)| {
-            evs.sort_by_key(|e| e.ts_ms);
+        .map(|((project_id, _, client), evs)| {
             let all: Vec<Start> = evs.iter().map(|e| Start { ts_ms: e.ts_ms, tokens: e.request_input }).collect();
             let recent = &evs[evs.len().saturating_sub(START_RECENT)..];
             let mut costs: Vec<f64> = recent.iter().filter_map(|e| book.cost(&input_of(e)).map(|c| c.total())).collect();

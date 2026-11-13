@@ -32,6 +32,7 @@ AI Usage Tracker, Windows, macOS ve Linux'ta çalışan bir uygulamadır. Yapay 
 - **Limitin kestiği işi kaldığı yerden sürdürün.** Kullanım limiti bir Claude Code konuşmasını yarıda keserse, limit sıfırlanınca uygulama konuşmayı kendisi devam ettirir; gece yarıda kalan iş siz yokken sürer.
 - **Sıfırlanmayı ihtiyacınız olan saate getirin.** Claude'un 5 saatlik penceresi ilk isteğinizle başlar. Uygulama, seçtiğiniz saatte (örneğin 06:00) tek küçük bir istekle pencereyi açar; pencere 11:00'de sıfırlanır ve bir iş gününde iki tam pencere kullanırsınız.
 - **Daha yazmadan her konuşmanın neye mal olduğunu görün.** Sistem istemi, araç tanımları, bellek dosyaları ve MCP sunucuları her konuşmanın ilk isteğiyle gönderilir. Bu başlangıç yükünü proje proje ve arttığı günle birlikte görürsünüz.
+- **Bir değişikliğin işe yarayıp yaramadığını görün.** MCP sunucusu eklediğiniz, `CLAUDE.md` dosyasını kısalttığınız ya da model değiştirdiğiniz günü işaretleyin; öncesindeki ve sonrasındaki kullanımınızı yan yana görün: oturum başına maliyet, başlangıç yükü, araç hata oranı ve önbellek isabeti.
 - **Geçmişinizi kaybetmeyin.** Devam ettirdiğiniz ya da kopyasından yeni oturum açtığınız sohbetler iki kez sayılmaz. Claude Code kayıtlarını 30 gün sonra silse bile geçmişiniz uygulamanın veri tabanında kalır.
 - **İşinizi değil, kullanımınızı paylaşın.** Bir gününüzü, haftanızı, ayınızı ya da yılınızı dört boyutta karta dönüştürün. Kartta yalnızca toplamlar, araç adları ve model adları bulunur.
 
@@ -126,6 +127,15 @@ Birden fazla Codex ya da Claude hesabınız varsa her hesap, kendi pencerelerine
 - Çağrılarının %25'i ya da daha fazlası hata veren araçlar (sonucu bilinen en az 20 çağrı).
 
 Tutarlar API eşdeğeridir. Abonelikle kullanıyorsanız bu tutarları ödemezsiniz; tutarlar kullanımınızın büyüklüğünü gösterir.
+
+**Önce ve sonra.** **Öneriler** sayfasının altında, bir şeyi değiştirdiğiniz günü kendi sözlerinizle işaretleyebilirsiniz ("yeni MCP sunucusu eklendi", "CLAUDE.md kısaltıldı"). Uygulama her işaret için o günden önceki günleri, o günden sonraki aynı sayıda günle karşılaştırır (her iki yanda 3, 7, 14 ya da 30 gün); sonraki günler geçtikçe sayılır:
+
+- **oturum başına maliyet**: konuşmaların o günlerdeki fiyatlı isteklerinin API eşdeğeri maliyeti, böyle bir isteği olan konuşma sayısına bölünür
+- **başlangıç yükü**: o günlerde başlayan konuşmaların ilk isteklerinin medyanı (bkz. **Başlangıç yükü**)
+- **araç hata oranı**: sonucu bilinen araç çağrıları içinde hata verenlerin payı
+- **önbellek isabeti**: önbellekten okunan ÷ istem token'ları
+
+Bir işareti tek bir projeye ve tek bir araca daraltabilirsiniz; böylece bir projenin bellek dosyasındaki değişiklik, yaptığınız diğer her şeyle birlikte ölçülmez. Her rakam değişimi yüzde olarak, iki oran için puan olarak gösterir. Bir değişim yalnızca her iki yanda en az üç oturum (hata oranı için yirmi araç çağrısı) varsa ve fark en az %5 ya da bir puansa iyi ya da kötü olarak renklendirilir; daha azında rakam renksiz gösterilir; bir yanda üçten az oturum varsa kart bunu söyler. Fiyatı olmayan bir modelin istekleri hiçbir maliyete girmez; bunlar bir yandaki isteklerin %5'inden fazlaysa kart kaç istek olduğunu söyler ve oturum başına maliyeti renklendirmez. Karşılaştırma o gün çevresinde neyin değiştiğini gösterir, değişikliğinizin buna yol açtığını göstermez: ikinci hafta farklı türde bir iş yapmak aynı rakamları oynatır. En çok 50 işaret, uygulamanın ayarlarında tutulur; **Tüm verilerimi sil** bunları kaldırır.
 
 **Abonelik değeri.** **Genel bakış** sayfası, son 30 günde her sağlayıcıdaki API eşdeğeri kullanımınızı planınızın bu günlere düşen ücretiyle karşılaştırır ("4,7×"). Birikimli kullanımınız plan ücretiyle aynı grafikte çizilir ve planın kendini kaçıncı gün amorti ettiği gösterilir. Bu 30 günde hiç kullanmadığınız araçlar gösterilmez.
 

@@ -57,11 +57,12 @@ describe('continuing after a limit resets', () => {
       }),
     )
     const [known, unknown, held, due, went] = rows(target)
-    expect(known).toMatch(/^notes · main Terminal 5-hour limit full \d\d:\d\d.* continues in 1 h Don't continue$/)
+    // late in the evening the time is tomorrow's and carries its day
+    expect(known).toMatch(/^notes · main Terminal 5-hour limit full .*\d\d:\d\d.* continues in 1 h Don't continue$/)
     expect(unknown).toBe("Hidden project Terminal Reset time not known yet stopped 1 min ago Don't continue")
     expect(held).toContain('Continued too often today')
     expect(due).toContain('Continues shortly')
-    expect(went).toMatch(/^site The limit reset and the conversation continued \d\d:\d\d.* continued$/)
+    expect(went).toMatch(/^site The limit reset and the conversation continued .*\d\d:\d\d.* continued$/)
     expect(toggle(target).getAttribute('aria-checked')).toBe('true')
     expect(target.querySelector('.tag')?.textContent).toBe('4 conversations waiting')
     // how much of the wait is over shows as a wedge; one without a time has none

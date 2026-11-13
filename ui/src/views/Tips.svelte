@@ -5,6 +5,7 @@
   import { fmtCompact, fmtInt, fmtMoney, fmtPct, has, t, toolLabel } from '../lib/i18n.svelte'
   import Icon from '../components/Icon.svelte'
   import PlanAdvice from '../components/PlanAdvice.svelte'
+  import Experiments from '../components/Experiments.svelte'
 
   let data = $state<Tips | null>(null)
   let history = $state<LimitHistoryView | null>(null)
@@ -149,6 +150,8 @@
   {/if}
   <p class="subtle small basis">{t('tips.basis', { requests: fmtInt(data.requests), calls: fmtInt(data.tool_calls) })} {data.tips.length ? t('tips.checked') : ''}</p>
 {/if}
+
+<Experiments />
 
 <style>
   .lead {

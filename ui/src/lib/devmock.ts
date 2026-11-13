@@ -105,6 +105,10 @@ const settings: Settings = {
   cache_lead: 2 as 1 | 2 | 5,
   limit_resume: scenario.get('resume') === '1',
   window_opener: { enabled: scenario.get('opener') === '1', minute: 360, days: [1, 2, 3, 4, 5] },
+  markers: [
+    { id: 'm1', at_ms: new Date().setHours(0, 0, 0, 0) - 9 * 86_400_000, label: 'CLAUDE.md kısaltıldı', project_id: 3 as number | null, project_path: null as string | null, tool: 'claude_code' as string | null, days: 7 },
+    { id: 'm2', at_ms: new Date().setHours(0, 0, 0, 0) - 2 * 86_400_000, label: 'Yeni MCP sunucusu eklendi', project_id: null as number | null, project_path: null as string | null, tool: null as string | null, days: 7 },
+  ],
   provider_colors: {},
   tint_icons: false,
   show_icons: true,
@@ -897,6 +901,23 @@ export function installMock() {
           return mockCompare()
         case 'context_stats':
           return mockContext()
+        case 'experiments': {
+          const side = (from: number, to: number, sessions: number, cost: number, start: number | null, calls: number, failed: number, hit: number) => ({ from_ms: from, to_ms: to, sessions, requests: sessions * 31, cost_usd: cost * sessions, unpriced_requests: 0, cost_per_session: sessions ? cost : null, started: sessions, starting_load: sessions ? start : null, tool_calls: calls, tool_failed: failed, tool_error_pct: calls ? (failed * 100) / calls : null, cache_hit_pct: sessions ? hit : null })
+          const names: Record<number, string> = { 1: 'demo-app', 2: 'website', 3: 'notes' }
+          return settings.markers.map((m, i) => {
+            const span = m.days * 86_400_000
+            const end = Math.min(m.at_ms + span, Date.now())
+            const fresh = end - m.at_ms < 3 * 86_400_000
+            return {
+              ...m,
+              project: m.project_id === null || settings.hide_project_names ? '' : (names[m.project_id] ?? ''),
+              project_hidden: m.project_id !== null && settings.hide_project_names,
+              project_gone: false,
+              before: i % 2 ? side(m.at_ms - span, m.at_ms, 14, 3.42, 74_300, 412, 37, 93.1) : side(m.at_ms - span, m.at_ms, 11, 2.86, 38_400, 240, 22, 91.4),
+              after: fresh ? side(m.at_ms, end, 2, 4.1, 86_400, 61, 9, 90.2) : side(m.at_ms, end, 12, 2.21, 29_500, 265, 15, 95.8),
+            }
+          })
+        }
         case 'starting_loads': {
           const day = 86_400_000
           const load = (id: number, project: string, tool: string, client: string, sizes: number[], cost: number | null, step: number | null) => {
