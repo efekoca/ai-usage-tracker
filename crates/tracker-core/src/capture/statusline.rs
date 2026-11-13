@@ -173,6 +173,17 @@ pub fn write_options(data_dir: &Path, options: &Options) -> std::io::Result<()> 
 /// How much of the transcript's end is read, a larger part only when a smaller one does not tell.
 const TAIL_BYTES: [u64; 3] = [256 * 1024, 2 * 1024 * 1024, 8 * 1024 * 1024];
 
+/// When the prompt cache of the conversation the status line is drawn for runs out. Claude Code
+/// 2.1.251 and later send it as `prompt_cache.expires_at` (`null` once it went cold); for an older
+/// one the transcript tells.
+pub fn session_cache_expiry(input: &Value, now_ms: i64) -> Option<i64> {
+    if let Some(cache) = input.get("prompt_cache").filter(|c| c.is_object()) {
+        let at = cache.get("expires_at").and_then(Value::as_i64)?.checked_mul(1000)?;
+        return (at > now_ms && cache.get("warm").and_then(Value::as_bool) != Some(false)).then_some(at);
+    }
+    cache_expiry(Path::new(input.get("transcript_path")?.as_str()?), now_ms)
+}
+
 /// When the prompt cache of the conversation in `transcript` runs out, by the rule of the app's
 /// live caches: the lifetime it was last written with, after the last request that used it.
 /// `None` once it ran out, or when the end of the transcript does not tell.
@@ -388,6 +399,20 @@ mod tests {
         let (_dir, path) = transcript(&[request("msg_f", "10:30:00", 0, 0, 0)]);
         assert_eq!(cache_expiry(&path, ms("10:31:00")), None, "no cache in use");
         assert_eq!(cache_expiry(Path::new("/no/such/transcript.jsonl"), 0), None);
+    }
+
+    #[test]
+    fn claude_codes_own_cache_time_comes_first() {
+        let (_dir, path) = transcript(&[request("msg_a", "10:00:00", 1000, 0, 500)]);
+        let t = path.to_str().unwrap();
+        let input = |cache: Value| json!({"transcript_path": t, "prompt_cache": cache});
+        let at = ms("10:04:00");
+        assert_eq!(session_cache_expiry(&input(json!({"warm": true, "ttl": "5m", "expires_at": at / 1000})), ms("10:01:00")), Some(at));
+        assert_eq!(session_cache_expiry(&input(json!({"warm": false, "expires_at": null})), ms("10:01:00")), None, "cold, whatever the transcript says");
+        assert_eq!(session_cache_expiry(&input(json!({"warm": true, "expires_at": at / 1000})), at), None);
+        // an older Claude Code sends no prompt_cache
+        assert_eq!(session_cache_expiry(&json!({"transcript_path": t}), ms("10:01:00")), Some(ms("11:00:00")));
+        assert_eq!(session_cache_expiry(&json!({}), 0), None);
     }
 
     #[test]
