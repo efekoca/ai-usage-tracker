@@ -34,9 +34,8 @@
   <div class="value">{value}</div>
   <div class="foot">
     {#if delta !== null && Number.isFinite(delta)}
-      <span class="delta" class:up={delta > 0} class:down={delta < 0}>
-        <Icon name={delta >= 0 ? 'up' : 'down'} size={12} />
-        {#if !flat}<span class="sr-only">{t(delta > 0 ? 'overview.deltaUp' : 'overview.deltaDown')}</span>{/if}
+      <span class="delta" class:up={!flat && delta > 0} class:down={!flat && delta < 0}>
+        {#if !flat}<Icon name={delta > 0 ? 'up' : 'down'} size={12} /><span class="sr-only">{t(delta > 0 ? 'overview.deltaUp' : 'overview.deltaDown')}</span>{/if}
         <!-- beyond +200 % a multiplier reads better than a four-digit percentage -->
         {points ? t('overview.deltaPoints', { pts: fmtDec(Math.abs(delta), 1) }) : delta >= 2 ? `${fmtDec(1 + delta, delta >= 9 ? 0 : 1)}×` : fmtPct(Math.abs(delta) * 100)}
       </span>

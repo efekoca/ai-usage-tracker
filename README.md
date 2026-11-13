@@ -12,7 +12,7 @@ A private app for Windows, macOS, and Linux that reads the usage logs your AI to
 
 [Features](#features) · [Install](#install) · [Privacy](#privacy) · [How it works](#how-it-works) · [Build from source](#build-from-source) · [Türkçe](README.tr.md)
 
-![The AI Usage Tracker overview with a 30-day trend for Claude Code, Codex, Antigravity and OpenCode and the plan value, and the desktop widget showing today's tokens, limit rings and OpenCode usage](assets/readme/hero-en.webp)
+![The AI Usage Tracker overview with a 30-day trend for Claude Code, Codex, Antigravity and OpenCode and the plan value, and the desktop widget showing today's tokens, the conversation whose cache runs out first, limit rings and OpenCode usage](assets/readme/hero-en.webp)
 
 - **Private by design.** Prompts and responses never enter the app's archive. Only counts and metadata are kept, in a local SQLite file, and your usage data never leaves the computer.
 - **Know where every number comes from.** Every figure is labeled: **Exact** from the tool's own log, **Estimated** by the app, or **Captured** live. Nothing is guessed silently.
@@ -28,6 +28,7 @@ A private app for Windows, macOS, and Linux that reads the usage logs your AI to
 - **Compare what the same work would cost on other models.** Your requests are repriced on every model in the price list, with the same token counts and prompt sizes.
 - **See what subagents and tools cost you.** You see how much of your cost comes from subagents and how often each tool's calls fail.
 - **Measure what the cache saves you.** You see the hit rate, the net savings, and what it cost when the cache had to be written again after a long pause.
+- **Keep a conversation's cache from running out.** Each Claude Code conversation's cache shows its time left on the **Cache** page, in the widget, the menu bar and the control panel. Refresh it with one click, or let the app do it shortly before it runs out, for the price of one cache read instead of writing it again.
 - **Keep your history.** Resumed and forked sessions are never counted twice, and your history stays in the archive even after the tools delete their own logs (Claude Code does so after 30 days).
 - **Share your use, not your work.** Turn a day, a week, a month or a year into a card in four sizes. A card holds totals, tool names and model names only.
 
@@ -46,7 +47,7 @@ Providers publish how their limits work, not the numbers themselves. The app the
 - A real percentage appears only when a tool writes one locally or the app reads it live (see [Live capture](#live-capture)).
 - If the tool was used after the newest reading, the current value is unknown. It is shown as "?" with the last reading and its age, never as the current value. The panel and the menu bar text mark that last reading with "~": it is usually lower than the current value, but higher if the provider reset your limit in between.
 - While a weekly limit is full, its five-hour limit shows a lock and **week full** instead of a percentage, because none of it can be used until the week resets. The menu bar icon then shows that limit as full. Claude's Opus and Sonnet weeks lock nothing, since other models stay free.
-- Percentages can read as **used** (as Claude shows them, "15 % used") or **left** (as Codex shows them, "85 % left"). Switch between them in **Settings**, on the **Limits** page, or in the **Widget studio**. Warning colors follow usage either way.
+- Percentages can read as **used** (as Claude shows them, "15 % used") or **left** (as Codex shows them, "85 % left"). Switch between them in **Settings**, on the **Limits** page, or in the **Widget studio**. Warning colors follow usage either way, at the **Caution** and **Critical** levels set in the **Widget studio** (70% and 90% by default), in the app as in the widget, the panel and the menu bar.
 - Without a real reading, you can set your own budget per window. The resulting percentage is labeled **Estimated**.
 - Limits are account-wide. Each rise of the percentage is split among the projects that sent requests meanwhile, by API-equivalent cost. Use from elsewhere (the web, a phone, cloud tasks, another computer) is not charged to your projects; it shows separately as **Not in local logs**. With several Claude or Codex accounts, requests no evidence ties to an account get a share of their own, **Unidentified account**, and a reading taken before them is not shown as current. These shares are always **Estimated**.
 - Each tool is marked with its own monochrome icon. Under **Settings → General → Tool colors** you can give Claude, Codex, and Antigravity their own color for limit bars and widget rings, and color the icons too if you like. Warning colors still show when a limit gets close. If you prefer plain names, turn the icons off under **Settings → General → Show tool icons**.
@@ -154,7 +155,7 @@ Four more pages cover sessions, cache, context, and projects.
 
 | ![Sessions page](assets/readme/sessions-en.webp) | ![Cache page](assets/readme/cache-en.webp) |
 |---|---|
-| **Sessions**: every session with its length, models, cost, and largest context | **Cache**: hit rate, reuse, and what the cache actually saved |
+| **Sessions**: every session with its length, models, cost, and largest context | **Cache**: each conversation's cache time left, the hit rate, reuse, and what the cache actually saved |
 
 **Sessions.** The **Sessions** page lists every session in the period with its start, project, models, length (first to last request), requests, tokens, API-equivalent cost, cache hit rate, and largest context. The list is sortable and searchable, and each row opens into a panel with the session's tokens, average context, cache hit rate, models, tool and session ID, and a **timeline** of the session. The timeline shows each request as a column with its context size and how much of it came from the cache, and marks where the cache was written again after a pause, where the context shrank, which requests came from subagents and which tools were called. Subagents that work at the same time share one mark that says how many there were, and a long pause shows its length under the gap. Subagent transcripts count toward their parent session.
 
@@ -199,18 +200,18 @@ Press **Cmd+K** on a Mac or **Ctrl+K** on Windows and Linux, or click **Search**
 
 An always-on-top mini window sits by default in the bottom-right corner of the screen. It sizes itself to its content and, when snapped to a corner, stays flush with that corner while it resizes. Dragging it leaves it where you drop it. Right-click it to open the dashboard or change its opacity, size and position.
 
-![The desktop widget showing today's tokens and cost, five-hour rings and weekly percentages for two Claude accounts, Antigravity and two Codex accounts, and today's OpenCode usage](assets/readme/widget-en.webp)
+![The desktop widget showing today's tokens and cost, the conversation whose cache runs out first, five-hour rings and weekly percentages for two Claude accounts, Antigravity and two Codex accounts, and today's OpenCode usage](assets/readme/widget-en.webp)
 
 The **Widget studio** page changes what the widget shows and how it looks, with a live preview.
 
-![Widget studio with a live preview of the widget, including its Claude and Codex accounts and OpenCode usage, and the list of items the widget can show](assets/readme/studio-en.webp)
+![Widget studio with a live preview of the widget, including its Claude and Codex accounts, OpenCode usage and the cache time left, and the list of items the widget can show](assets/readme/studio-en.webp)
 
-- **Content:** the items shown and their order (main number, secondary value, five-hour and weekly limits, OpenCode usage, per-tool split, 7- and 30-day totals, and last update time), which tools' limits to show and in what order, and which Antigravity limit to show: Gemini, Claude and GPT, both, or whichever is fuller
+- **Content:** the items shown and their order (main number, secondary value, five-hour and weekly limits, OpenCode usage, per-tool split, 7- and 30-day totals, last update time, and, while **Cache time left** is on, the conversation whose cache runs out first), which tools' limits to show and in what order, and which Antigravity limit to show: Gemini, Claude and GPT, both, or whichever is fuller
 - **Layout:** horizontal, vertical, or a single line
 - **Limit style:** ring, bar, or text
 - **Look:** theme, accent color, scale, background opacity, corner radius, border, shadow, labels, tool icons, and time until reset
 - **Text:** any font installed on the computer (searchable and shown in its own face), text size, main-number size, number weight, and fixed-width digits
-- **Thresholds:** caution and critical levels
+- **Thresholds:** caution and critical levels, which the app's own limit colors follow too
 - **Behavior:** always on top, position lock, click action, hiding during full-screen apps (on macOS while the app is out of the Dock), and snap to a corner
 
 The widget also comes with a shortcut and a tray icon:
@@ -222,7 +223,7 @@ The widget also comes with a shortcut and a tray icon:
 
 The app's icon sits next to the clock on Windows, in the menu bar on macOS, and in the system tray on Linux. Click it to open the control panel. Right-click it for a short menu: open the app, show or hide the widget, scan now, install a ready update, or quit. On Windows and macOS, hovering over the icon lists every current limit. Linux trays report no clicks, so there the panel opens from the menu.
 
-![The control panel open under the menu bar on a Mac: next to the clock, the usage dial and the text with Claude's and Codex's limits as bars and percentages, with a warning mark on Claude's weekly limit; below, rings for Claude's and Codex's 5-hour and weekly limits, today's usage, OpenCode usage, a forecast for Claude's 5-hour limit, and four buttons](assets/readme/panel-en.webp)
+![The control panel open under the menu bar on a Mac: next to the clock, the usage dial and the text with Claude's and Codex's limits as bars and percentages, with a warning mark on Claude's weekly limit; below, rings for Claude's and Codex's 5-hour and weekly limits, today's usage, OpenCode usage, the conversation whose cache runs out first with a refresh button, a forecast for Claude's 5-hour limit, and four buttons](assets/readme/panel-en.webp)
 
 **Control panel.** The panel shows the tiles you choose:
 
@@ -237,7 +238,7 @@ The panel also tells you when an update is ready and when a signed-out tool keep
 
 **Menu bar page.** Set up the panel on the **Menu bar** page. Drag tiles from the gallery into a live preview of the panel, drag them to reorder, or drag them back to the gallery to remove them. Click a tile to pick its size (small, wide, large, full width, or full width and tall) and, for limits, a ring or a bar. The panel holds up to 16 tiles and shows used or remaining limits, as in the app or as you set it for the panel.
 
-![Menu bar page with a live preview: the icon showing the Claude logo on a square in Claude's color, and under it the control panel with Claude and Codex limit rings, today's usage, OpenCode usage, a forecast and buttons, next to the gallery of tiles with every account](assets/readme/menubar-en.webp)
+![Menu bar page with a live preview: the icon showing the Claude logo on a square in Claude's color, and under it the control panel with Claude and Codex limit rings, today's usage, OpenCode usage, live caches, a forecast and buttons, next to the gallery of tiles with every account](assets/readme/menubar-en.webp)
 
 **Icon.** Choose what the icon shows and which limit it follows (by default, the percentage of your fullest limit):
 
@@ -247,7 +248,7 @@ The panel also tells you when an update is ready and when a signed-out tool keep
 
 While the limit was used after its newest reading, so the real value may be higher, the icon is drawn faded, as the text marks such a value with "~".
 
-**Text next to the icon.** On macOS and Linux, text can sit next to the icon, such as `Cl 5h ▰▰▱▱▱ 46% · Cl W ⚠︎▰▰▰▰▱ 73%`. Windows shows no text next to tray icons. Pick the items and their order: any limit (of every Claude or Codex account too), its forecast, tokens, API-equivalent cost, sessions or cache hit rate for today, 7 or 30 days (for every tool or OpenCode alone), and the time of the last scan. Then choose:
+**Text next to the icon.** On macOS and Linux, text can sit next to the icon, such as `Cl 5h ▰▰▱▱▱ 46% · Cl W ⚠︎▰▰▰▰▱ 73%`. Windows shows no text next to tray icons. Pick the items and their order: any limit (of every Claude or Codex account too), its forecast, tokens, API-equivalent cost, sessions or cache hit rate for today, 7 or 30 days (for every tool or OpenCode alone), and the time of the last scan. While **Cache time left** shows in the menu bar, the conversation whose cache runs out first follows the text (`notes 2m`). Then choose:
 
 - **Labels:** full names (`Claude 5h`), short ones (`Cl 5h`), or none
 - **Value:** used or left
@@ -384,6 +385,7 @@ Every release includes `SHA256SUMS`, the checksum of each file. Put it next to y
 - **Codex and Claude accounts:** to tell accounts apart, the app keeps only a one-way digest of the Codex account ID and of the Claude plan's organization ID. For Claude it reads only that ID: from `~/.claude.json`, from telemetry events, and from the folder names and session IDs of the Claude desktop app's Code-tab session list. Account names are the ones you give; e-mail addresses are never read.
 - **Antigravity's temporary copy:** Antigravity keeps its conversations, text included, in a database. So as never to touch that file, the app copies it into a temporary folder only you can open, reads the counts and deletes the copy right away. If the app is forced to quit, the next Antigravity read deletes leftover copies older than 10 minutes. Conversation text never reaches the app's archive.
 - **OpenCode's database:** OpenCode keeps its sessions, text included, in one database. The app opens it read-only and asks it only for token counts, model, provider, agent, project folder, and the name, result and time of each tool call; text is never read.
+- **Cache refresh hook:** if you turn on cache refresh, a small hook is added to `~/.claude/settings.json` (backed up first). The hook and the app share only small files named by each conversation's session ID in the app's data folder: whether the conversation is waiting, when you last sent a prompt, and the refresh request. The hook never reads the conversation, and **Settings → General → Cache time left → Remove** takes it out again.
 - **Network:** the app itself connects only to check for updates and for a newer price list. Each check downloads one file, the release's version file or `config/pricing.json` from this repository, and sends nothing (**Settings → Updates**, **Settings → Prices**). The limit reads, on by default, run your own Claude Code, Codex and Antigravity CLI, which ask their own services for your plan's limit percentages; the app starts Claude Code with its telemetry and error reporting turned off and Codex with its analytics turned off; the Antigravity CLI has no such setting. You can turn the reads off under **Sources → Live capture**. If you install a tool from the app, its installer is downloaded from the maker's site. Plans ship with the app, and currency conversion uses a rate you enter yourself.
 
 ### Live capture
