@@ -211,9 +211,19 @@ const MAX_IMPORTED_COUNT: i64 = 1_000_000_000_000;
 /// Imported times must fall between 1970 and 3000 (milliseconds; reset times are seconds).
 const MAX_IMPORTED_MS: i64 = 32_503_680_000_000;
 
+thread_local! {
+    static CLOCK_SHIFT_MS: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+}
+
+/// Moves the clock this thread's reads and writes go by, so a test can see what a later run does.
+#[doc(hidden)]
+pub fn shift_clock_for_tests(ms: i64) {
+    CLOCK_SHIFT_MS.with(|c| c.set(ms));
+}
+
 /// The newest reading time accepted now: a little ahead of the clock for drift, never far ahead.
 pub(crate) fn latest_accepted_ms() -> i64 {
-    chrono::Utc::now().timestamp_millis() + MAX_CLOCK_SKEW_MS
+    chrono::Utc::now().timestamp_millis() + CLOCK_SHIFT_MS.with(std::cell::Cell::get) + MAX_CLOCK_SKEW_MS
 }
 
 /// The Claude config folder of each session an archive's logs came from (`schema`: main or other).
