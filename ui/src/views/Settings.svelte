@@ -579,6 +579,12 @@
         <Toggle checked={s.notify.budget} label={t('settings.notify.budget')} onchange={(v) => saveNotify({ budget: v })} />
       </div>
     {/if}
+    {#if s.limit_resume}
+      <div class="item">
+        <span>{t('settings.notify.resume')}</span>
+        <Toggle checked={s.notify.resume} label={t('settings.notify.resume')} onchange={(v) => saveNotify({ resume: v })} />
+      </div>
+    {/if}
     <div class="item">
       <div><span>{t('settings.notify.signIn')}</span><div class="subtle small">{t('settings.notify.signIn.help')}</div></div>
       <Toggle checked={s.notify.sign_in} label={t('settings.notify.signIn')} onchange={(v) => saveNotify({ sign_in: v })} />

@@ -189,13 +189,15 @@ pub fn render_default(windows: Option<&Map<String, Value>>) -> String {
     parts.join(" · ")
 }
 
-/// What the app asks the bridge to add to the status line.
+/// What the app asks of the programs Claude Code runs for it: the bridge and the hooks.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Options {
-    /// The time the conversation's prompt cache runs out.
+    /// The time the conversation's prompt cache runs out, at the end of the status line.
     pub cache: bool,
     pub turkish: bool,
+    /// A conversation the usage limit stopped is continued once the limit starts again.
+    pub resume: bool,
 }
 
 /// A missing or unreadable file adds nothing.
@@ -514,7 +516,7 @@ mod tests {
     fn options_are_read_back_and_a_missing_file_adds_nothing() {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(read_options(dir.path()), Options::default());
-        let on = Options { cache: true, turkish: true };
+        let on = Options { cache: true, turkish: true, resume: true };
         write_options(dir.path(), &on).unwrap();
         assert_eq!(read_options(dir.path()), on);
         fs::write(options_file(dir.path()), b"{").unwrap();

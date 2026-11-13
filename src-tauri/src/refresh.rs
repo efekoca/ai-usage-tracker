@@ -88,13 +88,13 @@ fn save(state: &AppState, b: &mut Book) {
 
 /// Where hooks leave their files: the app's own folder and, on Windows, the private copies of it
 /// that a packaged app (the Claude desktop app) gives the programs it starts.
-fn hook_dirs(state: &AppState) -> Vec<PathBuf> {
+pub(crate) fn hook_dirs(state: &AppState) -> Vec<PathBuf> {
     std::iter::once(state.data_dir.clone()).chain(crate::capture::package_data_dirs(&state.data_dir)).map(|d| rh::dir(&d)).filter(|d| d == &rh::dir(&state.data_dir) || d.is_dir()).collect()
 }
 
 fn waiter_dir<'a>(dirs: &'a [PathBuf], session: &str) -> Option<&'a PathBuf> {
     let now = SystemTime::now();
-    dirs.iter().find(|d| rh::waiting(d, session, now))
+    dirs.iter().find(|d| rh::waiting(d, rh::Wait::Cache, session, now))
 }
 
 /// Whether Claude Code's settings hold our hook.
@@ -198,7 +198,7 @@ fn signal(app: &AppHandle, s: &Settings, c: &Cache, auto: bool) -> Result<(), St
     let dir = waiter_dir(&dirs, &c.session_id).ok_or("not_waiting")?;
     // before the signal: the hook can take it at once, and a refresh counts only from a later take
     let now = now_ms();
-    rh::signal(dir, &c.session_id, message(s)).map_err(|e| e.to_string())?;
+    rh::signal(dir, rh::Wait::Cache, &c.session_id, message(s)).map_err(|e| e.to_string())?;
     log::info!("cache refresh {}", if auto { "(automatic)" } else { "(by hand)" });
     let mut b = BOOK.lock().unwrap();
     load(&state, &mut b);

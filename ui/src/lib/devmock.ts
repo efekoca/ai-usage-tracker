@@ -55,7 +55,7 @@ const settings: Settings = {
   capture: { codex_poll: true, codex_poll_minutes: 5, codex_path: '', statusline: false, otel: false, otel_port: 43180, claude_poll: true, claude_poll_minutes: 5, claude_path: '', antigravity_poll: true, antigravity_poll_minutes: 5, antigravity_path: '' },
   autostart: false,
   show_in_dock: true,
-  notify: { enabled: true, early: 'warn', full: true, reset: true, five_hour: true, seven_day: true, budget: true, sign_in: true, route: true, cache: false },
+  notify: { enabled: true, early: 'warn', full: true, reset: true, five_hour: true, seven_day: true, budget: true, sign_in: true, route: true, cache: false, resume: true },
   allow_config_updates: false,
   primary_metric: 'tokens',
   dismissed_unpriced: [],
@@ -103,6 +103,7 @@ const settings: Settings = {
   cache_picked: [] as string[],
   cache_auto: showcase,
   cache_lead: 2 as 1 | 2 | 5,
+  limit_resume: scenario.get('resume') === '1',
   provider_colors: {},
   tint_icons: false,
   show_icons: true,
@@ -782,6 +783,9 @@ const droppedCaches = new Set<string>()
 // the showcase shows refresh at work: the hook added and automatic refresh on
 let refreshHook = scenario.get('refresh') === '1' || showcase
 const refreshedAt = new Map<string, number>()
+// the limit hook is added on first use too; `?resume=1` shows it at work
+let resumeHook = scenario.get('resume') === '1'
+const resumeCancelled = new Set<string>()
 const autoOverride = new Map<string, boolean>()
 const refreshLog: { at: number; usd: number; session: string }[] = []
 function mockCaches() {
@@ -967,6 +971,22 @@ export function installMock() {
           const today = refreshLog.filter((r) => new Date(r.at).toDateString() === new Date().toDateString())
           return { installed: refreshHook, settings_file: platform === 'windows' ? 'C:\\Users\\you\\.claude\\settings.json' : '/Users/you/.claude/settings.json', today: today.length, today_usd: today.reduce((n, r) => n + r.usd, 0) }
         }
+        case 'limit_resume_info':
+        case 'set_limit_resume': {
+          if (cmd === 'set_limit_resume') {
+            resumeHook = !!a.on
+            settings.limit_resume = !!a.on
+          }
+          const waiting = [
+            { session_id: 'c-demo', project: settings.hide_project_names ? '' : 'demo-app', branch: settings.hide_project_names ? null : 'cache-refresh', client: 'claude-desktop', stopped_ms: Date.now() - 42 * 60_000, window: 'five_hour', resumes_ms: Date.now() + 78 * 60_000, held: false },
+            { session_id: 'c-notes', project: settings.hide_project_names ? '' : 'notes', branch: null, client: 'cli', stopped_ms: Date.now() - 5 * 60_000, window: null, resumes_ms: null, held: false },
+          ].filter((w) => resumeHook && !resumeCancelled.has(w.session_id))
+          const resumed = resumeHook ? [{ session_id: 'c-web', project: settings.hide_project_names ? '' : 'website', branch: settings.hide_project_names ? null : 'main', at_ms: Date.now() - 5 * 3_600_000 }] : []
+          return { installed: resumeHook, settings_file: platform === 'windows' ? 'C:\\Users\\you\\.claude\\settings.json' : '/Users/you/.claude/settings.json', waiting, resumed }
+        }
+        case 'cancel_limit_resume':
+          resumeCancelled.add(a.sessionId as string)
+          return null
         case 'cache_project_choices':
           return ['demo-app', 'website', 'notes', 'data-pipeline', 'client-x'].map((p, i) => ({ id: i + 1, path: `C:\\Projects\\${p}`, name: p === 'client-x' || settings.hide_project_names ? '' : p, hidden: p === 'client-x' || settings.hide_project_names }))
         case 'capture_status':

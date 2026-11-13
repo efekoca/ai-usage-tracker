@@ -1,6 +1,7 @@
 mod alerts;
 mod caches;
 mod refresh;
+mod resume;
 mod capture;
 mod commands;
 mod fonts;
@@ -106,6 +107,9 @@ pub fn cli_mode() -> Option<i32> {
     }
     if args.iter().any(|a| a == "--cache-hook") {
         return Some(capture::cache_hook_main());
+    }
+    if args.iter().any(|a| a == "--limit-hook") {
+        return Some(capture::limit_hook_main());
     }
     if args.iter().any(|a| a == "--revert-capture") {
         return Some(capture::revert_all_main());
@@ -472,6 +476,9 @@ pub fn run() {
             refresh::set_cache_auto,
             refresh::cache_refresh_info,
             refresh::set_cache_refresh,
+            resume::limit_resume_info,
+            resume::set_limit_resume,
+            resume::cancel_limit_resume,
             commands::list_projects,
             commands::list_projects_for_settings,
             commands::set_project_hidden,

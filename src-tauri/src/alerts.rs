@@ -336,6 +336,17 @@ fn send(app: &AppHandle, tag: &str, title: &str, body: &str, done: impl FnOnce(S
     send_with(app, tag, title, body, None, done);
 }
 
+/// A conversation the limit stopped went on by itself after the limit started again.
+pub(crate) fn resumed(app: &AppHandle, s: &Settings, session: &str, label: Option<String>) {
+    if !s.onboarded || !s.notify.enabled || !s.notify.resume {
+        return;
+    }
+    let tr = crate::tray::turkish(s);
+    let title = if tr { "Limit sıfırlandı, konuşma devam ediyor" } else { "The limit reset and the conversation continued" };
+    log::info!("resume notification");
+    send(app, &format!("resume-{session}"), title, &label.unwrap_or_else(|| "Claude Code".into()), |_| {});
+}
+
 fn open(app: &AppHandle, tag: &str) {
     crate::windows::show_main_at(app, Some(match tag {
         "budget" => "overview",

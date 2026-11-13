@@ -13,6 +13,7 @@
   import LimitHistory from '../components/LimitHistory.svelte'
   import LimitNotices from '../components/LimitNotices.svelte'
   import EarlyRestartNotice from '../components/EarlyRestartNotice.svelte'
+  import LimitResume from '../components/LimitResume.svelte'
 
   let plans: PlansFile | null = $state(null)
   let plansFailed = $state('')
@@ -313,6 +314,8 @@
 {#if app.settings?.enabled_sources.includes('opencode') && app.limits.some((l) => l.provider === 'anthropic' || l.provider === 'openai')}
   <p class="subtle small oc-note"><Icon name="info" size={13} />{t('limits.opencode')}</p>
 {/if}
+
+{#if app.settings?.enabled_sources.includes('claude_code') && app.settings.plans.anthropic !== 'api'}<LimitResume />{/if}
 
 <section class="card">
   <h2>{t('limits.thresholds')}</h2>
