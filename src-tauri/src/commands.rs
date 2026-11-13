@@ -614,6 +614,8 @@ pub async fn wipe_all_data(window: WebviewWindow, app: AppHandle) -> Res<()> {
             let store = state.db();
             let mut s = state.settings.read().unwrap().clone();
             s.onboarded = false;
+            // they mark days of the use that is deleted
+            s.markers.clear();
             store.wipe_data().map_err(err)?;
             s.save(&store)?;
             *state.settings.write().unwrap() = s.clone();
@@ -839,6 +841,66 @@ pub async fn starting_loads(app: AppHandle, period: Period, filter: Option<Filte
         }
     }
     Ok(loads)
+}
+
+/// A marker with the use before and after it.
+#[derive(Debug, Serialize)]
+pub struct MarkerView {
+    id: String,
+    at_ms: i64,
+    label: String,
+    project_id: Option<i64>,
+    /// The project's name; empty while it is hidden, or gone from the archive.
+    project: String,
+    project_hidden: bool,
+    /// The project it was narrowed to is not in the archive any more, so nothing is compared.
+    project_gone: bool,
+    tool: Option<String>,
+    days: u32,
+    #[serde(flatten)]
+    use_: insights::Experiment,
+}
+
+/// Every marker the user set, the latest first, each with the days before it against the days
+/// after, as far as they have passed.
+#[tauri::command]
+pub async fn experiments(app: AppHandle) -> Res<Vec<MarkerView>> {
+    let state = app.state::<AppState>();
+    let (markers, hide_all) = {
+        let s = state.settings.read().unwrap();
+        (s.markers.clone(), s.hide_project_names)
+    };
+    let projects = state.db().projects().map_err(err)?;
+    let now = now_ms();
+    markers
+        .into_iter()
+        .map(|m| {
+            // the archive is taken for one marker at a time, so other pages are not held up by a long list
+            let store = state.db();
+            let book = state.book.read().unwrap();
+            // the same folder however a tool spells it
+            let same = |a: &str, b: &str| tracker_core::store::normalize_project_path(a) == tracker_core::store::normalize_project_path(b);
+            let project = m.project_id.and_then(|id| projects.iter().find(|p| p.id == id && m.project_path.as_ref().is_none_or(|path| same(path, &p.path))));
+            let gone = m.project_id.is_some() && project.is_none();
+            let hidden = project.is_some_and(|p| hide_all || p.hidden);
+            // a project that is gone is narrowed to an id no request has
+            let projects_wanted = if gone { vec![i64::MIN] } else { m.project_id.into_iter().collect() };
+            let filter = Filter { tools: m.tool.as_deref().and_then(Tool::parse).into_iter().collect(), projects: projects_wanted, ..Default::default() };
+            let use_ = insights::experiment(&store, &book, m.at_ms, m.days, now, &filter).map_err(err)?;
+            Ok(MarkerView {
+                id: m.id,
+                at_ms: m.at_ms,
+                label: m.label,
+                project_id: m.project_id,
+                project: project.filter(|_| !hidden).map(|p| p.name.clone()).unwrap_or_default(),
+                project_hidden: hidden,
+                project_gone: gone,
+                tool: m.tool,
+                days: m.days,
+                use_,
+            })
+        })
+        .collect()
 }
 
 #[tauri::command]

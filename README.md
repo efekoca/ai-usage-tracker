@@ -32,6 +32,7 @@ A private app for Windows, macOS, and Linux that reads the usage logs your AI to
 - **Pick up where a limit stopped you.** When the usage limit stops a Claude Code conversation, the app continues it by itself once the limit resets, so work cut off overnight goes on without you.
 - **Put the reset where you need it.** Claude's 5-hour window starts with your first request. The app can open it with one small request at a time you choose, say 06:00, so it resets at 11:00 and you use two full windows in one working day.
 - **See what every conversation costs before you type.** The system prompt, tool definitions, memory files and MCP servers are sent with the first request of every conversation. You see that starting load for each project, and the day it grew.
+- **Check whether a change helped.** Mark the day you added an MCP server, shortened `CLAUDE.md` or switched models, and see your use before and after it side by side: cost per session, starting load, tool error rate and cache hit rate.
 - **Keep your history.** Resumed and forked sessions are never counted twice, and your history stays in the archive even after the tools delete their own logs (Claude Code does so after 30 days).
 - **Share your use, not your work.** Turn a day, a week, a month or a year into a card in four sizes. A card holds totals, tool names and model names only.
 
@@ -126,6 +127,15 @@ With more than one Codex or Claude account, each account gets its own recommenda
 - tools whose calls return an error 25 % of the time or more (at least 20 calls with a known outcome)
 
 Amounts are API equivalents. On a subscription you do not pay them; they show the size of your use.
+
+**Before and after.** At the bottom of the **Tips** page you can mark the day you changed something, in your own words ("added a new MCP server", "shortened CLAUDE.md"). For each marker the app compares the days before it with the same number of days from it on (3, 7, 14 or 30 on each side), as far as those have passed:
+
+- **cost per session**: the API-equivalent cost of the conversations' priced requests in those days, divided by the conversations that had one
+- **starting load**: the median first request of the conversations that began in those days (see [Starting load](#explore-sessions-cache-context-and-projects))
+- **tool error rate**: failed calls among the tool calls whose outcome is known
+- **cache hit rate**: cache read ÷ prompt tokens
+
+A marker can be narrowed to one project and one tool, so a change to one project's memory file is not measured against everything else you did. Each figure shows the change in percent, or in percentage points (pp) for the two rates. It is colored as better or worse only when both sides hold at least three sessions (twenty tool calls for the error rate) and the change is at least 5% or one percentage point; with less, the figure is shown without a color, and the card says so when a side has fewer than three sessions. Requests of a model without a price are in no cost; when they are more than 5% of a side's requests, the card says how many there were and leaves the cost per session uncolored. The comparison shows what changed around that day, not that your change caused it: a different kind of work in the second week moves the same figures. Up to 50 markers are kept, in the app's settings; **Delete all my data** removes them.
 
 **Plan value.** The **Overview** compares each provider's API-equivalent use over the last 30 days with the plan price for those days ("4.7×"), shows a running total against the plan price, and marks the day the plan paid for itself. Tools you have not used in those 30 days are left out.
 

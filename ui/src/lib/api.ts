@@ -631,6 +631,8 @@ export interface Settings {
   limit_resume: boolean
   /** Opens Claude's five-hour window at a time of day: minutes after local midnight, on weekdays 1 (Monday) to 7. */
   window_opener: { enabled: boolean; minute: number; days: number[] }
+  /** Days the user marked a change on, the latest first. */
+  markers: Marker[]
   /** provider → #rrggbb; missing = the accent color */
   provider_colors: Partial<Record<Provider, string>>
   tint_icons: boolean
@@ -904,6 +906,50 @@ export interface ContextByModel {
   over_threshold: number
   long_context_extra_usd: number
 }
+/** A day the user changed something on; the use before it is compared with the use after. */
+export interface Marker {
+  id: string
+  /** The start of the local day. */
+  at_ms: number
+  label: string
+  /** The project the comparison is narrowed to; `null` for all. */
+  project_id: number | null
+  /** That project's folder when the marker was set, which tells when its id comes to name another. */
+  project_path: string | null
+  tool: string | null
+  /** Days compared on each side: 3, 7, 14 or 30. */
+  days: number
+}
+
+/** One side of a comparison: the use in `from_ms <= ts < to_ms`. */
+export interface ExperimentSide {
+  from_ms: number
+  to_ms: number
+  sessions: number
+  requests: number
+  cost_usd: number
+  /** Requests of a model without a price: they are in no cost. */
+  unpriced_requests: number
+  cost_per_session: number | null
+  /** Conversations that began in it, and the median of their first requests. */
+  started: number
+  starting_load: number | null
+  /** Tool calls whose outcome is known, and those of them that failed. */
+  tool_calls: number
+  tool_failed: number
+  tool_error_pct: number | null
+  cache_hit_pct: number | null
+}
+
+export interface MarkerView extends Omit<Marker, 'project_path'> {
+  /** Empty while the project is hidden, or gone from the archive. */
+  project: string
+  project_hidden: boolean
+  project_gone: boolean
+  before: ExperimentSide
+  after: ExperimentSide
+}
+
 /** What every new conversation of a project begins with, where it runs. */
 export interface StartingLoad {
   project_id: number | null
@@ -1163,6 +1209,7 @@ export const api = {
   compareModels: (period: Period, filter?: Filter) => invoke<ModelCompare>('compare_models', { period, filter }),
   contextStats: (period: Period, filter?: Filter) => invoke<ContextStats>('context_stats', { period, filter }),
   startingLoads: (period: Period, filter?: Filter) => invoke<StartingLoad[]>('starting_loads', { period, filter }),
+  experiments: () => invoke<MarkerView[]>('experiments'),
   planValue: (period?: Period) => invoke<PlanValue>('plan_value', { period }),
   saveImage: (path: string, bytes: Uint8Array) => invoke<void>('save_image', { path, bytes: Array.from(bytes) }),
   openLastImage: () => invoke<void>('open_last_image'),

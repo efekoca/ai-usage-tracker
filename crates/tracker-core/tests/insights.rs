@@ -4,7 +4,7 @@ use chrono::{FixedOffset, TimeZone};
 use common::Dst;
 use tracker_core::analytics::{account_key, Filter, Range};
 use tracker_core::insights::{agents_tools, branches, compare_models, context_stats, day_detail, forecast, plan_value, restarted, session_timeline, sessions, subagent_cache, ForecastKind, PromptShare};
-use tracker_core::insights::{cache_misses, live_caches, starting_loads, MissCause, StartChange};
+use tracker_core::insights::{cache_misses, experiment, live_caches, starting_loads, MissCause, StartChange};
 use tracker_core::tips::{cache_rebuilds, tips, Tip, Tips};
 use tracker_core::model::{Accuracy, CacheMissReport, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
 use tracker_core::pricing::{CostInput, PriceBook};
@@ -1078,4 +1078,94 @@ fn a_projects_starting_load_is_its_conversations_first_request_and_a_lasting_ste
     assert_eq!(inside.iter().find(|l| l.project == "q").unwrap().starts[0].tokens, 60_000);
     let codex = Filter { tools: vec![Tool::Codex], ..Default::default() };
     assert_eq!(starting_loads(&store, &book, all(), &codex).unwrap().len(), 1);
+}
+
+#[test]
+fn a_marker_compares_the_days_before_it_with_the_days_after() {
+    const DAY: i64 = 24 * HOUR;
+    let at = ms(2026, 11, 10, 0, 0);
+    let cc = |key, ts, session, project, input, read| ev(key, ts, Tool::ClaudeCode, "claude-opus-5-5", Some(session), project, input, read, 100);
+    let mut store = store_with(&[
+        // before: two conversations in the project, each begun with 40K
+        cc("a1", at - 3 * DAY, "a", "C:/w/app", 40_000, 0),
+        cc("a2", at - 3 * DAY + MIN, "a", "C:/w/app", 2_000, 40_000),
+        cc("b1", at - DAY, "b", "C:/w/app", 40_400, 0),
+        // one that began before the window and goes on in it is used in it, but did not begin in it
+        cc("o1", at - 9 * DAY, "o", "C:/w/app", 90_000, 0),
+        cc("o2", at - 6 * DAY, "o", "C:/w/app", 1_000, 90_000),
+        // after: three conversations begun with 30K, read from the cache more
+        cc("c1", at + HOUR, "c", "C:/w/app", 30_000, 0),
+        cc("c2", at + HOUR + MIN, "c", "C:/w/app", 1_000, 30_000),
+        cc("c3", at + HOUR + 2 * MIN, "c", "C:/w/app", 1_000, 31_000),
+        cc("d1", at + DAY, "d", "C:/w/app", 30_200, 0),
+        cc("e1", at + 2 * DAY, "e", "C:/w/app", 29_800, 0),
+        // another project and another tool
+        cc("x1", at + HOUR, "x", "C:/w/other", 500_000, 0),
+        ev("y1", at + HOUR, Tool::Codex, "gpt-5.5", Some("y"), "C:/w/app", 19_000, 0, 10),
+        // past the window
+        cc("z1", at + 8 * DAY, "z", "C:/w/app", 70_000, 0),
+    ]);
+    add_calls(
+        &mut store,
+        &[
+            ("t1", at - 2 * DAY, Tool::ClaudeCode, "Bash", None, Some(true)),
+            ("t2", at - 2 * DAY, Tool::ClaudeCode, "Bash", None, Some(false)),
+            ("t3", at - 2 * DAY, Tool::ClaudeCode, "Edit", None, None),
+            ("t4", at + DAY, Tool::ClaudeCode, "Bash", None, Some(false)),
+            ("t5", at + DAY, Tool::ClaudeCode, "Bash", None, Some(false)),
+            ("t6", at + DAY, Tool::ClaudeCode, "Bash", None, Some(false)),
+            ("t7", at + DAY, Tool::ClaudeCode, "Read", None, Some(true)),
+            ("t8", at + DAY, Tool::Codex, "shell", None, Some(true)),
+        ],
+    );
+    // calls of another project, and of none, are not the project's
+    let elsewhere = |key: &str, project: Option<&str>| ToolCall { key: key.into(), ts_ms: at + DAY, tool: Tool::ClaudeCode, session_id: Some("x".into()), project_path: project.map(Into::into), agent: None, name: "Bash".into(), failed: Some(true) };
+    let mut tx = store.transaction().unwrap();
+    tx.upsert_tool_calls(&[elsewhere("u1", Some("C:/w/other")), elsewhere("u2", None)]).unwrap();
+    tx.commit().unwrap();
+    let book = PriceBook::default_book();
+    let app = store.projects().unwrap().into_iter().find(|p| p.name == "app").unwrap().id;
+    let scope = Filter { tools: vec![Tool::ClaudeCode], projects: vec![app], models: vec!["no-such-model".into()], ..Default::default() };
+    let now = at + 30 * DAY;
+    let x = experiment(&store, &book, at, 7, now, &scope).unwrap();
+
+    let b = &x.before;
+    assert_eq!((b.from_ms, b.to_ms), (at - 7 * DAY, at));
+    assert_eq!((b.sessions, b.requests, b.started, b.starting_load), (3, 4, 2, Some(40_000)), "only the tool and the project narrow it; `o` goes on but did not begin here");
+    assert_eq!((b.tool_calls, b.tool_failed, b.tool_error_pct), (2, 1, Some(50.0)), "a call whose outcome is not known is not counted");
+    assert!(close(b.cache_hit_pct.unwrap(), 130_000.0 * 100.0 / 213_400.0), "{:?}", b.cache_hit_pct);
+    assert!(close(b.cost_per_session.unwrap(), b.cost_usd / 3.0) && b.cost_usd > 0.0);
+
+    let a = &x.after;
+    assert_eq!((a.from_ms, a.to_ms), (at, at + 7 * DAY));
+    assert_eq!((a.sessions, a.requests, a.started, a.starting_load), (3, 5, 3, Some(30_000)));
+    assert_eq!((a.tool_calls, a.tool_failed, a.tool_error_pct), (4, 1, Some(25.0)), "another tool's calls are left out");
+    assert!(close(a.cache_hit_pct.unwrap(), 61_000.0 * 100.0 / 153_000.0));
+
+    // the days after are counted as far as they have passed
+    let early = experiment(&store, &book, at, 7, at + HOUR + 90_000, &scope).unwrap().after;
+    assert_eq!((early.to_ms, early.sessions, early.requests, early.started), (at + HOUR + 90_000, 1, 2, 1));
+    // nothing yet: no rate is made up
+    let ahead = experiment(&store, &book, now, 7, now, &scope).unwrap().after;
+    assert_eq!((ahead.sessions, ahead.cost_per_session, ahead.starting_load, ahead.tool_error_pct, ahead.cache_hit_pct), (0, None, None, None, None));
+    // without a scope every tool and project counts
+    let all_of_it = experiment(&store, &book, at, 7, now, &Filter::default()).unwrap().after;
+    assert_eq!((all_of_it.sessions, all_of_it.tool_calls), (5, 7));
+
+    // a model without a price is in no cost, and its conversation in no cost per session
+    let unpriced = store_with(&[
+        cc("p1", at + HOUR, "p", "C:/w/app", 30_000, 0),
+        ev("q1", at + HOUR, Tool::ClaudeCode, "no-such-model", Some("q"), "C:/w/app", 30_000, 0, 100),
+        ev("q2", at + 2 * HOUR, Tool::ClaudeCode, "no-such-model", Some("q"), "C:/w/app", 30_000, 0, 100),
+        ev("r1", at + HOUR, Tool::ClaudeCode, "claude-opus-5-5", None, "C:/w/app", 30_000, 0, 100),
+        // a failed request used no token and would cost nothing at any price
+        ev("q3", at + 3 * HOUR, Tool::ClaudeCode, "<synthetic>", Some("q"), "C:/w/app", 0, 0, 0),
+    ]);
+    let u = experiment(&unpriced, &book, at, 7, now, &Filter::default()).unwrap().after;
+    let one = experiment(&store_with(&[cc("p1", at + HOUR, "p", "C:/w/app", 30_000, 0)]), &book, at, 7, now, &Filter::default()).unwrap().after;
+    assert_eq!((u.sessions, u.requests, u.unpriced_requests), (2, 5, 2));
+    assert!(close(u.cost_per_session.unwrap(), one.cost_per_session.unwrap()), "only the priced conversation, and not the request without one");
+    assert!(close(u.cost_usd, 2.0 * one.cost_usd), "the request of no conversation is still in the cost");
+    let none = experiment(&store_with(&[ev("q1", at + HOUR, Tool::ClaudeCode, "no-such-model", Some("q"), "C:/w/app", 30_000, 0, 100)]), &book, at, 7, now, &Filter::default()).unwrap().after;
+    assert_eq!((none.sessions, none.unpriced_requests, none.cost_per_session), (1, 1, None));
 }

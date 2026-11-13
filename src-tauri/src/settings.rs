@@ -677,6 +677,8 @@ pub struct Settings {
     pub renewal_days: std::collections::BTreeMap<String, u8>,
     pub cards: CardSettings,
     pub window_opener: OpenerSettings,
+    /// Days the user marked a change on, the latest first.
+    pub markers: Vec<Marker>,
     /// Fields this version does not know (a newer one wrote them), kept so saving does not drop them.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
@@ -715,6 +717,49 @@ impl OpenerSettings {
             self.days = (1..=7).collect();
         }
     }
+}
+
+/// A day the user changed something on (a new MCP server, a shorter memory file): the use before
+/// it is compared with the use after.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Marker {
+    pub id: String,
+    /// The start of the local day the change was made on.
+    pub at_ms: i64,
+    /// The user's own words for the change.
+    pub label: String,
+    /// The project the comparison is narrowed to; `None` for all.
+    pub project_id: Option<i64>,
+    /// That project's folder when the marker was set: an id is given again once its project is
+    /// gone, and the folder tells that it now names another.
+    pub project_path: Option<String>,
+    /// The tool it is narrowed to, as [`tracker_core::model::Tool`] is written; `None` for all.
+    pub tool: Option<String>,
+    /// How many days on each side are compared: 3, 7, 14 or 30.
+    pub days: u32,
+    /// Fields this version does not know (a newer one wrote them), kept so saving does not drop them.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+pub const MAX_MARKERS: usize = 50;
+const MAX_MARKER_LABEL: usize = 80;
+
+fn normalize_markers(markers: &mut Vec<Marker>) {
+    for m in markers.iter_mut() {
+        m.label = m.label.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(MAX_MARKER_LABEL).collect();
+        if ![3, 7, 14, 30].contains(&m.days) {
+            m.days = 7;
+        }
+        m.tool = m.tool.take().filter(|t| tracker_core::model::Tool::parse(t).is_some());
+    }
+    markers.retain(|m| !m.id.is_empty() && !m.label.is_empty() && m.at_ms > 0);
+    // the latest first; one id names one marker
+    markers.sort_by(|a, b| b.at_ms.cmp(&a.at_ms).then_with(|| a.id.cmp(&b.id)));
+    let mut seen = std::collections::HashSet::new();
+    markers.retain(|m| seen.insert(m.id.clone()));
+    markers.truncate(MAX_MARKERS);
 }
 
 /// How the Summary cards page draws a card.
@@ -815,6 +860,7 @@ impl Default for Settings {
             renewal_days: Default::default(),
             cards: CardSettings::default(),
             window_opener: OpenerSettings::default(),
+            markers: Vec::new(),
             extra: Default::default(),
         }
     }
@@ -931,6 +977,7 @@ impl Settings {
         self.panel.normalize();
         self.cards.normalize();
         self.window_opener.normalize();
+        normalize_markers(&mut self.markers);
         if self.accent != "system" {
             self.accent = "app".into();
         }
@@ -983,6 +1030,34 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markers_are_kept_tidy_the_latest_first() {
+        let m = |id: &str, at_ms: i64, label: &str, days: u32, tool: Option<&str>| Marker { id: id.into(), at_ms, label: label.into(), days, tool: tool.map(Into::into), ..Default::default() };
+        let mut s = Settings {
+            markers: vec![
+                m("a", 100, "  new   MCP\tserver ", 7, Some("claude_code")),
+                m("b", 300, &"x".repeat(200), 5, Some("no_such_tool")),
+                m("a", 200, "the same id again", 30, None),
+                m("", 400, "no id", 7, None),
+                m("c", 500, "   ", 7, None),
+                m("d", 0, "no day", 7, None),
+            ],
+            ..Default::default()
+        };
+        s.normalize();
+        let kept: Vec<(&str, i64, &str, u32, Option<&str>)> = s.markers.iter().map(|m| (m.id.as_str(), m.at_ms, m.label.as_str(), m.days, m.tool.as_deref())).collect();
+        assert_eq!(kept.len(), 2);
+        assert_eq!(kept[0].0, "b");
+        assert_eq!((kept[0].2.len(), kept[0].3, kept[0].4), (MAX_MARKER_LABEL, 7, None), "a long label is cut, an unknown number of days and tool are dropped");
+        assert_eq!(kept[1], ("a", 200, "the same id again", 30, None), "one id names one marker: the later one");
+        s.markers = (0..MAX_MARKERS as i64 + 5).map(|i| m(&format!("m{i}"), i + 1, "x", 7, None)).collect();
+        s.normalize();
+        assert_eq!((s.markers.len(), s.markers[0].at_ms), (MAX_MARKERS, MAX_MARKERS as i64 + 5));
+        // a marker written by a newer version keeps what this one does not know
+        let newer: Marker = serde_json::from_str(r#"{"id":"n","at_ms":5,"label":"l","days":7,"note":"later"}"#).unwrap();
+        assert_eq!(serde_json::to_value(&newer).unwrap()["note"], "later");
+    }
 
     #[test]
     fn followed_projects_are_kept_tidy() {
