@@ -1328,6 +1328,7 @@ fn projects_are_found_again_after_a_wipe_or_a_rolled_back_write() {
             agent: None,
             name: "shell".into(),
             failed: None,
+            turn: None,
         }])
         .unwrap();
     }
@@ -1359,6 +1360,7 @@ fn a_wipe_on_another_connection_does_not_leave_stale_project_ids() {
         agent: None,
         name: "shell".into(),
         failed: None,
+        turn: None,
     }])
     .unwrap();
     tx.commit().unwrap();

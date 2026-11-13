@@ -258,6 +258,7 @@ fn read_session(conn: &Connection, sessions: &HashMap<String, Session>, id: &str
                     thread_id: child.then(|| id.to_owned()),
                     limit_reset: None,
                     creator: None,
+                    turn: None,
                 });
             }
             Some("tool") => {
@@ -285,6 +286,7 @@ fn read_session(conn: &Connection, sessions: &HashMap<String, Session>, id: &str
                         Some("error") => Some(true),
                         _ => None,
                     },
+                    turn: None,
                 });
             }
             _ => {}

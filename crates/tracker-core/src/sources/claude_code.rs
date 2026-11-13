@@ -18,9 +18,13 @@
 //!   with the agent's id (`agentId`) and type (`attributionAgent`, newer versions).
 //! * Tool calls are `tool_use` content blocks (one block per line); the outcome is the matching
 //!   `tool_result` block (`is_error`) in a later user line. Only names and outcomes are kept.
+//! * Every `type: "user"` line carries `promptId`: the prompt, the tool results that follow it and
+//!   the subagents it starts share one, in the subagents' own files too. Responses carry none and
+//!   belong to the user line before them. `origin.kind` or `turnOrigin` says what began the turn
+//!   (`human`, `task-notification`, `peer`, …); older versions wrote neither.
 
 use super::{str_at, u64_at, i64_at, JsonlReader, ParseOutput};
-use crate::model::{parse_ts_ms, Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
+use crate::model::{parse_ts_ms, Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, Turn, UsageEvent};
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -64,6 +68,7 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
     // The session's first working directory is its project; later lines can carry
     // sub-directories the agent cd'd into, which would split one project into many.
     let mut root_cwd = str_at(state, "root_cwd").map(str::to_owned);
+    let mut turn = str_at(state, "turn").map(str::to_owned);
     let mut typed = 0u64;
     let mut undated = 0u64;
     for line in lines.by_ref() {
@@ -81,6 +86,10 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
         if root_cwd.is_none() {
             root_cwd = str_at(v, "cwd").filter(|s| !s.is_empty()).map(|c| launch_dir(c, folder.as_deref()));
         }
+        if let Some((id, start)) = turn_of(v) {
+            out.turns.extend(start);
+            turn = Some(id);
+        }
         let mut recognised = false;
         // each Cowork session runs in its own scratch folder; group them as one project
         let project = if ctx.client_override == Some("cowork") { Some("Cowork".to_owned()) } else { root_cwd.clone() };
@@ -88,6 +97,7 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
             if project.is_some() {
                 ev.project_path = project.clone();
             }
+            ev.turn = turn.clone();
             out.events.push(ev);
             recognised = true;
         }
@@ -95,6 +105,7 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
             if project.is_some() {
                 call.project_path = project.clone();
             }
+            call.turn = turn.clone();
             out.tool_calls.push(call);
         }
         out.tool_results.extend(tool_results(v));
@@ -113,7 +124,7 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
         out.warn("unrecognised format: no line has a `type` field");
     }
     out.warn_undated(undated);
-    out.state = json!({ "root_cwd": root_cwd });
+    out.state = json!({ "root_cwd": root_cwd, "turn": turn });
     out.next_offset = lines.finish()?;
     Ok(out)
 }
@@ -233,6 +244,7 @@ pub(crate) fn usage_events(v: &Value, ctx: &ClaudeCtx) -> Vec<UsageEvent> {
             thread_id: thread_id.clone(),
             limit_reset: None,
             creator: None,
+            turn: None,
         }
     };
     let searches = usage.get("server_tool_use").map(|s| u64_at(s, "web_search_requests")).unwrap_or(0);
@@ -289,9 +301,43 @@ fn tool_calls(v: &Value) -> Vec<ToolCall> {
                 agent: agent.clone(),
                 name: name.to_owned(),
                 failed: None,
+                turn: None,
             })
         })
         .collect()
+}
+
+fn has_tool_result(v: &Value) -> bool {
+    let blocks = v.get("message").and_then(|m| m.get("content")).and_then(Value::as_array);
+    blocks.is_some_and(|b| b.iter().any(|b| str_at(b, "type") == Some("tool_result")))
+}
+
+/// The turn a user line belongs to. A line of the main conversation that is not a tool result
+/// also gives the turn's record: the earliest one stored is when and how the turn began.
+fn turn_of(v: &Value) -> Option<(String, Option<Turn>)> {
+    if str_at(v, "type") != Some("user") {
+        return None;
+    }
+    let id = format!("cc:{}", str_at(v, "promptId").filter(|p| !p.is_empty())?);
+    let flag = |k: &str| v.get(k).and_then(Value::as_bool) == Some(true);
+    if flag("isSidechain") || has_tool_result(v) {
+        return Some((id, None));
+    }
+    let named = str_at(v, "turnOrigin").or_else(|| v.get("origin").and_then(|o| str_at(o, "kind")));
+    let origin = match named.map(|o| o.replace('-', "_")).as_deref() {
+        Some(o @ ("human" | "task_notification" | "peer" | "scheduled" | "sdk")) => o.to_owned(),
+        // versions that named no origin wrote the user's own prompt as a plain line
+        None if !flag("isMeta") && !flag("isCompactSummary") => "human".to_owned(),
+        _ => "other".to_owned(),
+    };
+    let start = str_at(v, "timestamp").and_then(parse_ts_ms).map(|ts_ms| Turn {
+        id: id.clone(),
+        tool: Tool::ClaudeCode,
+        session_id: str_at(v, "sessionId").map(str::to_owned),
+        ts_ms,
+        origin,
+    });
+    Some((id, start))
 }
 
 fn tool_results(v: &Value) -> Vec<(String, bool)> {

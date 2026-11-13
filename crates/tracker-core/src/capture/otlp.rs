@@ -138,6 +138,7 @@ pub fn parse_logs(body: &Value) -> Vec<UsageEvent> {
                     thread_id: None,
                     limit_reset: None,
                     creator: text(&a, "organization.id").filter(|o| crate::model::is_uuid(o.trim())).map(claude_account),
+                    turn: None,
                 });
             }
         }

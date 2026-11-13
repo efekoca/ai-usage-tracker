@@ -918,6 +918,32 @@ export function installMock() {
             }
           })
         }
+        case 'turn_costs': {
+          if (scenario.get('turns') === 'none') return { turns: [], tracked: true, requests_outside: 0 }
+          const all = mockSessions().sessions.filter((x) => x.tool === 'claude_code' || x.tool === 'codex')
+          const origins = ['human', 'human', 'human', 'task_notification', 'human', 'human', 'peer', 'human', 'scheduled', 'human']
+          const turns = Array.from({ length: 46 }, (_, i) => {
+            const s = all[i % all.length]
+            const agents = i % 4 === 0 ? 1 + (i % 3) : 0
+            const main = 0.18 + ((i * 53) % 17) * (i % 9 === 0 ? 1.9 : 0.21)
+            const sub = agents ? 1.4 + ((i * 31) % 11) * 1.7 : 0
+            const requests = 3 + ((i * 7) % 41)
+            const agentRequests = agents * (14 + ((i * 5) % 60))
+            const unpriced = s.models[0].unpriced || i === 13
+            const hidden = settings.hide_project_names || s.hidden
+            const parts = [{ agent: null as string | null, threads: 0, requests, cost_usd: unpriced ? 0 : main }]
+            if (agents) parts.push({ agent: i % 8 === 0 ? 'Explore' : 'general-purpose', threads: agents, requests: agentRequests, cost_usd: unpriced ? 0 : sub })
+            return {
+              id: `cc:${i}`, tool: s.tool, client: s.client, session_id: s.session_id, ordinal: 1 + ((i * 3) % 28), origin: origins[i % origins.length],
+              project_id: s.project_id, project: hidden ? '' : s.project, hidden,
+              started_ms: Date.now() - i * 47 * 60000, ended_ms: Date.now() - i * 47 * 60000 + (20 + ((i * 37) % 1500)) * 1000,
+              requests: requests + agentRequests, agents, tool_calls: i % 11 === 5 ? 0 : requests + agentRequests + ((i * 3) % 30), tool_failed: i % 3 === 0 ? (i % 7) + 1 : 0,
+              total_tokens: Math.round((main + sub) * 2.4e6), cost_usd: unpriced ? 0 : main + sub, unpriced_requests: unpriced ? requests + agentRequests : 0,
+              models: i % 6 === 0 ? [s.models[0].model, 'claude-haiku-5-5'] : [s.models[0].model], parts,
+            }
+          })
+          return { turns, tracked: true, requests_outside: 214 }
+        }
         case 'starting_loads': {
           const day = 86_400_000
           const load = (id: number, project: string, tool: string, client: string, sizes: number[], cost: number | null, step: number | null) => {

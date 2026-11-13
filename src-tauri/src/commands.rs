@@ -843,6 +843,23 @@ pub async fn starting_loads(app: AppHandle, period: Period, filter: Option<Filte
     Ok(loads)
 }
 
+/// The turns that began in the period, each with what it set off and cost.
+#[tauri::command]
+pub async fn turn_costs(app: AppHandle, period: Period, filter: Option<Filter>) -> Res<tracker_core::turns::Turns> {
+    let state = app.state::<AppState>();
+    let hide_all = state.settings.read().unwrap().hide_project_names;
+    let store = state.db();
+    let book = state.book.read().unwrap();
+    let mut out = tracker_core::turns::turns(&store, &book, range_for(&store, period)?, &filter.unwrap_or_default()).map_err(err)?;
+    for t in &mut out.turns {
+        if hide_all || t.hidden {
+            t.project.clear();
+            t.hidden = true;
+        }
+    }
+    Ok(out)
+}
+
 /// A marker with the use before and after it.
 #[derive(Debug, Serialize)]
 pub struct MarkerView {

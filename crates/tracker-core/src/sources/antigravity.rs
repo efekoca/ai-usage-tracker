@@ -401,6 +401,7 @@ fn read(path: &Path) -> Result<ParseOutput, Box<dyn std::error::Error + Send + S
             thread_id: thread.clone(),
             limit_reset: None,
             creator: None,
+            turn: None,
         });
     }
 
@@ -422,6 +423,7 @@ fn read(path: &Path) -> Result<ParseOutput, Box<dyn std::error::Error + Send + S
             agent: agent.clone(),
             name: name.clone(),
             failed,
+            turn: None,
         });
     }
     out.next_offset = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);

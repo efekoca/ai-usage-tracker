@@ -970,6 +970,50 @@ export interface StartingLoad {
   starts: { ts_ms: number; tokens: number }[]
 }
 
+/** The main conversation's share of a turn, or one kind of subagent's. */
+export interface TurnPart {
+  /** The subagent's type; `null` for the main conversation. */
+  agent: string | null
+  threads: number
+  requests: number
+  cost_usd: number
+}
+
+/** One prompt and everything it set off. The prompt itself is never read. */
+export interface TurnCost {
+  id: string
+  tool: string
+  client: string | null
+  session_id: string | null
+  /** Its place in the conversation, 1 for the first. */
+  ordinal: number
+  origin: 'human' | 'task_notification' | 'peer' | 'scheduled' | 'sdk' | 'other' | (string & {})
+  project_id: number | null
+  /** Empty while the project is hidden or not known. */
+  project: string
+  hidden: boolean
+  started_ms: number
+  ended_ms: number
+  requests: number
+  agents: number
+  tool_calls: number
+  tool_failed: number
+  total_tokens: number
+  cost_usd: number
+  unpriced_requests: number
+  models: string[]
+  parts: TurnPart[]
+}
+
+export interface Turns {
+  /** Newest first. */
+  turns: TurnCost[]
+  /** Whether any log read so far names its turns. */
+  tracked: boolean
+  /** Requests in the period whose log named no turn. */
+  requests_outside: number
+}
+
 export interface ContextStats {
   requests: number
   avg: number
@@ -1209,6 +1253,7 @@ export const api = {
   compareModels: (period: Period, filter?: Filter) => invoke<ModelCompare>('compare_models', { period, filter }),
   contextStats: (period: Period, filter?: Filter) => invoke<ContextStats>('context_stats', { period, filter }),
   startingLoads: (period: Period, filter?: Filter) => invoke<StartingLoad[]>('starting_loads', { period, filter }),
+  turnCosts: (period: Period, filter?: Filter) => invoke<Turns>('turn_costs', { period, filter }),
   experiments: () => invoke<MarkerView[]>('experiments'),
   planValue: (period?: Period) => invoke<PlanValue>('plan_value', { period }),
   saveImage: (path: string, bytes: Uint8Array) => invoke<void>('save_image', { path, bytes: Array.from(bytes) }),

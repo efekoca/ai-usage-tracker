@@ -1,7 +1,7 @@
 //! Local SQLite archive (`%LOCALAPPDATA%\AIUsageTracker\tracker.db`). Records stay here even
 //! after the source tools delete or rotate their logs. No content columns exist by design.
 
-use crate::model::{Accuracy, CacheMissReport, LimitSnapshot, Provider, SessionAccount, Tokens, Tool, ToolCall, UsageEvent, MAX_CLOCK_SKEW_MS, MAX_EPOCH_SECS, MAX_WINDOW_MINUTES};
+use crate::model::{Accuracy, CacheMissReport, LimitSnapshot, Provider, SessionAccount, Tokens, Tool, ToolCall, Turn, UsageEvent, MAX_CLOCK_SKEW_MS, MAX_EPOCH_SECS, MAX_WINDOW_MINUTES};
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde::Serialize;
 use std::cell::RefCell;
@@ -194,6 +194,24 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX IF NOT EXISTS cache_miss_report_ts ON cache_miss_report(ts_ms);
     "#,
+    // v16: turns. Each request and tool call names the prompt that set it off, and `turn` keeps
+    // when that prompt came and what kind it was, never its text; re-read the logs that say so.
+    r#"
+    ALTER TABLE usage_event ADD COLUMN turn TEXT;
+    ALTER TABLE tool_call ADD COLUMN turn TEXT;
+    CREATE TABLE IF NOT EXISTS turn (
+        id         TEXT PRIMARY KEY,
+        tool       TEXT NOT NULL,
+        session_id TEXT,
+        ts_ms      INTEGER NOT NULL,
+        origin     TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS turn_ts ON turn(ts_ms);
+    CREATE INDEX IF NOT EXISTS turn_session ON turn(session_id);
+    CREATE INDEX IF NOT EXISTS usage_event_turn ON usage_event(turn);
+    CREATE INDEX IF NOT EXISTS tool_call_turn ON tool_call(turn);
+    DELETE FROM file_checkpoint WHERE parser IN ('claude_code_jsonl', 'cowork_jsonl', 'codex_rollout');
+    "#,
 ];
 
 /// How long the sign-in of a Claude config folder may go unseen and still count as unchanged: the
@@ -329,7 +347,7 @@ fn row_columns() -> String {
     format!(
         "ts_ms, tool, client, model, project_id, session_id, input, cache_read, cache_write,
          cache_write_1h, output, reasoning, request_input, web_search, speed, inference_geo, accuracy,
-         branch, agent, thread_id, owner, {}",
+         branch, agent, thread_id, owner, {}, turn",
         crate::sources::claude_code::ADVISOR_SQL
     )
 }
@@ -365,17 +383,18 @@ fn event_row(r: &rusqlite::Row) -> rusqlite::Result<Option<EventRow>> {
         thread_id: r.get(19)?,
         account: r.get(20)?,
         advisor: r.get(21)?,
+        turn: r.get(22)?,
     }))
 }
 
 const EVENT_COLUMNS: &str = "key, ts_ms, tool, client, model, project_id, session_id, input, cache_read, cache_write,
     cache_write_1h, output, reasoning, request_input, web_search, speed, service_tier, inference_geo, accuracy, source,
-    request_id, branch, agent, thread_id, limit_reset, creator";
+    request_id, branch, agent, thread_id, limit_reset, creator, turn";
 
 /// Merge rule for a repeated event key: field-wise maximum (streaming duplicates), earliest
 /// timestamp, pricing modifiers from whichever copy carries them (the first streaming copy of a
 /// Claude message has no `speed`), and a log-derived (exact) copy upgrades a captured one.
-/// Branch, subagent and thread are kept once known; a row that learns it belongs to a subagent
+/// Branch, subagent, thread and turn are kept once known; a row that learns it belongs to a subagent
 /// thread also takes that copy's session (a Codex subagent counts toward its parent session).
 /// SQLite evaluates every right-hand side against the old row, so the order does not matter.
 const UPSERT_EVENT_TAIL: &str = "ON CONFLICT(key) DO UPDATE SET
@@ -400,7 +419,16 @@ const UPSERT_EVENT_TAIL: &str = "ON CONFLICT(key) DO UPDATE SET
     session_id = CASE WHEN thread_id IS NULL AND excluded.thread_id IS NOT NULL THEN excluded.session_id ELSE session_id END,
     thread_id = COALESCE(thread_id, excluded.thread_id),
     limit_reset = COALESCE(limit_reset, excluded.limit_reset),
-    creator = COALESCE(creator, excluded.creator)";
+    creator = COALESCE(creator, excluded.creator),
+    turn = COALESCE(turn, excluded.turn)";
+
+/// The line a turn began with is its earliest; later lines of the same turn change nothing. A
+/// line that names what began the turn outranks one that does not (`other`), whichever came first:
+/// a note written just before the prompt carries the prompt's id but no origin.
+const UPSERT_TURN_TAIL: &str = "ON CONFLICT(id) DO UPDATE SET
+    origin = CASE WHEN excluded.origin = 'other' THEN origin WHEN origin = 'other' OR excluded.ts_ms < ts_ms THEN excluded.origin ELSE origin END,
+    session_id = CASE WHEN excluded.ts_ms < ts_ms THEN COALESCE(excluded.session_id, session_id) ELSE COALESCE(session_id, excluded.session_id) END,
+    ts_ms = MIN(ts_ms, excluded.ts_ms)";
 
 pub struct Store {
     conn: Connection,
@@ -438,6 +466,29 @@ pub struct EventRow {
     /// Claude: the model a request consulted as its advisor. Priced as its own model, but no
     /// request of the conversation: its cache and context are the advisor's.
     pub advisor: bool,
+    /// The turn the request belongs to ([`crate::model::Turn::id`]), when its log says.
+    pub turn: Option<String>,
+}
+
+/// A turn that began in a range, with its place among its conversation's turns.
+#[derive(Debug, Clone)]
+pub struct TurnRow {
+    pub id: String,
+    pub tool: Tool,
+    pub session_id: Option<String>,
+    pub ts_ms: i64,
+    pub origin: String,
+    /// 1 for the conversation's first turn.
+    pub ordinal: u32,
+}
+
+/// A tool call made in a turn.
+#[derive(Debug, Clone)]
+pub struct TurnCall {
+    pub turn: String,
+    pub project_id: Option<i64>,
+    pub tool: Tool,
+    pub failed: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -556,6 +607,65 @@ impl Store {
             Ok(CacheMissReport { session_id: r.get(0)?, ts_ms: r.get(1)?, last_miss_ms: r.get(2)?, requests: n(r, 3)?, misses: n(r, 4)?, rebuilds: n(r, 5)?, recached_tokens: n(r, 6)?, causes })
         })?;
         rows.collect()
+    }
+
+    /// The turns that began in `from_ms <= ts < to_ms`, oldest first. One no request answered is
+    /// no turn to show and takes no place in the conversation's order.
+    pub fn turns_between(&self, from_ms: i64, to_ms: i64) -> Result<Vec<TurnRow>> {
+        let mut st = self.conn.prepare_cached(
+            "SELECT id, tool, session_id, ts_ms, origin, n FROM (
+                 SELECT id, tool, session_id, ts_ms, origin,
+                        CASE WHEN session_id IS NULL THEN 1 ELSE ROW_NUMBER() OVER (PARTITION BY tool, session_id ORDER BY ts_ms, id) END AS n
+                 FROM turn
+                 WHERE (session_id IS NULL OR session_id IN (SELECT session_id FROM turn WHERE ts_ms >= ?1 AND ts_ms < ?2))
+                   AND EXISTS (SELECT 1 FROM usage_event u WHERE u.turn = turn.id)
+             ) WHERE ts_ms >= ?1 AND ts_ms < ?2 ORDER BY ts_ms, id",
+        )?;
+        let rows = st.query_map(params![from_ms, to_ms], |r| {
+            let tool: String = r.get(1)?;
+            let Some(tool) = Tool::parse(&tool) else { return Ok(None) };
+            Ok(Some(TurnRow { id: r.get(0)?, tool, session_id: r.get(2)?, ts_ms: r.get(3)?, origin: r.get(4)?, ordinal: r.get::<_, i64>(5)?.clamp(1, i64::from(u32::MAX)) as u32 }))
+        })?;
+        rows.filter_map(Result::transpose).collect()
+    }
+
+    /// Every request of the turns that began in `from_ms <= ts < to_ms`, whenever it was made.
+    pub fn turn_events(&self, from_ms: i64, to_ms: i64) -> Result<Vec<EventRow>> {
+        let mut st = self.conn.prepare_cached(&format!(
+            "SELECT {} FROM usage_event u WHERE turn IN (SELECT id FROM turn WHERE ts_ms >= ?1 AND ts_ms < ?2) AND {NOT_SUPERSEDED} ORDER BY ts_ms",
+            row_columns()
+        ))?;
+        let rows = st.query_map(params![from_ms, to_ms], event_row)?;
+        rows.filter_map(Result::transpose).collect()
+    }
+
+    /// Every tool call of the turns that began in `from_ms <= ts < to_ms`.
+    pub fn turn_calls(&self, from_ms: i64, to_ms: i64) -> Result<Vec<TurnCall>> {
+        let mut st = self.conn.prepare_cached(
+            "SELECT turn, project_id, tool, failed FROM tool_call WHERE turn IN (SELECT id FROM turn WHERE ts_ms >= ?1 AND ts_ms < ?2)",
+        )?;
+        let rows = st.query_map(params![from_ms, to_ms], |r| {
+            let tool: String = r.get(2)?;
+            let Some(tool) = Tool::parse(&tool) else { return Ok(None) };
+            Ok(Some(TurnCall { turn: r.get(0)?, project_id: r.get(1)?, tool, failed: r.get::<_, Option<i64>>(3)?.map(|f| f != 0) }))
+        })?;
+        rows.filter_map(Result::transpose).collect()
+    }
+
+    /// The turns named by requests in `from_ms <= ts < to_ms` whose own record was never read (a
+    /// Codex subagent whose main thread's log is gone).
+    pub fn turns_without_record(&self, from_ms: i64, to_ms: i64) -> Result<std::collections::HashSet<String>> {
+        let mut st = self.conn.prepare_cached(
+            "SELECT DISTINCT u.turn FROM usage_event u WHERE u.ts_ms >= ?1 AND u.ts_ms < ?2 AND u.turn IS NOT NULL
+               AND NOT EXISTS (SELECT 1 FROM turn t WHERE t.id = u.turn)",
+        )?;
+        let rows = st.query_map(params![from_ms, to_ms], |r| r.get(0))?;
+        rows.collect()
+    }
+
+    /// Whether any log read so far names its turns.
+    pub fn has_turns(&self) -> Result<bool> {
+        self.conn.query_row("SELECT EXISTS(SELECT 1 FROM turn)", [], |r| r.get(0))
     }
 
     /// Whether Claude Code has ever reported a cache miss here.
@@ -758,7 +868,7 @@ impl Store {
         self.conn.execute_batch(
             "BEGIN; DELETE FROM usage_event; DELETE FROM tool_call; DELETE FROM limit_snapshot; DELETE FROM file_checkpoint;
              DELETE FROM project; DELETE FROM account_session; DELETE FROM signin_span; DELETE FROM session_root;
-             DELETE FROM cache_miss_report; COMMIT;",
+             DELETE FROM cache_miss_report; DELETE FROM turn; COMMIT;",
         )?;
         // the data is gone once committed; a full disk only keeps the file from shrinking
         if let Err(e) = self.conn.execute_batch("VACUUM;") {
@@ -784,6 +894,7 @@ impl Store {
             let their_req = if theirs >= 2 { "e.request_id" } else { "NULL" };
             let their_v7 = if theirs >= 7 { "e.branch, e.agent, e.thread_id" } else { "NULL, NULL, NULL" };
             let their_v12 = if theirs >= 12 { "e.limit_reset, e.creator" } else { "NULL, NULL" };
+            let their_turn = |t: &str| if theirs >= 16 { format!("{t}.turn") } else { "NULL".to_owned() };
             // Codex rows from before v10 use other keys: take them only for sessions this database lacks
             self.conn.execute_batch(
                 "DROP TABLE IF EXISTS temp.codex_sessions;
@@ -818,10 +929,15 @@ impl Store {
             if theirs >= 12 {
                 event_optional.push("creator");
             }
+            let mut call_optional = vec!["session_id", "agent"];
+            if theirs >= 16 {
+                event_optional.push("turn");
+                call_optional.push("turn");
+            }
             let event_texts = texts("e.", &["key", "tool", "model", "accuracy", "source"], &event_optional);
             let project_texts = texts("", &["path", "name"], if theirs >= 3 { &["display_path"] } else { &[] });
             let limit_texts = texts("", &["provider", "tool", "account", "limit_id", "window", "source", "accuracy"], &["status", "plan"]);
-            let call_texts = texts("c.", &["key", "tool", "name"], &["session_id", "agent"]);
+            let call_texts = texts("c.", &["key", "tool", "name"], &call_optional);
             let tx = self.conn.unchecked_transaction()?;
             let their_display = if theirs >= 3 { "display_path" } else { "NULL" };
             tx.execute(
@@ -842,12 +958,13 @@ impl Store {
                     "INSERT INTO usage_event({EVENT_COLUMNS})
                      SELECT e.key, e.ts_ms, e.tool, e.client, e.model, p.id, e.session_id, e.input, e.cache_read,
                             e.cache_write, e.cache_write_1h, e.output, e.reasoning, e.request_input, e.web_search,
-                            e.speed, e.service_tier, e.inference_geo, e.accuracy, e.source, {their_req}, {their_v7}, {their_v12}
+                            e.speed, e.service_tier, e.inference_geo, e.accuracy, e.source, {their_req}, {their_v7}, {their_v12}, {}
                      FROM other.usage_event e
                      LEFT JOIN other.project op ON op.id = e.project_id
                      LEFT JOIN main.project p ON p.path = op.path
                      WHERE typeof(e.ts_ms) = 'integer' AND e.ts_ms BETWEEN 0 AND {latest} {valid_counts} {event_texts} {old_events} {valid_reset}
-                     {tail}"
+                     {tail}",
+                    their_turn("e")
                 ),
                 [],
             )?;
@@ -868,13 +985,26 @@ impl Store {
             if theirs >= 7 {
                 tx.execute(
                     &format!(
-                        "INSERT INTO tool_call(key, ts_ms, tool, session_id, project_id, agent, name, failed)
-                         SELECT c.key, c.ts_ms, c.tool, c.session_id, p.id, c.agent, c.name, c.failed
+                        "INSERT INTO tool_call(key, ts_ms, tool, session_id, project_id, agent, name, failed, turn)
+                         SELECT c.key, c.ts_ms, c.tool, c.session_id, p.id, c.agent, c.name, c.failed, {}
                          FROM other.tool_call c
                          LEFT JOIN other.project op ON op.id = c.project_id
                          LEFT JOIN main.project p ON p.path = op.path
                          WHERE typeof(c.ts_ms) = 'integer' AND c.ts_ms BETWEEN 0 AND {latest} AND typeof(c.failed) IN ('integer', 'null') {call_texts} {old_calls}
-                         ON CONFLICT(key) DO UPDATE SET failed = COALESCE(failed, excluded.failed)"
+                         ON CONFLICT(key) DO UPDATE SET failed = COALESCE(failed, excluded.failed), turn = COALESCE(turn, excluded.turn)",
+                        their_turn("c")
+                    ),
+                    [],
+                )?;
+            }
+            if theirs >= 16 {
+                tx.execute(
+                    &format!(
+                        "INSERT INTO turn(id, tool, session_id, ts_ms, origin)
+                         SELECT id, tool, session_id, ts_ms, origin FROM other.turn
+                         WHERE typeof(id) = 'text' AND typeof(tool) = 'text' AND typeof(session_id) IN ('text', 'null') AND typeof(origin) = 'text'
+                           AND typeof(ts_ms) = 'integer' AND ts_ms BETWEEN 0 AND {latest}
+                         {UPSERT_TURN_TAIL}"
                     ),
                     [],
                 )?;
@@ -1023,7 +1153,7 @@ impl StoreTx<'_> {
             };
             let mut st = self.tx.prepare_cached(&format!(
                 "INSERT INTO usage_event({EVENT_COLUMNS})
-                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27)
                  {UPSERT_EVENT_TAIL}"
             ))?;
             st.execute(params![
@@ -1053,6 +1183,7 @@ impl StoreTx<'_> {
                 e.thread_id,
                 e.limit_reset.filter(|r| (0..=MAX_EPOCH_SECS).contains(r)),
                 e.creator,
+                e.turn,
             ])?;
         }
         Ok(())
@@ -1066,15 +1197,16 @@ impl StoreTx<'_> {
                 _ => None,
             };
             let mut st = self.tx.prepare_cached(
-                "INSERT INTO tool_call(key, ts_ms, tool, session_id, project_id, agent, name, failed)
-                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8)
+                "INSERT INTO tool_call(key, ts_ms, tool, session_id, project_id, agent, name, failed, turn)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)
                  ON CONFLICT(key) DO UPDATE SET
                      ts_ms = MIN(ts_ms, excluded.ts_ms),
                      project_id = COALESCE(excluded.project_id, project_id),
                      agent = COALESCE(agent, excluded.agent),
-                     failed = COALESCE(excluded.failed, failed)",
+                     failed = COALESCE(excluded.failed, failed),
+                     turn = COALESCE(turn, excluded.turn)",
             )?;
-            st.execute(params![c.key, c.ts_ms, c.tool.as_str(), c.session_id, pid, c.agent, c.name, c.failed.map(i64::from)])?;
+            st.execute(params![c.key, c.ts_ms, c.tool.as_str(), c.session_id, pid, c.agent, c.name, c.failed.map(i64::from), c.turn])?;
         }
         Ok(())
     }
@@ -1159,6 +1291,15 @@ impl StoreTx<'_> {
              ON CONFLICT(tool, session_id) DO UPDATE SET root = ?4 WHERE root <> excluded.root",
             params![tool.as_str(), session_id, root, crate::accounts::MANY_ROOTS],
         )?;
+        Ok(())
+    }
+
+    /// A turn seen again (a resumed conversation copies its history) keeps its earliest record.
+    pub fn insert_turns(&mut self, turns: &[Turn]) -> Result<()> {
+        let mut st = self.tx.prepare_cached(&format!("INSERT INTO turn(id, tool, session_id, ts_ms, origin) VALUES(?1, ?2, ?3, ?4, ?5) {UPSERT_TURN_TAIL}"))?;
+        for t in turns.iter().filter(|t| (0..=latest_accepted_ms()).contains(&t.ts_ms)) {
+            st.execute(params![t.id, t.tool.as_str(), t.session_id, t.ts_ms, t.origin])?;
+        }
         Ok(())
     }
 

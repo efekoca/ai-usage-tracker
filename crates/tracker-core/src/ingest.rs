@@ -136,7 +136,7 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<FileR
         let more = f.parser.is_incremental() && out.round_full() && out.next_offset > offset && (packed || out.next_offset < size);
         let latest = crate::store::latest_accepted_ms();
         let ahead = |ts: i64| ts > latest && ts - latest <= HOLD_AHEAD_MS;
-        if hold.is_none() && (out.events.iter().any(|e| ahead(e.ts_ms)) || out.limits.iter().any(|l| ahead(l.ts_ms)) || out.tool_calls.iter().any(|c| ahead(c.ts_ms))) {
+        if hold.is_none() && (out.events.iter().any(|e| ahead(e.ts_ms)) || out.limits.iter().any(|l| ahead(l.ts_ms)) || out.tool_calls.iter().any(|c| ahead(c.ts_ms)) || out.turns.iter().any(|t| ahead(t.ts_ms))) {
             hold = Some((offset, state.clone()));
             out.warn("records dated ahead of the clock are read once it reaches them");
         }
@@ -154,6 +154,7 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<FileR
         // one dated too far ahead would hold the conversation's report until the clock got there
         out.cache_misses.retain(|r| r.ts_ms <= latest);
         tx.insert_cache_miss_reports(&out.cache_misses).map_err(|e| e.to_string())?;
+        tx.insert_turns(&out.turns).map_err(|e| e.to_string())?;
         if f.parser == ParserKind::ClaudeCodeJsonl
             && let Some((root, session)) = crate::accounts::claude_log_session(&f.path)
         {

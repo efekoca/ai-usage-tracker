@@ -20,13 +20,17 @@
 //!   `plan_type`, `limit_id`. Windows are classified by `window_minutes`, not by slot. Older
 //!   Codex wrote `resets_in_seconds` (from the line's time) instead of `resets_at`, and before
 //!   that flat `primary_used_percent`, `primary_window_minutes` and the same for `secondary`.
+//! * `task_started` opens a turn and `task_complete` or `turn_aborted` closes it; every request and
+//!   action lies between them. `root_turn_id` is the turn of the main thread that set it off, so a
+//!   subagent's work counts toward the prompt that started it. `started_at` (epoch seconds) stays
+//!   the same in a copy, unlike the line's own time.
 //! * `session_meta.creator_account_id` (Codex ≥ 0.157) is the account selected when the thread
 //!   started. It is never updated: a resumed thread or a desktop account switch goes on under
 //!   another account, so it only vouches for the first requests (see `State::vouch_for`).
 
 use super::{f64_at, i64_at, str_at, u64_at, JsonlReader, ParseOutput};
 use crate::accounts::{MAIN_LIMIT, SAME_WINDOW_S};
-use crate::model::{account_digest, parse_ts_ms, window_name, Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
+use crate::model::{account_digest, parse_ts_ms, window_name, Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, Turn, UsageEvent, MAX_EPOCH_SECS};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -67,6 +71,8 @@ struct State {
     vouch_reset: Option<i64>,
     /// A request of the file's own thread was seen.
     asked: bool,
+    /// The open turn ([`Turn::id`]).
+    turn: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -240,6 +246,20 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
                 }
                 out.lines_recognised += 1;
             }
+            ("event_msg", Some("task_started")) => {
+                let own = str_at(p, "turn_id").filter(|t| !t.is_empty());
+                let root = str_at(p, "root_turn_id").filter(|t| !t.is_empty()).or(own);
+                st.turn = root.map(|r| format!("cx:{r}"));
+                let began = i64_at(p, "started_at").filter(|s| (1..=MAX_EPOCH_SECS).contains(s)).map(|s| s * 1000).or(ts_ms);
+                // a subagent's turn is part of its root's, which the main thread's own log records
+                if let (Some(id), Some(ts_ms), true) = (st.turn.clone(), began, root == own) {
+                    let trigger = p.get("turn_attribution").and_then(|a| str_at(a, "turn_trigger"));
+                    let origin = if matches!(trigger, None | Some("composer" | "edit_user_message")) { "human" } else { "other" };
+                    out.turns.push(Turn { id, tool: Tool::Codex, session_id: Some(st.who(path).session), ts_ms, origin: origin.to_owned() });
+                }
+                out.lines_recognised += 1;
+            }
+            ("event_msg", Some("task_complete" | "turn_aborted")) => st.turn = None,
             ("event_msg", Some("thread_settings_applied")) => {
                 if let Some(id) = str_at(p, "thread_id") {
                     st.take_owner(id, path);
@@ -312,8 +332,9 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
                 }
                 let completed = i64_at(p, "completed_at_ms").filter(|&ms| ms > 0).or(ts_ms);
                 if let Some(item) = p.get("item")
-                    && let Some(call) = action(&st.who(path), line.offset, completed.unwrap_or_default(), item)
+                    && let Some(mut call) = action(&st.who(path), line.offset, completed.unwrap_or_default(), item)
                 {
+                    call.turn = st.turn.clone();
                     if completed.is_some() {
                         out.tool_calls.push(call);
                         out.lines_recognised += 1;
@@ -403,6 +424,7 @@ fn event(who: &Who, st: &State, key: String, ts_ms: i64, last: &Value) -> UsageE
         thread_id: who.agent.is_some().then(|| who.thread.clone()),
         limit_reset: None,
         creator: None,
+        turn: st.turn.clone(),
     }
 }
 
@@ -456,6 +478,7 @@ fn action(who: &Who, offset: u64, ts_ms: i64, item: &Value) -> Option<ToolCall> 
         agent: who.agent.clone(),
         name,
         failed,
+        turn: None,
     })
 }
 
