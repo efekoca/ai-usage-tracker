@@ -31,6 +31,7 @@ A private app for Windows, macOS, and Linux that reads the usage logs your AI to
 - **Keep a conversation's cache from running out.** Each Claude Code conversation's cache shows its time left on the **Cache** page, in the widget, the menu bar and the control panel, and Claude Code's own status line can show when it is dropped. Refresh it with one click, or let the app do it shortly before it runs out, for the price of one cache read instead of writing it again.
 - **Pick up where a limit stopped you.** When the usage limit stops a Claude Code conversation, the app continues it by itself once the limit resets, so work cut off overnight goes on without you.
 - **Put the reset where you need it.** Claude's 5-hour window starts with your first request. The app can open it with one small request at a time you choose, say 06:00, so it resets at 11:00 and you use two full windows in one working day.
+- **See what every conversation costs before you type.** The system prompt, tool definitions, memory files and MCP servers are sent with the first request of every conversation. You see that starting load for each project, and the day it grew.
 - **Keep your history.** Resumed and forked sessions are never counted twice, and your history stays in the archive even after the tools delete their own logs (Claude Code does so after 30 days).
 - **Share your use, not your work.** Turn a day, a week, a month or a year into a card in four sizes. A card holds totals, tool names and model names only.
 
@@ -211,6 +212,15 @@ Negative savings mean that written cache was not read enough to pay off.
 - the daily average and p90
 - a breakdown per model
 - the **long-context surcharge**: what requests above a model's long-context threshold (272K for GPT-5.x) cost beyond the standard rates
+
+**Starting load.** Every new conversation begins with a prompt you did not write: the system prompt, the tool definitions, memory files such as `CLAUDE.md`, and whatever your MCP servers add. The tools log the size of each request, so the first request of a conversation shows that load exactly (with your first prompt in it). The **Context** page lists it for each project, per tool and where it runs (the terminal and the Claude desktop app start differently):
+
+- the **starting load**: the median first request of the latest five conversations, so one conversation that began with a long prompt does not move it
+- the smallest first request in the period, and the API-equivalent cost of such a first request
+- the **course**: the first request of each conversation as a line (the latest 60); point at it to see a conversation's size and time
+- a **change**: when at least three conversations in a row start larger or smaller than all of the five before them, by at least 2,000 tokens and 10%, the row shows by how much and since which day. Adding an MCP server or lengthening `CLAUDE.md` shows up there, and so does removing one
+
+Only conversations that began in the period count; subagents and captured telemetry are left out. The figures come from the logs as they are, so the page shows that the load changed and when, not which file or server changed it.
 
 **Branches.** The **Projects** page splits each project's usage by git branch. Claude Code records the branch with every request; Codex records it when a session starts in a repository. Requests outside a repository show as "no branch".
 

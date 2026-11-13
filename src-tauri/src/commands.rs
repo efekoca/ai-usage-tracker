@@ -826,6 +826,22 @@ pub async fn get_sessions(app: AppHandle, period: Period, filter: Option<Filter>
 }
 
 #[tauri::command]
+pub async fn starting_loads(app: AppHandle, period: Period, filter: Option<Filter>) -> Res<Vec<insights::StartingLoad>> {
+    let state = app.state::<AppState>();
+    let hide_all = state.settings.read().unwrap().hide_project_names;
+    let store = state.db();
+    let book = state.book.read().unwrap();
+    let mut loads = insights::starting_loads(&store, &book, range_for(&store, period)?, &filter.unwrap_or_default()).map_err(err)?;
+    for l in &mut loads {
+        if hide_all || l.hidden {
+            l.project.clear();
+            l.hidden = true;
+        }
+    }
+    Ok(loads)
+}
+
+#[tauri::command]
 pub async fn compare_models(app: AppHandle, period: Period, filter: Option<Filter>) -> Res<insights::ModelCompare> {
     let state = app.state::<AppState>();
     let store = state.db();

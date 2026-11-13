@@ -4,7 +4,7 @@ use chrono::{FixedOffset, TimeZone};
 use common::Dst;
 use tracker_core::analytics::{account_key, Filter, Range};
 use tracker_core::insights::{agents_tools, branches, compare_models, context_stats, day_detail, forecast, plan_value, restarted, session_timeline, sessions, subagent_cache, ForecastKind, PromptShare};
-use tracker_core::insights::{cache_misses, live_caches, MissCause};
+use tracker_core::insights::{cache_misses, live_caches, starting_loads, MissCause, StartChange};
 use tracker_core::tips::{cache_rebuilds, tips, Tip, Tips};
 use tracker_core::model::{Accuracy, CacheMissReport, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
 use tracker_core::pricing::{CostInput, PriceBook};
@@ -997,4 +997,85 @@ fn a_day_with_a_clock_change_keeps_every_local_hour_once() {
     let autumn = day(10, 25);
     assert_eq!((autumn.totals.events, autumn.hourly.len()), (3, 24), "25 hours long");
     assert_eq!(busy(&autumn), [(2, 2), (23, 1)]);
+}
+
+#[test]
+fn a_projects_starting_load_is_its_conversations_first_request_and_a_lasting_step_is_marked() {
+    const DAY: i64 = 24 * HOUR;
+    let t = ms(2026, 11, 1, 9, 0);
+    let cc = |key, at, session, project, size| ev(key, at, Tool::ClaudeCode, "claude-opus-5-5", Some(session), project, size, 0, 50);
+    let store = store_with(&[
+        // /p: three conversations at about 38K, then an MCP server is added
+        cc("a1", t, "a", "/w/p", 38_000),
+        cc("a2", t + MIN, "a", "/w/p", 120_000),
+        cc("b1", t + DAY, "b", "/w/p", 38_400),
+        cc("c0", t + 2 * DAY - MIN, "c", "/w/p", 900).agent("Explore", "x"),
+        cc("c1", t + 2 * DAY, "c", "/w/p", 37_900),
+        cc("c2", t + 2 * DAY, "c", "/w/p", 5_000).captured(),
+        cc("d1", t + 3 * DAY, "d", "/w/p", 50_200),
+        cc("e1", t + 4 * DAY, "e", "/w/p", 50_600),
+        cc("f1", t + 5 * DAY, "f", "/w/p", 49_900),
+        // /q: one conversation that began with a long prompt is no change
+        cc("g1", t, "g", "/w/q", 20_000),
+        cc("h1", t + DAY, "h", "/w/q", 60_000),
+        cc("i1", t + 2 * DAY, "i", "/w/q", 21_000),
+        cc("j1", t + 3 * DAY, "j", "/w/q", 20_500),
+        cc("k1", t + 4 * DAY, "k", "/w/q", 20_200),
+        ev("x1", t + DAY, Tool::Codex, "gpt-5.5", Some("x"), "/w/p", 19_000, 0, 10),
+        ev("n1", t + DAY, Tool::ClaudeCode, "claude-opus-5-5", None, "/w/p", 7_000, 0, 10),
+    ]);
+    let book = PriceBook::default_book();
+    let loads = starting_loads(&store, &book, all(), &Filter::default()).unwrap();
+    let of = |project: &str, tool: Tool| loads.iter().find(|l| l.project == project && l.tool == tool).unwrap();
+    assert_eq!(loads.iter().map(|l| (l.project.as_str(), l.tool, l.conversations)).collect::<Vec<_>>(), [("p", Tool::ClaudeCode, 6), ("q", Tool::ClaudeCode, 5), ("p", Tool::Codex, 1)]);
+
+    let p = of("p", Tool::ClaudeCode);
+    assert_eq!(p.starts.iter().map(|s| s.tokens).collect::<Vec<_>>(), [38_000, 38_400, 37_900, 50_200, 50_600, 49_900], "later requests, subagents and telemetry are not a start");
+    assert_eq!(p.change, Some(StartChange { at_ms: t + 3 * DAY, before: 38_000, after: 50_200 }));
+    assert_eq!((p.typical, p.smallest, p.client.as_deref()), (49_900, 37_900, Some("cli")), "what one begins with now: the latest five");
+    assert!(p.cost_usd.is_some_and(|c| c > 0.0));
+
+    let q = of("q", Tool::ClaudeCode);
+    assert_eq!((q.typical, q.smallest, q.change.clone()), (20_500, 20_000, None), "one long first prompt moves neither");
+    assert_eq!((of("p", Tool::Codex).typical, of("p", Tool::Codex).change.clone()), (19_000, None));
+
+    // a step back down is marked too, and two conversations after are too few to tell
+    let down = store_with(&[
+        cc("a", t, "a", "/w/p", 50_000),
+        cc("b", t + DAY, "b", "/w/p", 50_500),
+        cc("c", t + 2 * DAY, "c", "/w/p", 30_000),
+        cc("d", t + 3 * DAY, "d", "/w/p", 30_400),
+    ]);
+    assert_eq!(starting_loads(&down, &book, all(), &Filter::default()).unwrap()[0].change, None);
+    let down = store_with(&[
+        cc("a", t, "a", "/w/p", 50_000),
+        cc("b", t + DAY, "b", "/w/p", 50_500),
+        cc("c", t + 2 * DAY, "c", "/w/p", 30_000),
+        cc("d", t + 3 * DAY, "d", "/w/p", 30_400),
+        cc("e", t + 4 * DAY, "e", "/w/p", 30_100),
+    ]);
+    assert_eq!(starting_loads(&down, &book, all(), &Filter::default()).unwrap()[0].change, Some(StartChange { at_ms: t + 2 * DAY, before: 50_000, after: 30_100 }));
+    // the change is where the step began, not a conversation or two after it
+    let sizes = [38_000, 38_400, 37_900, 50_200, 50_600, 50_900, 51_000];
+    let keys = ["a", "b", "c", "d", "e", "f", "g"];
+    let rising = store_with(&sizes.iter().zip(keys).enumerate().map(|(i, (&size, key))| cc(key, t + i as i64 * DAY, key, "/w/p", size)).collect::<Vec<_>>());
+    assert_eq!(starting_loads(&rising, &book, all(), &Filter::default()).unwrap()[0].change, Some(StartChange { at_ms: t + 3 * DAY, before: 38_000, after: 50_600 }));
+    // a small drift is no step
+    let drift = store_with(&[
+        cc("a", t, "a", "/w/p", 50_000),
+        cc("b", t + DAY, "b", "/w/p", 50_500),
+        cc("c", t + 2 * DAY, "c", "/w/p", 53_000),
+        cc("d", t + 3 * DAY, "d", "/w/p", 53_400),
+        cc("e", t + 4 * DAY, "e", "/w/p", 53_100),
+    ]);
+    assert_eq!(starting_loads(&drift, &book, all(), &Filter::default()).unwrap()[0].change, None);
+
+    // a conversation that began before the period only goes on in it: its later request is no start
+    let later = Range { from_ms: t + 30_000, to_ms: i64::MAX / 2 };
+    let inside = starting_loads(&store, &book, later, &Filter::default()).unwrap();
+    let p = inside.iter().find(|l| l.project == "p" && l.tool == Tool::ClaudeCode).unwrap();
+    assert_eq!(p.starts.iter().map(|s| s.tokens).collect::<Vec<_>>(), [38_400, 37_900, 50_200, 50_600, 49_900], "a's request at +1 min is in the period, its start is not");
+    assert_eq!(inside.iter().find(|l| l.project == "q").unwrap().starts[0].tokens, 60_000);
+    let codex = Filter { tools: vec![Tool::Codex], ..Default::default() };
+    assert_eq!(starting_loads(&store, &book, all(), &codex).unwrap().len(), 1);
 }
