@@ -125,7 +125,8 @@
     const id = setInterval(() => (clock = Date.now()), 1000)
     return () => clearInterval(id)
   })
-  const caches = $derived(m.kind === 'caches' ? (data?.caches ?? []).filter((c) => c.expires_ms > clock) : [])
+  // like the grid, so the tile is never drawn taller than its cell between a settings change and new data
+  const caches = $derived(m.kind === 'caches' && settings.cache_timer ? (data?.caches ?? []).filter((c) => c.expires_ms > clock) : [])
   // until its refresh reaches the logs, a row's button keeps turning
   let asked = $state<string[]>([])
   // why a refresh did not go, in place of the row's second line for a few seconds

@@ -61,6 +61,7 @@ impl AppState {
         f(&mut s);
         s.save(&store)?;
         *self.settings.write().unwrap() = s.clone();
+        crate::capture::write_statusline_options(&self.data_dir, &s);
         Ok(s)
     }
 }

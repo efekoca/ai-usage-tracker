@@ -98,6 +98,7 @@ const settings: Settings = {
   cache_timer: true,
   cache_widget: true,
   cache_menubar: true,
+  cache_statusline: false,
   cache_projects: 'all' as 'all' | 'picked',
   cache_picked: [] as string[],
   cache_auto: showcase,

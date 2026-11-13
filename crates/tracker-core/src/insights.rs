@@ -548,6 +548,11 @@ pub struct LiveCache {
 const FIVE_MINUTES: i64 = 5 * 60_000;
 const ONE_HOUR: i64 = 60 * 60_000;
 
+/// A cache written partly for five minutes loses that part first.
+pub(crate) fn cache_ttl_ms(written: u64, written_1h: u64) -> i64 {
+    if written > written_1h { FIVE_MINUTES } else { ONE_HOUR }
+}
+
 /// Every Claude Code conversation whose cache still lasts, the soonest to run out first. A request
 /// that reads a cache renews it, so it runs out its lifetime after the conversation's last request
 /// that used it; one that wrote both lifetimes loses its five-minute part first. Subagents and
@@ -566,11 +571,8 @@ pub fn live_caches(store: &Store, book: &PriceBook, now_ms: i64) -> Result<Vec<L
         // a failed request logs no tokens and leaves the cache as it was
         let Some(last) = evs.iter().filter(|e| e.tokens.cache_read + e.tokens.cache_write > 0).max_by_key(|e| e.ts_ms) else { continue };
         // the lifetime is the one the cache was last written with, however long reads kept it since
-        let ttl_ms = match store.last_cache_write(session_id, &last.model, last.ts_ms)? {
-            Some((all, one_hour)) if all > one_hour => FIVE_MINUTES,
-            Some(_) => ONE_HOUR,
-            None => continue,
-        };
+        let Some((written, written_1h)) = store.last_cache_write(session_id, &last.model, last.ts_ms)? else { continue };
+        let ttl_ms = cache_ttl_ms(written, written_1h);
         let expires_ms = last.ts_ms + ttl_ms;
         if expires_ms <= now_ms {
             continue;

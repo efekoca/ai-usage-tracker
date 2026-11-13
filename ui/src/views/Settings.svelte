@@ -441,6 +441,12 @@
           <Toggle small checked={s.cache_menubar} label="{t('settings.cacheTimer')}: {t('settings.cacheTimer.menubar')}" onchange={(v) => saveSettings({ cache_menubar: v })} />
         </div>
         <div class="choice">
+          <span class="glyph"><Icon name="terminal" size={16} /></span>
+          <span class="label">{t('settings.cacheTimer.statusline')}<span class="subtle small">{s.capture.statusline ? t('settings.cacheTimer.statusline.help') : t('settings.cacheTimer.statusline.off')}</span></span>
+          {#if !s.capture.statusline}<button class="btn ghost small" onclick={() => (app.view = 'sources')}>{t('settings.cacheTimer.statusline.open')}</button>{/if}
+          <Toggle small checked={s.cache_statusline && s.capture.statusline} disabled={!s.capture.statusline} label="{t('settings.cacheTimer')}: {t('settings.cacheTimer.statusline')}" onchange={(v) => saveSettings({ cache_statusline: v })} />
+        </div>
+        <div class="choice">
           <span class="glyph"><Icon name="bell" size={16} /></span>
           <span class="label">{t('settings.cacheTimer.notify')}<span class="subtle small">{s.notify.enabled ? t('settings.cacheTimer.notify.help') : t('settings.notifyOff')}</span></span>
           <Toggle small checked={s.notify.cache} disabled={!s.notify.enabled} label="{t('settings.cacheTimer')}: {t('settings.cacheTimer.notify')}" onchange={(v) => saveNotify({ cache: v })} />
