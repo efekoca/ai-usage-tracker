@@ -516,6 +516,7 @@ pub fn run() {
             commands::get_branches,
             commands::get_agents_tools,
             commands::get_subagent_cache,
+            commands::get_cache_misses,
             commands::get_tips,
             commands::get_limit_history,
             commands::early_restart,

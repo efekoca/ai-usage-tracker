@@ -256,6 +256,26 @@ pub fn is_uuid(s: &str) -> bool {
     parts.len() == 5 && parts.iter().zip([8, 4, 4, 4, 12]).all(|(p, n)| p.len() == n && p.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
+/// What Claude Code reports to the status line about a conversation's prompt cache misses so
+/// far (`prompt_cache`, 2.1.251 and later; causes from 2.1.260). The bridge writes one each time
+/// the counts change, so two in a row tell what happened in between.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheMissReport {
+    pub session_id: String,
+    pub ts_ms: i64,
+    /// When the latest miss happened, as Claude Code reports it.
+    pub last_miss_ms: Option<i64>,
+    pub requests: u64,
+    /// Requests that re-processed content the cache already held, compaction aside.
+    pub misses: u64,
+    /// Rebuilds after a compaction or a clearing of old tool results, which Claude Code expects.
+    pub rebuilds: u64,
+    /// Tokens the misses wrote to the cache again.
+    pub recached_tokens: u64,
+    /// How many misses had each cause, by Claude Code's own name for it.
+    pub causes: Vec<(String, u64)>,
+}
+
 /// Evidence that a session ran on an account (a digest): the Claude desktop app lists each
 /// Code-tab session under the account it ran it with.
 #[derive(Debug, Clone, PartialEq)]

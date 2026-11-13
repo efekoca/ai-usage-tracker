@@ -3,7 +3,7 @@ mod common;
 use common::*;
 use std::fs;
 use std::io::Write;
-use tracker_core::discovery::{detect, enumerate_files, Env, ExtraPaths, SourceId};
+use tracker_core::discovery::{detect, enumerate_files, file_identity, DiscoveredFile, Env, ExtraPaths, SourceId};
 use tracker_core::store::Store;
 
 #[derive(Debug, PartialEq, Default)]
@@ -1440,4 +1440,26 @@ fn old_rows_of_a_later_vanished_copy_are_taken_by_an_earlier_copy() {
 
     run(&mut store, &h.env);
     assert_eq!(codex_rows(&store).len(), 4, "the parent's two requests, the fork's own and the vanished fork's own");
+}
+
+#[test]
+fn the_status_lines_cache_misses_are_stored_with_their_largest_counts() {
+    use serde_json::json;
+    use tracker_core::capture::statusline;
+    let dir = tempfile::tempdir().unwrap();
+    let report = |misses: u64, causes: serde_json::Value| json!({"session_id": "s-1", "prompt_cache": {"requests": 20, "misses": misses, "expected_rebuilds": 0, "miss_recache_tokens": misses * 1000, "miss_causes": causes}});
+    assert!(statusline::record_cache_misses(dir.path(), &report(1, json!({"tools_changed": 1})), 1_000));
+    assert!(statusline::record_cache_misses(dir.path(), &report(2, json!({"tools_changed": 1, "likely_server_side": 1})), 2_000));
+    let path = statusline::capture_file(dir.path());
+    let files = [DiscoveredFile { file_id: file_identity(&path), path, parser: tracker_core::sources::ParserKind::StatuslineCapture, source: SourceId::ClaudeCode }];
+    let mut store = Store::open_in_memory().unwrap();
+    tracker_core::ingest::ingest(&mut store, &files, |_| {});
+    let got = store.cache_miss_reports(0, 10_000).unwrap();
+    assert_eq!(got.iter().map(|r| (r.ts_ms, r.misses, r.recached_tokens)).collect::<Vec<_>>(), [(1_000, 1, 1_000), (2_000, 2, 2_000)]);
+    assert_eq!(got[1].causes, [("tools_changed".to_owned(), 1), ("likely_server_side".to_owned(), 1)]);
+    // the same log read again adds nothing
+    let mut again = Store::open_in_memory().unwrap();
+    tracker_core::ingest::ingest(&mut again, &files, |_| {});
+    tracker_core::ingest::ingest(&mut again, &files, |_| {});
+    assert_eq!(again.cache_miss_reports(0, 10_000).unwrap().len(), 2);
 }

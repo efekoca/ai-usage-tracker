@@ -1,7 +1,7 @@
 //! Local SQLite archive (`%LOCALAPPDATA%\AIUsageTracker\tracker.db`). Records stay here even
 //! after the source tools delete or rotate their logs. No content columns exist by design.
 
-use crate::model::{Accuracy, LimitSnapshot, Provider, SessionAccount, Tokens, Tool, ToolCall, UsageEvent, MAX_CLOCK_SKEW_MS, MAX_EPOCH_SECS, MAX_WINDOW_MINUTES};
+use crate::model::{Accuracy, CacheMissReport, LimitSnapshot, Provider, SessionAccount, Tokens, Tool, ToolCall, UsageEvent, MAX_CLOCK_SKEW_MS, MAX_EPOCH_SECS, MAX_WINDOW_MINUTES};
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde::Serialize;
 use std::cell::RefCell;
@@ -177,6 +177,22 @@ const MIGRATIONS: &[&str] = &[
     r#"
     DELETE FROM file_checkpoint WHERE parser IN ('claude_desktop_session', 'cowork_jsonl', 'cowork_audit')
         AND (path LIKE '%claude-code-sessions%' OR path LIKE '%local-agent-mode-sessions%');
+    "#,
+    // v15: each report of a conversation's prompt cache misses Claude Code gives its status line,
+    // with the causes so far as JSON; keyed by its time and counts, so a log read again adds nothing
+    r#"
+    CREATE TABLE IF NOT EXISTS cache_miss_report (
+        session_id   TEXT NOT NULL,
+        misses       INTEGER NOT NULL,
+        rebuilds     INTEGER NOT NULL,
+        ts_ms        INTEGER NOT NULL,
+        requests     INTEGER NOT NULL,
+        recached     INTEGER NOT NULL,
+        last_miss_ms INTEGER,
+        causes       TEXT NOT NULL,
+        PRIMARY KEY (session_id, ts_ms, misses, rebuilds)
+    );
+    CREATE INDEX IF NOT EXISTS cache_miss_report_ts ON cache_miss_report(ts_ms);
     "#,
 ];
 
@@ -525,6 +541,28 @@ impl Store {
         rows.filter_map(Result::transpose).collect()
     }
 
+    /// Every miss report of the conversations with one in `from_ms <= ts < to_ms`, earlier and
+    /// later ones included, each conversation's in the order they came.
+    pub fn cache_miss_reports(&self, from_ms: i64, to_ms: i64) -> Result<Vec<CacheMissReport>> {
+        let mut st = self.conn.prepare_cached(
+            "SELECT session_id, ts_ms, last_miss_ms, requests, misses, rebuilds, recached, causes FROM cache_miss_report
+             WHERE session_id IN (SELECT session_id FROM cache_miss_report WHERE ts_ms >= ?1 AND ts_ms < ?2)
+             ORDER BY session_id, ts_ms, misses, rebuilds",
+        )?;
+        let n = |r: &rusqlite::Row, i: usize| r.get::<_, i64>(i).map(|v| v.max(0) as u64);
+        let rows = st.query_map(params![from_ms, to_ms], |r| {
+            let causes: String = r.get(7)?;
+            let causes: Vec<(String, u64)> = serde_json::from_str(&causes).unwrap_or_default();
+            Ok(CacheMissReport { session_id: r.get(0)?, ts_ms: r.get(1)?, last_miss_ms: r.get(2)?, requests: n(r, 3)?, misses: n(r, 4)?, rebuilds: n(r, 5)?, recached_tokens: n(r, 6)?, causes })
+        })?;
+        rows.collect()
+    }
+
+    /// Whether Claude Code has ever reported a cache miss here.
+    pub fn has_cache_misses(&self) -> Result<bool> {
+        self.conn.query_row("SELECT EXISTS(SELECT 1 FROM cache_miss_report)", [], |r| r.get(0))
+    }
+
     /// When a session's first request was made.
     pub fn session_started_ms(&self, session_id: &str) -> Result<Option<i64>> {
         let mut st = self.conn.prepare_cached(&format!("SELECT MIN(ts_ms) FROM usage_event u WHERE session_id = ?1 AND {NOT_SUPERSEDED}"))?;
@@ -719,7 +757,8 @@ impl Store {
         self.project_cache.borrow_mut().clear();
         self.conn.execute_batch(
             "BEGIN; DELETE FROM usage_event; DELETE FROM tool_call; DELETE FROM limit_snapshot; DELETE FROM file_checkpoint;
-             DELETE FROM project; DELETE FROM account_session; DELETE FROM signin_span; DELETE FROM session_root; COMMIT;",
+             DELETE FROM project; DELETE FROM account_session; DELETE FROM signin_span; DELETE FROM session_root;
+             DELETE FROM cache_miss_report; COMMIT;",
         )?;
         // the data is gone once committed; a full disk only keeps the file from shrinking
         if let Err(e) = self.conn.execute_batch("VACUUM;") {
@@ -1120,6 +1159,20 @@ impl StoreTx<'_> {
              ON CONFLICT(tool, session_id) DO UPDATE SET root = ?4 WHERE root <> excluded.root",
             params![tool.as_str(), session_id, root, crate::accounts::MANY_ROOTS],
         )?;
+        Ok(())
+    }
+
+    /// A report already kept is not kept twice, so a log read again changes nothing.
+    pub fn insert_cache_miss_reports(&mut self, reports: &[CacheMissReport]) -> Result<()> {
+        let mut st = self.tx.prepare_cached(
+            "INSERT OR IGNORE INTO cache_miss_report(session_id, misses, rebuilds, ts_ms, requests, recached, last_miss_ms, causes)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )?;
+        let n = |v: u64| i64::try_from(v).unwrap_or(i64::MAX);
+        for r in reports {
+            let causes = serde_json::to_string(&r.causes).unwrap_or_else(|_| "[]".into());
+            st.execute(params![r.session_id, n(r.misses), n(r.rebuilds), r.ts_ms, n(r.requests), n(r.recached_tokens), r.last_miss_ms, causes])?;
+        }
         Ok(())
     }
 

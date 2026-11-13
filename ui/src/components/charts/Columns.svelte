@@ -14,6 +14,7 @@
     onselect,
     xLabel = (k: string) => fmtDate(k, 'short'),
     labelStep = 0,
+    legend = true,
     tipLabel = (k: string) => fmtDate(k, 'long'),
   }: {
     dates: string[]
@@ -28,6 +29,8 @@
     tipLabel?: (key: string) => string
     /** 0 = as many labels as fit. */
     labelStep?: number
+    /** off where the colors are explained beside the chart already */
+    legend?: boolean
   } = $props()
 
   let width = $state(600)
@@ -71,7 +74,7 @@
 </script>
 
 <div class="wrap" bind:clientWidth={width}>
-  {#if series.length > 1}
+  {#if legend && series.length > 1}
     <div class="legend" aria-hidden="true">
       {#each series as s (s.key)}<span><i style="background:{s.color}"></i>{s.label}</span>{/each}
     </div>

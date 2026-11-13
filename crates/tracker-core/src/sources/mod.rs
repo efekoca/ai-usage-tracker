@@ -9,7 +9,7 @@ pub mod codex;
 pub mod cowork_audit;
 pub mod opencode;
 
-use crate::model::{LimitSnapshot, SessionAccount, ToolCall, UsageEvent};
+use crate::model::{CacheMissReport, LimitSnapshot, SessionAccount, ToolCall, UsageEvent};
 use serde_json::Value;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
@@ -75,6 +75,8 @@ pub struct ParseOutput {
     pub tool_results: Vec<(String, bool)>,
     /// Sessions the source ties to an account.
     pub sessions: Vec<SessionAccount>,
+    /// What Claude Code reported about conversations' cache misses.
+    pub cache_misses: Vec<CacheMissReport>,
     /// Human-readable, content-free warnings (line numbers / offsets only), at most
     /// `MAX_WARNING_DETAILS`; the last one is always the latest. Added with `warn`.
     pub warnings: Vec<String>,

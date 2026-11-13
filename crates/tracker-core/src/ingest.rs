@@ -151,6 +151,9 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<FileR
         tx.upsert_events(&out.events).map_err(|e| e.to_string())?;
         tx.insert_limits(&out.limits).map_err(|e| e.to_string())?;
         tx.insert_session_accounts(&out.sessions).map_err(|e| e.to_string())?;
+        // one dated too far ahead would hold the conversation's report until the clock got there
+        out.cache_misses.retain(|r| r.ts_ms <= latest);
+        tx.insert_cache_miss_reports(&out.cache_misses).map_err(|e| e.to_string())?;
         if f.parser == ParserKind::ClaudeCodeJsonl
             && let Some((root, session)) = crate::accounts::claude_log_session(&f.path)
         {

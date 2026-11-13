@@ -598,6 +598,203 @@ pub fn live_caches(store: &Store, book: &PriceBook, now_ms: i64) -> Result<Vec<L
     Ok(out)
 }
 
+/// Prompt cache misses Claude Code reported over a period: in all, day by day and project by project.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct CacheMisses {
+    /// Whether Claude Code has reported any here at all, in any period.
+    pub reported: bool,
+    /// Conversations with a miss in the period.
+    pub sessions: u64,
+    pub misses: u64,
+    pub rebuilds: u64,
+    pub recached_tokens: u64,
+    /// How many misses had each cause, the most frequent first; one miss can have several.
+    pub causes: Vec<MissCause>,
+    /// Misses Claude Code gave no cause for.
+    pub undetermined: u64,
+    /// The days with a miss, the earliest first.
+    pub days: Vec<MissDay>,
+    /// The projects with a miss or a rebuild, the most misses first.
+    pub projects: Vec<MissProject>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct MissCause {
+    pub cause: String,
+    pub misses: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct MissDay {
+    /// The local date, `YYYY-MM-DD`.
+    pub date: String,
+    pub causes: Vec<MissCause>,
+    pub undetermined: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct MissProject {
+    pub project_id: Option<i64>,
+    pub project: String,
+    pub hidden: bool,
+    pub misses: u64,
+    pub rebuilds: u64,
+    pub recached_tokens: u64,
+    /// The latest miss, or the latest rebuild when there was none.
+    pub last_ms: i64,
+    /// The cause behind most of its misses; `None` when that is none Claude Code could tell, or
+    /// when it had rebuilds alone.
+    pub cause: Option<String>,
+    /// Its misses and rebuilds as they came, the latest first, at most [`MISS_EVENTS`].
+    pub events: Vec<MissEvent>,
+    /// How many more there were.
+    pub more: u64,
+}
+
+/// What happened to a conversation's cache between two reports: usually one miss or one rebuild.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct MissEvent {
+    pub ts_ms: i64,
+    pub session_id: String,
+    pub branch: Option<String>,
+    pub model: Option<String>,
+    pub misses: u64,
+    pub rebuilds: u64,
+    pub recached_tokens: u64,
+    /// The causes Claude Code gave; empty when it could not tell, or for a rebuild alone.
+    pub causes: Vec<String>,
+}
+
+/// The most misses a project lists one by one.
+pub const MISS_EVENTS: usize = 50;
+/// A report comes with the next status-line update after the miss; one this much later still
+/// tells about a miss in the period.
+const MISS_REPORT_LAG_MS: i64 = 7 * 86_400_000;
+
+/// The misses Claude Code reported for the conversations the filter keeps, each at the time it
+/// happened. Two reports in a row tell what happened in between; counts that start over begin a
+/// new run.
+pub fn cache_misses<Tz: TimeZone>(store: &Store, range: Range, filter: &Filter, tz: &Tz) -> Result<CacheMisses> {
+    let projects: HashMap<i64, ProjectRow> = store.projects()?.into_iter().map(|p| (p.id, p)).collect();
+    let mut out = CacheMisses { reported: store.has_cache_misses()?, ..CacheMisses::default() };
+    let mut causes: BTreeMap<String, u64> = BTreeMap::new();
+    let mut days: BTreeMap<NaiveDate, (BTreeMap<String, u64>, u64)> = BTreeMap::new();
+    struct Acc {
+        project: String,
+        hidden: bool,
+        misses: u64,
+        rebuilds: u64,
+        recached: u64,
+        last_miss: Option<i64>,
+        last: i64,
+        causes: BTreeMap<String, u64>,
+        undetermined: u64,
+        events: Vec<MissEvent>,
+    }
+    let mut by_project: HashMap<Option<i64>, Acc> = HashMap::new();
+    // a miss in the period is reported at or after it
+    let reports = store.cache_miss_reports(range.from_ms, range.to_ms.saturating_add(MISS_REPORT_LAG_MS))?;
+    for group in reports.chunk_by(|a, b| a.session_id == b.session_id) {
+        let session_id = &group[0].session_id;
+        // the filter keeps a conversation by its own requests, whenever they were
+        let events: Vec<EventRow> = store.session_events(session_id)?.into_iter().filter(|e| e.tool == Tool::ClaudeCode).collect();
+        if !events.iter().any(|e| filter.matches(e)) {
+            continue;
+        }
+        let mut counts: HashMap<Option<i64>, u64> = HashMap::new();
+        for e in &events {
+            *counts.entry(e.project_id).or_default() += 1;
+        }
+        let project_id = counts.iter().max_by_key(|(id, n)| (**n, id.unwrap_or(i64::MIN))).and_then(|(id, _)| *id);
+        // a miss is the main conversation's: a subagent's request tells nothing about it
+        let main: Vec<&EventRow> = events.iter().filter(|e| e.agent.is_none() && !e.advisor).collect();
+        let mut missed = false;
+        let mut prev: Option<&crate::model::CacheMissReport> = None;
+        for r in group {
+            let base = prev.filter(|p| r.misses >= p.misses && r.rebuilds >= p.rebuilds);
+            prev = Some(r);
+            let (misses, rebuilds) = (r.misses - base.map_or(0, |p| p.misses), r.rebuilds - base.map_or(0, |p| p.rebuilds));
+            let at = if misses > 0 { r.last_miss_ms.unwrap_or(r.ts_ms) } else { r.ts_ms };
+            if misses + rebuilds == 0 || at < range.from_ms || at >= range.to_ms {
+                continue;
+            }
+            let before = |cause: &str| base.and_then(|p| p.causes.iter().find(|(c, _)| c == cause)).map_or(0, |(_, n)| *n);
+            let new: Vec<(String, u64)> = r.causes.iter().filter_map(|(c, n)| Some((c.clone(), n.checked_sub(before(c)).filter(|d| *d > 0)?))).collect();
+            let recached = r.recached_tokens.saturating_sub(base.map_or(0, |p| p.recached_tokens));
+            let undetermined = if new.is_empty() { misses } else { 0 };
+            let acc = by_project.entry(project_id).or_insert_with(|| {
+                let (project, hidden) = project_label(&projects, project_id);
+                Acc { project, hidden, misses: 0, rebuilds: 0, recached: 0, last_miss: None, last: 0, causes: BTreeMap::new(), undetermined: 0, events: Vec::new() }
+            });
+            acc.misses += misses;
+            acc.rebuilds += rebuilds;
+            acc.recached += recached;
+            acc.undetermined += undetermined;
+            acc.last = acc.last.max(at);
+            if misses > 0 {
+                acc.last_miss = Some(acc.last_miss.map_or(at, |l| l.max(at)));
+                missed = true;
+                let day = days.entry(local_date(tz, at)).or_default();
+                day.1 += undetermined;
+                for (c, n) in &new {
+                    *day.0.entry(c.clone()).or_default() += n;
+                }
+            }
+            for (c, n) in &new {
+                *causes.entry(c.clone()).or_default() += n;
+                *acc.causes.entry(c.clone()).or_default() += n;
+            }
+            out.misses += misses;
+            out.rebuilds += rebuilds;
+            out.recached_tokens += recached;
+            out.undetermined += undetermined;
+            // the request that missed, or the last one before it
+            let near = main.iter().rev().find(|e| e.ts_ms <= at).or(main.first());
+            acc.events.push(MissEvent {
+                ts_ms: at,
+                session_id: session_id.clone(),
+                branch: near.and_then(|e| e.branch.clone()),
+                model: near.map(|e| e.model.clone()),
+                misses,
+                rebuilds,
+                recached_tokens: recached,
+                causes: new.into_iter().map(|(c, _)| c).collect(),
+            });
+        }
+        out.sessions += u64::from(missed);
+    }
+    let by_count = |m: BTreeMap<String, u64>| {
+        let mut v: Vec<MissCause> = m.into_iter().map(|(cause, misses)| MissCause { cause, misses }).collect();
+        v.sort_by(|a, b| b.misses.cmp(&a.misses).then_with(|| a.cause.cmp(&b.cause)));
+        v
+    };
+    out.causes = by_count(causes);
+    out.days = days.into_iter().map(|(d, (c, undetermined))| MissDay { date: d.format("%Y-%m-%d").to_string(), causes: by_count(c), undetermined }).collect();
+    out.projects = by_project
+        .into_iter()
+        .map(|(project_id, mut a)| {
+            a.events.sort_by(|x, y| y.ts_ms.cmp(&x.ts_ms).then_with(|| x.session_id.cmp(&y.session_id)));
+            let more = a.events.len().saturating_sub(MISS_EVENTS) as u64;
+            a.events.truncate(MISS_EVENTS);
+            let top = by_count(a.causes).into_iter().next().filter(|c| c.misses >= a.undetermined);
+            MissProject {
+                project_id,
+                project: a.project,
+                hidden: a.hidden,
+                misses: a.misses,
+                rebuilds: a.rebuilds,
+                recached_tokens: a.recached,
+                last_ms: a.last_miss.unwrap_or(a.last),
+                cause: top.map(|c| c.cause),
+                events: a.events,
+                more,
+            }
+        })
+        .collect();
+    out.projects.sort_by(|a, b| b.misses.cmp(&a.misses).then(b.last_ms.cmp(&a.last_ms)).then(a.project.cmp(&b.project)));
+    Ok(out)
+}
+
 /// API-equivalent cost per provider over `range`, with a daily running total (unfiltered).
 /// Over 401 days only the newest are shown; earlier use starts the first day's running total.
 pub fn plan_value<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, tz: &Tz) -> Result<PlanValue> {

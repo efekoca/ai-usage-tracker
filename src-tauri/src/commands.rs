@@ -1056,6 +1056,23 @@ pub async fn get_subagent_cache(app: AppHandle, period: Period, filter: Option<F
 }
 
 #[tauri::command]
+pub async fn get_cache_misses(app: AppHandle, period: Period, filter: Option<Filter>) -> Res<insights::CacheMisses> {
+    let state = app.state::<AppState>();
+    let hide_all = state.settings.read().unwrap().hide_project_names;
+    let store = state.db();
+    let mut r = insights::cache_misses(&store, range_for(&store, period)?, &filter.unwrap_or_default(), &chrono::Local).map_err(err)?;
+    for p in &mut r.projects {
+        // a branch name can tell the project too
+        if hide_all || p.hidden {
+            p.project.clear();
+            p.hidden = true;
+            p.events.iter_mut().for_each(|e| e.branch = None);
+        }
+    }
+    Ok(r)
+}
+
+#[tauri::command]
 pub async fn get_tips(app: AppHandle, period: Period, filter: Option<Filter>) -> Res<tracker_core::tips::Tips> {
     let state = app.state::<AppState>();
     let store = state.db();

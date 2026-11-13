@@ -8,6 +8,7 @@
   import Icon from '../components/Icon.svelte'
   import BarValue from '../components/BarValue.svelte'
   import SubagentCache from '../components/SubagentCache.svelte'
+  import CacheMisses from '../components/CacheMisses.svelte'
   import LiveCaches from '../components/LiveCaches.svelte'
 
   const r = $derived(app.report)
@@ -84,6 +85,8 @@
       <AreaChart dates={days.map((d) => d.date)} {values} {series} format={(v) => fmtPct(v)} height={200} ariaLabel={t('cache.trend')} />
     </section>
   </div>
+
+  <CacheMisses />
 
   <SubagentCache />
 
