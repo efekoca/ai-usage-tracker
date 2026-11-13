@@ -33,6 +33,7 @@ A private app for Windows, macOS, and Linux that reads the usage logs your AI to
 - **Put the reset where you need it.** Claude's 5-hour window starts with your first request. The app can open it with one small request at a time you choose, say 06:00, so it resets at 11:00 and you use two full windows in one working day.
 - **See what every conversation costs before you type.** The system prompt, tool definitions, memory files and MCP servers are sent with the first request of every conversation. You see that starting load for each project, and the day it grew.
 - **Check whether a change helped.** Mark the day you added an MCP server, shortened `CLAUDE.md` or switched models, and see your use before and after it side by side: cost per session, starting load, tool error rate and cache hit rate.
+- **See what one prompt cost you.** Every request, subagent and tool call that one prompt set off is gathered into one line: "the turn at 14:32: 84 requests, 3 subagents, $11.40". The prompt itself is never read or stored.
 - **Keep your history.** Resumed and forked sessions are never counted twice, and your history stays in the archive even after the tools delete their own logs (Claude Code does so after 30 days).
 - **Share your use, not your work.** Turn a day, a week, a month or a year into a card in four sizes. A card holds totals, tool names and model names only.
 
@@ -193,6 +194,13 @@ Four more pages cover sessions, cache, context, and projects.
 **Sessions.** The **Sessions** page lists every session in the period with its start, project, models, length (first to last request), requests, tokens, API-equivalent cost, cache hit rate, and largest context. The list is sortable and searchable, and each row opens into a panel with the session's tokens, average context, cache hit rate, models, tool and session ID, and a **timeline** of the session. The timeline shows each request as a column with its context size and how much of it came from the cache, and marks where the cache was written again after a pause, where the context shrank, which requests came from subagents and which tools were called. Subagents that work at the same time share one mark that says how many there were, and a long pause shows its length under the gap. Subagent transcripts count toward their parent session.
 
 ![A session opened on the Sessions page: its tokens, average context, cache hit rate, model, tool and session ID, and a timeline with a cache rewrite, subagent requests and tool calls](assets/readme/session-en.webp)
+
+**Turn cost.** A turn is one prompt and everything it set off: the requests that answered it, the subagents it started and the tool calls they made. Above the session list, the **Sessions** page lists the turns that began in the period, the costliest first or the newest first, each with its time, project, place in the conversation ("Turn 12"), requests, subagents, tool calls and how many of them failed, length and API-equivalent cost. A thin bar under the cost shows how much of it the subagents made, and a row opens into the main conversation and each kind of subagent with their requests and cost, the models used, the tokens, and a button that opens the turn's session. Three figures sum the period up: how many turns began, what a typical turn cost (the median), and how much of the total the costliest tenth made.
+
+- Claude Code and Codex mark turns in their own logs, so nothing is guessed from timing. A subagent that goes on working while you send the next prompt still counts toward the prompt that started it, and a conversation compacted in the middle of a turn stays one turn.
+- A turn you did not type is labelled: the notice of a finished background task, a message from another session, a scheduled prompt, or a prompt sent by a program.
+- Only when a turn began, what began it and its place in the conversation are kept; the prompt's text is never read.
+- Requests whose log names no turn are not listed, and the page says how many there were: conversations whose logs were deleted before this version read them, Claude Code logs without a prompt ID and Codex logs without turn markers. Antigravity and OpenCode are not covered.
 
 **Cache.** The **Cache** page shows:
 
@@ -423,7 +431,7 @@ Every release includes `SHA256SUMS`, the checksum of each file. Put it next to y
 
 > **Content never enters the archive.** The app takes only details such as token counts, model, and time from the logs; prompt and response text is never saved to the app's archive. Your usage data never leaves your computer, and the app has no telemetry.
 
-- **Read:** timestamps, model, project folder, git branch, session ID, subagent name, token counts, the name and outcome of each tool call (never its input or output), and limit percentages from the tools' own logs.
+- **Read:** timestamps, model, project folder, git branch, session ID, subagent name, when each prompt was sent and what kind it was (never its text), token counts, the name and outcome of each tool call (never its input or output), and limit percentages from the tools' own logs.
 - **Stored:** only those values, in `tracker.db` (SQLite) in the app's data folder: `%LOCALAPPDATA%\AIUsageTracker` on Windows, `~/Library/Application Support/AIUsageTracker` on macOS, and `~/.local/share/AIUsageTracker` on Linux. Project names stay local. You can hide them one by one or all at once, and hidden names are masked in exports too.
 - **Never kept in the app's archive:** prompts, responses, file contents, credentials, or tokens. The app does **not** read the tools' credential files.
 - **Codex and Claude accounts:** to tell accounts apart, the app keeps only a one-way digest of the Codex account ID and of the Claude plan's organization ID. For Claude it reads only that ID: from `~/.claude.json`, from telemetry events, and from the folder names and session IDs of the Claude desktop app's Code-tab session list. Account names are the ones you give; e-mail addresses are never read.

@@ -9,7 +9,7 @@ pub mod codex;
 pub mod cowork_audit;
 pub mod opencode;
 
-use crate::model::{CacheMissReport, LimitSnapshot, SessionAccount, ToolCall, UsageEvent};
+use crate::model::{CacheMissReport, LimitSnapshot, SessionAccount, ToolCall, Turn, UsageEvent};
 use serde_json::Value;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
@@ -77,6 +77,8 @@ pub struct ParseOutput {
     pub sessions: Vec<SessionAccount>,
     /// What Claude Code reported about conversations' cache misses.
     pub cache_misses: Vec<CacheMissReport>,
+    /// Turns the file saw begin.
+    pub turns: Vec<Turn>,
     /// Human-readable, content-free warnings (line numbers / offsets only), at most
     /// `MAX_WARNING_DETAILS`; the last one is always the latest. Added with `warn`.
     pub warnings: Vec<String>,

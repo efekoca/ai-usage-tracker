@@ -546,6 +546,7 @@ fn the_archive_refuses_an_implausible_count_from_any_source() {
         thread_id: None,
         limit_reset: None,
         creator: None,
+        turn: None,
     };
     let mut tx = store.transaction().unwrap();
     tx.upsert_events(&[ev("ok", 5_000), ev("bad", u64::MAX), ev("too-big", 2_000_000_000_000)]).unwrap();

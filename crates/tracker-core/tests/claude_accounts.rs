@@ -62,6 +62,7 @@ impl Claude {
             thread_id: None,
             limit_reset: None,
             creator,
+            turn: None,
         }
     }
 
@@ -660,6 +661,7 @@ fn the_account_filter_keeps_only_that_accounts_tool_calls() {
         agent: None,
         name: name.into(),
         failed: Some(false),
+        turn: None,
     };
     let mut tx = c.store.transaction().unwrap();
     tx.upsert_tool_calls(&[call("Read", "sa"), call("Write", "sb")]).unwrap();

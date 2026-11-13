@@ -510,6 +510,7 @@ pub fn run() {
             commands::compare_models,
             commands::context_stats,
             commands::starting_loads,
+            commands::turn_costs,
             commands::experiments,
             commands::plan_value,
             commands::save_image,

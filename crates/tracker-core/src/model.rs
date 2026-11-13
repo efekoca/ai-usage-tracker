@@ -193,6 +193,21 @@ pub struct UsageEvent {
     /// sent right after it started and before its limit window changed. Claude: the
     /// [`claude_account`] its telemetry event names.
     pub creator: Option<String>,
+    /// The turn the request belongs to ([`Turn::id`]), when the log says.
+    pub turn: Option<String>,
+}
+
+/// One prompt and everything it set off, as the tool's own log groups it (Claude Code's
+/// `promptId`, Codex's root turn). Only when it began and what began it; never the prompt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Turn {
+    /// `cc:<prompt id>` or `cx:<root turn id>`.
+    pub id: String,
+    pub tool: Tool,
+    pub session_id: Option<String>,
+    pub ts_ms: i64,
+    /// `human`, `task_notification`, `peer`, `scheduled`, `sdk` or `other`.
+    pub origin: String,
 }
 
 /// One tool call or tool action, by name only (never its input or output).
@@ -209,6 +224,8 @@ pub struct ToolCall {
     pub name: String,
     /// Whether the call returned an error, when the log says (`None` = not known yet).
     pub failed: Option<bool>,
+    /// The turn the call was made in ([`Turn::id`]), when the log says.
+    pub turn: Option<String>,
 }
 
 /// A point-in-time reading of a plan limit window.

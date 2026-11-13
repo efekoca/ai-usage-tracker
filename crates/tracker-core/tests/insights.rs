@@ -96,6 +96,7 @@ fn store_with(evs: &[Ev]) -> Store {
             thread_id: e.thread.map(Into::into),
             limit_reset: None,
             creator: None,
+            turn: None,
         })
         .collect();
     let mut tx = store.transaction().unwrap();
@@ -487,6 +488,7 @@ fn add_calls(store: &mut Store, calls: &[Call]) {
             agent: agent.map(Into::into),
             name: (*name).into(),
             failed: *failed,
+            turn: None,
         })
         .collect();
     let mut tx = store.transaction().unwrap();
@@ -757,6 +759,7 @@ fn a_session_timeline_marks_rebuilt_caches_compactions_subagents_and_failed_call
             agent: None,
             name: (*name).into(),
             failed: *failed,
+            turn: None,
         })
         .collect();
     let mut tx = store.transaction().unwrap();
@@ -799,6 +802,7 @@ fn a_session_timeline_keeps_the_filter_of_the_session_list() {
             agent: None,
             name: (*key).into(),
             failed: None,
+            turn: None,
         })
         .collect();
     let mut tx = store.transaction().unwrap();
@@ -852,6 +856,7 @@ fn a_call_from_before_the_row() -> (Store, i64, i64) {
         agent: None,
         name: "Read".into(),
         failed: Some(true),
+        turn: None,
     };
     let mut tx = store.transaction().unwrap();
     tx.upsert_tool_calls(&[call]).unwrap();
@@ -1119,7 +1124,7 @@ fn a_marker_compares_the_days_before_it_with_the_days_after() {
         ],
     );
     // calls of another project, and of none, are not the project's
-    let elsewhere = |key: &str, project: Option<&str>| ToolCall { key: key.into(), ts_ms: at + DAY, tool: Tool::ClaudeCode, session_id: Some("x".into()), project_path: project.map(Into::into), agent: None, name: "Bash".into(), failed: Some(true) };
+    let elsewhere = |key: &str, project: Option<&str>| ToolCall { key: key.into(), ts_ms: at + DAY, tool: Tool::ClaudeCode, session_id: Some("x".into()), project_path: project.map(Into::into), agent: None, name: "Bash".into(), failed: Some(true), turn: None };
     let mut tx = store.transaction().unwrap();
     tx.upsert_tool_calls(&[elsewhere("u1", Some("C:/w/other")), elsewhere("u2", None)]).unwrap();
     tx.commit().unwrap();

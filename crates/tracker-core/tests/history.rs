@@ -423,6 +423,7 @@ fn usage(key: &str, ts: i64, input: u64) -> UsageEvent {
         thread_id: None,
         limit_reset: None,
         creator: None,
+        turn: None,
     }
 }
 

@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { tick } from 'svelte'
   import { app, latest, toolColor } from '../lib/store.svelte'
   import { api, type SessionRow, type Sessions } from '../lib/api'
   import { clientLabel, fmtCompact, fmtDateTime, fmtInt, fmtSpan, fmtMoney, fmtPct, searchKey, t, toolLabel } from '../lib/i18n.svelte'
   import StatTile from '../components/StatTile.svelte'
   import Icon from '../components/Icon.svelte'
   import SessionTimeline from '../components/SessionTimeline.svelte'
+  import Turns from '../components/Turns.svelte'
 
   let data = $state<Sessions | null>(null)
   let failed = $state('')
@@ -28,6 +30,7 @@
   let open = $state<string | null>(null)
   let copied = $state<string | null>(null)
   let visibleW = $state(0)
+  let list = $state<HTMLElement>()
 
   const prompt = (s: SessionRow) => s.totals.tokens.input + s.totals.tokens.cache_read + s.totals.tokens.cache_write
   const hit = (s: SessionRow) => (prompt(s) > 0 ? s.totals.tokens.cache_read / prompt(s) : 0)
@@ -67,6 +70,8 @@
     if (s) {
       query = s.session_id
       open = key
+      // the list lies below the turns, out of view on a short window
+      void tick().then(() => list?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }))
     }
     app.openSession = null
   })
@@ -131,7 +136,9 @@
     </StatTile>
   </section>
 
-  <section class="card table-card">
+  <Turns />
+
+  <section class="card table-card" bind:this={list}>
     <div class="head">
       <h2>{t('sessions.list')}</h2>
       <span class="spacer"></span>
@@ -264,6 +271,7 @@
   }
   .table-card {
     padding: 6px 0;
+    scroll-margin-top: 12px;
   }
   .head {
     display: flex;
