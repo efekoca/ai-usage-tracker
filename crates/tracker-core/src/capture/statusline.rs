@@ -227,7 +227,19 @@ fn expiry_in<'a>(lines: impl Iterator<Item = &'a str>) -> Option<i64> {
 pub fn cache_text<Tz: TimeZone>(expires_ms: i64, turkish: bool, tz: &Tz) -> Option<String> {
     let at = tz.timestamp_millis_opt(expires_ms).single()?;
     let hm = format!("{:02}:{:02}", at.hour(), at.minute());
-    Some(if turkish { format!("önbellek {hm} silinir") } else { format!("cache until {hm}") })
+    Some(if turkish { format!("önbellek {hm}'{} silinir", turkish_at(at.hour(), at.minute())) } else { format!("cache until {hm}") })
+}
+
+/// The Turkish ending of a clock time follows its last number as it is read aloud: "14:32'de".
+fn turkish_at(hour: u32, minute: u32) -> &'static str {
+    const ONES: [&str; 10] = ["da", "de", "de", "te", "te", "te", "da", "de", "de", "da"];
+    let n = if minute > 0 { minute } else { hour };
+    match (n % 10, n % 100) {
+        (0, 20 | 50) => "de",
+        (0, 40) => "ta",
+        (0, _) => "da",
+        (one, _) => ONES[one as usize],
+    }
 }
 
 /// `part` at the end of the status line's last line, after that line's own colors are reset.
@@ -427,7 +439,9 @@ mod tests {
         let tz = chrono::FixedOffset::east_opt(3 * 3600).unwrap();
         let at = ms("10:32:59");
         assert_eq!(cache_text(at, false, &tz).unwrap(), "cache until 13:32");
-        assert_eq!(cache_text(at, true, &tz).unwrap(), "önbellek 13:32 silinir");
+        assert_eq!(cache_text(at, true, &tz).unwrap(), "önbellek 13:32'de silinir");
+        let endings: Vec<String> = [(13, 30), (13, 40), (13, 0), (12, 0), (13, 5), (13, 6), (13, 9), (13, 50), (0, 0), (10, 0)].iter().map(|&(h, m)| format!("{h}:{m:02}'{}", turkish_at(h, m))).collect();
+        assert_eq!(endings, ["13:30'da", "13:40'ta", "13:00'te", "12:00'de", "13:05'te", "13:06'da", "13:09'da", "13:50'de", "0:00'da", "10:00'da"]);
         assert_eq!(append("5h 24% · 7d 41%", "cache until 13:32"), "5h 24% · 7d 41% · cache until 13:32");
         assert_eq!(append("", "cache until 13:32"), "cache until 13:32");
         assert_eq!(append("first\nsecond\n", "x"), "first\nsecond · x");
