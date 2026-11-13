@@ -14,6 +14,7 @@
   import LimitNotices from '../components/LimitNotices.svelte'
   import EarlyRestartNotice from '../components/EarlyRestartNotice.svelte'
   import LimitResume from '../components/LimitResume.svelte'
+  import WindowOpener from '../components/WindowOpener.svelte'
 
   let plans: PlansFile | null = $state(null)
   let plansFailed = $state('')
@@ -315,7 +316,10 @@
   <p class="subtle small oc-note"><Icon name="info" size={13} />{t('limits.opencode')}</p>
 {/if}
 
-{#if app.settings?.enabled_sources.includes('claude_code') && app.settings.plans.anthropic !== 'api'}<LimitResume />{/if}
+{#if app.settings?.enabled_sources.includes('claude_code') && app.settings.plans.anthropic !== 'api'}
+  <LimitResume />
+  <WindowOpener />
+{/if}
 
 <section class="card">
   <h2>{t('limits.thresholds')}</h2>

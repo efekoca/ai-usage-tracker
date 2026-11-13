@@ -676,9 +676,45 @@ pub struct Settings {
     /// renews; with one, plan value counts from the last renewal instead of the last 30 days.
     pub renewal_days: std::collections::BTreeMap<String, u8>,
     pub cards: CardSettings,
+    pub window_opener: OpenerSettings,
     /// Fields this version does not know (a newer one wrote them), kept so saving does not drop them.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+/// Opens Claude's five-hour window at a set time of day, so its reset falls where the user wants it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct OpenerSettings {
+    /// Off by default: every run spends one small request of the plan.
+    pub enabled: bool,
+    /// The time of day, in minutes after local midnight.
+    pub minute: u16,
+    /// The weekdays it runs on: 1 is Monday, 7 Sunday.
+    pub days: Vec<u8>,
+    /// Fields this version does not know (a newer one wrote them), kept so saving does not drop them.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+impl Default for OpenerSettings {
+    fn default() -> Self {
+        OpenerSettings { enabled: false, minute: 6 * 60, days: (1..=7).collect(), extra: Default::default() }
+    }
+}
+
+impl OpenerSettings {
+    pub fn normalize(&mut self) {
+        if self.minute >= 24 * 60 {
+            self.minute = 6 * 60;
+        }
+        self.days.retain(|d| (1..=7).contains(d));
+        self.days.sort();
+        self.days.dedup();
+        if self.days.is_empty() {
+            self.days = (1..=7).collect();
+        }
+    }
 }
 
 /// How the Summary cards page draws a card.
@@ -778,6 +814,7 @@ impl Default for Settings {
             account_prices: Default::default(),
             renewal_days: Default::default(),
             cards: CardSettings::default(),
+            window_opener: OpenerSettings::default(),
             extra: Default::default(),
         }
     }
@@ -893,6 +930,7 @@ impl Settings {
         self.tray.normalize();
         self.panel.normalize();
         self.cards.normalize();
+        self.window_opener.normalize();
         if self.accent != "system" {
             self.accent = "app".into();
         }

@@ -341,6 +341,29 @@ export interface LiveCache {
   refreshes_usd: number
 }
 
+/** One run of the window opener. */
+export interface OpenerRun {
+  at_ms: number
+  /** The local day it ran for; `null` for one started by hand. */
+  day: string | null
+  /** "sent": the request went out; "open": a window was already open, so none was sent. */
+  outcome: 'sent' | 'open' | 'failed'
+  /** When the window ends, as Claude named it. */
+  resets_ms: number | null
+  tokens: number | null
+  error: string | null
+}
+
+export interface OpenerInfo {
+  /** Claude Code was found, so a request can be sent. */
+  available: boolean
+  running: boolean
+  /** The next time it runs; `null` while it is off. */
+  next_ms: number | null
+  /** The latest runs, the newest first. */
+  runs: OpenerRun[]
+}
+
 /** A conversation the usage limit stopped, whose hook waits for the limit's reset. */
 export interface ResumeWaiting {
   session_id: string
@@ -606,6 +629,8 @@ export interface Settings {
   cache_lead: 1 | 2 | 5
   /** Continues a Claude Code conversation the usage limit stopped, once the limit starts again. */
   limit_resume: boolean
+  /** Opens Claude's five-hour window at a time of day: minutes after local midnight, on weekdays 1 (Monday) to 7. */
+  window_opener: { enabled: boolean; minute: number; days: number[] }
   /** provider → #rrggbb; missing = the accent color */
   provider_colors: Partial<Record<Provider, string>>
   tint_icons: boolean
@@ -1138,6 +1163,8 @@ export const api = {
   limitResumeInfo: () => invoke<ResumeInfo>('limit_resume_info'),
   setLimitResume: (on: boolean) => invoke<ResumeInfo>('set_limit_resume', { on }),
   cancelLimitResume: (sessionId: string) => invoke<void>('cancel_limit_resume', { sessionId }),
+  windowOpenerInfo: () => invoke<OpenerInfo>('window_opener_info'),
+  openWindowNow: () => invoke<OpenerInfo>('open_window_now'),
   trayPreview: (tray: TraySettings) => invoke<TrayPreview>('tray_preview', { tray }),
   projects: () => invoke<ProjectRow[]>('list_projects'),
   projectsForSettings: () => invoke<ProjectRow[]>('list_projects_for_settings'),
