@@ -562,11 +562,13 @@ export interface Settings {
   /** Suggests another Claude or Codex account when the one in use is full or has clearly less room; `router_page` and `notify.route` pick where. */
   account_router: boolean
   router_page: boolean
-  /** Claude Code's cache time left; `cache_widget`, `cache_menubar` and `notify.cache` pick where. */
+  /** Claude Code's cache time left; `cache_widget`, `cache_menubar`, `cache_statusline` and `notify.cache` pick where. */
   cache_timer: boolean
   cache_widget: boolean
   /** The same in minutes next to the tray icon and in its tooltip. */
   cache_menubar: boolean
+  /** The time the cache runs out at the end of the conversation's own status line, through the status-line bridge. */
+  cache_statusline: boolean
   /** "all" or "picked": whose caches are followed. */
   cache_projects: 'all' | 'picked'
   /** The projects followed while `cache_projects` is "picked", by path. */

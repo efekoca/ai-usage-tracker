@@ -159,10 +159,21 @@ pub fn statusline_main() -> i32 {
     // a bridge run as someone's previous command (another copy of the app) does not chain again,
     // so two bridges can never call each other without end
     let previous = state.statusline.and_then(|s| s.previous).filter(|_| std::env::var_os(CHAINED).is_none());
-    let out = match previous.as_ref().and_then(|p| p.get("command")).and_then(|c| c.as_str()) {
+    let mut out = match previous.as_ref().and_then(|p| p.get("command")).and_then(|c| c.as_str()) {
         Some(cmd) => run_chained(cmd, input).unwrap_or_default(),
         None => statusline::render_default(windows.as_ref()),
     };
+    // a static clock time: Claude Code redraws the line only when the conversation changes
+    let options = statusline::read_options(&data_dir);
+    let cache = json
+        .get("transcript_path")
+        .and_then(|t| t.as_str())
+        .filter(|_| options.cache && std::env::var_os(CHAINED).is_none())
+        .and_then(|t| statusline::cache_expiry(Path::new(t), now_ms()))
+        .and_then(|at| statusline::cache_text(at, options.turkish, &chrono::Local));
+    if let Some(part) = cache {
+        out = statusline::append(&out, &part);
+    }
     let mut stdout = std::io::stdout();
     let _ = stdout.write_all(out.as_bytes());
     let _ = stdout.flush();
@@ -1386,8 +1397,18 @@ fn refresh_statusline(data_dir: &Path) {
     }
 }
 
+/// The bridge runs as a process of its own, so what it adds is written down for it.
+pub fn write_statusline_options(data_dir: &Path, s: &Settings) {
+    let options = statusline::Options { cache: s.cache_timer && s.cache_statusline, turkish: crate::tray::turkish(s) };
+    if let Err(e) = statusline::write_options(data_dir, &options) {
+        log::warn!("could not save the status-line options: {e}");
+    }
+}
+
 pub fn start(app: &AppHandle) {
     let s = app.state::<AppState>().settings.read().unwrap().clone();
+    // the system language may have changed since the last run
+    write_statusline_options(&app.state::<AppState>().data_dir, &s);
     if s.onboarded {
         // a wipe interrupted before it deleted anything leaves the pause behind
         if let Err(e) = statusline::set_paused(&app.state::<AppState>().data_dir, false) {
@@ -1528,6 +1549,18 @@ mod tests {
         assert!(r.to_restore(1_000_000 + REINSTALL_WINDOW_MS).is_empty());
         // a clock set back is no reason to touch the user's settings
         assert!(r.to_restore(1_000_000 - 1).is_empty());
+    }
+
+    #[test]
+    fn the_bridge_adds_the_cache_time_only_while_both_switches_are_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Settings { language: "tr".into(), cache_statusline: true, ..Settings::default() };
+        write_statusline_options(dir.path(), &s);
+        assert_eq!(statusline::read_options(dir.path()), statusline::Options { cache: true, turkish: true });
+        s.cache_timer = false;
+        s.language = "en".into();
+        write_statusline_options(dir.path(), &s);
+        assert_eq!(statusline::read_options(dir.path()), statusline::Options { cache: false, turkish: false });
     }
 
     #[test]

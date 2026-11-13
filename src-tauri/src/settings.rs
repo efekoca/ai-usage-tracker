@@ -636,12 +636,15 @@ pub struct Settings {
     /// The suggestion on the Limits page.
     pub router_page: bool,
     /// How long Claude Code's prompt cache has left after the last request; `cache_widget`,
-    /// `cache_menubar` and `notify.cache` pick where.
+    /// `cache_menubar`, `cache_statusline` and `notify.cache` pick where.
     pub cache_timer: bool,
     /// The time left in the widget.
     pub cache_widget: bool,
     /// The same in minutes, next to the tray icon and in its tooltip.
     pub cache_menubar: bool,
+    /// The time the conversation's cache runs out, at the end of its own Claude Code status line;
+    /// shown through the status-line bridge, so off by default like the bridge.
+    pub cache_statusline: bool,
     /// "all" or "picked": whose caches are followed.
     pub cache_projects: String,
     /// The projects followed while `cache_projects` is "picked", by path.
@@ -756,6 +759,7 @@ impl Default for Settings {
             cache_timer: true,
             cache_widget: true,
             cache_menubar: true,
+            cache_statusline: false,
             cache_projects: "all".into(),
             cache_picked: Vec::new(),
             cache_auto: false,

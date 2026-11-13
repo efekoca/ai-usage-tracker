@@ -4,13 +4,18 @@
 //! file, which the ingest worker then reads like any other source.
 //!
 //! The bridge is transparent: if the user already had a status line, that command is run with
-//! the same stdin and its output is printed unchanged.
+//! the same stdin and its output is printed unchanged. When the user asks for it, the time the
+//! conversation's prompt cache runs out is added at the end.
 
-use crate::model::{Accuracy, LimitSnapshot, Provider, Tool};
+use crate::model::{Accuracy, LimitSnapshot, Provider, Tokens, Tool};
+use crate::sources::claude_code::{usage_events, ClaudeCtx};
 use crate::sources::{f64_at, i64_at, JsonlReader, ParseOutput};
+use chrono::{TimeZone, Timelike};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::collections::HashMap;
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 pub const SOURCE: &str = "claude_statusline";
@@ -31,6 +36,9 @@ pub fn rotated_file(data_dir: &Path) -> PathBuf {
 }
 fn last_file(data_dir: &Path) -> PathBuf {
     capture_dir(data_dir).join("statusline.last.json")
+}
+fn options_file(data_dir: &Path) -> PathBuf {
+    capture_dir(data_dir).join("statusline.options.json")
 }
 fn paused_file(data_dir: &Path) -> PathBuf {
     capture_dir(data_dir).join("paused")
@@ -133,6 +141,92 @@ pub fn render_default(windows: Option<&Map<String, Value>>) -> String {
         }
     }
     parts.join(" · ")
+}
+
+/// What the app asks the bridge to add to the status line.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Options {
+    /// The time the conversation's prompt cache runs out.
+    pub cache: bool,
+    pub turkish: bool,
+}
+
+/// A missing or unreadable file adds nothing.
+pub fn read_options(data_dir: &Path) -> Options {
+    fs::read(options_file(data_dir)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+pub fn write_options(data_dir: &Path, options: &Options) -> std::io::Result<()> {
+    if read_options(data_dir) == *options {
+        return Ok(());
+    }
+    fs::create_dir_all(capture_dir(data_dir))?;
+    let tmp = capture_dir(data_dir).join(format!(".statusline.options.{}", std::process::id()));
+    // written whole first, so a bridge never reads half of it
+    fs::write(&tmp, serde_json::to_vec(options)?)?;
+    fs::rename(&tmp, options_file(data_dir)).inspect_err(|_| {
+        let _ = fs::remove_file(&tmp);
+    })
+}
+
+/// How much of the transcript's end is read, a larger part only when a smaller one does not tell.
+const TAIL_BYTES: [u64; 3] = [256 * 1024, 2 * 1024 * 1024, 8 * 1024 * 1024];
+
+/// When the prompt cache of the conversation in `transcript` runs out, by the rule of the app's
+/// live caches: the lifetime it was last written with, after the last request that used it.
+/// `None` once it ran out, or when the end of the transcript does not tell.
+pub fn cache_expiry(transcript: &Path, now_ms: i64) -> Option<i64> {
+    let mut file = File::open(transcript).ok()?;
+    let len = file.metadata().ok()?.len();
+    for size in TAIL_BYTES {
+        let from = len.saturating_sub(size);
+        let mut bytes = Vec::new();
+        file.seek(SeekFrom::Start(from)).ok()?;
+        (&mut file).take(len - from).read_to_end(&mut bytes).ok()?;
+        // a read that starts mid-file starts mid-line
+        let text = String::from_utf8_lossy(&bytes);
+        if let Some(at) = expiry_in(text.lines().skip(usize::from(from > 0))) {
+            return (at > now_ms).then_some(at);
+        }
+        if from == 0 {
+            break;
+        }
+    }
+    None
+}
+
+fn expiry_in<'a>(lines: impl Iterator<Item = &'a str>) -> Option<i64> {
+    let ctx = ClaudeCtx { client_override: None, source: SOURCE };
+    // a response is written once per content block; its copies merge like they do in the store
+    let mut requests: HashMap<String, (i64, String, Tokens)> = HashMap::new();
+    for line in lines {
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        // the first event is the request itself, any others the advisors it consulted;
+        // subagents keep caches of their own
+        let Some(e) = usage_events(&v, &ctx).into_iter().next().filter(|e| e.agent.is_none()) else { continue };
+        requests.entry(e.key).and_modify(|r| r.2 = r.2.max(&e.tokens)).or_insert((e.ts_ms, e.model, e.tokens));
+    }
+    let last = requests.values().filter(|r| r.2.cache_read + r.2.cache_write > 0).max_by_key(|r| r.0)?;
+    let written = requests.values().filter(|r| r.1 == last.1 && r.0 <= last.0 && r.2.cache_write > 0).max_by_key(|r| r.0)?;
+    Some(last.0 + crate::insights::cache_ttl_ms(written.2.cache_write, written.2.cache_write_1h))
+}
+
+/// "cache until 14:32" by the local clock, rounded down so it never promises time it lacks.
+pub fn cache_text<Tz: TimeZone>(expires_ms: i64, turkish: bool, tz: &Tz) -> Option<String> {
+    let at = tz.timestamp_millis_opt(expires_ms).single()?;
+    let hm = format!("{:02}:{:02}", at.hour(), at.minute());
+    Some(if turkish { format!("önbellek {hm} silinir") } else { format!("cache until {hm}") })
+}
+
+/// `part` at the end of the status line's last line, after that line's own colors are reset.
+pub fn append(out: &str, part: &str) -> String {
+    let body = out.trim_end_matches(['\r', '\n']);
+    if body.trim().is_empty() {
+        return part.to_owned();
+    }
+    let reset = if body.contains('\u{1b}') { "\u{1b}[0m" } else { "" };
+    format!("{body}{reset} · {part}")
 }
 
 pub fn parse_file(path: &Path, offset: u64) -> std::io::Result<ParseOutput> {
@@ -255,5 +349,74 @@ mod tests {
         set_paused(dir.path(), false).unwrap();
         set_paused(dir.path(), false).unwrap();
         assert!(record(dir.path(), &w, 3_000));
+    }
+
+    fn request(id: &str, at: &str, read: u64, write_5m: u64, write_1h: u64) -> Value {
+        json!({"type": "assistant", "sessionId": "s", "timestamp": format!("2026-11-13T{at}.000Z"), "message": {"id": id, "model": "claude-opus-5-5", "usage": {
+            "input_tokens": 3, "output_tokens": 10, "cache_read_input_tokens": read, "cache_creation_input_tokens": write_5m + write_1h,
+            "cache_creation": {"ephemeral_5m_input_tokens": write_5m, "ephemeral_1h_input_tokens": write_1h}}}})
+    }
+
+    fn ms(at: &str) -> i64 {
+        crate::model::parse_ts_ms(&format!("2026-11-13T{at}.000Z")).unwrap()
+    }
+
+    fn transcript(lines: &[Value]) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.jsonl");
+        fs::write(&path, lines.iter().map(|l| format!("{l}\n")).collect::<String>()).unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn the_cache_lasts_its_written_lifetime_after_the_last_request_that_used_it() {
+        let mut streaming = request("msg_b", "10:10:00", 0, 0, 0);
+        streaming["message"]["usage"] = json!({"input_tokens": 0, "output_tokens": 0});
+        let mut subagent = request("msg_c", "10:20:00", 900, 100, 0);
+        subagent["isSidechain"] = json!(true);
+        let mut failed = request("msg_d", "10:25:00", 0, 0, 0);
+        failed["message"]["model"] = json!("<synthetic>");
+        let mut lines = vec![request("msg_a", "10:00:00", 1000, 0, 500), streaming, request("msg_b", "10:10:00", 1500, 0, 0), subagent, failed];
+        let (_dir, path) = transcript(&lines);
+        // the hour the cache was written for, from the last request that read it
+        assert_eq!(cache_expiry(&path, ms("10:30:00")), Some(ms("11:10:00")));
+        assert_eq!(cache_expiry(&path, ms("11:10:00")), None, "it ran out");
+
+        lines.push(request("msg_e", "10:30:00", 2000, 300, 0));
+        let (_dir, path) = transcript(&lines);
+        assert_eq!(cache_expiry(&path, ms("10:31:00")), Some(ms("10:35:00")), "written partly for five minutes");
+        let (_dir, path) = transcript(&[request("msg_f", "10:30:00", 0, 0, 0)]);
+        assert_eq!(cache_expiry(&path, ms("10:31:00")), None, "no cache in use");
+        assert_eq!(cache_expiry(Path::new("/no/such/transcript.jsonl"), 0), None);
+    }
+
+    #[test]
+    fn a_larger_end_of_the_transcript_is_read_when_the_last_write_is_further_back() {
+        let tool_result = json!({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t", "content": "x".repeat(400 * 1024)}]}});
+        let (_dir, path) = transcript(&[request("msg_a", "10:00:00", 1000, 0, 500), tool_result, request("msg_b", "10:05:00", 1500, 0, 0)]);
+        assert_eq!(cache_expiry(&path, ms("10:06:00")), Some(ms("11:05:00")));
+    }
+
+    #[test]
+    fn the_cache_time_is_a_local_clock_time_at_the_end_of_the_line() {
+        let tz = chrono::FixedOffset::east_opt(3 * 3600).unwrap();
+        let at = ms("10:32:59");
+        assert_eq!(cache_text(at, false, &tz).unwrap(), "cache until 13:32");
+        assert_eq!(cache_text(at, true, &tz).unwrap(), "önbellek 13:32 silinir");
+        assert_eq!(append("5h 24% · 7d 41%", "cache until 13:32"), "5h 24% · 7d 41% · cache until 13:32");
+        assert_eq!(append("", "cache until 13:32"), "cache until 13:32");
+        assert_eq!(append("first\nsecond\n", "x"), "first\nsecond · x");
+        assert_eq!(append("\u{1b}[32mmine\n", "x"), "\u{1b}[32mmine\u{1b}[0m · x");
+    }
+
+    #[test]
+    fn options_are_read_back_and_a_missing_file_adds_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(read_options(dir.path()), Options::default());
+        let on = Options { cache: true, turkish: true };
+        write_options(dir.path(), &on).unwrap();
+        assert_eq!(read_options(dir.path()), on);
+        fs::write(options_file(dir.path()), b"{").unwrap();
+        assert_eq!(read_options(dir.path()), Options::default());
     }
 }

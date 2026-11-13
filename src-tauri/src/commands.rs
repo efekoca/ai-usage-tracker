@@ -96,6 +96,7 @@ fn save_settings_inner(app: &AppHandle, state: &AppState, make: impl FnOnce(&Set
     settings.save(&store)?;
     *state.settings.write().unwrap() = settings.clone();
     drop(store);
+    crate::capture::write_statusline_options(&state.data_dir, &settings);
 
     if old.enabled_sources != settings.enabled_sources
         || serde_json::to_string(&old.extra_paths).ok() != serde_json::to_string(&settings.extra_paths).ok()
