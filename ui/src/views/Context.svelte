@@ -6,6 +6,7 @@
   import Histogram from '../components/charts/Histogram.svelte'
   import AreaChart from '../components/charts/AreaChart.svelte'
   import Icon from '../components/Icon.svelte'
+  import StartingLoads from '../components/StartingLoads.svelte'
 
   let c = $state<ContextStats | null>(null)
   let failed = $state('')
@@ -119,6 +120,7 @@
     </div>
     <p class="subtle small pad note">{t('context.longHelp')}</p>
   </section>
+  <StartingLoads />
 {/if}
 
 <style>

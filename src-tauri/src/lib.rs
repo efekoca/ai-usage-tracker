@@ -509,6 +509,7 @@ pub fn run() {
             commands::get_sessions,
             commands::compare_models,
             commands::context_stats,
+            commands::starting_loads,
             commands::plan_value,
             commands::save_image,
             commands::save_images,

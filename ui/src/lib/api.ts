@@ -904,6 +904,26 @@ export interface ContextByModel {
   over_threshold: number
   long_context_extra_usd: number
 }
+/** What every new conversation of a project begins with, where it runs. */
+export interface StartingLoad {
+  project_id: number | null
+  /** Empty while the project is hidden or not known. */
+  project: string
+  hidden: boolean
+  tool: string
+  client: string | null
+  conversations: number
+  /** The median of the latest conversations' first requests, in tokens. */
+  typical: number
+  smallest: number
+  /** API-equivalent cost of such a first request; `null` without a price. */
+  cost_usd: number | null
+  /** From the conversation at `at_ms` on, they start larger or smaller than before. */
+  change: { at_ms: number; before: number; after: number } | null
+  /** The conversations' first requests, the oldest first. */
+  starts: { ts_ms: number; tokens: number }[]
+}
+
 export interface ContextStats {
   requests: number
   avg: number
@@ -1142,6 +1162,7 @@ export const api = {
     invoke<SessionTimeline>('get_session_timeline', { tool, sessionId, fromMs, toMs, filter }),
   compareModels: (period: Period, filter?: Filter) => invoke<ModelCompare>('compare_models', { period, filter }),
   contextStats: (period: Period, filter?: Filter) => invoke<ContextStats>('context_stats', { period, filter }),
+  startingLoads: (period: Period, filter?: Filter) => invoke<StartingLoad[]>('starting_loads', { period, filter }),
   planValue: (period?: Period) => invoke<PlanValue>('plan_value', { period }),
   saveImage: (path: string, bytes: Uint8Array) => invoke<void>('save_image', { path, bytes: Array.from(bytes) }),
   openLastImage: () => invoke<void>('open_last_image'),

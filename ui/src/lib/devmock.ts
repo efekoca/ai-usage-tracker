@@ -897,6 +897,22 @@ export function installMock() {
           return mockCompare()
         case 'context_stats':
           return mockContext()
+        case 'starting_loads': {
+          const day = 86_400_000
+          const load = (id: number, project: string, tool: string, client: string, sizes: number[], cost: number | null, step: number | null) => {
+            const starts = sizes.map((tokens, i) => ({ ts_ms: Date.now() - (sizes.length - i) * day, tokens }))
+            const hidden = settings.hide_project_names || project === 'client-x'
+            const recent = [...sizes.slice(-5)].sort((a, b) => a - b)
+            return { project_id: id, project: hidden ? '' : project, hidden, tool, client, conversations: sizes.length, typical: recent[Math.floor((recent.length - 1) / 2)], smallest: Math.min(...sizes), cost_usd: cost, change: step === null ? null : { at_ms: starts[step].ts_ms, before: sizes[step - 1], after: sizes[step + 1] }, starts }
+          }
+          return [
+            load(1, 'demo-app', 'claude_code', 'claude-desktop', [74_200, 73_900, 74_600, 74_100, 75_000, 86_400, 86_900, 86_200, 87_100], 0.52, 5),
+            load(2, 'website', 'claude_code', 'cli', [41_100, 41_300, 44_000, 41_200, 62_500, 41_400, 41_100], 0.26, null),
+            load(3, 'notes', 'claude_code', 'cli', [38_400, 38_100, 38_600, 29_200, 29_500, 29_100], 0.18, 3),
+            load(1, 'demo-app', 'codex', 'codex-cli', [19_000, 19_600, 21_300, 20_900], 0.04, null),
+            load(5, 'client-x', 'claude_code', 'cli', [52_000], null, null),
+          ]
+        }
         case 'get_month_spend': {
           const d = new Date()
           const starts = new Date(d.getFullYear(), d.getMonth(), 1).getTime()

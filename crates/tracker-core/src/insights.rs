@@ -417,6 +417,131 @@ pub struct ContextStats {
     pub daily: Vec<ContextDay>,
 }
 
+/// One conversation's first request: when, and how large its prompt was.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Start {
+    pub ts_ms: i64,
+    pub tokens: u64,
+}
+
+/// A lasting change in a project's starting load: from the conversation at `at_ms` on, they start
+/// larger or smaller than those before.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct StartChange {
+    pub at_ms: i64,
+    pub before: u64,
+    pub after: u64,
+}
+
+/// What every new conversation of a project begins with, where it runs: the system prompt, the
+/// tool definitions, memory files and MCP servers, as the first request's prompt size tells.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct StartingLoad {
+    pub project_id: Option<i64>,
+    pub project: String,
+    pub hidden: bool,
+    pub tool: Tool,
+    pub client: Option<String>,
+    pub conversations: u64,
+    /// The median of the latest conversations' first requests: what one begins with now.
+    pub typical: u64,
+    pub smallest: u64,
+    /// API-equivalent cost of such a first request; `None` when none of them has a price.
+    pub cost_usd: Option<f64>,
+    pub change: Option<StartChange>,
+    /// The conversations' first requests, the oldest first, at most [`START_POINTS`] of the latest.
+    pub starts: Vec<Start>,
+}
+
+/// How many of the latest conversations tell what one begins with now, and how many on each side
+/// of a change are compared.
+const START_RECENT: usize = 5;
+pub const START_POINTS: usize = 60;
+const START_STEP_TOKENS: u64 = 2_000;
+const START_STEP_SHARE: f64 = 0.10;
+
+fn median(values: &[u64]) -> u64 {
+    let mut v = values.to_vec();
+    v.sort_unstable();
+    percentile(&v, 50.0)
+}
+
+/// Whether the conversations from `i` on start clearly larger or smaller than those before: the
+/// medians of up to five on each side differ by at least 2,000 tokens and a tenth, and every one
+/// of those after lies beyond every one of those before.
+fn step_at(starts: &[Start], i: usize) -> Option<StartChange> {
+    let before: Vec<u64> = starts[i.saturating_sub(START_RECENT)..i].iter().map(|s| s.tokens).collect();
+    let after: Vec<u64> = starts[i..(i + START_RECENT).min(starts.len())].iter().map(|s| s.tokens).collect();
+    let (was, is) = (median(&before), median(&after));
+    let apart = was.abs_diff(is) >= START_STEP_TOKENS.max((was as f64 * START_STEP_SHARE) as u64);
+    let (low, high) = (after.iter().min()?, after.iter().max()?);
+    let clear = low > before.iter().max()? || high < before.iter().min()?;
+    (apart && clear).then(|| StartChange { at_ms: starts[i].ts_ms, before: was, after: is })
+}
+
+/// The latest lasting change in where the conversations start (see [`step_at`]), at the
+/// conversation it began with. Two before and three after are needed, so one conversation that
+/// began with a long prompt is not taken for a change.
+fn start_change(starts: &[Start]) -> Option<StartChange> {
+    let mut at = (2..starts.len().saturating_sub(2)).rev().find(|&i| step_at(starts, i).is_some())?;
+    // the conversations right after a step still pass against the older ones: the step is the first that does
+    while at > 2 && step_at(starts, at - 1).is_some() {
+        at -= 1;
+    }
+    step_at(starts, at)
+}
+
+/// The starting load of each project, per tool and where it runs, from the conversations that
+/// began in `range`; the projects with the most conversations first. A conversation's first
+/// request is its first main-conversation one: subagents, advisors and captured telemetry (which
+/// also holds helper requests) are left out.
+pub fn starting_loads(store: &Store, book: &PriceBook, range: Range, filter: &Filter) -> Result<Vec<StartingLoad>> {
+    let mut firsts: BTreeMap<(&str, &str), &EventRow> = BTreeMap::new();
+    let events = store.events_between(range.from_ms, range.to_ms)?;
+    for e in events.iter().filter(|e| e.agent.is_none() && !e.advisor && e.accuracy != Accuracy::Captured && e.request_input > 0) {
+        if let Some(session) = e.session_id.as_deref() {
+            // events come oldest first
+            firsts.entry((e.tool.as_str(), session)).or_insert(e);
+        }
+    }
+    type Key<'a> = (Option<i64>, &'a str, Option<String>);
+    let mut groups: BTreeMap<Key, Vec<&EventRow>> = BTreeMap::new();
+    for ((_, session), e) in firsts {
+        // one that began before the range only goes on in it
+        if !filter.matches(e) || store.session_started_ms(session)?.is_some_and(|t| t < range.from_ms) {
+            continue;
+        }
+        groups.entry((e.project_id, e.tool.as_str(), e.client.clone())).or_default().push(e);
+    }
+    let projects: HashMap<i64, ProjectRow> = store.projects()?.into_iter().map(|p| (p.id, p)).collect();
+    let mut out: Vec<StartingLoad> = groups
+        .into_iter()
+        .map(|((project_id, _, client), mut evs)| {
+            evs.sort_by_key(|e| e.ts_ms);
+            let all: Vec<Start> = evs.iter().map(|e| Start { ts_ms: e.ts_ms, tokens: e.request_input }).collect();
+            let recent = &evs[evs.len().saturating_sub(START_RECENT)..];
+            let mut costs: Vec<f64> = recent.iter().filter_map(|e| book.cost(&input_of(e)).map(|c| c.total())).collect();
+            costs.sort_by(f64::total_cmp);
+            let (project, hidden) = project_label(&projects, project_id);
+            StartingLoad {
+                project_id,
+                project,
+                hidden,
+                tool: evs[0].tool,
+                client,
+                conversations: all.len() as u64,
+                typical: median(&recent.iter().map(|e| e.request_input).collect::<Vec<_>>()),
+                smallest: all.iter().map(|s| s.tokens).min().unwrap_or(0),
+                cost_usd: costs.get(costs.len().saturating_sub(1) / 2).copied(),
+                change: start_change(&all),
+                starts: all[all.len().saturating_sub(START_POINTS)..].to_vec(),
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| b.conversations.cmp(&a.conversations).then_with(|| b.typical.cmp(&a.typical)));
+    Ok(out)
+}
+
 /// Prompt size per request (`request_input`: uncached input + cache read + cache write).
 pub fn context_stats<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filter: &Filter, tz: &Tz) -> Result<ContextStats> {
     let events: Vec<EventRow> =

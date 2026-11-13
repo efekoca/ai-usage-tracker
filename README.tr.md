@@ -31,6 +31,7 @@ AI Usage Tracker, Windows, macOS ve Linux'ta çalışan bir uygulamadır. Yapay 
 - **Konuşmanızın önbelleğini süresi dolmadan tazeleyin.** Her Claude Code konuşmasının önbelleğinin kalan süresini **Önbellek** sayfasında, widget'ta, menü çubuğunda ve kontrol panelinde görürsünüz; Claude Code'un kendi durum satırı da önbelleğin ne zaman silineceğini gösterebilir. Tek tıkla tazeleyin ya da süre dolmadan kısa süre önce uygulama kendisi tazelesin; önbelleği yeniden yazmak yerine yalnızca bir okuma bedeli ödersiniz.
 - **Limitin kestiği işi kaldığı yerden sürdürün.** Kullanım limiti bir Claude Code konuşmasını yarıda keserse, limit sıfırlanınca uygulama konuşmayı kendisi devam ettirir; gece yarıda kalan iş siz yokken sürer.
 - **Sıfırlanmayı ihtiyacınız olan saate getirin.** Claude'un 5 saatlik penceresi ilk isteğinizle başlar. Uygulama, seçtiğiniz saatte (örneğin 06:00) tek küçük bir istekle pencereyi açar; pencere 11:00'de sıfırlanır ve bir iş gününde iki tam pencere kullanırsınız.
+- **Daha yazmadan her konuşmanın neye mal olduğunu görün.** Sistem istemi, araç tanımları, bellek dosyaları ve MCP sunucuları her konuşmanın ilk isteğiyle gönderilir. Bu başlangıç yükünü proje proje ve arttığı günle birlikte görürsünüz.
 - **Geçmişinizi kaybetmeyin.** Devam ettirdiğiniz ya da kopyasından yeni oturum açtığınız sohbetler iki kez sayılmaz. Claude Code kayıtlarını 30 gün sonra silse bile geçmişiniz uygulamanın veri tabanında kalır.
 - **İşinizi değil, kullanımınızı paylaşın.** Bir gününüzü, haftanızı, ayınızı ya da yılınızı dört boyutta karta dönüştürün. Kartta yalnızca toplamlar, araç adları ve model adları bulunur.
 
@@ -183,6 +184,15 @@ Model aileleri aynı metni farklı sayıda token'a böler (Claude 4.7 ve sonras�
 - boyut dağılımı (10K altından 1M üstüne kadar),
 - günlük ortalama ve p90,
 - model bazında dağılım ve **uzun bağlam ek ücreti**: bir modelin uzun bağlam eşiğini (GPT-5.x için 272K) aşan isteklerin standart fiyata göre fazladan tuttuğu tutar.
+
+**Başlangıç yükü.** Her yeni konuşma, sizin yazmadığınız bir istemle başlar: sistem istemi, araç tanımları, `CLAUDE.md` gibi bellek dosyaları ve MCP sunucularınızın ekledikleri. Araçlar her isteğin boyutunu kaydettiği için bir konuşmanın ilk isteği bu yükü kesin olarak gösterir (ilk isteminiz de içindedir). **Bağlam** sayfası bunu her proje için, araca ve çalıştığı yere göre listeler (terminal ile Claude masaüstü uygulaması farklı başlar):
+
+- **başlangıç yükü**: son beş konuşmanın ilk isteklerinin medyanı; uzun bir istemle başlayan tek bir konuşma bunu oynatmaz
+- dönemdeki en küçük ilk istek ve böyle bir ilk isteğin API eşdeğeri maliyeti
+- **seyir**: her konuşmanın ilk isteği, bir çizgi olarak (son 60 konuşma); üzerine gelince o konuşmanın boyutunu ve zamanını görürsünüz
+- **değişiklik**: art arda en az üç konuşma önceki beş konuşmanın hepsinden en az 2.000 token ve %10 büyük ya da küçük başladığında, satır farkı ve hangi günden beri olduğunu gösterir. Bir MCP sunucusu eklemek ya da `CLAUDE.md` dosyasını uzatmak burada görünür; kaldırmak da
+
+Yalnızca dönem içinde başlayan konuşmalar sayılır; alt ajanlar ve yakalanan telemetri dışarıda kalır. Rakamlar loglardan olduğu gibi gelir; sayfa yükün değiştiğini ve ne zaman değiştiğini gösterir, hangi dosyanın ya da sunucunun değiştirdiğini göstermez.
 
 **Önbellek** sayfasında şunları görürsünüz:
 
