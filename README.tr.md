@@ -12,7 +12,7 @@ AI Usage Tracker, Windows, macOS ve Linux'ta çalışan bir uygulamadır. Yapay 
 
 [Özellikler](#özellikler) · [Kurulum](#kurulum) · [Gizlilik](#gizlilik) · [Nasıl çalışır](#nasıl-çalışır) · [Kaynaktan derleme](#kaynaktan-derleme) · [English](README.md)
 
-![Genel bakış ekranı: Claude Code, Codex, Antigravity ve OpenCode için 30 günlük trend ve abonelik değeri; yanında bugünkü token sayısını, limit halkalarını ve OpenCode kullanımını gösteren masaüstü widget'ı](assets/readme/hero-tr.webp)
+![Genel bakış ekranı: Claude Code, Codex, Antigravity ve OpenCode için 30 günlük trend ve abonelik değeri; yanında bugünkü token sayısını, önbelleği ilk dolacak konuşmayı, limit halkalarını ve OpenCode kullanımını gösteren masaüstü widget'ı](assets/readme/hero-tr.webp)
 
 - **Verileriniz sizde kalır.** Prompt ve yanıtlarınız uygulamanın arşivine hiçbir zaman kaydedilmez. Uygulama yalnızca sayıları ve meta verileri bilgisayarınızdaki bir dosyada tutar ve hiçbir yere göndermez.
 - **Her sayının nereden geldiğini bilirsiniz.** Araçtan doğrudan okunan değerler **Kesin**, uygulamanın hesapladıkları **Tahmini**, canlı okunanlar **Yakalanan** etiketiyle gösterilir. Hiçbir değer sessizce tahmin edilmez.
@@ -28,6 +28,7 @@ AI Usage Tracker, Windows, macOS ve Linux'ta çalışan bir uygulamadır. Yapay 
 - **Aynı işin başka bir modelle ne tutacağını karşılaştırın.** İstekleriniz aynı token sayıları ve bağlam boyutlarıyla fiyat listesindeki her modele göre yeniden fiyatlanır.
 - **Alt ajanların ve araçların payını görün.** Maliyetin ne kadarının alt ajanlardan geldiğini ve hangi araçların ne sıklıkla hata verdiğini görürsünüz.
 - **Önbelleğin size ne kazandırdığını ölçün.** İsabet oranını, net tasarrufu ve uzun bir aradan sonra önbelleğin yeniden yazılmasının maliyetini görürsünüz.
+- **Konuşmanızın önbelleğini süresi dolmadan tazeleyin.** Her Claude Code konuşmasının önbelleğinin kalan süresini **Önbellek** sayfasında, widget'ta, menü çubuğunda ve kontrol panelinde görürsünüz. Tek tıkla tazeleyin ya da süre dolmadan kısa süre önce uygulama kendisi tazelesin; önbelleği yeniden yazmak yerine yalnızca bir okuma bedeli ödersiniz.
 - **Geçmişinizi kaybetmeyin.** Devam ettirdiğiniz ya da kopyasından yeni oturum açtığınız sohbetler iki kez sayılmaz. Claude Code kayıtlarını 30 gün sonra silse bile geçmişiniz uygulamanın veri tabanında kalır.
 - **İşinizi değil, kullanımınızı paylaşın.** Bir gününüzü, haftanızı, ayınızı ya da yılınızı dört boyutta karta dönüştürün. Kartta yalnızca toplamlar, araç adları ve model adları bulunur.
 
@@ -46,7 +47,7 @@ Sağlayıcılar limitlerin sayısal karşılığını yayımlamıyor, yalnızca 
 - Gerçek yüzde yalnızca araç bunu kendi kaydına yazdığında ya da uygulama canlı okuduğunda gösterilir (bkz. [Canlı yakalama](#canlı-yakalama)).
 - Son okumadan sonra aracı kullandıysanız güncel değer bilinemez. Bu durumda "?" görürsünüz; yanında son okuma ve ne kadar önce yapıldığı yazar. Eski bir değer hiçbir zaman güncelmiş gibi gösterilmez. Panelde ve menü çubuğu metninde bu son okuma "~" ile işaretlenir: güncel değer genellikle daha yüksektir, ama sağlayıcı arada limitinizi sıfırladıysa daha düşük olabilir.
 - Haftalık limit doluyken 5 saatlik limitte yüzde yerine kilit ve **hafta dolu** görünür, çünkü hafta yenilenene kadar ondan hiç yararlanamazsınız. Menü çubuğu simgesi de bu limiti dolu gösterir. Claude'un Opus ve Sonnet haftaları bir şeyi kilitlemez, çünkü diğer modeller kullanılabilir kalır.
-- Yüzdeleri **kullanılan** ("%15 kullanıldı", Claude'daki gibi) ya da **kalan** ("%85 kaldı", Codex'teki gibi) olarak görebilirsiniz. Bu tercihi **Ayarlar**'dan, **Limitler** sayfasından ya da **Widget stüdyosu**'ndan değiştirirsiniz. Uyarı renkleri her iki durumda da kullanıma göre değişir.
+- Yüzdeleri **kullanılan** ("%15 kullanıldı", Claude'daki gibi) ya da **kalan** ("%85 kaldı", Codex'teki gibi) olarak görebilirsiniz. Bu tercihi **Ayarlar**'dan, **Limitler** sayfasından ya da **Widget stüdyosu**'ndan değiştirirsiniz. Uyarı renkleri her iki durumda da kullanıma göre, **Widget stüdyosu**'nda belirlediğiniz **Dikkat** ve **Kritik** seviyelerinde değişir (varsayılan %70 ve %90); widget'ta, panelde ve menü çubuğunda olduğu gibi uygulamanın içinde de.
 - Okuma yoksa her pencere için kendi bütçenizi belirleyebilirsiniz, örneğin "5 saatte 50 $ API eşdeğeri". Bu bütçeye göre hesaplanan yüzde **Tahmini** olarak gösterilir.
 - Limitler hesabınızın tamamı için geçerlidir. Yüzde her arttığında artış, o arada istek gönderen projelere API eşdeğeri maliyetleri oranında bölünür. Başka yerde yaptığınız kullanım (web, telefon, bulut görevleri, başka bir bilgisayar) projelerinize yazılmaz, **Kayıtlarda görünmeyen kullanım** satırında ayrı görünür. Birden çok Claude ya da Codex hesabınız varsa hangi hesaba ait olduğu bilinmeyen istekler **Tanımlanmamış hesap** adlı ayrı bir pay alır; bu isteklerden önce alınmış bir okuma güncel diye gösterilmez. Bu paylar **Tahmini** olarak gösterilir.
 - Her araç kendi tek renkli ikonuyla gösterilir. **Ayarlar → Genel → Araç renkleri** bölümünden Claude, Codex ve Antigravity'ye limit çubuklarında ve widget halkalarında kullanılacak kendi rengini verebilir, isterseniz ikonları da renklendirebilirsiniz. Limit dolmaya yaklaştığında uyarı renkleri yine gösterilir. Yalnızca adları görmek isterseniz ikonları **Ayarlar → Genel → Araç ikonlarını göster** ile kapatın.
@@ -144,7 +145,7 @@ Model aileleri aynı metni farklı sayıda token'a böler (Claude 4.7 ve sonras�
 
 | ![Oturumlar sayfası](assets/readme/sessions-tr.webp)                              | ![Önbellek sayfası](assets/readme/cache-tr.webp)                                         |
 | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| **Oturumlar**: her oturumunuz; süresi, modelleri, maliyeti ve en büyük bağlamıyla | **Önbellek**: isabet oranı, yeniden kullanım ve önbelleğin size gerçekte ne kazandırdığı |
+| **Oturumlar**: her oturumunuz; süresi, modelleri, maliyeti ve en büyük bağlamıyla | **Önbellek**: her konuşmanın önbelleğinin kalan süresi, isabet oranı, yeniden kullanım ve önbelleğin size gerçekte ne kazandırdığı |
 
 | ![Bağlam sayfası](assets/readme/context-tr.webp)                      | ![Projeler sayfası](assets/readme/projects-tr.webp) |
 | --------------------------------------------------------------------- | --------------------------------------------------- |
@@ -188,18 +189,18 @@ Mac'te **Cmd+K**, Windows ve Linux'ta **Ctrl+K** tuşlarına basın ya da kenar 
 
 Widget her zaman üstte duran küçük bir penceredir. Varsayılan olarak ekranın sağ alt köşesinde durur. Neleri gösterdiğini ve nasıl göründüğünü **Widget stüdyosu**'nda canlı önizlemeyle değiştirirsiniz.
 
-![Bugünkü token ve maliyeti, iki Claude hesabı, Antigravity ve iki Codex hesabı için 5 saatlik limit halkaları ve haftalık yüzdelerle, bugünkü OpenCode kullanımıyla gösteren masaüstü widget'ı](assets/readme/widget-tr.webp)
+![Bugünkü token ve maliyeti, önbelleği ilk dolacak konuşmayı, iki Claude hesabı, Antigravity ve iki Codex hesabı için 5 saatlik limit halkaları ve haftalık yüzdelerle, bugünkü OpenCode kullanımıyla gösteren masaüstü widget'ı](assets/readme/widget-tr.webp)
 
-![Widget stüdyosu: Claude ve Codex hesaplarını ve OpenCode kullanımını da gösteren canlı önizleme ve widget'ın gösterebileceği öğelerin listesi](assets/readme/studio-tr.webp)
+![Widget stüdyosu: Claude ve Codex hesaplarını, OpenCode kullanımını ve önbelleğin kalan süresini de gösteren canlı önizleme ve widget'ın gösterebileceği öğelerin listesi](assets/readme/studio-tr.webp)
 
 **Widget stüdyosu**'nda şunları ayarlayabilirsiniz:
 
-- **Gösterilenler:** ana sayı, ikincil değer, 5 saatlik ve haftalık limitler, OpenCode kullanımı, araçlara göre dağılım, 7 ve 30 günlük toplamlar, son güncelleme saati. Her öğeyi açıp kapatabilir ve sırasını değiştirebilirsiniz. Limitleri gösterilecek araçları ve sıralarını da seçebilirsiniz. Antigravity için hangi limitin gösterileceğini belirleyin: Gemini, Claude ve GPT, ikisi birden ya da hangisi daha doluysa o.
+- **Gösterilenler:** ana sayı, ikincil değer, 5 saatlik ve haftalık limitler, OpenCode kullanımı, araçlara göre dağılım, 7 ve 30 günlük toplamlar, son güncelleme saati ve **Önbelleğin kalan süresi** açıkken önbelleği ilk dolacak konuşma. Her öğeyi açıp kapatabilir ve sırasını değiştirebilirsiniz. Limitleri gösterilecek araçları ve sıralarını da seçebilirsiniz. Antigravity için hangi limitin gösterileceğini belirleyin: Gemini, Claude ve GPT, ikisi birden ya da hangisi daha doluysa o.
 - **Yerleşim:** yatay, dikey ya da tek satır.
 - **Limit gösterimi:** halka, çubuk ya da metin.
 - **Görünüm:** tema, vurgu rengi, ölçek, arka plan opaklığı, köşe yuvarlaklığı, kenarlık, gölge, etiketler, araç ikonları, sıfırlanmaya kalan süre.
 - **Yazı:** bilgisayarınızda yüklü herhangi bir yazı tipi (aranabilir; her biri kendi görünümüyle listelenir), yazı boyutu, ana sayı boyutu, sayı kalınlığı, sabit genişlikli rakamlar.
-- **Uyarı eşikleri:** dikkat ve kritik seviyeleri.
+- **Uyarı eşikleri:** dikkat ve kritik seviyeleri; uygulamanın kendi limit renkleri de bunlara uyar.
 - **Davranış:** her zaman üstte, konum kilidi, tıklayınca ne olacağı, tam ekran uygulamalarda gizlenme (macOS'te uygulama Dock'ta değilken), köşeye yerleştirme.
 
 Widget boyutunu içeriğe göre kendisi ayarlar. Bir köşeye sabitlediyseniz büyüyüp küçülürken o köşede kalır; sürüklerseniz bıraktığınız yerde durur. Sağ tıklayarak paneli açabilir, saydamlığını, boyutunu ve konumunu değiştirebilirsiniz.
@@ -211,7 +212,7 @@ Widget boyutunu içeriğe göre kendisi ayarlar. Bir köşeye sabitlediyseniz b�
 
 Uygulamanın simgesi Windows'ta saatin yanında, macOS'te menü çubuğunda, Linux'ta sistem tepsisinde durur. Simgeye tıklayınca kontrol paneli açılır. Sağ tıklayınca kısa bir menü açılır: uygulamayı açma, widget'ı gösterip gizleme, şimdi tarama, hazır güncellemeyi kurma ve çıkış. Windows ve macOS'te simgenin üzerine gelince güncel limitlerin hepsini görürsünüz. Linux'ta tepsi tıklamaları bildirmediği için panel bu menüden açılır.
 
-![Mac'te menü çubuğunun altında açık kontrol paneli: saatin yanında kullanım göstergesi ve Claude ile Codex limitlerini çubuk ve yüzdeyle gösteren, Claude'un haftalık limitinde uyarı işareti olan metin; altında Claude ve Codex için 5 saatlik ve haftalık limit halkaları, bugünkü kullanım, OpenCode kullanımı, Claude'un 5 saatlik limiti için tahmin ve dört düğme](assets/readme/panel-tr.webp)
+![Mac'te menü çubuğunun altında açık kontrol paneli: saatin yanında kullanım göstergesi ve Claude ile Codex limitlerini çubuk ve yüzdeyle gösteren, Claude'un haftalık limitinde uyarı işareti olan metin; altında Claude ve Codex için 5 saatlik ve haftalık limit halkaları, bugünkü kullanım, OpenCode kullanımı, önbelleği ilk dolacak konuşma ve tazeleme düğmesi, Claude'un 5 saatlik limiti için tahmin ve dört düğme](assets/readme/panel-tr.webp)
 
 **Kontrol paneli.** Panelde seçtiğiniz kutucuklar görünür:
 
@@ -226,7 +227,7 @@ Panel ayrıca güncelleme hazır olduğunda ve bir aracın oturumu kapandığı 
 
 **Menü çubuğu sayfası.** Paneli **Menü çubuğu** sayfasından ayarlayın. Kutucukları galeriden panelin canlı önizlemesine sürükleyin, sürükleyerek sıralayın, galeriye geri sürükleyerek kaldırın. Bir kutucuğa tıklayıp boyutunu (küçük, geniş, büyük, tam genişlik ya da tam genişlik ve uzun) ve limitlerde halka ya da çubuk görünümünü seçin. Panele en fazla 16 kutucuk ekleyebilirsiniz. Limitler panelde kullanılan ya da kalan olarak görünür; uygulamadaki seçimi izleyebilir ya da panel için ayrı seçebilirsiniz.
 
-![Menü çubuğu sayfasında canlı önizleme: Claude logosunu Claude renginde bir karede gösteren simge ve altında Claude ve Codex limit halkaları, bugünkü kullanım, OpenCode kullanımı, tahmin ve düğmeler içeren kontrol paneli; yanında her hesabı içeren kutucuk galerisi](assets/readme/menubar-tr.webp)
+![Menü çubuğu sayfasında canlı önizleme: Claude logosunu Claude renginde bir karede gösteren simge ve altında Claude ve Codex limit halkaları, bugünkü kullanım, OpenCode kullanımı, canlı önbellekler, tahmin ve düğmeler içeren kontrol paneli; yanında her hesabı içeren kutucuk galerisi](assets/readme/menubar-tr.webp)
 
 **Simge.** Simgede ne görüneceğini ve hangi limiti izleyeceğini seçin (varsayılan: en dolu limitinizin yüzdesi):
 
@@ -236,7 +237,7 @@ Panel ayrıca güncelleme hazır olduğunda ve bir aracın oturumu kapandığı 
 
 Limit en son okumadan sonra kullanıldıysa, yani gerçek değer daha yüksek olabilirse, simge soluk çizilir; metinde de böyle bir değerin başında "~" durur.
 
-**Simgenin yanındaki metin.** macOS ve Linux'ta simgenin yanına `Cl 5s ▰▰▱▱▱ %46 · Cl H ⚠︎▰▰▰▰▱ %73` gibi bir metin koyabilirsiniz. Windows, tepsi simgelerinin yanında metin göstermez. Metindeki öğeleri ve sıralarını seçin: herhangi bir limit (her Claude ve Codex hesabınızınki de) ve o limitin tahmini; bugün, son 7 ya da 30 günün token, API eşdeğeri, oturum sayısı ya da önbellek isabeti (tüm araçlar ya da yalnızca OpenCode); son taramanın saati. Sonra şunları belirleyin:
+**Simgenin yanındaki metin.** macOS ve Linux'ta simgenin yanına `Cl 5s ▰▰▱▱▱ %46 · Cl H ⚠︎▰▰▰▰▱ %73` gibi bir metin koyabilirsiniz. Windows, tepsi simgelerinin yanında metin göstermez. Metindeki öğeleri ve sıralarını seçin: herhangi bir limit (her Claude ve Codex hesabınızınki de) ve o limitin tahmini; bugün, son 7 ya da 30 günün token, API eşdeğeri, oturum sayısı ya da önbellek isabeti (tüm araçlar ya da yalnızca OpenCode); son taramanın saati. **Önbelleğin kalan süresi** menü çubuğunda gösteriliyorsa metnin sonunda önbelleği ilk dolacak konuşma da yer alır (`notes 2 dk`). Sonra şunları belirleyin:
 
 - **Etiket:** tam ad (`Claude 5 sa`), kısa ad (`Cl 5s`) ya da etiketsiz
 - **Değer:** kullanılan ya da kalan
@@ -376,6 +377,7 @@ Her sürümde, her dosyanın sağlama değerini içeren bir `SHA256SUMS` dosyas�
 - **Codex ve Claude hesapları:** Uygulama hesapları ayırt etmek için Codex hesap kimliğinin ve Claude planının bağlı olduğu kuruluş kimliğinin yalnızca geri çözülemeyen bir özetini saklar. Claude'da yalnızca bu kimliği okur: `~/.claude.json` dosyasından, telemetri kayıtlarından ve Claude masaüstünün Code sekmesi oturum listesindeki klasör adları ile oturum kimliklerinden. Hesap adları sizin verdiğiniz adlardır; e-posta adresi hiç okunmaz.
 - **Antigravity'nin geçici kopyası:** Antigravity, sohbetlerini metinleriyle birlikte bir veri tabanında tutar. Uygulama bu dosyaya dokunmamak için onu, yalnızca sizin erişebildiğiniz geçici bir klasöre kopyalar, sayıları okur ve kopyayı hemen siler. Uygulama zorla kapatılırsa kalan kopyalar, Antigravity bir sonraki okunduğunda 10 dakikadan eskiyse silinir. Sohbet metni uygulamanın arşivine hiçbir zaman alınmaz.
 - **OpenCode'un veritabanı:** OpenCode, oturumlarını metinleriyle birlikte tek bir veritabanında tutar. Uygulama bu dosyayı salt okunur açar ve yalnızca token sayılarını, modeli, sağlayıcıyı, ajanı, proje klasörünü ve araç çağrılarının adını, sonucunu ve zamanını sorar; metin hiç okunmaz.
+- **Önbellek tazeleme hook'u:** Önbellek tazelemeyi açarsanız `~/.claude/settings.json` dosyasına küçük bir hook eklenir (önce yedeği alınır). Hook ile uygulama, uygulamanın veri klasöründe yalnızca konuşmanın oturum kimliğiyle adlandırılmış küçük dosyaları paylaşır: konuşmanın sizi bekleyip beklemediği, en son ne zaman istem gönderdiğiniz ve tazeleme isteği. Hook konuşmayı hiç okumaz; **Ayarlar → Genel → Önbelleğin kalan süresi → Kaldır** onu yeniden çıkarır.
 - **İnternet bağlantısı:** Uygulamanın kendisi internete yalnızca güncelleme ve yeni fiyat listesi denetimi için bağlanır. Her denetimde tek bir dosya, sürüm dosyası ya da bu depodaki `config/pricing.json` indirilir ve hiçbir veri gönderilmez (**Ayarlar → Güncellemeler**, **Ayarlar → Fiyatlar**). Varsayılan olarak açık gelen limit okumaları bilgisayarınızdaki Claude Code, Codex ve Antigravity CLI'ı çalıştırır; bu araçlar limit yüzdenizi kendi servislerinden sorar. Uygulama Claude Code'u telemetri ve hata raporlaması kapalı, Codex'i analitik kapalı olarak başlatır; Antigravity CLI'da böyle bir ayar yoktur. Limit okumalarını **Kaynaklar → Canlı yakalama** bölümünden kapatabilirsiniz. Bir aracı uygulamadan kurarsanız kurulum dosyası üreticinin sitesinden indirilir. Plan dosyası uygulamayla birlikte gelir. Döviz kuru için de internetten veri çekilmez; kuru kendiniz girersiniz.
 
 ### Canlı yakalama

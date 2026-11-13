@@ -86,7 +86,7 @@ const settings: Settings = {
       pm({ kind: 'provider', provider: 'anthropic', size: 'm', style: 'ring' }),
       pm({ kind: 'provider', provider: 'openai', size: 'm', style: 'ring' }),
       pm({ kind: 'usage', period: 'today', size: 'w' }),
-      ...(showcase ? [pm({ kind: 'usage', provider: 'opencode', period: 'today', size: 'w' })] : []),
+      ...(showcase ? [pm({ kind: 'usage', provider: 'opencode', period: 'today', size: 'w' }), pm({ kind: 'caches', size: 'l' })] : []),
       pm({ kind: 'forecast', provider: 'anthropic', window: 'five_hour', size: showcase ? 'l' : 'w' }),
       ...['open', 'widget', 'rescan', 'settings'].map((action) => pm({ kind: 'action', action, size: 's' })),
     ],
@@ -100,7 +100,7 @@ const settings: Settings = {
   cache_menubar: true,
   cache_projects: 'all' as 'all' | 'picked',
   cache_picked: [] as string[],
-  cache_auto: false,
+  cache_auto: showcase,
   cache_lead: 2 as 1 | 2 | 5,
   provider_colors: {},
   tint_icons: false,
@@ -734,7 +734,8 @@ let mockScanning = false
 const cacheStart = Date.now()
 const droppedCaches = new Set<string>()
 // the preview's refresh side: the hook is added on first use, as in the app
-let refreshHook = scenario.get('refresh') === '1'
+// the showcase shows refresh at work: the hook added and automatic refresh on
+let refreshHook = scenario.get('refresh') === '1' || showcase
 const refreshedAt = new Map<string, number>()
 const autoOverride = new Map<string, boolean>()
 const refreshLog: { at: number; usd: number; session: string }[] = []
