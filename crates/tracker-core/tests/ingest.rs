@@ -203,6 +203,14 @@ fn a_record_dated_ahead_of_the_clock_is_read_again_until_the_clock_reaches_it() 
     run(&mut store, &m.env);
     let rep = run(&mut store, &m.env);
     assert_eq!(rep.files_read, 1, "only the held file is read again");
+
+    // once the clock reaches it, it is stored, and the file is no longer held
+    tracker_core::store::shift_clock_for_tests(3 * 86_400_000);
+    let rep = run(&mut store, &m.env);
+    assert_eq!(rep.new_events(), 1);
+    assert!(rep.warnings.iter().all(|(_, w)| !w.contains("ahead of the clock")), "{:?}", rep.warnings);
+    assert_eq!(run(&mut store, &m.env).files_read, 0);
+    tracker_core::store::shift_clock_for_tests(0);
 }
 
 #[test]

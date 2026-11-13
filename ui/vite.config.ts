@@ -4,6 +4,8 @@ import { resolve } from 'node:path'
 
 export default defineConfig({
   plugins: [svelte()],
+  // component tests mount as in the browser; Svelte's server build has no `mount`
+  ...(process.env.VITEST ? { resolve: { conditions: ['browser'] } } : {}),
   clearScreen: false,
   // fs.allow lets the dev-only mock read ../config/plans.json
   server: { port: 5173, strictPort: true, fs: { allow: ['..'] } },
