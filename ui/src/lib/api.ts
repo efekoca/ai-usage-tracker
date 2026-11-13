@@ -341,6 +341,31 @@ export interface LiveCache {
   refreshes_usd: number
 }
 
+/** A conversation the usage limit stopped, whose hook waits for the limit's reset. */
+export interface ResumeWaiting {
+  session_id: string
+  /** Empty while the project is hidden or not known. */
+  project: string
+  branch: string | null
+  client: string | null
+  stopped_ms: number
+  /** The limit that stopped it; `null` while its record is not read yet. */
+  window: string | null
+  /** When it goes on; `null` while the limit's reset is not known. */
+  resumes_ms: number | null
+  /** Continued too often in a day to be continued again by itself. */
+  held: boolean
+}
+
+export interface ResumeInfo {
+  /** Our hook is in Claude Code's settings. */
+  installed: boolean
+  settings_file: string
+  waiting: ResumeWaiting[]
+  /** Those continued in the last day, the latest first. */
+  resumed: { session_id: string; project: string; branch: string | null; at_ms: number }[]
+}
+
 export interface RefreshInfo {
   /** Our hook is in Claude Code's settings. */
   installed: boolean
@@ -525,6 +550,8 @@ export interface NotifySettings {
   route: boolean
   /** Shortly before Claude Code's cache runs out. */
   cache: boolean
+  /** When a conversation the limit stopped is continued after the limit's reset. */
+  resume: boolean
 }
 
 export interface Settings {
@@ -577,6 +604,8 @@ export interface Settings {
   cache_auto: boolean
   /** Minutes before an hour's cache runs out: 1, 2 or 5 (a 5-minute cache: in its last minute). */
   cache_lead: 1 | 2 | 5
+  /** Continues a Claude Code conversation the usage limit stopped, once the limit starts again. */
+  limit_resume: boolean
   /** provider → #rrggbb; missing = the accent color */
   provider_colors: Partial<Record<Provider, string>>
   tint_icons: boolean
@@ -1106,6 +1135,9 @@ export const api = {
   setCacheAuto: (sessionId: string, on: boolean) => invoke<void>('set_cache_auto', { sessionId, on }),
   cacheRefreshInfo: () => invoke<RefreshInfo>('cache_refresh_info'),
   setCacheRefresh: (on: boolean) => invoke<RefreshInfo>('set_cache_refresh', { on }),
+  limitResumeInfo: () => invoke<ResumeInfo>('limit_resume_info'),
+  setLimitResume: (on: boolean) => invoke<ResumeInfo>('set_limit_resume', { on }),
+  cancelLimitResume: (sessionId: string) => invoke<void>('cancel_limit_resume', { sessionId }),
   trayPreview: (tray: TraySettings) => invoke<TrayPreview>('tray_preview', { tray }),
   projects: () => invoke<ProjectRow[]>('list_projects'),
   projectsForSettings: () => invoke<ProjectRow[]>('list_projects_for_settings'),

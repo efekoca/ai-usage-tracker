@@ -387,6 +387,8 @@ pub struct NotifySettings {
     /// Shortly before Claude Code's prompt cache runs out. Off at first: a five-minute cache
     /// would tell every short pause.
     pub cache: bool,
+    /// When a conversation the limit stopped is continued after the limit started again.
+    pub resume: bool,
     /// Fields this version does not know (a newer one wrote them), kept so saving does not drop them.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
@@ -394,7 +396,7 @@ pub struct NotifySettings {
 
 impl Default for NotifySettings {
     fn default() -> Self {
-        NotifySettings { enabled: true, early: "warn".into(), full: true, reset: true, five_hour: true, seven_day: true, budget: true, sign_in: true, route: true, cache: false, extra: Default::default() }
+        NotifySettings { enabled: true, early: "warn".into(), full: true, reset: true, five_hour: true, seven_day: true, budget: true, sign_in: true, route: true, cache: false, resume: true, extra: Default::default() }
     }
 }
 
@@ -653,6 +655,9 @@ pub struct Settings {
     pub cache_auto: bool,
     /// How many minutes before an hour's cache runs out: 1, 2 or 5 (a 5-minute cache: in its last minute).
     pub cache_lead: u32,
+    /// Continues a Claude Code conversation the usage limit stopped, once the limit starts again;
+    /// needs the limit hook in Claude Code's settings, so off by default.
+    pub limit_resume: bool,
     /// Provider → `#rrggbb` for its limit bars and mark; a missing one uses the accent color.
     pub provider_colors: std::collections::BTreeMap<String, String>,
     /// Marks take the tool's color too; off keeps them in the text color.
@@ -764,6 +769,7 @@ impl Default for Settings {
             cache_picked: Vec::new(),
             cache_auto: false,
             cache_lead: 2,
+            limit_resume: false,
             provider_colors: Default::default(),
             tint_icons: false,
             show_icons: true,

@@ -131,6 +131,12 @@ pub fn cache_hook_command(exe: &Path) -> String {
     if cfg!(windows) { format!("{cmd}; exit $LASTEXITCODE") } else { cmd }
 }
 
+/// The hook that waits for a limit's reset wakes the conversation the same way.
+pub fn limit_hook_command(exe: &Path) -> String {
+    let cmd = quoted_command(&exe.to_string_lossy(), short_path(exe).as_deref(), !cfg!(windows) || git_bash().is_some(), "--limit-hook");
+    if cfg!(windows) { format!("{cmd}; exit $LASTEXITCODE") } else { cmd }
+}
+
 /// Single quotes: inside double quotes both shells would still expand `$` and backticks.
 fn quoted_command(full: &str, short: Option<&str>, bash: bool, flag: &str) -> String {
     // only Windows paths are turned into forward slashes; a backslash is an ordinary file name character elsewhere
@@ -211,10 +217,53 @@ pub fn cache_hook_main() -> i32 {
     let me = format!("{}-{}", std::process::id(), now_ms());
     // ends before Claude Code's own timeout, so the wait is never cut off mid-signal
     let until = Instant::now() + Duration::from_secs(cs::REFRESH_HOOK_TIMEOUT_SECS.saturating_sub(60));
-    match rh::wait(&dir, session, &me, transcript.as_deref(), Duration::from_secs(1), until, parent_alive()) {
+    match rh::wait(&dir, rh::Wait::Cache, session, &me, transcript.as_deref(), Duration::from_secs(1), until, parent_alive()) {
         Ok(rh::Outcome::Wake(message)) => {
             rh::woke(&dir, session, now_ms());
             eprint!("{message}");
+            2
+        }
+        _ => 0,
+    }
+}
+
+fn resume_message(turkish: bool) -> &'static str {
+    if turkish {
+        "Bu, AI Usage Tracker'ın gönderdiği otomatik bir mesaj: bu konuşmayı durduran kullanım limiti yeniden başladı. Yarıda kalan işe kaldığın yerden devam et."
+    } else {
+        "This is an automatic message from AI Usage Tracker: the usage limit that stopped this conversation has started again. Continue the work from where it stopped."
+    }
+}
+
+/// Run by Claude Code when the usage limit ends a turn: waits in the background until the app says
+/// the limit started again, then wakes the conversation to continue. The words are the hook's own,
+/// so nothing a file says reaches the conversation. A new prompt or the end of the conversation
+/// sends the waiting one away at once.
+pub fn limit_hook_main() -> i32 {
+    use tracker_core::capture::refresh_hook as rh;
+    let Some(data_dir) = tracker_core::store::default_data_dir() else { return 0 };
+    let mut input = Vec::new();
+    let _ = std::io::stdin().take(1024 * 1024).read_to_end(&mut input);
+    let json: serde_json::Value = serde_json::from_slice(&input).unwrap_or(serde_json::Value::Null);
+    let Some(session) = json.get("session_id").and_then(|v| v.as_str()).filter(|s| rh::valid_session(s)) else { return 0 };
+    let dir = rh::dir(&data_dir);
+    let options = statusline::read_options(&data_dir);
+    match json.get("hook_event_name").and_then(|v| v.as_str()) {
+        Some("StopFailure") if json.get("error").and_then(|v| v.as_str()) == Some("rate_limit") && options.resume && !rh::refresh_turn(&dir, session, now_ms()) && !scripted() => {}
+        Some("UserPromptSubmit" | "SessionEnd") => {
+            rh::retire_limit(&dir, session);
+            return 0;
+        }
+        _ => return 0,
+    }
+    rh::stopped(&dir, session, now_ms());
+    let me = format!("{}-{}", std::process::id(), now_ms());
+    let until = Instant::now() + Duration::from_secs(cs::RESUME_HOOK_TIMEOUT_SECS.saturating_sub(60));
+    // the transcript is not watched: Claude Code may write to it while the conversation only waits
+    match rh::wait(&dir, rh::Wait::Limit, session, &me, None, Duration::from_secs(2), until, parent_alive()) {
+        Ok(rh::Outcome::Wake(_)) => {
+            rh::resumed(&dir, session, now_ms());
+            eprint!("{}", resume_message(options.turkish));
             2
         }
         _ => 0,
@@ -296,8 +345,69 @@ fn parent_alive() -> impl Fn() -> bool {
     move || std::os::unix::process::parent_id() == first
 }
 
-/// Windows keeps no such link; the hook's own time limit ends a wait that outlives Claude Code.
-#[cfg(not(unix))]
+/// Windows keeps no such link, so the Claude Code among the hook's ancestors is held open and asked
+/// whether it still runs. When none is found, the hook's own time limit ends the wait.
+#[cfg(windows)]
+fn parent_alive() -> impl Fn() -> bool {
+    let claude = ClaudeProcess::find();
+    move || claude.as_ref().is_none_or(ClaudeProcess::running)
+}
+
+#[cfg(windows)]
+struct ClaudeProcess(windows_sys::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+impl ClaudeProcess {
+    /// The nearest ancestor that is Claude Code itself (its own program, or Node running it); the
+    /// shells between it and the hook are passed over.
+    fn find() -> Option<Self> {
+        use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+        use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS};
+        use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE};
+        // SAFETY: a process snapshot, closed below; PROCESSENTRY32W is plain data with its size set
+        let snap = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+        if snap == INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let mut entry: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        let mut processes = std::collections::HashMap::new();
+        let mut more = unsafe { Process32FirstW(snap, &mut entry) } != 0;
+        while more {
+            let len = entry.szExeFile.iter().position(|c| *c == 0).unwrap_or(entry.szExeFile.len());
+            processes.insert(entry.th32ProcessID, (entry.th32ParentProcessID, String::from_utf16_lossy(&entry.szExeFile[..len]).to_ascii_lowercase()));
+            more = unsafe { Process32NextW(snap, &mut entry) } != 0;
+        }
+        unsafe { CloseHandle(snap) };
+        let mut pid = processes.get(&std::process::id())?.0;
+        for _ in 0..6 {
+            let (parent, name) = processes.get(&pid)?;
+            if name == "claude.exe" || name == "node.exe" {
+                // SAFETY: only the right to wait on it; the handle is closed on drop
+                let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+                return (!handle.is_null()).then_some(ClaudeProcess(handle));
+            }
+            pid = *parent;
+        }
+        None
+    }
+
+    fn running(&self) -> bool {
+        use windows_sys::Win32::Foundation::WAIT_TIMEOUT;
+        // SAFETY: the handle is open until drop; a wait of no time only asks whether it ended
+        unsafe { windows_sys::Win32::System::Threading::WaitForSingleObject(self.0, 0) == WAIT_TIMEOUT }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for ClaudeProcess {
+    fn drop(&mut self) {
+        // SAFETY: owned handle, closed once
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(self.0) };
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 fn parent_alive() -> impl Fn() -> bool {
     || true
 }
@@ -503,18 +613,19 @@ pub fn revert_all_main() -> i32 {
             return 2;
         }
     };
-    let had = (state.statusline.is_some(), state.otel.is_some(), state.refresh.is_some());
+    let had = (state.statusline.is_some(), state.otel.is_some(), state.refresh.is_some(), state.resume.is_some());
     let statusline = cs::uninstall_statusline(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: status line: {e}"));
     let otel = cs::uninstall_otel(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: telemetry: {e}"));
     let refresh = cs::uninstall_refresh_hook(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: cache refresh: {e}"));
+    let resume = cs::uninstall_hook(&mut state, cs::Hook::Resume, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: limit hook: {e}"));
     let (statusline_ok, otel_ok, refresh_ok) = (statusline.is_ok(), otel.is_ok(), refresh.is_ok());
     // only what the uninstaller itself took out is put back; a value the user changed stays theirs
     let restored = |r: &Result<RevertOutcome, _>| matches!(r, Ok(RevertOutcome::Restored));
     let store = Store::open(&data_dir.join("tracker.db")).ok();
     let mut settings = store.as_ref().map(Settings::load);
     let auto = settings.as_ref().is_some_and(|s| s.cache_auto);
-    let reverted = Reverted { statusline: had.0 && restored(&statusline), otel: had.1 && restored(&otel), refresh: had.2 && restored(&refresh), auto, at_ms: now_ms() };
-    if reverted.statusline || reverted.otel || reverted.refresh {
+    let reverted = Reverted { statusline: had.0 && restored(&statusline), otel: had.1 && restored(&otel), refresh: had.2 && restored(&refresh), resume: had.3 && restored(&resume), auto, at_ms: now_ms() };
+    if reverted.statusline || reverted.otel || reverted.refresh || reverted.resume {
         let _ = std::fs::write(reverted_file(&data_dir), serde_json::to_string(&reverted).unwrap_or_default());
     }
     if let (Some(store), Some(s)) = (&store, settings.as_mut()) {
@@ -523,9 +634,11 @@ pub fn revert_all_main() -> i32 {
         // a hook added again later must not start refreshing every conversation by itself; an
         // upgrade puts both back
         s.cache_auto &= !refresh_ok;
+        // without its hook nothing is continued, so the switch goes with it
+        s.limit_resume &= !resume.is_ok();
         let _ = s.save(store);
     }
-    if statusline_ok && otel_ok && refresh_ok { 0 } else { 1 }
+    if statusline_ok && otel_ok && refresh_ok && resume.is_ok() { 0 } else { 1 }
 }
 
 /// What an uninstaller turned off. A manual upgrade runs the old uninstaller first, so a start
@@ -539,6 +652,8 @@ struct Reverted {
     /// Automatic refresh was on with the hook.
     #[serde(default)]
     auto: bool,
+    #[serde(default)]
+    resume: bool,
     at_ms: i64,
 }
 
@@ -553,7 +668,7 @@ impl Reverted {
         if !(0..REINSTALL_WINDOW_MS).contains(&(now - self.at_ms)) {
             return Vec::new();
         }
-        [("statusline", self.statusline), ("otel", self.otel), ("refresh", self.refresh)].into_iter().filter(|k| k.1).map(|k| k.0).collect()
+        [("statusline", self.statusline), ("otel", self.otel), ("refresh", self.refresh), ("resume", self.resume)].into_iter().filter(|k| k.1).map(|k| k.0).collect()
     }
 }
 
@@ -571,7 +686,15 @@ fn restore_after_upgrade(app: &AppHandle) {
     let _ = std::fs::remove_file(&file);
     let Ok(reverted) = serde_json::from_str::<Reverted>(&raw) else { return };
     for kind in reverted.to_restore(now_ms()) {
-        let done = if kind == "refresh" { crate::refresh::install(app).and_then(|()| restore_auto(app, reverted.auto)) } else { set(app, kind, true) };
+        let done = match kind {
+            "refresh" => crate::refresh::install(app).and_then(|()| restore_auto(app, reverted.auto)),
+            "resume" => crate::resume::install(app).and_then(|()| {
+                let s = app.state::<AppState>().update_settings(|s| s.limit_resume = true)?;
+                let _ = app.emit("settings-changed", &s);
+                Ok("enabled".into())
+            }),
+            _ => set(app, kind, true),
+        };
         match done {
             Ok(r) => log::info!("{kind} turned back on after the upgrade: {r}"),
             Err(e) => log::warn!("{kind} could not be turned back on after the upgrade: {e}"),
@@ -1398,7 +1521,7 @@ fn refresh_statusline(data_dir: &Path) {
 
 /// The bridge runs as a process of its own, so what it adds is written down for it.
 pub fn write_statusline_options(data_dir: &Path, s: &Settings) {
-    let options = statusline::Options { cache: s.cache_timer && s.cache_statusline, turkish: crate::tray::turkish(s) };
+    let options = statusline::Options { cache: s.cache_timer && s.cache_statusline, turkish: crate::tray::turkish(s), resume: s.limit_resume };
     if let Err(e) = statusline::write_options(data_dir, &options) {
         log::warn!("could not save the status-line options: {e}");
     }
@@ -1420,6 +1543,7 @@ pub fn start(app: &AppHandle) {
             refresh_statusline(&app.state::<AppState>().data_dir);
         }
         crate::refresh::follow_app(&app.state::<AppState>());
+        crate::resume::follow_app(&app.state::<AppState>());
         restore_after_upgrade(app);
     }
     start_claude_poller(app);
@@ -1541,7 +1665,7 @@ mod tests {
 
     #[test]
     fn only_a_recent_uninstall_turns_captures_back_on() {
-        let r = Reverted { statusline: true, otel: false, refresh: true, auto: true, at_ms: 1_000_000 };
+        let r = Reverted { statusline: true, otel: false, refresh: true, auto: true, resume: false, at_ms: 1_000_000 };
         assert_eq!(r.to_restore(1_000_000 + 5 * 60_000), ["statusline", "refresh"]);
         let older: Reverted = serde_json::from_str(r#"{"statusline": false, "otel": true, "at_ms": 1000000}"#).unwrap();
         assert_eq!(older.to_restore(1_000_000), ["otel"], "a record written before the refresh hook existed");
@@ -1555,11 +1679,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut s = Settings { language: "tr".into(), cache_statusline: true, ..Settings::default() };
         write_statusline_options(dir.path(), &s);
-        assert_eq!(statusline::read_options(dir.path()), statusline::Options { cache: true, turkish: true });
+        assert_eq!(statusline::read_options(dir.path()), statusline::Options { cache: true, turkish: true, resume: false });
         s.cache_timer = false;
         s.language = "en".into();
         write_statusline_options(dir.path(), &s);
-        assert_eq!(statusline::read_options(dir.path()), statusline::Options { cache: false, turkish: false });
+        assert_eq!(statusline::read_options(dir.path()), statusline::Options { cache: false, turkish: false, resume: false });
     }
 
     #[test]

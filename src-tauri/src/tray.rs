@@ -496,6 +496,7 @@ fn update(app: &AppHandle) {
     let now = chrono::Utc::now().timestamp_millis();
     let caches = crate::caches::followed(&app.state::<AppState>(), &s, now);
     guarded("refresh", || crate::refresh::tick(app, &s, &caches, now));
+    guarded("resume", || crate::resume::tick(app, &s, now));
     guarded("alerts", || crate::alerts::check(app, &s, &readings, &caches));
     let Some(tray) = app.tray_by_id(ID) else { return };
     let limits = current_limits(&readings);

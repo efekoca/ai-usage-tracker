@@ -105,9 +105,14 @@
     font-size: 12.5px;
   }
   .actions {
-    display: flex;
-    justify-content: flex-end;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    align-self: flex-end;
     gap: 8px;
     padding-top: 2px;
+  }
+  .actions .btn {
+    justify-content: center;
   }
 </style>

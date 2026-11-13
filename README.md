@@ -29,6 +29,7 @@ A private app for Windows, macOS, and Linux that reads the usage logs your AI to
 - **See what subagents and tools cost you.** You see how much of your cost comes from subagents and how often each tool's calls fail.
 - **Measure what the cache saves you.** You see the hit rate, the net savings, what it cost when the cache had to be written again after a long pause, and why Claude Code says it had to.
 - **Keep a conversation's cache from running out.** Each Claude Code conversation's cache shows its time left on the **Cache** page, in the widget, the menu bar and the control panel, and Claude Code's own status line can show when it is dropped. Refresh it with one click, or let the app do it shortly before it runs out, for the price of one cache read instead of writing it again.
+- **Pick up where a limit stopped you.** When the usage limit stops a Claude Code conversation, the app continues it by itself once the limit resets, so work cut off overnight goes on without you.
 - **Keep your history.** Resumed and forked sessions are never counted twice, and your history stays in the archive even after the tools delete their own logs (Claude Code does so after 30 days).
 - **Share your use, not your work.** Turn a day, a week, a month or a year into a card in four sizes. A card holds totals, tool names and model names only.
 
@@ -65,6 +66,18 @@ Providers publish how their limits work, not the numbers themselves. The app the
 **Notifications.** A system notification tells you when a limit you use passes your warning threshold, when it fills up, and when a full limit starts again. It shows when the limit resets and, at your current pace, roughly when it fills. In **Settings → Notifications**, choose an early warning at the **Caution** or **Critical** threshold or none, whether to hear when a limit fills up and when it resets, and which limits (5-hour, weekly) notify you. macOS asks once whether the app may send notifications. Opening the app never reports what happened while it was closed. Click a notification to open the **Limits** page. To check that notifications show on this computer, use **Settings → Notifications → Test notification**. On Windows, notifications go through the app's Start menu shortcut, so keep it.
 
 **Sign-in notifications.** When Claude Code, the Codex CLI or the Antigravity CLI is signed out and your limits cannot be read, a notification tells you once, even right after the app opens. Click it to see how to sign in. Other reasons a read fails, such as no network or an API key, never count as a sign-out and show under **Sources → Live capture** instead. Turn this off with **Settings → Notifications → When you need to sign in**.
+
+**Continue after a limit resets.** When the usage limit stops a Claude Code conversation in the middle of its work, the app can continue it by itself once the limit resets: turn on **Continue after a limit resets** on the **Limits** page. The app asks before it adds a small hook to your Claude Code settings (`~/.claude/settings.json`); it runs when the usage limit stops a reply, when you send a prompt and when a conversation ends, and turning the switch off removes it. From then on the hook waits in a conversation the limit stopped. The app takes the reset time from what Claude Code itself recorded when the limit turned the request down, and a minute after the reset the conversation gets one automatic message that tells it to continue from where it stopped. The card lists the conversations that wait, with the limit that stopped each and the time each continues, and those continued in the last day; **Don't continue** calls one off.
+
+- The conversation must stay open and the computer awake. If the computer sleeps through the reset, the conversation continues when it wakes.
+- A continued conversation runs with its own permission setting, so one that asks before it uses a tool waits at its first question. Its work counts against your plan like any other.
+- Writing in the conversation yourself, or closing it, ends the wait.
+- A cache refresh that the limit turns down stopped no work, so it is not continued.
+- On Windows, updating the app can end the waits; a conversation the limit stopped before the update is then not continued.
+- If a limit stops it again (the weekly one after the 5-hour one, for example), it waits for that reset. A conversation is continued at most once in 15 minutes and six times in a day.
+- The reset time is never guessed: without Claude Code's own record of it, which needs Claude Code among your sources, the conversation stays as it is and the card says the time is not known.
+- A notification tells you when a conversation was continued; turn it off with **Settings → Notifications → When a conversation the limit stopped is continued**.
+- It needs a Claude Code version that runs a hook when the limit stops a reply (tested with 2.1.322).
 
 ### Limit history
 
@@ -337,7 +350,7 @@ Windows 10 and 11.
 
 > **SmartScreen.** The installer is not code-signed, so Windows may show "Unknown publisher". Choose **More info → Run anyway**.
 
-**Uninstall.** Use Windows Settings → Apps. The uninstaller reverts the Claude Code settings changed under **Live capture** and removes the cache refresh hook. Ticking "Delete the application data" also removes `%LOCALAPPDATA%\AIUsageTracker`. The start-with-Windows entry is always removed.
+**Uninstall.** Use Windows Settings → Apps. The uninstaller reverts the Claude Code settings changed under **Live capture** and removes the cache refresh hook and the limit hook. Ticking "Delete the application data" also removes `%LOCALAPPDATA%\AIUsageTracker`. The start-with-Windows entry is always removed.
 
 ### macOS
 
@@ -350,7 +363,7 @@ Run the app from Applications, not from the disk image. A copy opened from the d
 
 To keep the app out of the Dock and the ⌘Tab list, turn off **Settings → Show in the Dock**. You then open it from its menu bar icon or the widget shortcut. The widget can then stay over full-screen apps too: turn off **Hide during full-screen apps** in the **Widget studio**.
 
-**Uninstall.** macOS has no uninstaller, so first turn off the switches you turned on under **Sources → Live capture** and **Settings → Start at login**, and if you added the cache refresh hook, remove it under **Settings → General → Cache time left → Remove**. Then drag the app to the Trash. Your data stays in `~/Library/Application Support/AIUsageTracker` until you delete it.
+**Uninstall.** macOS has no uninstaller, so first turn off the switches you turned on under **Sources → Live capture** and **Settings → Start at login**, and if you added the cache refresh hook, remove it under **Settings → General → Cache time left → Remove**. Turn off **Continue after a limit resets** on the **Limits** page as well. Then drag the app to the Trash. Your data stays in `~/Library/Application Support/AIUsageTracker` until you delete it.
 
 ### Linux
 
@@ -367,7 +380,7 @@ The app updates itself in all three forms. For the `.deb` and `.rpm`, your syste
 
 **Widget shortcut.** It works from any app on KDE Plasma and GNOME, also under Wayland. On GNOME 47 and older the app adds a GNOME custom shortcut for it (Settings → Keyboard → Custom Shortcuts). On Sway or Hyprland, bind a key to `ai-usage-tracker --toggle-widget` yourself, for example `bindsym Ctrl+Alt+Shift+w exec ai-usage-tracker --toggle-widget` (Sway) or `bind = CTRL ALT SHIFT, W, exec, ai-usage-tracker --toggle-widget` (Hyprland).
 
-**Uninstall.** `sudo apt remove ai-usage-tracker` or `sudo dnf remove ai-usage-tracker`. Removing the package reverts the Claude Code settings changed under **Live capture**, the cache refresh hook and the start-at-login entry for every user who used the app with the default folders (`~/.local/share` and `~/.config`). For the AppImage, turn those switches off and remove the cache refresh hook under **Settings → General → Cache time left → Remove** first, then delete the file. Your data stays in `~/.local/share/AIUsageTracker` until you delete it. On GNOME, also remove the widget shortcut under **Settings → Widget shortcut → Remove**, or in GNOME's keyboard settings.
+**Uninstall.** `sudo apt remove ai-usage-tracker` or `sudo dnf remove ai-usage-tracker`. Removing the package reverts the Claude Code settings changed under **Live capture**, the cache refresh hook, the limit hook and the start-at-login entry for every user who used the app with the default folders (`~/.local/share` and `~/.config`). For the AppImage, turn those switches off and remove the cache refresh hook under **Settings → General → Cache time left → Remove** and turn off **Continue after a limit resets** on the **Limits** page first, then delete the file. Your data stays in `~/.local/share/AIUsageTracker` until you delete it. On GNOME, also remove the widget shortcut under **Settings → Widget shortcut → Remove**, or in GNOME's keyboard settings.
 
 ### Verify a download
 
@@ -388,6 +401,7 @@ Every release includes `SHA256SUMS`, the checksum of each file. Put it next to y
 - **Antigravity's temporary copy:** Antigravity keeps its conversations, text included, in a database. So as never to touch that file, the app copies it into a temporary folder only you can open, reads the counts and deletes the copy right away. If the app is forced to quit, the next Antigravity read deletes leftover copies older than 10 minutes. Conversation text never reaches the app's archive.
 - **OpenCode's database:** OpenCode keeps its sessions, text included, in one database. The app opens it read-only and asks it only for token counts, model, provider, agent, project folder, and the name, result and time of each tool call; text is never read.
 - **Cache refresh hook:** if you turn on cache refresh, a small hook is added to `~/.claude/settings.json` (backed up first). The hook and the app share only small files named by each conversation's session ID in the app's data folder: whether the conversation is waiting, when you last sent a prompt, and the refresh request. The hook never reads the conversation, and **Settings → General → Cache time left → Remove** takes it out again.
+- **Limit hook:** if you turn on **Continue after a limit resets**, a small hook is added to `~/.claude/settings.json` (backed up first). The hook and the app share only small files named by each conversation's session ID in the app's data folder: whether the conversation waits for a reset, when the limit stopped it, when it was continued, and the request to continue. The message that continues a conversation is fixed in the app, so nothing a file says reaches the conversation. The hook never reads the conversation, and turning the switch off on the **Limits** page takes it out again.
 - **Network:** the app itself connects only to check for updates and for a newer price list. Each check downloads one file, the release's version file or `config/pricing.json` from this repository, and sends nothing (**Settings → Updates**, **Settings → Prices**). The limit reads, on by default, run your own Claude Code, Codex and Antigravity CLI, which ask their own services for your plan's limit percentages; the app starts Claude Code with its telemetry and error reporting turned off and Codex with its analytics turned off; the Antigravity CLI has no such setting. You can turn the reads off under **Sources → Live capture**. If you install a tool from the app, its installer is downloaded from the maker's site. Plans ship with the app, and currency conversion uses a rate you enter yourself.
 
 ### Live capture
