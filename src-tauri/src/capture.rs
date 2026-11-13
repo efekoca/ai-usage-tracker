@@ -834,7 +834,7 @@ fn read_antigravity(state: &AppState, bin: &Path) -> Result<Vec<tracker_core::mo
     antigravity_limits::query(bin, &work, Duration::from_secs(30), now_ms())
 }
 
-fn claude_binary(s: &Settings) -> Option<PathBuf> {
+pub(crate) fn claude_binary(s: &Settings) -> Option<PathBuf> {
     let configured = (!s.capture.claude_path.trim().is_empty()).then(|| PathBuf::from(s.capture.claude_path.trim()));
     claude_usage::find_claude(&Env::from_system(), configured.as_deref())
 }
@@ -1395,7 +1395,7 @@ fn start_antigravity_poller(app: &AppHandle) {
     });
 }
 
-fn wake_claude(app: &AppHandle) {
+pub(crate) fn wake_claude(app: &AppHandle) {
     if let Some(tx) = app.state::<AppState>().capture.claude_wake.lock().unwrap().as_ref() {
         let _ = tx.send(());
     }

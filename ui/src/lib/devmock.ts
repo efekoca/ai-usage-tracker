@@ -104,6 +104,7 @@ const settings: Settings = {
   cache_auto: showcase,
   cache_lead: 2 as 1 | 2 | 5,
   limit_resume: scenario.get('resume') === '1',
+  window_opener: { enabled: scenario.get('opener') === '1', minute: 360, days: [1, 2, 3, 4, 5] },
   provider_colors: {},
   tint_icons: false,
   show_icons: true,
@@ -786,6 +787,12 @@ const refreshedAt = new Map<string, number>()
 // the limit hook is added on first use too; `?resume=1` shows it at work
 let resumeHook = scenario.get('resume') === '1'
 const resumeCancelled = new Set<string>()
+// the window opener's last runs: one sent this morning, one that found a window open
+const morning = new Date().setHours(6, 0, 0, 0)
+const openerRuns = [
+  { at_ms: morning, day: 'today' as string | null, outcome: 'sent', resets_ms: morning + 5 * 3_600_000, tokens: 1054 as number | null, error: null as string | null },
+  { at_ms: morning - 86_400_000, day: 'yesterday', outcome: 'open', resets_ms: morning - 86_400_000 + 2 * 3_600_000, tokens: null as number | null, error: null as string | null },
+]
 const autoOverride = new Map<string, boolean>()
 const refreshLog: { at: number; usd: number; session: string }[] = []
 function mockCaches() {
@@ -970,6 +977,14 @@ export function installMock() {
           if (cmd === 'set_cache_refresh') refreshHook = !!a.on
           const today = refreshLog.filter((r) => new Date(r.at).toDateString() === new Date().toDateString())
           return { installed: refreshHook, settings_file: platform === 'windows' ? 'C:\\Users\\you\\.claude\\settings.json' : '/Users/you/.claude/settings.json', today: today.length, today_usd: today.reduce((n, r) => n + r.usd, 0) }
+        }
+        case 'window_opener_info':
+        case 'open_window_now': {
+          if (cmd === 'open_window_now') openerRuns.unshift({ at_ms: Date.now(), day: null, outcome: 'sent', resets_ms: Date.now() + 5 * 3_600_000, tokens: 1054, error: null })
+          const o = settings.window_opener
+          const at = (days: number) => new Date(new Date().setHours(0, o.minute, 0, 0) + days * 86_400_000)
+          const next = [0, 1, 2, 3, 4, 5, 6, 7].map(at).find((d) => d.getTime() > Date.now() && o.days.includes(((d.getDay() + 6) % 7) + 1))
+          return { available: claudeMode !== 'missing', running: false, next_ms: o.enabled && next ? next.getTime() : null, runs: openerRuns.slice(0, 5) }
         }
         case 'limit_resume_info':
         case 'set_limit_resume': {

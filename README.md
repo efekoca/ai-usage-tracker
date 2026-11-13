@@ -30,6 +30,7 @@ A private app for Windows, macOS, and Linux that reads the usage logs your AI to
 - **Measure what the cache saves you.** You see the hit rate, the net savings, what it cost when the cache had to be written again after a long pause, and why Claude Code says it had to.
 - **Keep a conversation's cache from running out.** Each Claude Code conversation's cache shows its time left on the **Cache** page, in the widget, the menu bar and the control panel, and Claude Code's own status line can show when it is dropped. Refresh it with one click, or let the app do it shortly before it runs out, for the price of one cache read instead of writing it again.
 - **Pick up where a limit stopped you.** When the usage limit stops a Claude Code conversation, the app continues it by itself once the limit resets, so work cut off overnight goes on without you.
+- **Put the reset where you need it.** Claude's 5-hour window starts with your first request. The app can open it with one small request at a time you choose, say 06:00, so it resets at 11:00 and you use two full windows in one working day.
 - **Keep your history.** Resumed and forked sessions are never counted twice, and your history stays in the archive even after the tools delete their own logs (Claude Code does so after 30 days).
 - **Share your use, not your work.** Turn a day, a week, a month or a year into a card in four sizes. A card holds totals, tool names and model names only.
 
@@ -78,6 +79,14 @@ Providers publish how their limits work, not the numbers themselves. The app the
 - The reset time is never guessed: without Claude Code's own record of it, which needs Claude Code among your sources, the conversation stays as it is and the card says the time is not known.
 - A notification tells you when a conversation was continued; turn it off with **Settings → Notifications → When a conversation the limit stopped is continued**.
 - It needs a Claude Code version that runs a hook when the limit stops a reply (tested with 2.1.322).
+
+**Window scheduler.** Claude's 5-hour window starts with your first request and resets five hours later, so a day that starts at 09:00 gets its reset at 14:00. Turn on **Window scheduler** on the **Limits** page, pick a time and the days, and the app opens the window for you at that time: with 06:00, the window resets at 11:00 and a second one carries you through the afternoon. It is off at first, because each run sends one request.
+
+- The request is the smallest Claude Code can make: the Haiku model, no tools, a one-line system prompt and a one-word answer, 1,000 to 1,500 tokens. It goes through your own Claude Code and sign-in, and nothing of it is kept on disk, so it is not among your sessions; it counts against your plan like any other use.
+- The answer names the time the window resets, and the card shows it with the request's tokens for the latest runs.
+- No request is sent while a reading shows a window already open; the card then says when that window resets.
+- The app must be running and the computer awake at that time. A time missed by more than 15 minutes is skipped for the day, since a window opened late would not reset when you planned. A request that fails is tried again up to twice within those 15 minutes.
+- **Try it now** sends the request at once, whatever the time, so you can see what it does.
 
 ### Limit history
 
@@ -402,6 +411,7 @@ Every release includes `SHA256SUMS`, the checksum of each file. Put it next to y
 - **OpenCode's database:** OpenCode keeps its sessions, text included, in one database. The app opens it read-only and asks it only for token counts, model, provider, agent, project folder, and the name, result and time of each tool call; text is never read.
 - **Cache refresh hook:** if you turn on cache refresh, a small hook is added to `~/.claude/settings.json` (backed up first). The hook and the app share only small files named by each conversation's session ID in the app's data folder: whether the conversation is waiting, when you last sent a prompt, and the refresh request. The hook never reads the conversation, and **Settings → General → Cache time left → Remove** takes it out again.
 - **Limit hook:** if you turn on **Continue after a limit resets**, a small hook is added to `~/.claude/settings.json` (backed up first). The hook and the app share only small files named by each conversation's session ID in the app's data folder: whether the conversation waits for a reset, when the limit stopped it, when it was continued, and the request to continue. The message that continues a conversation is fixed in the app, so nothing a file says reaches the conversation. The hook never reads the conversation, and turning the switch off on the **Limits** page takes it out again.
+- **Window scheduler:** off by default. When on, it runs your own Claude Code once on each chosen day to send one small request (see **Window scheduler** under [Limits that stay current](#limits-that-stay-current)), with Claude Code's telemetry, error reporting, MCP servers and hooks turned off for that run.
 - **Network:** the app itself connects only to check for updates and for a newer price list. Each check downloads one file, the release's version file or `config/pricing.json` from this repository, and sends nothing (**Settings → Updates**, **Settings → Prices**). The limit reads, on by default, run your own Claude Code, Codex and Antigravity CLI, which ask their own services for your plan's limit percentages; the app starts Claude Code with its telemetry and error reporting turned off and Codex with its analytics turned off; the Antigravity CLI has no such setting. You can turn the reads off under **Sources → Live capture**. If you install a tool from the app, its installer is downloaded from the maker's site. Plans ship with the app, and currency conversion uses a rate you enter yourself.
 
 ### Live capture

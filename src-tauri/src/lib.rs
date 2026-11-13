@@ -1,5 +1,6 @@
 mod alerts;
 mod caches;
+mod opener;
 mod refresh;
 mod resume;
 mod capture;
@@ -479,6 +480,8 @@ pub fn run() {
             resume::limit_resume_info,
             resume::set_limit_resume,
             resume::cancel_limit_resume,
+            opener::window_opener_info,
+            opener::open_window_now,
             commands::list_projects,
             commands::list_projects_for_settings,
             commands::set_project_hidden,

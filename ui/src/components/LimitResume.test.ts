@@ -45,7 +45,7 @@ async function render(first: ResumeInfo) {
   return target
 }
 
-const rows = (t: HTMLElement) => [...t.querySelectorAll('.list-row')].map((r) => r.textContent?.replace(/\s+/g, ' ').trim())
+const rows = (t: HTMLElement) => [...t.querySelectorAll('.row')].map((r) => r.textContent?.replace(/\s+/g, ' ').trim())
 const toggle = (t: HTMLElement) => t.querySelector<HTMLButtonElement>('button[role=switch]')!
 
 describe('continuing after a limit resets', () => {
@@ -57,19 +57,23 @@ describe('continuing after a limit resets', () => {
       }),
     )
     const [known, unknown, held, due, went] = rows(target)
-    expect(known).toMatch(/^notes · main Terminal · 5-hour limit full continues at \d/)
-    expect(unknown).toBe("Hidden project Terminal Reset time not known yet Don't continue")
+    expect(known).toMatch(/^notes · main Terminal 5-hour limit full \d\d:\d\d.* continues in 1 h Don't continue$/)
+    expect(unknown).toBe("Hidden project Terminal Reset time not known yet stopped 1 min ago Don't continue")
     expect(held).toContain('Continued too often today')
     expect(due).toContain('Continues shortly')
-    expect(went).toMatch(/^site continued at \d/)
+    expect(went).toMatch(/^site The limit reset and the conversation continued \d\d:\d\d.* continued$/)
     expect(toggle(target).getAttribute('aria-checked')).toBe('true')
+    expect(target.querySelector('.tag')?.textContent).toBe('4 conversations waiting')
+    // how much of the wait is over shows as a wedge; one without a time has none
+    const states = [...target.querySelectorAll('.row .state')].map((s) => [s.getAttribute('aria-label'), !!s.querySelector('path')])
+    expect(states).toEqual([['Waiting for the limit to reset', true], ['Reset time not known', false], ['Reset time not known', false], ['Waiting for the limit to reset', true], ['Continued', true]])
   })
 
   it('calls one conversation off', async () => {
     const target = await render(info({ waiting: [waiting()] }))
     mocks.cancelLimitResume.mockResolvedValue(undefined)
     mocks.limitResumeInfo.mockResolvedValue(info())
-    target.querySelector<HTMLButtonElement>('.list-row button')!.click()
+    target.querySelector<HTMLButtonElement>('.row button')!.click()
     await settle()
     expect(mocks.cancelLimitResume).toHaveBeenCalledWith('s')
     expect(rows(target)).toEqual([])
