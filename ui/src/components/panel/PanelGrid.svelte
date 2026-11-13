@@ -31,6 +31,9 @@
   const mode = $derived<LimitMode>(settings.panel.value === 'used' || settings.panel.value === 'remaining' ? settings.panel.value : settings.limit_display === 'remaining' ? 'remaining' : 'used')
 
   const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+  // a tall Live caches tile is as tall as its conversations: one row for none or one, a row more for each up to three
+  const live = $derived(settings.cache_timer ? (data?.caches ?? []).filter((c) => c.expires_ms > now).length : 0)
+  const rows = (m: Module) => (m.kind === 'caches' && m.size === 't' ? Math.max(1, Math.min(3, live)) : null)
 </script>
 
 <div class="cc-grid" data-zone="panel" role={edit ? 'list' : undefined} aria-label={edit ? t('menubar.panel') : undefined}>
@@ -38,6 +41,7 @@
     {@const k = moduleKey(m)}
     <div
       class="cell {m.size}"
+      style:grid-row={rows(m) ? `span ${rows(m)}` : undefined}
       class:editing={!!edit}
       class:selected={edit?.selected === k}
       class:placeholder={edit?.placeholder === k}

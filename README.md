@@ -230,7 +230,7 @@ The app's icon sits next to the clock on Windows, in the menu bar on macOS, and 
 - **Limits:** one window or both (5-hour and weekly) of Claude, Codex, or Antigravity, as a ring or a bar, with the time until the reset. With several Claude or Codex accounts, each account's limits can have their own tiles.
 - **Forecasts:** when a limit will fill at your current pace, or where it will stand at the reset.
 - **Usage:** tokens and API-equivalent cost for today, 7 or 30 days, for every tool or OpenCode alone. A large tile adds sessions and the cache hit rate.
-- **Live caches:** the conversations whose cache runs out first, with the time left; click the count to open the **Cache** page.
+- **Live caches:** the conversations whose cache runs out first, with the time left; click the count to open the **Cache** page. The tall tile grows with the conversations, up to three, and is one row high while there is one or none.
 - **Last scan:** when the logs were last read; click it to scan again.
 - **Buttons:** open the app, show or hide the widget, scan now, or open Settings.
 
