@@ -775,7 +775,9 @@ function mockCaches() {
     one('c-demo', 'demo-app', 'cache-refresh', 'claude-opus-5-5', 'claude-desktop', 3_600_000, 2_472_000, 388_000, 0.2, 8),
     one('c-demo-main', 'demo-app', 'main', 'claude-sonnet-5-5', 'cli', 3_600_000, 3_150_000, 96_000, 0.1, 4),
   ]
+  // `?caches=2` keeps only that many, to see how the views look with fewer
   return all
+    .slice(0, Number(scenario.get('caches') ?? all.length))
     .filter((c) => !droppedCaches.has(c.session_id))
     .filter((c) => settings.cache_projects !== 'picked' || settings.cache_picked.includes(`C:\\Projects\\${c.project}`))
     .map((c) => (settings.hide_project_names ? { ...c, project: '', branch: null } : c))

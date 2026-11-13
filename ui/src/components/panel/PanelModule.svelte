@@ -268,8 +268,10 @@
     </span>
   </div>
 {:else if m.kind === 'caches'}
-  <div class="mod caches {m.size}" role="group" aria-label={t('panel.caches.title')}>
-    {#if m.size === 't'}
+  <!-- a tall tile with one conversation or none is one row high, so it reads as a wide one -->
+  {@const tall = m.size === 't' && caches.length > 1}
+  <div class="mod caches {tall ? 't' : 'l'}" role="group" aria-label={t('panel.caches.title')}>
+    {#if tall}
       <span class="head top">
         <Icon name="clock" size={14} />
         <span class="lbl">{t('panel.caches.title')}</span>
@@ -279,7 +281,7 @@
     {#if !settings.cache_timer || !caches.length}
       <span class="sub none">{settings.cache_timer ? t('panel.caches.none') : t('panel.caches.off')}</span>
     {:else}
-      {#each caches.slice(0, m.size === 't' ? 3 : 1) as c (c.session_id)}
+      {#each caches.slice(0, tall ? 3 : 1) as c (c.session_id)}
         {@const left = c.expires_ms - clock}
         {@const tone = cacheTone(c, left)}
         {@const busy = c.refreshing || asked.includes(c.session_id)}
@@ -393,10 +395,16 @@
     align-items: stretch;
     justify-content: flex-start;
     gap: 0;
-    padding: 10px 11px 6px;
+    padding: 8px 11px 4px;
   }
   .caches .top {
-    margin-bottom: 4px;
+    margin-bottom: 2px;
+  }
+  /* the rows share the tile's height, two in two grid rows and three in three */
+  .caches.t .crow {
+    flex: 1;
+    height: auto;
+    min-height: 0;
   }
   .crow {
     display: flex;

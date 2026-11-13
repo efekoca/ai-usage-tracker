@@ -219,7 +219,7 @@ Uygulamanın simgesi Windows'ta saatin yanında, macOS'te menü çubuğunda, Lin
 - **Limitler:** Claude, Codex ya da Antigravity için tek pencere ya da ikisi birden (5 saatlik ve haftalık); halka ya da çubuk olarak, sıfırlanmaya kalan süreyle. Birden fazla Claude ya da Codex hesabınız varsa her hesabın limitlerine ayrı kutucuk ekleyebilirsiniz.
 - **Tahminler:** bu hızla bir limitin ne zaman dolacağı ya da sıfırlandığında nerede olacağı.
 - **Kullanım:** bugün, son 7 ya da 30 günün token sayısı ve API eşdeğeri maliyeti; tüm araçlar ya da yalnızca OpenCode için. Büyük kutucukta oturum sayısı ve önbellek isabet oranı da görünür.
-- **Canlı önbellekler:** önbelleği en önce silinecek konuşmalar ve kalan süreleri. Konuşma sayısına tıklayınca **Önbellek** sayfası açılır.
+- **Canlı önbellekler:** önbelleği en önce silinecek konuşmalar ve kalan süreleri. Konuşma sayısına tıklayınca **Önbellek** sayfası açılır. Uzun kutucuk konuşma sayısına göre en çok üç konuşmaya kadar uzar; tek konuşma varken ya da hiç yokken tek satır yüksekliğindedir.
 - **Son tarama:** kayıtların en son ne zaman okunduğu. Tıklayınca yeniden tarar.
 - **Düğmeler:** uygulamayı açma, widget'ı gösterip gizleme, şimdi tarama ve Ayarlar.
 
