@@ -200,7 +200,7 @@
         <span class="txt">
           <span class="lbl">{name}</span>
           <span class="row start"><b class="num val">{@render val(s, 15)}</b><span class="unit">{short(m.window)}</span></span>
-          <span class="sub" title={resetAt(one) || s.sub}>{note(s, one) || (s.value === null ? s.why : ' ')}</span>
+          <span class="sub" title={resetAt(one) || s.sub}>{note(s, one) || (s.value === null ? s.why : '\u00a0')}</span>
         </span>
       {/if}
     {:else}
@@ -236,7 +236,7 @@
           <span class="cell">
             <Ring value={r.s.value} color={color(r.s.used, m.provider)} size={50} stroke={5}><b class="num small">{#if r.s.locked}<Icon name="lock" size={16} />{:else}{r.s.value === null ? '—' : fmtPct(r.s.value)}{/if}</b></Ring>
             <span class="tiny">{short(r.w)}</span>
-            <span class="tiny dim fit" title={r.s.locked || r.s.value === null ? r.s.sub : resetAt(r.l) || undefined}>{note(r.s, r.l) || r.s.why || ' '}</span>
+            <span class="tiny dim fit" title={r.s.locked || r.s.value === null ? r.s.sub : resetAt(r.l) || undefined}>{note(r.s, r.l) || r.s.why || '\u00a0'}</span>
           </span>
         {/each}
       </span>
