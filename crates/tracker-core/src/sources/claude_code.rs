@@ -42,7 +42,7 @@ pub struct ClaudeCtx<'a> {
 const PROMPTS_KEPT: usize = 5_000;
 
 /// The conversation a main transcript is named after; `None` for a subagent's file.
-pub(crate) fn own_session(path: &Path) -> Option<String> {
+fn own_session(path: &Path) -> Option<String> {
     let in_subagents = path.parent().and_then(Path::file_name).is_some_and(|d| d == "subagents");
     path.file_stem().filter(|_| !in_subagents).map(|s| s.to_string_lossy().into_owned()).filter(|s| crate::model::is_uuid(s))
 }

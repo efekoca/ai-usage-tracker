@@ -530,7 +530,7 @@ fn a_codex_subagent_whose_log_names_no_root_turn_is_no_turn_of_its_own() {
     assert_eq!(r.requests_outside, 1, "the subagent's request belongs to no turn the log names");
 }
 
-/// An archive as the build at `version` (16 or 17) left it, with two turns it derived wrongly:
+/// An archive as the build at `version` (16, 17 or 18) left it, with two turns it derived wrongly:
 /// the second request in the first turn, and the third turn begun where a line written again was dated.
 fn archive_of_an_earlier_build(m: &Machine, db: &std::path::Path, version: u32) {
     let dir = m.home.join(".claude/projects/C--Work-Turns");
@@ -576,41 +576,128 @@ fn hours_and_requests(store: &Store, session: &str) -> Vec<(i64, u64)> {
 }
 
 #[test]
-fn turns_an_earlier_build_derived_wrongly_are_set_anew_from_the_logs_still_on_disk() {
-    for version in [16, 17] {
+fn turns_an_earlier_build_derived_wrongly_are_built_again_from_the_logs() {
+    // with the logs' checkpoints as that build left them, and with none (an archive merged from a backup)
+    for (version, checkpoints) in [(16, true), (17, true), (18, true), (17, false), (18, false)] {
         let m = machine();
         let tmp = tempfile::tempdir().unwrap();
         let db = tmp.path().join("tracker.db");
         archive_of_an_earlier_build(&m, &db, version);
         std::fs::remove_file(m.home.join(".claude/projects/C--Work-Turns/s-lost.jsonl")).unwrap();
+        if !checkpoints {
+            rusqlite::Connection::open(&db).unwrap().execute("DELETE FROM file_checkpoint", []).unwrap();
+        }
 
         let mut store = Store::open(&db).unwrap();
-        assert_eq!(hours_and_requests(&store, "s-fix"), [(10, 2), (10, 1)], "as the earlier build left it");
+        assert!(of(&store, "s-fix").is_empty(), "nothing that build derived is shown");
+        let events = store.event_count().unwrap();
         run(&mut store, &m.env);
-        assert_eq!(hours_and_requests(&store, "s-fix"), [(10, 1), (12, 1)], "from version {version}");
-        assert_eq!(of(&store, "s-lost").len(), 1, "a turn whose log is gone is kept as it was");
+        assert_eq!(hours_and_requests(&store, "s-fix"), [(10, 1), (12, 1)], "from version {version}, checkpoints {checkpoints}");
+        assert_eq!(store.event_count().unwrap(), events, "no request is lost or counted twice");
+        // a request whose log is gone stays in the archive, in no turn: nothing is left to check a turn against
+        assert!(of(&store, "s-lost").is_empty());
+        let lost: i64 = store.conn().query_row("SELECT COUNT(*) FROM usage_event WHERE key = 'cc:msg_l1' AND turn IS NULL", [], |r| r.get(0)).unwrap();
+        assert_eq!(lost, 1);
         // and the next read changes nothing
         assert_eq!(run(&mut store, &m.env).files_read, 0);
     }
 }
 
+/// Reads every log, the one whose path holds `first` before the others.
+fn run_first(store: &mut Store, m: &Machine, first: &str) {
+    use_test_round();
+    let mut files = tracker_core::discovery::enumerate_files(&m.env, &tracker_core::discovery::ExtraPaths::default(), &all_sources());
+    files.sort_by_key(|f| !f.path.to_string_lossy().contains(first));
+    tracker_core::ingest::ingest(store, &files, |_| {});
+}
+
+/// What `check` gives for the logs read in either order, and for an archive of the build before
+/// this one, damaged by `damage`, that this one opens and reads again in either order.
+fn in_every_order<T: std::fmt::Debug + PartialEq>(m: &Machine, logs: [&str; 2], damage: &str, check: impl Fn(&Store) -> T, want: T) {
+    for first in logs {
+        let mut clean = Store::open_in_memory().unwrap();
+        run_first(&mut clean, m, first);
+        assert_eq!(check(&clean), want, "a first read, {first} first");
+        for again in logs {
+            let tmp = tempfile::tempdir().unwrap();
+            let db = tmp.path().join("tracker.db");
+            {
+                let mut store = Store::open(&db).unwrap();
+                run_first(&mut store, m, first);
+                store.conn().execute_batch(&format!("{damage}; PRAGMA user_version = 18;")).unwrap();
+                assert_ne!(check(&store), want, "the damage shows");
+            }
+            let mut store = Store::open(&db).unwrap();
+            run_first(&mut store, m, again);
+            assert_eq!(check(&store), want, "read {first} first, then again {again} first");
+        }
+    }
+}
+
 #[test]
-fn a_log_whose_new_read_was_cut_short_is_read_from_its_start_again() {
+fn a_part_of_a_conversation_copied_into_another_log_does_not_move_its_turns_start() {
+    let (own, copy) = ("aaaaaaaa-0000-4000-8000-000000000001", "bbbbbbbb-0000-4000-8000-000000000002");
     let m = machine();
-    let tmp = tempfile::tempdir().unwrap();
-    let db = tmp.path().join("tracker.db");
-    archive_of_an_earlier_build(&m, &db, 17);
-    let mut store = Store::open(&db).unwrap();
-    // the read stopped after the first rounds: the log is still marked, at a point past the wrong records
-    let moved = store
-        .conn()
-        .execute("UPDATE file_checkpoint SET offset = 900, size = 1, state = '{\"_relearn\":true,\"turn\":\"cc:f3\"}' WHERE path LIKE '%s-fix.jsonl'", [])
-        .unwrap();
-    assert_eq!(moved, 1);
-    run(&mut store, &m.env);
-    assert_eq!(hours_and_requests(&store, "s-fix"), [(10, 1), (12, 1)]);
-    let marked: i64 = store.conn().query_row("SELECT COUNT(*) FROM file_checkpoint WHERE state LIKE '%_relearn%'", [], |r| r.get(0)).unwrap();
-    assert_eq!(marked, 0, "the mark goes once a log is read to its end");
+    let dir = m.home.join(".claude/projects/C--Work-Turns");
+    let note = {
+        let mut n = user(own, "10:05:00", "cp1", None);
+        n["isMeta"] = json!(true);
+        n["uuid"] = json!("u-note");
+        n
+    };
+    let mut prompt = user(own, "10:00:00", "cp1", Some("human"));
+    prompt["uuid"] = json!("u-prompt");
+    write(&dir.join(format!("{own}.jsonl")), &[prompt, reply(own, "10:00:05", "msg_cp1", None), note.clone(), reply(own, "10:05:05", "msg_cp2", None)]);
+    // the other conversation carries only the later part, under the first one's id
+    write(&dir.join(format!("{copy}.jsonl")), &[note, reply(own, "10:05:05", "msg_cp2", None), user(copy, "11:00:00", "cp2", Some("human")), reply(copy, "11:00:05", "msg_cp3", None)]);
+    // what the build before this one could leave: the turn begun where the copied part begins
+    let damage = format!("UPDATE turn SET ts_ms = {}, origin = 'other' WHERE id = 'cc:cp1'", DAY.from_ms + 10 * 3_600_000 + 300_000);
+    let check = |store: &Store| of(store, own).iter().map(|t| ((t.started_ms - DAY.from_ms) / 60_000, t.requests, t.origin.clone())).collect::<Vec<_>>();
+    in_every_order(&m, [own, copy], &damage, check, vec![(600, 2, "human".to_owned())]);
+}
+
+#[test]
+fn a_tool_call_copied_into_a_codex_fork_keeps_the_turn_its_own_log_gave_it() {
+    let (parent, fork) = ("0199eeee-0000-7000-8000-000000000001", "0199eeee-0000-7000-8000-000000000002");
+    let m = machine();
+    let dir = m.home.join(".codex/sessions/2026/09/04");
+    let began = DAY.from_ms / 1000 + 18 * 3600;
+    let meta = |time: &str, id: &str, from: Option<&str>| {
+        let mut v = json!({"timestamp": at(time), "type": "session_meta", "payload": {"id": id, "cwd": "C:\\Work\\Turns", "originator": "codex_cli_rs", "source": "cli"}});
+        if let Some(f) = from {
+            v["payload"]["forked_from_id"] = json!(f);
+        }
+        v
+    };
+    let call = |time: &str| cx(time, json!({"type": "item_completed", "thread_id": parent, "turn_id": "ft1", "item": {"type": "CommandExecution", "id": "shared-call", "status": "completed", "exit_code": 0}}));
+    write(
+        &dir.join(format!("rollout-2026-09-04T18-00-00-{parent}.jsonl")),
+        &[
+            meta("18:00:00", parent, None),
+            json!({"timestamp": at("18:00:00"), "type": "turn_context", "payload": {"model": "gpt-5.3-codex"}}),
+            cx_started("18:00:01", "ft1", "ft1", began, "composer"),
+            cx_tokens("18:00:10", 1000),
+            call("18:00:20"),
+            cx("18:00:30", json!({"type": "task_complete", "turn_id": "ft1"})),
+        ],
+    );
+    // the fork begins with a part of the parent's history that holds the call but not the line its turn began with
+    write(
+        &dir.join(format!("rollout-2026-09-04T19-00-00-{fork}.jsonl")),
+        &[
+            meta("19:00:00", fork, Some(parent)),
+            meta("19:00:00", parent, None),
+            call("19:00:00"),
+            json!({"timestamp": at("19:10:00"), "type": "turn_context", "payload": {"model": "gpt-5.3-codex"}}),
+            cx_started("19:10:01", "ft5", "ft5", began + 4200, "composer"),
+            cx_tokens("19:10:10", 5000),
+            cx("19:10:20", json!({"type": "task_complete", "turn_id": "ft5"})),
+        ],
+    );
+    // what the build before this one could leave: the call's turn forgotten
+    let damage = "UPDATE tool_call SET turn = NULL WHERE key = 'cxt:ishared-call'";
+    let check = |store: &Store| of(store, parent).iter().map(|t| (t.requests, t.tool_calls)).collect::<Vec<_>>();
+    in_every_order(&m, [parent, fork], damage, check, vec![(1, 1)]);
 }
 
 #[test]
@@ -618,7 +705,7 @@ fn a_backup_of_an_earlier_build_brings_its_requests_but_not_its_turns() {
     let m = machine();
     let tmp = tempfile::tempdir().unwrap();
     let backup = tmp.path().join("old.db");
-    archive_of_an_earlier_build(&m, &backup, 17);
+    archive_of_an_earlier_build(&m, &backup, 18);
     // an archive that read the same logs itself
     let mut store = Store::open_in_memory().unwrap();
     run(&mut store, &m.env);
