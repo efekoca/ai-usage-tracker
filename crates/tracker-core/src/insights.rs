@@ -923,6 +923,8 @@ pub const MISS_EVENTS: usize = 50;
 const MISS_REPORT_LAG_MS: i64 = 7 * 86_400_000;
 /// How far the log's time of a request may lie from the time Claude Code gives its miss.
 const MISS_NEAR_MS: i64 = 60_000;
+/// Requests this near a miss's time cannot be told apart as the one that missed.
+const MISS_DRIFT_MS: i64 = 5_000;
 
 /// The counts one window on a conversation has told so far: its latest report, and whether the
 /// counts were seen at nothing after it, which ends the run.
@@ -936,7 +938,12 @@ struct MissRun<'a> {
 /// it is, so a report joins the run it can be the next step of, and begins a new one when there
 /// is none. `Some(None)` is a new run; `None` a state already told, which adds nothing.
 fn miss_base<'a>(runs: &mut Vec<MissRun<'a>>, high: Option<i64>, r: &'a crate::model::CacheMissReport) -> Option<Option<&'a crate::model::CacheMissReport>> {
-    let no_fewer = |h: &crate::model::CacheMissReport| h.misses <= r.misses && h.rebuilds <= r.rebuilds;
+    // counts only go up within a run, each cause's and the rewritten tokens too: a report that
+    // lacks what an earlier one told is another window's
+    let no_fewer = |h: &crate::model::CacheMissReport| {
+        let causes = h.causes.iter().all(|(c, n)| r.causes.iter().any(|(rc, rn)| rc == c && rn >= n));
+        h.misses <= r.misses && h.rebuilds <= r.rebuilds && h.recached_tokens <= r.recached_tokens && causes
+    };
     // misses told before: their latest is no later than one already told
     let told = r.misses > 0 && matches!((r.last_miss_ms, high), (Some(l), Some(h)) if l <= h);
     let fits = |run: &MissRun| {
@@ -954,6 +961,7 @@ fn miss_base<'a>(runs: &mut Vec<MissRun<'a>>, high: Option<i64>, r: &'a crate::m
             !run.closed && no_fewer(h)
         }
     };
+    // of several it could go on from, the one that leaves the fewest new: never more than there were
     let found = runs.iter().enumerate().filter(|(_, run)| fits(run)).max_by_key(|(_, run)| (run.head.misses, run.head.rebuilds)).map(|(i, _)| i);
     match found {
         Some(i) => {
@@ -1022,16 +1030,21 @@ pub fn cache_misses<Tz: TimeZone>(store: &Store, range: Range, filter: &Filter, 
             if misses + rebuilds == 0 || at < range.from_ms || at >= range.to_ms {
                 continue;
             }
-            // the request that missed: Claude Code names the miss to the second and the log stamps
-            // the response on its own, so it is the nearest one within a minute, or else the last before
+            // Claude Code names the miss to the second and the log stamps the response on its own,
+            // so any main request within a few seconds can be the one that missed. The latest of
+            // the miss's own second is shown, else the nearest one within a minute, else the last before.
+            let around: Vec<&&EventRow> = main.iter().filter(|e| (e.ts_ms - at).abs() <= MISS_DRIFT_MS).collect();
             let near = main
                 .iter()
-                .filter(|e| (e.ts_ms - at).abs() <= MISS_NEAR_MS)
-                .min_by_key(|e| (e.ts_ms - at).abs())
+                .rev()
+                .find(|e| (at..at.saturating_add(1000)).contains(&e.ts_ms))
+                .or_else(|| main.iter().filter(|e| (e.ts_ms - at).abs() <= MISS_NEAR_MS).min_by_key(|e| (e.ts_ms - at).abs()))
                 .or_else(|| main.iter().rev().find(|e| e.ts_ms <= at))
                 .or(main.first());
-            // a conversation can change model or account: a miss of a request the filter leaves out is not its
-            if !filter.is_empty() && !near.is_some_and(|e| filter.matches(e)) {
+            // a conversation can change model or account: a miss of a request the filter leaves out
+            // is not its, and one the requests around it disagree on is counted under no filter
+            let kept = if around.is_empty() { near.is_some_and(|e| filter.matches(e)) } else { around.iter().all(|e| filter.matches(e)) };
+            if !filter.is_empty() && !kept {
                 continue;
             }
             let before = |cause: &str| base.and_then(|p| p.causes.iter().find(|(c, _)| c == cause)).map_or(0, |(_, n)| *n);

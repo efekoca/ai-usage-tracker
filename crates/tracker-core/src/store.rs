@@ -230,9 +230,22 @@ const MIGRATIONS: &[&str] = &[
         resets_at  INTEGER NOT NULL,
         PRIMARY KEY (session_id, ts_ms, window)
     );
-    DELETE FROM file_checkpoint WHERE parser IN ('claude_code_jsonl', 'cowork_jsonl', 'codex_rollout');
+    UPDATE file_checkpoint SET size = 0, offset = 0, state = '{"_relearn":true}' WHERE parser IN ('claude_code_jsonl', 'cowork_jsonl', 'codex_rollout');
+    "#,
+    // v18: an archive a build at v16 or v17 wrote can hold turns that build derived wrongly, and a
+    // re-read alone keeps them (a known turn is never replaced). Each log is read again from its
+    // start with a mark (`RELEARN`), and that read sets its own records' turns anew; v17 above
+    // marks the logs of an archive that comes from v16. The status-line file is read again too,
+    // for reports such a build passed over.
+    r#"
+    UPDATE file_checkpoint SET size = 0, offset = 0, state = '{"_relearn":true}' WHERE parser IN ('claude_code_jsonl', 'cowork_jsonl', 'codex_rollout');
+    DELETE FROM file_checkpoint WHERE parser = 'statusline_capture';
     "#,
 ];
+
+/// In a checkpoint's state: the log is to be read from its start, and its own records' turns set
+/// anew by that read (see v18). It stays until the read reaches the log's end.
+pub const RELEARN: &str = "_relearn";
 
 /// How long the sign-in of a Claude config folder may go unseen and still count as unchanged: the
 /// app looks every 30 seconds while it runs, so a longer gap means it was closed or asleep.
@@ -931,7 +944,8 @@ impl Store {
             let their_req = if theirs >= 2 { "e.request_id" } else { "NULL" };
             let their_v7 = if theirs >= 7 { "e.branch, e.agent, e.thread_id" } else { "NULL, NULL, NULL" };
             let their_v12 = if theirs >= 12 { "e.limit_reset, e.creator" } else { "NULL, NULL" };
-            let their_turn = |t: &str| if theirs >= 16 { format!("{t}.turn") } else { "NULL".to_owned() };
+            // turns as v16 and v17 derived them can be wrong (see v18), and nothing here could set them right
+            let their_turn = |t: &str| if theirs >= 18 { format!("{t}.turn") } else { "NULL".to_owned() };
             // Codex rows from before v10 use other keys: take them only for sessions this database lacks
             self.conn.execute_batch(
                 "DROP TABLE IF EXISTS temp.codex_sessions;
@@ -967,7 +981,7 @@ impl Store {
                 event_optional.push("creator");
             }
             let mut call_optional = vec!["session_id", "agent"];
-            if theirs >= 16 {
+            if theirs >= 18 {
                 event_optional.push("turn");
                 call_optional.push("turn");
             }
@@ -1038,7 +1052,7 @@ impl Store {
                     [],
                 )?;
             }
-            if theirs >= 16 {
+            if theirs >= 18 {
                 tx.execute(
                     &format!(
                         "INSERT INTO turn(id, tool, session_id, ts_ms, origin)
@@ -1381,6 +1395,24 @@ impl StoreTx<'_> {
         let mut st = self.tx.prepare_cached("INSERT OR IGNORE INTO limit_stop(session_id, ts_ms, window, resets_at) VALUES(?1, ?2, ?3, ?4)")?;
         for s in stops.iter().filter(|s| (0..=latest_accepted_ms()).contains(&s.ts_ms) && (0..=MAX_EPOCH_SECS).contains(&s.resets_at)) {
             st.execute(params![s.session_id, s.ts_ms, s.window, s.resets_at])?;
+        }
+        Ok(())
+    }
+
+    /// Forgets what an earlier build derived about these records' turns, so that the read that
+    /// brings them sets it anew. Records whose log is gone are never named here and keep theirs.
+    pub fn forget_turns(&mut self, events: &[&str], calls: &[&str], turns: &[&str]) -> Result<()> {
+        let mut e = self.tx.prepare_cached("UPDATE usage_event SET turn = NULL WHERE key = ?1")?;
+        for k in events {
+            e.execute([k])?;
+        }
+        let mut c = self.tx.prepare_cached("UPDATE tool_call SET turn = NULL, request = NULL WHERE key = ?1")?;
+        for k in calls {
+            c.execute([k])?;
+        }
+        let mut t = self.tx.prepare_cached("DELETE FROM turn WHERE id = ?1")?;
+        for id in turns {
+            t.execute([id])?;
         }
         Ok(())
     }

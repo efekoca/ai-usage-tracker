@@ -529,3 +529,106 @@ fn a_codex_subagent_whose_log_names_no_root_turn_is_no_turn_of_its_own() {
     let r = turns(&store, &PriceBook::default_book(), DAY, &Filter { tools: vec![Tool::Codex], ..Default::default() }).unwrap();
     assert_eq!(r.requests_outside, 1, "the subagent's request belongs to no turn the log names");
 }
+
+/// An archive as the build at `version` (16 or 17) left it, with two turns it derived wrongly:
+/// the second request in the first turn, and the third turn begun where a line written again was dated.
+fn archive_of_an_earlier_build(m: &Machine, db: &std::path::Path, version: u32) {
+    let dir = m.home.join(".claude/projects/C--Work-Turns");
+    let line = |session: &str, time: &str, prompt: &str, uuid: &str| {
+        let mut v = user(session, time, prompt, Some("human"));
+        v["uuid"] = json!(uuid);
+        v
+    };
+    let bare = {
+        let mut b = user("s-fix", "10:10:00", "", Some("human"));
+        b.as_object_mut().unwrap().remove("promptId");
+        b
+    };
+    write(
+        &dir.join("s-fix.jsonl"),
+        &[
+            line("s-fix", "10:00:00", "f1", "u-1"),
+            reply("s-fix", "10:00:05", "msg_f1", None),
+            bare,
+            reply("s-fix", "10:10:05", "msg_f2", None),
+            line("s-fix", "12:00:00", "f3", "u-3"),
+            reply("s-fix", "12:00:05", "msg_f3", None),
+            line("s-fix", "10:00:00", "f3", "u-1"),
+        ],
+    );
+    write(&dir.join("s-lost.jsonl"), &[user("s-lost", "09:00:00", "l1", Some("human")), reply("s-lost", "09:00:05", "msg_l1", None)]);
+    let mut store = Store::open(db).unwrap();
+    run(&mut store, &m.env);
+    let older = if version == 16 { "DROP TABLE limit_stop; DROP TABLE session_carried; ALTER TABLE tool_call DROP COLUMN request;" } else { "" };
+    store
+        .conn()
+        .execute_batch(&format!(
+            "UPDATE usage_event SET turn = 'cc:f1' WHERE key = 'cc:msg_f2';
+             UPDATE turn SET ts_ms = {} WHERE id = 'cc:f3';
+             {older} PRAGMA user_version = {version};",
+            DAY.from_ms + 10 * 3_600_000
+        ))
+        .unwrap();
+}
+
+fn hours_and_requests(store: &Store, session: &str) -> Vec<(i64, u64)> {
+    of(store, session).iter().map(|t| ((t.started_ms - DAY.from_ms) / 3_600_000, t.requests)).collect()
+}
+
+#[test]
+fn turns_an_earlier_build_derived_wrongly_are_set_anew_from_the_logs_still_on_disk() {
+    for version in [16, 17] {
+        let m = machine();
+        let tmp = tempfile::tempdir().unwrap();
+        let db = tmp.path().join("tracker.db");
+        archive_of_an_earlier_build(&m, &db, version);
+        std::fs::remove_file(m.home.join(".claude/projects/C--Work-Turns/s-lost.jsonl")).unwrap();
+
+        let mut store = Store::open(&db).unwrap();
+        assert_eq!(hours_and_requests(&store, "s-fix"), [(10, 2), (10, 1)], "as the earlier build left it");
+        run(&mut store, &m.env);
+        assert_eq!(hours_and_requests(&store, "s-fix"), [(10, 1), (12, 1)], "from version {version}");
+        assert_eq!(of(&store, "s-lost").len(), 1, "a turn whose log is gone is kept as it was");
+        // and the next read changes nothing
+        assert_eq!(run(&mut store, &m.env).files_read, 0);
+    }
+}
+
+#[test]
+fn a_log_whose_new_read_was_cut_short_is_read_from_its_start_again() {
+    let m = machine();
+    let tmp = tempfile::tempdir().unwrap();
+    let db = tmp.path().join("tracker.db");
+    archive_of_an_earlier_build(&m, &db, 17);
+    let mut store = Store::open(&db).unwrap();
+    // the read stopped after the first rounds: the log is still marked, at a point past the wrong records
+    let moved = store
+        .conn()
+        .execute("UPDATE file_checkpoint SET offset = 900, size = 1, state = '{\"_relearn\":true,\"turn\":\"cc:f3\"}' WHERE path LIKE '%s-fix.jsonl'", [])
+        .unwrap();
+    assert_eq!(moved, 1);
+    run(&mut store, &m.env);
+    assert_eq!(hours_and_requests(&store, "s-fix"), [(10, 1), (12, 1)]);
+    let marked: i64 = store.conn().query_row("SELECT COUNT(*) FROM file_checkpoint WHERE state LIKE '%_relearn%'", [], |r| r.get(0)).unwrap();
+    assert_eq!(marked, 0, "the mark goes once a log is read to its end");
+}
+
+#[test]
+fn a_backup_of_an_earlier_build_brings_its_requests_but_not_its_turns() {
+    let m = machine();
+    let tmp = tempfile::tempdir().unwrap();
+    let backup = tmp.path().join("old.db");
+    archive_of_an_earlier_build(&m, &backup, 17);
+    // an archive that read the same logs itself
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &m.env);
+    assert_eq!(hours_and_requests(&store, "s-fix"), [(10, 1), (12, 1)]);
+    store.merge_from(&backup).unwrap();
+    assert_eq!(hours_and_requests(&store, "s-fix"), [(10, 1), (12, 1)], "what that build derived wrongly does not come along");
+    // one that has not: the requests arrive, in no turn until their logs are read
+    let mut fresh = Store::open_in_memory().unwrap();
+    assert!(fresh.merge_from(&backup).unwrap().0 > 0);
+    assert!(of(&fresh, "s-fix").is_empty());
+    run(&mut fresh, &m.env);
+    assert_eq!(hours_and_requests(&fresh, "s-fix"), [(10, 1), (12, 1)]);
+}

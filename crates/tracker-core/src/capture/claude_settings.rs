@@ -626,15 +626,33 @@ pub fn read_settings(path: &Path) -> Option<Value> {
 /// Variables that give Claude Code a sign-in other than its config folder's.
 const OWN_SIGN_IN: [&str; 3] = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"];
 
-/// Whether settings give Claude Code a sign-in of its own: a token or key in their `env`, or a
-/// key helper. Only the names count.
+/// Switches that send Claude Code's requests to a cloud provider instead of the plan, which
+/// come before a sign-in kept in the config folder.
+const OWN_PROVIDER: [&str; 3] = ["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"];
+
+/// Whether a switch is on, as Claude Code reads one: `1`, `true`, `yes` or `on`.
+fn switched_on(value: &str) -> bool {
+    matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
+}
+
+/// Whether settings give Claude Code a sign-in of its own: a token or key in their `env`, a key
+/// helper, or a cloud provider turned on. Only the names count, and for a switch whether it is on.
 pub fn own_sign_in(docs: &[Value]) -> bool {
-    docs.iter().any(|d| d.get("env").and_then(Value::as_object).is_some_and(|e| OWN_SIGN_IN.iter().any(|k| e.contains_key(*k))) || d.get("apiKeyHelper").is_some())
+    let on = |v: &Value| match v {
+        Value::String(s) => switched_on(s),
+        Value::Bool(b) => *b,
+        Value::Number(n) => n.as_f64() == Some(1.0),
+        _ => false,
+    };
+    docs.iter().any(|d| {
+        let env = d.get("env").and_then(Value::as_object);
+        env.is_some_and(|e| OWN_SIGN_IN.iter().any(|k| e.contains_key(*k)) || OWN_PROVIDER.iter().any(|k| e.get(*k).is_some_and(on))) || d.get("apiKeyHelper").is_some()
+    })
 }
 
 /// The same in this process's environment, which the CLI inherits.
 pub fn own_sign_in_env() -> bool {
-    OWN_SIGN_IN.iter().any(|k| std::env::var_os(k).is_some_and(|v| !v.is_empty()))
+    OWN_SIGN_IN.iter().any(|k| std::env::var_os(k).is_some_and(|v| !v.is_empty())) || OWN_PROVIDER.iter().any(|k| std::env::var(k).is_ok_and(|v| switched_on(&v)))
 }
 
 pub fn install_otel(st: &mut CaptureState, data_dir: &Path, settings_file: &Path, port: u16, token: &str, now_ms: i64) -> Result<OtelChange, SettingsError> {
@@ -920,6 +938,15 @@ mod tests {
     fn a_token_key_or_key_helper_in_settings_is_a_sign_in_of_its_own() {
         for doc in [json!({"env": {"CLAUDE_CODE_OAUTH_TOKEN": "x"}}), json!({"env": {"ANTHROPIC_API_KEY": ""}}), json!({"apiKeyHelper": "/bin/key.sh"})] {
             assert!(own_sign_in(&[json!({"model": "opus"}), doc.clone()]), "{doc}");
+        }
+        // a cloud provider turned on comes before the folder's sign-in, however the switch is written
+        for on in [json!("1"), json!("true"), json!(1), json!(true)] {
+            for k in ["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"] {
+                assert!(own_sign_in(&[json!({"env": {k: on}})]), "{k} {on}");
+            }
+        }
+        for off in [json!("0"), json!("false"), json!(""), json!("2"), json!(0), json!(false), json!(null)] {
+            assert!(!own_sign_in(&[json!({"env": {"CLAUDE_CODE_USE_BEDROCK": off}})]), "{off}");
         }
         assert!(!own_sign_in(&[json!({"env": {"OTEL_LOGS_EXPORTER": "otlp", "ANTHROPIC_BASE_URL": "x"}}), json!("not an object")]));
         let (_d, file, _) = setup(Some("\u{feff}{\"env\": {\"ANTHROPIC_AUTH_TOKEN\": \"x\"}}"));
