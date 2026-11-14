@@ -1339,3 +1339,50 @@ fn a_long_prompt_after_a_step_does_not_hide_it_and_a_carried_conversation_is_no_
     assert_eq!((l.conversations, l.starts.last().map(|s| s.tokens), l.typical), (11, Some(30_000), 30_200));
     assert_eq!(l.change, Some(StartChange { at_ms: t + 5 * DAY, before: 50_100, after: 30_200 }), "three in a row below all before; the long prompt came after");
 }
+
+#[test]
+fn a_report_joins_the_window_whose_causes_it_carries_on() {
+    let t = ms(2026, 11, 10, 12, 0);
+    let report = |ts_ms: i64, last: i64, misses: u64, cause: &str| CacheMissReport { session_id: "s1".into(), ts_ms, last_miss_ms: Some(last), requests: 5, misses, rebuilds: 0, recached_tokens: misses * 1_000, causes: vec![(cause.into(), misses)] };
+    let mut store = store_with(&[ev("a", t, Tool::ClaudeCode, "claude-opus-5-5", Some("s1"), "/p/notes", 10, 100, 5)]);
+    let mut tx = store.transaction().unwrap();
+    tx.insert_cache_miss_reports(&[
+        report(t + MIN, t + MIN, 5, "ttl_expired_5m"),
+        report(t + 10 * MIN, t + 9 * MIN, 1, "tools_changed"),
+        // the second window passes the first: five more of its own, not one more than the first's five
+        report(t + 20 * MIN, t + 19 * MIN, 6, "tools_changed"),
+    ])
+    .unwrap();
+    tx.commit().unwrap();
+    let m = cache_misses(&store, Range { from_ms: t - HOUR, to_ms: t + HOUR }, &Filter::default(), &chrono::Utc).unwrap();
+    assert_eq!((m.misses, m.recached_tokens), (11, 11_000));
+    assert_eq!(m.causes, [MissCause { cause: "tools_changed".into(), misses: 6 }, MissCause { cause: "ttl_expired_5m".into(), misses: 5 }]);
+}
+
+#[test]
+fn a_miss_two_requests_of_its_second_could_have_made_is_counted_under_neither_filter() {
+    let t = ms(2026, 11, 10, 12, 0);
+    let mut store = store_with(&[
+        ev("a", t + 100, Tool::ClaudeCode, "claude-sonnet-5-5", Some("s1"), "/p/notes", 10, 100, 5),
+        ev("b", t + 900, Tool::ClaudeCode, "claude-opus-5-5", Some("s1"), "/p/notes", 10, 100, 5),
+    ]);
+    let mut tx = store.transaction().unwrap();
+    tx.insert_cache_miss_reports(&[CacheMissReport { session_id: "s1".into(), ts_ms: t + MIN, last_miss_ms: Some(t), requests: 2, misses: 1, rebuilds: 0, recached_tokens: 1_000, causes: vec![("model_changed".into(), 1)] }]).unwrap();
+    tx.commit().unwrap();
+    let range = Range { from_ms: t - HOUR, to_ms: t + HOUR };
+    let of = |model: &str| cache_misses(&store, range, &Filter { models: vec![model.into()], ..Default::default() }, &chrono::Utc).unwrap().misses;
+    assert_eq!((of("claude-sonnet-5-5"), of("claude-opus-5-5")), (0, 0), "the second it happened in does not say which");
+    // nor does a response the log stamped just past that second
+    let mut drift = store_with(&[
+        ev("a", t + 100, Tool::ClaudeCode, "claude-sonnet-5-5", Some("s2"), "/p/notes", 10, 100, 5),
+        ev("b", t + 1_100, Tool::ClaudeCode, "claude-opus-5-5", Some("s2"), "/p/notes", 10, 100, 5),
+    ]);
+    let mut tx = drift.transaction().unwrap();
+    tx.insert_cache_miss_reports(&[CacheMissReport { session_id: "s2".into(), ts_ms: t + MIN, last_miss_ms: Some(t), requests: 2, misses: 1, rebuilds: 0, recached_tokens: 1_000, causes: vec![("model_changed".into(), 1)] }]).unwrap();
+    tx.commit().unwrap();
+    for model in ["claude-sonnet-5-5", "claude-opus-5-5"] {
+        assert_eq!(cache_misses(&drift, range, &Filter { models: vec![model.into()], ..Default::default() }, &chrono::Utc).unwrap().misses, 0, "{model}");
+    }
+    let all = cache_misses(&store, range, &Filter::default(), &chrono::Utc).unwrap();
+    assert_eq!((all.misses, all.projects[0].events[0].model.as_deref()), (1, Some("claude-opus-5-5")), "shown with the later request of that second");
+}

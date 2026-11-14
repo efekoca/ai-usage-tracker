@@ -120,12 +120,22 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<FileR
     // compressed file is read again from its start, and its keys merge with what was stored
     let packed = is_compressed(&f.path);
 
+    // a log marked to have its turns set anew is read from its start, however far an
+    // interrupted read of it got: what that read had seen is not kept
+    let turn_logs = matches!(f.parser, ParserKind::ClaudeCodeJsonl | ParserKind::CoworkJsonl | ParserKind::CodexRollout);
+    let relearn = turn_logs && cp.as_ref().is_some_and(|c| c.state.get(crate::store::RELEARN).is_some());
     let (mut offset, mut state) = match &cp {
+        Some(c) if relearn && !(c.file_id == f.file_id && c.size == size && c.mtime_ms == mtime_ms) => (0, serde_json::Value::Null),
         Some(c) if c.file_id == f.file_id && c.size == size && c.mtime_ms == mtime_ms => return Ok(None),
         Some(c) if f.parser.is_incremental() && !packed && c.file_id == f.file_id && size >= c.offset && same_tail(&f.path, c) => (c.offset, c.state.clone()),
         Some(c) if f.parser.keeps_state() && c.file_id == f.file_id => (0, c.state.clone()),
         _ => (0, serde_json::Value::Null), // new, replaced, truncated or whole-document file
     };
+
+    // each of the log's own records forgets its turn once, before the first copy of it in this
+    // read; a record copied here from another conversation's log keeps what its own log gave it
+    let home = claude_code::own_session(&f.path);
+    let mut relearned: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     let mut read = FileRead::default();
     // where the first record dated too far ahead was read: the file is read from there again
@@ -147,6 +157,15 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<FileR
             if let Some(ts) = tx.absorb_offset_copy(thread, &out.events[*i].tokens).map_err(|e| e.to_string())? {
                 out.events[*i].ts_ms = out.events[*i].ts_ms.min(ts);
             }
+        }
+        if relearn {
+            let new = |k: &str, seen: &mut std::collections::HashSet<String>| seen.insert(k.to_owned());
+            let own = |session: &Option<String>| home.is_none() || *session == home;
+            let copied = |i: usize| out.copies.iter().any(|(at, _)| *at == i);
+            let events: Vec<&str> = out.events.iter().enumerate().filter(|(i, e)| own(&e.session_id) && !copied(*i)).map(|(_, e)| e.key.as_str()).filter(|k| new(&format!("e{k}"), &mut relearned)).collect();
+            let calls: Vec<&str> = out.tool_calls.iter().filter(|c| own(&c.session_id)).map(|c| c.key.as_str()).filter(|k| new(&format!("c{k}"), &mut relearned)).collect();
+            let turns: Vec<&str> = out.turns.iter().map(|t| t.id.as_str()).filter(|k| new(&format!("t{k}"), &mut relearned)).collect();
+            tx.forget_turns(&events, &calls, &turns).map_err(|e| e.to_string())?;
         }
         tx.upsert_events(&out.events).map_err(|e| e.to_string())?;
         tx.insert_limits(&out.limits).map_err(|e| e.to_string())?;
@@ -185,7 +204,16 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<FileR
             Some((at, st)) => (0, *at, st),
             None => (stored, out.next_offset, &out.state),
         };
-        let kept = if f.parser.is_incremental() && !packed { with_tail(kept, &f.path, next) } else { kept.clone() };
+        let mut kept = if f.parser.is_incremental() && !packed { with_tail(kept, &f.path, next) } else { kept.clone() };
+        // the mark stays while rounds of the log are still to come
+        if relearn && more {
+            match &mut kept {
+                serde_json::Value::Object(m) => {
+                    m.insert(crate::store::RELEARN.into(), true.into());
+                }
+                other => *other = serde_json::json!({ crate::store::RELEARN: true }),
+            }
+        }
         tx.set_checkpoint(
             &key,
             &f.file_id,

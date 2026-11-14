@@ -895,8 +895,8 @@ fn read_claude(state: &AppState, s: &Settings, bin: &Path) -> Result<Vec<tracker
 /// What Claude Code sends its requests with, when the app starts it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CliSignIn {
-    /// A token or key the CLI is handed, which wins over its folder's sign-in: such a request is
-    /// billed by use and touches no plan window.
+    /// A token or key the CLI is handed, or a cloud provider it is switched to, which wins over
+    /// its folder's sign-in: such a request is billed by use and touches no plan window.
     OwnKey,
     /// Its config folder's sign-in.
     Account(String),

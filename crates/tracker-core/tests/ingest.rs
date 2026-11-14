@@ -1519,3 +1519,27 @@ fn a_limit_stop_is_kept_with_the_conversation_it_stopped() {
     store.wipe_data().unwrap();
     assert!(store.limit_stops("stop-a", 0, i64::MAX).unwrap().is_empty());
 }
+
+#[test]
+fn a_report_an_earlier_build_passed_over_is_read_from_the_status_line_file_again() {
+    use serde_json::json;
+    use tracker_core::capture::statusline;
+    let dir = tempfile::tempdir().unwrap();
+    let now = chrono::Utc::now().timestamp_millis();
+    let report = json!({"session_id": "s-old", "prompt_cache": {"requests": 20, "misses": 1, "expected_rebuilds": 0, "miss_recache_tokens": 1000}});
+    assert!(statusline::record_cache_misses(dir.path(), &report, now - 60_000));
+    let path = statusline::capture_file(dir.path());
+    let files = [DiscoveredFile { file_id: file_identity(&path), path, parser: tracker_core::sources::ParserKind::StatuslineCapture, source: SourceId::ClaudeCode }];
+    let db = dir.path().join("tracker.db");
+    {
+        let mut store = Store::open(&db).unwrap();
+        tracker_core::ingest::ingest(&mut store, &files, |_| {});
+        // the earlier build read past the report without keeping it
+        store.conn().execute_batch("DELETE FROM cache_miss_report; PRAGMA user_version = 17;").unwrap();
+    }
+    let mut store = Store::open(&db).unwrap();
+    tracker_core::ingest::ingest(&mut store, &files, |_| {});
+    assert_eq!(store.cache_miss_reports(0, i64::MAX).unwrap().len(), 1);
+    tracker_core::ingest::ingest(&mut store, &files, |_| {});
+    assert_eq!(store.cache_miss_reports(0, i64::MAX).unwrap().len(), 1);
+}
