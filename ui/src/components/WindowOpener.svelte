@@ -116,7 +116,7 @@
         </button>
       </div>
       {#if !info.available}<p class="subtle small plain">{t('opener.unavailable')}</p>{/if}
-      {#if error}<p class="error small plain" role="alert">{t('common.error', { e: error })}</p>{/if}
+      {#if error}<p class="error small plain" role="alert">{t('common.error', { e: why(error) })}</p>{/if}
 
       {#if info.runs.length}
         <div class="runs">

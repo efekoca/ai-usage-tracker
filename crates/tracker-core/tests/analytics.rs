@@ -532,13 +532,13 @@ fn a_web_search_count_past_u32_is_never_imported_or_kept() {
         let s = Store::open(&old).unwrap();
         event(s.conn(), "kept", 3);
         event(s.conn(), "wrapped", u32::MAX as i64 + 2);
-        // the columns v12 and v16 add and the indexes v13 and v16 add did not exist yet
+        // the columns v12, v16 and v17 add and the indexes v13 and v16 add did not exist yet
         s.conn()
             .execute_batch(
                 "DROP INDEX usage_event_tool_owner; ALTER TABLE usage_event DROP COLUMN limit_reset; ALTER TABLE usage_event DROP COLUMN creator;
                  ALTER TABLE usage_event DROP COLUMN owner; ALTER TABLE limit_snapshot DROP COLUMN owner;
                  DROP INDEX usage_event_turn; DROP INDEX tool_call_turn; ALTER TABLE usage_event DROP COLUMN turn; ALTER TABLE tool_call DROP COLUMN turn;
-                 PRAGMA user_version = 10;",
+                 ALTER TABLE tool_call DROP COLUMN request; PRAGMA user_version = 10;",
             )
             .unwrap();
     }

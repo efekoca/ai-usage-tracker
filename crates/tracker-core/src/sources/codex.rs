@@ -224,8 +224,12 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
                     if t.forked_from.is_none() && t.agent.is_none() {
                         st.unsourced = Some(id.to_owned());
                     }
+                    let forked = t.forked_from.is_some() && t.agent.is_none();
                     st.threads.entry(id.to_owned()).or_insert(t);
                     if st.own.is_none() {
+                        if forked {
+                            out.carried.push((Tool::Codex, id.to_owned()));
+                        }
                         st.own = Some(id.to_owned());
                         st.vouch = str_at(p, "creator_account_id").filter(|a| !a.is_empty()).map(account_digest);
                         st.started_ms = str_at(p, "timestamp").and_then(parse_ts_ms).or(ts_ms);
@@ -248,14 +252,17 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
             }
             ("event_msg", Some("task_started")) => {
                 let own = str_at(p, "turn_id").filter(|t| !t.is_empty());
-                let root = str_at(p, "root_turn_id").filter(|t| !t.is_empty()).or(own);
+                let who = st.who(path);
+                // a subagent's task is part of the turn that set it off; a version that does not
+                // name that turn leaves the task in none
+                let root = str_at(p, "root_turn_id").filter(|t| !t.is_empty()).or(own.filter(|_| who.agent.is_none()));
                 st.turn = root.map(|r| format!("cx:{r}"));
                 let began = i64_at(p, "started_at").filter(|s| (1..=MAX_EPOCH_SECS).contains(s)).map(|s| s * 1000).or(ts_ms);
-                // a subagent's turn is part of its root's, which the main thread's own log records
-                if let (Some(id), Some(ts_ms), true) = (st.turn.clone(), began, root == own) {
+                // the main thread's own log records the turn
+                if let (Some(id), Some(ts_ms), true) = (st.turn.clone(), began, root == own && who.agent.is_none()) {
                     let trigger = p.get("turn_attribution").and_then(|a| str_at(a, "turn_trigger"));
                     let origin = if matches!(trigger, None | Some("composer" | "edit_user_message")) { "human" } else { "other" };
-                    out.turns.push(Turn { id, tool: Tool::Codex, session_id: Some(st.who(path).session), ts_ms, origin: origin.to_owned() });
+                    out.turns.push(Turn { id, tool: Tool::Codex, session_id: Some(who.session), ts_ms, origin: origin.to_owned() });
                 }
                 out.lines_recognised += 1;
             }
@@ -479,6 +486,7 @@ fn action(who: &Who, offset: u64, ts_ms: i64, item: &Value) -> Option<ToolCall> 
         name,
         failed,
         turn: None,
+        request: None,
     })
 }
 

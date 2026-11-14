@@ -998,6 +998,8 @@ export interface TurnCost {
   agents: number
   tool_calls: number
   tool_failed: number
+  /** The filter left out some of the turn's requests, so its tool calls are not counted. */
+  calls_hidden: boolean
   total_tokens: number
   cost_usd: number
   unpriced_requests: number

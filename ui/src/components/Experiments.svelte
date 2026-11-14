@@ -98,7 +98,12 @@
     ]
   }
   const waiting = (m: MarkerView) => m.after.to_ms <= m.after.from_ms
-  const passed = (m: MarkerView) => Math.max(0, Math.min(m.days, Math.floor((m.after.to_ms - m.after.from_ms) / DAY)))
+  /** The whole calendar days that have passed since the marker, as the comparison counts them. */
+  function passed(m: MarkerView): number {
+    let k = 0
+    while (k < m.days && addDays(m.after.from_ms, k + 1) <= m.after.to_ms) k++
+    return k
+  }
   const scope = (m: MarkerView) =>
     [m.project_id === null ? '' : m.project_gone ? t('experiment.projectGone') : projectName({ id: m.project_id, name: m.project, hidden: m.project_hidden }), m.tool ? toolLabel(m.tool) : ''].filter(Boolean)
   /** `days` calendar days from the day of `at`: a day the clock changes on is still one day. */
@@ -177,14 +182,16 @@
             {/if}
           </span>
           <b class="after num" role="cell" aria-label="{t('experiment.after')}: {x.after}">{x.after}</b>
-          <span class="delta" role="cell">{#if x.change}<span class="change num {x.tone}">{x.change}</span>{/if}</span>
+          <span class="delta" role="cell">
+            {#if x.change}<span class="change num {x.tone}">{x.change}</span>{#if x.tone}<span class="sr-only">{` ${t(`experiment.${x.tone}`)}`}</span>{/if}{/if}
+          </span>
         </div>
       {/each}
     </div>
     <p class="subtle small basis">
       {beforeDays(m.at_ms, m.days)}: {used(m.before)} · {afterDays(m.at_ms, m.days)}: {waiting(m) ? t('experiment.notYet') : used(m.after)}
     </p>
-    {#if !waiting(m) && thin(m)}<p class="subtle small thin"><Icon name="info" size={13} />{t('experiment.thin')}</p>{/if}
+    {#if !waiting(m) && !m.project_gone && thin(m)}<p class="subtle small thin"><Icon name="info" size={13} />{t('experiment.thin')}</p>{/if}
     {#if muchUnpriced(m)}<p class="subtle small thin"><Icon name="info" size={13} />{t('experiment.unpriced', { n: fmtInt(unpriced(m)) })}</p>{/if}
   </article>
 {:else}
@@ -460,5 +467,12 @@
       grid-column: 1 / -1;
       grid-row: 3;
     }
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
   }
 </style>

@@ -22,9 +22,13 @@
 //!   the subagents it starts share one, in the subagents' own files too. Responses carry none and
 //!   belong to the user line before them. `origin.kind` or `turnOrigin` says what began the turn
 //!   (`human`, `task-notification`, `peer`, …); older versions wrote neither.
+//! * Claude desktop can write earlier lines of a file again, with their `uuid` and time but the
+//!   id of a later prompt: a prompt line the file already held begins no turn.
+//! * A conversation resumed under a new id or forked starts its file with the earlier one's lines,
+//!   which keep the earlier `sessionId`.
 
 use super::{str_at, u64_at, i64_at, JsonlReader, ParseOutput};
-use crate::model::{parse_ts_ms, Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, Turn, UsageEvent};
+use crate::model::{parse_ts_ms, Accuracy, LimitSnapshot, LimitStop, Provider, Tokens, Tool, ToolCall, Turn, UsageEvent, MAX_EPOCH_SECS};
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -32,6 +36,15 @@ pub struct ClaudeCtx<'a> {
     /// Overrides the `entrypoint` client label (used for Cowork sessions).
     pub client_override: Option<&'a str>,
     pub source: &'a str,
+}
+
+/// How many of a file's latest prompt lines are remembered between reads.
+const PROMPTS_KEPT: usize = 5_000;
+
+/// The conversation a main transcript is named after; `None` for a subagent's file.
+fn own_session(path: &Path) -> Option<String> {
+    let in_subagents = path.parent().and_then(Path::file_name).is_some_and(|d| d == "subagents");
+    path.file_stem().filter(|_| !in_subagents).map(|s| s.to_string_lossy().into_owned()).filter(|s| crate::model::is_uuid(s))
 }
 
 /// `C:\Users\me\app` → `C--Users-me-app` (Claude Code's project folder naming).
@@ -69,6 +82,10 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
     // sub-directories the agent cd'd into, which would split one project into many.
     let mut root_cwd = str_at(state, "root_cwd").map(str::to_owned);
     let mut turn = str_at(state, "turn").map(str::to_owned);
+    // the prompt lines read so far, by their own ids
+    let mut prompts: Vec<String> = state.get("prompts").and_then(Value::as_array).map(|a| a.iter().filter_map(|u| u.as_str().map(str::to_owned)).collect()).unwrap_or_default();
+    let own = own_session(path);
+    let mut carried = false;
     let mut typed = 0u64;
     let mut undated = 0u64;
     for line in lines.by_ref() {
@@ -86,9 +103,27 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
         if root_cwd.is_none() {
             root_cwd = str_at(v, "cwd").filter(|s| !s.is_empty()).map(|c| launch_dir(c, folder.as_deref()));
         }
-        if let Some((id, start)) = turn_of(v) {
-            out.turns.extend(start);
-            turn = Some(id);
+        match turn_of(v) {
+            Some((id, start)) => {
+                if let Some(start) = start {
+                    let again = str_at(v, "uuid").is_some_and(|u| prompts.iter().any(|p| p == u));
+                    if !again {
+                        prompts.extend(str_at(v, "uuid").map(str::to_owned));
+                        out.turns.push(start);
+                    }
+                }
+                turn = Some(id);
+            }
+            // a prompt that names no turn still ends the one before it
+            None if unnamed_prompt(v) => turn = None,
+            None => {}
+        }
+        if matches!(str_at(v, "type"), Some("user" | "assistant")) {
+            let other = str_at(v, "sessionId").is_some_and(|s| !s.is_empty() && own.as_deref().is_some_and(|o| o != s));
+            if other && !carried && v.get("isSidechain").and_then(Value::as_bool) != Some(true) {
+                carried = true;
+                out.carried.extend(own.clone().map(|o| (Tool::ClaudeCode, o)));
+            }
         }
         let mut recognised = false;
         // each Cowork session runs in its own scratch folder; group them as one project
@@ -110,6 +145,7 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
         }
         out.tool_results.extend(tool_results(v));
         if let Some(ls) = quota_limit(v, ctx) {
+            out.stops.extend(limit_stop(v, &ls));
             out.limits.push(ls);
             recognised = true;
         }
@@ -124,7 +160,8 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
         out.warn("unrecognised format: no line has a `type` field");
     }
     out.warn_undated(undated);
-    out.state = json!({ "root_cwd": root_cwd, "turn": turn });
+    let from = prompts.len().saturating_sub(PROMPTS_KEPT);
+    out.state = json!({ "root_cwd": root_cwd, "turn": turn, "prompts": &prompts[from..] });
     out.next_offset = lines.finish()?;
     Ok(out)
 }
@@ -166,6 +203,18 @@ fn model_id(model: &str) -> String {
     super::opencode::cloud_claude_id(model).unwrap_or_else(|| model.to_owned())
 }
 
+/// The key of the request a response line belongs to: its message id, else its request id, else
+/// the line's own id.
+fn request_key(v: &Value, msg: &Value) -> Option<String> {
+    if let Some(id) = str_at(msg, "id") {
+        Some(format!("cc:{id}"))
+    } else if let Some(rid) = str_at(v, "requestId") {
+        Some(format!("ccr:{rid}"))
+    } else {
+        str_at(v, "uuid").map(|uuid| format!("ccu:{uuid}"))
+    }
+}
+
 /// Every iteration re-sends the conversation, so the prompt size is the largest one, not the sum.
 pub(crate) fn usage_events(v: &Value, ctx: &ClaudeCtx) -> Vec<UsageEvent> {
     if str_at(v, "type") != Some("assistant") {
@@ -178,15 +227,7 @@ pub(crate) fn usage_events(v: &Value, ctx: &ClaudeCtx) -> Vec<UsageEvent> {
         return Vec::new();
     }
     let model = model_id(raw_model);
-    let key = if let Some(id) = str_at(msg, "id") {
-        format!("cc:{id}")
-    } else if let Some(rid) = str_at(v, "requestId") {
-        format!("ccr:{rid}")
-    } else if let Some(uuid) = str_at(v, "uuid") {
-        format!("ccu:{uuid}")
-    } else {
-        return Vec::new();
-    };
+    let Some(key) = request_key(v, msg) else { return Vec::new() };
     let Some(ts_ms) = str_at(v, "timestamp").and_then(parse_ts_ms) else { return Vec::new() };
 
     let mut tokens = usage_tokens(usage);
@@ -287,6 +328,7 @@ fn tool_calls(v: &Value) -> Vec<ToolCall> {
     let Some(blocks) = v.get("message").and_then(|m| m.get("content")).and_then(Value::as_array) else { return Vec::new() };
     let Some(ts_ms) = str_at(v, "timestamp").and_then(parse_ts_ms) else { return Vec::new() };
     let (agent, _) = subagent(v);
+    let request = v.get("message").and_then(|m| request_key(v, m));
     blocks
         .iter()
         .filter(|b| matches!(str_at(b, "type"), Some("tool_use" | "server_tool_use")))
@@ -302,6 +344,7 @@ fn tool_calls(v: &Value) -> Vec<ToolCall> {
                 name: name.to_owned(),
                 failed: None,
                 turn: None,
+                request: request.clone(),
             })
         })
         .collect()
@@ -320,14 +363,16 @@ fn turn_of(v: &Value) -> Option<(String, Option<Turn>)> {
     }
     let id = format!("cc:{}", str_at(v, "promptId").filter(|p| !p.is_empty())?);
     let flag = |k: &str| v.get(k).and_then(Value::as_bool) == Some(true);
-    if flag("isSidechain") || has_tool_result(v) {
+    // a compaction's summary is written into the turn it happens in, dated when the summary
+    // was made, which can be long before: it is no line the turn began with
+    if flag("isSidechain") || flag("isCompactSummary") || has_tool_result(v) {
         return Some((id, None));
     }
     let named = str_at(v, "turnOrigin").or_else(|| v.get("origin").and_then(|o| str_at(o, "kind")));
     let origin = match named.map(|o| o.replace('-', "_")).as_deref() {
         Some(o @ ("human" | "task_notification" | "peer" | "scheduled" | "sdk")) => o.to_owned(),
         // versions that named no origin wrote the user's own prompt as a plain line
-        None if !flag("isMeta") && !flag("isCompactSummary") => "human".to_owned(),
+        None if !flag("isMeta") => "human".to_owned(),
         _ => "other".to_owned(),
     };
     let start = str_at(v, "timestamp").and_then(parse_ts_ms).map(|ts_ms| Turn {
@@ -338,6 +383,13 @@ fn turn_of(v: &Value) -> Option<(String, Option<Turn>)> {
         origin,
     });
     Some((id, start))
+}
+
+/// A prompt of the main conversation whose line carries no `promptId`: what follows it belongs
+/// to no turn the log names. Tool results, notes and compaction summaries are no prompts.
+fn unnamed_prompt(v: &Value) -> bool {
+    let flag = |k: &str| v.get(k).and_then(Value::as_bool) == Some(true);
+    str_at(v, "type") == Some("user") && !flag("isSidechain") && !flag("isMeta") && !flag("isCompactSummary") && !has_tool_result(v)
 }
 
 fn tool_results(v: &Value) -> Vec<(String, bool)> {
@@ -374,6 +426,13 @@ fn quota_limit(v: &Value, ctx: &ClaudeCtx) -> Option<LimitSnapshot> {
         source: ctx.source.to_owned(),
         accuracy: Accuracy::Exact,
     })
+}
+
+/// The conversation a rejected request stopped, when the line names it and the window's reset.
+fn limit_stop(v: &Value, reading: &LimitSnapshot) -> Option<LimitStop> {
+    let session = str_at(v, "sessionId").filter(|s| !s.is_empty())?;
+    let resets_at = reading.resets_at.filter(|r| (1..=MAX_EPOCH_SECS).contains(r))?;
+    (reading.status.as_deref() == Some("rejected")).then(|| LimitStop { session_id: session.to_owned(), ts_ms: reading.ts_ms, window: reading.window.clone(), resets_at })
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 //! Local SQLite archive (`%LOCALAPPDATA%\AIUsageTracker\tracker.db`). Records stay here even
 //! after the source tools delete or rotate their logs. No content columns exist by design.
 
-use crate::model::{Accuracy, CacheMissReport, LimitSnapshot, Provider, SessionAccount, Tokens, Tool, ToolCall, Turn, UsageEvent, MAX_CLOCK_SKEW_MS, MAX_EPOCH_SECS, MAX_WINDOW_MINUTES};
+use crate::model::{Accuracy, CacheMissReport, LimitSnapshot, LimitStop, Provider, SessionAccount, Tokens, Tool, ToolCall, Turn, UsageEvent, MAX_CLOCK_SKEW_MS, MAX_EPOCH_SECS, MAX_WINDOW_MINUTES};
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde::Serialize;
 use std::cell::RefCell;
@@ -210,6 +210,26 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS turn_session ON turn(session_id);
     CREATE INDEX IF NOT EXISTS usage_event_turn ON usage_event(turn);
     CREATE INDEX IF NOT EXISTS tool_call_turn ON tool_call(turn);
+    DELETE FROM file_checkpoint WHERE parser IN ('claude_code_jsonl', 'cowork_jsonl', 'codex_rollout');
+    "#,
+    // v17: which conversation a plan limit stopped, as its own log says; a reading alone names
+    // no conversation, and two accounts can be stopped at the same moment. And which request
+    // made each tool call, so a filter that keeps the request keeps its calls. And which
+    // conversations began with another one's history.
+    r#"
+    ALTER TABLE tool_call ADD COLUMN request TEXT;
+    CREATE TABLE IF NOT EXISTS session_carried (
+        tool       TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        PRIMARY KEY (tool, session_id)
+    );
+    CREATE TABLE IF NOT EXISTS limit_stop (
+        session_id TEXT NOT NULL,
+        ts_ms      INTEGER NOT NULL,
+        window     TEXT NOT NULL,
+        resets_at  INTEGER NOT NULL,
+        PRIMARY KEY (session_id, ts_ms, window)
+    );
     DELETE FROM file_checkpoint WHERE parser IN ('claude_code_jsonl', 'cowork_jsonl', 'codex_rollout');
     "#,
 ];
@@ -486,6 +506,8 @@ pub struct TurnRow {
 #[derive(Debug, Clone)]
 pub struct TurnCall {
     pub turn: String,
+    /// The key of the request that made it, when its log says.
+    pub request: Option<String>,
     pub project_id: Option<i64>,
     pub tool: Tool,
     pub failed: Option<bool>,
@@ -629,25 +651,26 @@ impl Store {
         rows.filter_map(Result::transpose).collect()
     }
 
-    /// Every request of the turns that began in `from_ms <= ts < to_ms`, whenever it was made.
-    pub fn turn_events(&self, from_ms: i64, to_ms: i64) -> Result<Vec<EventRow>> {
+    /// Every request of the turns that began in `from_ms <= ts < to_ms`, whenever it was made,
+    /// each with its key.
+    pub fn turn_events(&self, from_ms: i64, to_ms: i64) -> Result<Vec<(EventRow, String)>> {
         let mut st = self.conn.prepare_cached(&format!(
-            "SELECT {} FROM usage_event u WHERE turn IN (SELECT id FROM turn WHERE ts_ms >= ?1 AND ts_ms < ?2) AND {NOT_SUPERSEDED} ORDER BY ts_ms",
+            "SELECT {}, key FROM usage_event u WHERE turn IN (SELECT id FROM turn WHERE ts_ms >= ?1 AND ts_ms < ?2) AND {NOT_SUPERSEDED} ORDER BY ts_ms",
             row_columns()
         ))?;
-        let rows = st.query_map(params![from_ms, to_ms], event_row)?;
+        let rows = st.query_map(params![from_ms, to_ms], |r| event_row(r)?.map(|e| r.get(23).map(|key| (e, key))).transpose())?;
         rows.filter_map(Result::transpose).collect()
     }
 
     /// Every tool call of the turns that began in `from_ms <= ts < to_ms`.
     pub fn turn_calls(&self, from_ms: i64, to_ms: i64) -> Result<Vec<TurnCall>> {
         let mut st = self.conn.prepare_cached(
-            "SELECT turn, project_id, tool, failed FROM tool_call WHERE turn IN (SELECT id FROM turn WHERE ts_ms >= ?1 AND ts_ms < ?2)",
+            "SELECT turn, project_id, tool, failed, request FROM tool_call WHERE turn IN (SELECT id FROM turn WHERE ts_ms >= ?1 AND ts_ms < ?2)",
         )?;
         let rows = st.query_map(params![from_ms, to_ms], |r| {
             let tool: String = r.get(2)?;
             let Some(tool) = Tool::parse(&tool) else { return Ok(None) };
-            Ok(Some(TurnCall { turn: r.get(0)?, project_id: r.get(1)?, tool, failed: r.get::<_, Option<i64>>(3)?.map(|f| f != 0) }))
+            Ok(Some(TurnCall { turn: r.get(0)?, request: r.get(4)?, project_id: r.get(1)?, tool, failed: r.get::<_, Option<i64>>(3)?.map(|f| f != 0) }))
         })?;
         rows.filter_map(Result::transpose).collect()
     }
@@ -666,6 +689,20 @@ impl Store {
     /// Whether any log read so far names its turns.
     pub fn has_turns(&self) -> Result<bool> {
         self.conn.query_row("SELECT EXISTS(SELECT 1 FROM turn)", [], |r| r.get(0))
+    }
+
+    /// The conversations that began with another one's history, as `(tool, session id)`.
+    pub fn carried_sessions(&self) -> Result<std::collections::HashSet<(String, String)>> {
+        let mut st = self.conn.prepare_cached("SELECT tool, session_id FROM session_carried")?;
+        let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect()
+    }
+
+    /// The requests of one conversation a plan limit turned down in `from_ms <= ts < to_ms`.
+    pub fn limit_stops(&self, session_id: &str, from_ms: i64, to_ms: i64) -> Result<Vec<LimitStop>> {
+        let mut st = self.conn.prepare_cached("SELECT session_id, ts_ms, window, resets_at FROM limit_stop WHERE session_id = ?1 AND ts_ms >= ?2 AND ts_ms < ?3 ORDER BY ts_ms")?;
+        let rows = st.query_map(params![session_id, from_ms, to_ms], |r| Ok(LimitStop { session_id: r.get(0)?, ts_ms: r.get(1)?, window: r.get(2)?, resets_at: r.get(3)? }))?;
+        rows.collect()
     }
 
     /// Whether Claude Code has ever reported a cache miss here.
@@ -868,7 +905,7 @@ impl Store {
         self.conn.execute_batch(
             "BEGIN; DELETE FROM usage_event; DELETE FROM tool_call; DELETE FROM limit_snapshot; DELETE FROM file_checkpoint;
              DELETE FROM project; DELETE FROM account_session; DELETE FROM signin_span; DELETE FROM session_root;
-             DELETE FROM cache_miss_report; DELETE FROM turn; COMMIT;",
+             DELETE FROM cache_miss_report; DELETE FROM turn; DELETE FROM limit_stop; DELETE FROM session_carried; COMMIT;",
         )?;
         // the data is gone once committed; a full disk only keeps the file from shrinking
         if let Err(e) = self.conn.execute_batch("VACUUM;") {
@@ -934,6 +971,10 @@ impl Store {
                 event_optional.push("turn");
                 call_optional.push("turn");
             }
+            if theirs >= 17 {
+                call_optional.push("request");
+            }
+            let their_request = if theirs >= 17 { "c.request" } else { "NULL" };
             let event_texts = texts("e.", &["key", "tool", "model", "accuracy", "source"], &event_optional);
             let project_texts = texts("", &["path", "name"], if theirs >= 3 { &["display_path"] } else { &[] });
             let limit_texts = texts("", &["provider", "tool", "account", "limit_id", "window", "source", "accuracy"], &["status", "plan"]);
@@ -985,13 +1026,13 @@ impl Store {
             if theirs >= 7 {
                 tx.execute(
                     &format!(
-                        "INSERT INTO tool_call(key, ts_ms, tool, session_id, project_id, agent, name, failed, turn)
-                         SELECT c.key, c.ts_ms, c.tool, c.session_id, p.id, c.agent, c.name, c.failed, {}
+                        "INSERT INTO tool_call(key, ts_ms, tool, session_id, project_id, agent, name, failed, turn, request)
+                         SELECT c.key, c.ts_ms, c.tool, c.session_id, p.id, c.agent, c.name, c.failed, {}, {their_request}
                          FROM other.tool_call c
                          LEFT JOIN other.project op ON op.id = c.project_id
                          LEFT JOIN main.project p ON p.path = op.path
                          WHERE typeof(c.ts_ms) = 'integer' AND c.ts_ms BETWEEN 0 AND {latest} AND typeof(c.failed) IN ('integer', 'null') {call_texts} {old_calls}
-                         ON CONFLICT(key) DO UPDATE SET failed = COALESCE(failed, excluded.failed), turn = COALESCE(turn, excluded.turn)",
+                         ON CONFLICT(key) DO UPDATE SET failed = COALESCE(failed, excluded.failed), turn = COALESCE(turn, excluded.turn), request = COALESCE(request, excluded.request)",
                         their_turn("c")
                     ),
                     [],
@@ -1006,6 +1047,39 @@ impl Store {
                            AND typeof(ts_ms) = 'integer' AND ts_ms BETWEEN 0 AND {latest}
                          {UPSERT_TURN_TAIL}"
                     ),
+                    [],
+                )?;
+            }
+            if theirs >= 15 {
+                // kept nowhere else once the status-line file that told them is rotated away
+                tx.execute(
+                    &format!(
+                        "INSERT OR IGNORE INTO cache_miss_report(session_id, misses, rebuilds, ts_ms, requests, recached, last_miss_ms, causes)
+                         SELECT session_id, misses, rebuilds, ts_ms, requests, recached, last_miss_ms, causes FROM other.cache_miss_report
+                         WHERE typeof(session_id) = 'text' AND typeof(causes) = 'text' AND json_valid(causes)
+                           AND typeof(ts_ms) = 'integer' AND ts_ms BETWEEN 0 AND {latest}
+                           AND typeof(last_miss_ms) IN ('integer', 'null')
+                           AND typeof(misses) = 'integer' AND misses BETWEEN 0 AND {MAX_IMPORTED_COUNT}
+                           AND typeof(rebuilds) = 'integer' AND rebuilds BETWEEN 0 AND {MAX_IMPORTED_COUNT}
+                           AND typeof(requests) = 'integer' AND requests BETWEEN 0 AND {MAX_IMPORTED_COUNT}
+                           AND typeof(recached) = 'integer' AND recached BETWEEN 0 AND {MAX_IMPORTED_COUNT}"
+                    ),
+                    [],
+                )?;
+            }
+            if theirs >= 17 {
+                tx.execute(
+                    &format!(
+                        "INSERT OR IGNORE INTO limit_stop(session_id, ts_ms, window, resets_at)
+                         SELECT session_id, ts_ms, window, resets_at FROM other.limit_stop
+                         WHERE typeof(session_id) = 'text' AND typeof(window) = 'text' AND typeof(ts_ms) = 'integer' AND ts_ms BETWEEN 0 AND {latest}
+                           AND typeof(resets_at) = 'integer' AND resets_at BETWEEN 0 AND {MAX_EPOCH_SECS}"
+                    ),
+                    [],
+                )?;
+                tx.execute(
+                    "INSERT OR IGNORE INTO session_carried(tool, session_id) SELECT tool, session_id FROM other.session_carried
+                     WHERE typeof(tool) = 'text' AND typeof(session_id) = 'text'",
                     [],
                 )?;
             }
@@ -1197,16 +1271,17 @@ impl StoreTx<'_> {
                 _ => None,
             };
             let mut st = self.tx.prepare_cached(
-                "INSERT INTO tool_call(key, ts_ms, tool, session_id, project_id, agent, name, failed, turn)
-                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)
+                "INSERT INTO tool_call(key, ts_ms, tool, session_id, project_id, agent, name, failed, turn, request)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
                  ON CONFLICT(key) DO UPDATE SET
                      ts_ms = MIN(ts_ms, excluded.ts_ms),
                      project_id = COALESCE(excluded.project_id, project_id),
                      agent = COALESCE(agent, excluded.agent),
                      failed = COALESCE(excluded.failed, failed),
-                     turn = COALESCE(turn, excluded.turn)",
+                     turn = COALESCE(turn, excluded.turn),
+                     request = COALESCE(request, excluded.request)",
             )?;
-            st.execute(params![c.key, c.ts_ms, c.tool.as_str(), c.session_id, pid, c.agent, c.name, c.failed.map(i64::from), c.turn])?;
+            st.execute(params![c.key, c.ts_ms, c.tool.as_str(), c.session_id, pid, c.agent, c.name, c.failed.map(i64::from), c.turn, c.request])?;
         }
         Ok(())
     }
@@ -1291,6 +1366,22 @@ impl StoreTx<'_> {
              ON CONFLICT(tool, session_id) DO UPDATE SET root = ?4 WHERE root <> excluded.root",
             params![tool.as_str(), session_id, root, crate::accounts::MANY_ROOTS],
         )?;
+        Ok(())
+    }
+
+    pub fn note_carried(&mut self, sessions: &[(Tool, String)]) -> Result<()> {
+        let mut st = self.tx.prepare_cached("INSERT OR IGNORE INTO session_carried(tool, session_id) VALUES(?1, ?2)")?;
+        for (tool, session) in sessions {
+            st.execute(params![tool.as_str(), session])?;
+        }
+        Ok(())
+    }
+
+    pub fn insert_limit_stops(&mut self, stops: &[LimitStop]) -> Result<()> {
+        let mut st = self.tx.prepare_cached("INSERT OR IGNORE INTO limit_stop(session_id, ts_ms, window, resets_at) VALUES(?1, ?2, ?3, ?4)")?;
+        for s in stops.iter().filter(|s| (0..=latest_accepted_ms()).contains(&s.ts_ms) && (0..=MAX_EPOCH_SECS).contains(&s.resets_at)) {
+            st.execute(params![s.session_id, s.ts_ms, s.window, s.resets_at])?;
+        }
         Ok(())
     }
 

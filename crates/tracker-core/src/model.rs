@@ -210,6 +210,18 @@ pub struct Turn {
     pub origin: String,
 }
 
+/// A plan limit turning a conversation's request down, as Claude Code writes it into that
+/// conversation's own log: which conversation, which window, and when the window starts again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LimitStop {
+    pub session_id: String,
+    pub ts_ms: i64,
+    /// `five_hour`, `seven_day`, …
+    pub window: String,
+    /// Unix epoch seconds.
+    pub resets_at: i64,
+}
+
 /// One tool call or tool action, by name only (never its input or output).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolCall {
@@ -226,6 +238,8 @@ pub struct ToolCall {
     pub failed: Option<bool>,
     /// The turn the call was made in ([`Turn::id`]), when the log says.
     pub turn: Option<String>,
+    /// The request that made the call ([`UsageEvent::key`]), when the log says.
+    pub request: Option<String>,
 }
 
 /// A point-in-time reading of a plan limit window.

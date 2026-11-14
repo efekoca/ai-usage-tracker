@@ -13,7 +13,7 @@ const t0 = new Date(2026, 10, 12, 14, 32).getTime()
 function turn(over: Partial<TurnCost>): TurnCost {
   return {
     id: 'cc:a', tool: 'claude_code', client: 'cli', session_id: 's1', ordinal: 3, origin: 'human', project_id: 1, project: 'notes', hidden: false,
-    started_ms: t0, ended_ms: t0 + 18 * 60_000, requests: 84, agents: 3, tool_calls: 120, tool_failed: 2, total_tokens: 4_200_000, cost_usd: 11.4, unpriced_requests: 0,
+    started_ms: t0, ended_ms: t0 + 18 * 60_000, requests: 84, agents: 3, tool_calls: 120, tool_failed: 2, calls_hidden: false, total_tokens: 4_200_000, cost_usd: 11.4, unpriced_requests: 0,
     models: ['claude-opus-5-5'],
     parts: [
       { agent: null, threads: 0, requests: 20, cost_usd: 2.85 },
@@ -101,9 +101,22 @@ describe('what each prompt cost', () => {
     expect([app.view, app.openSession]).toEqual(['sessions', 'claude_codes1'])
   })
 
-  it('shows no cost for a turn whose every request lacks a price', async () => {
-    const target = await render({ turns: [turn({ cost_usd: 0, unpriced_requests: 84, agents: 0 })] })
+  const facts = (t: HTMLElement) => [...t.querySelectorAll('.facts div')].map((d) => [...d.children].map(text).join(' '))
+
+  it('shows no cost for a turn whose every request lacks a price, in its row or in the summary', async () => {
+    const unknown = turn({ cost_usd: 0, unpriced_requests: 84, agents: 0 })
+    const target = await render({ turns: [unknown] })
     expect(rows(target)[0].endsWith('| —')).toBe(true)
+    expect(facts(target)).toEqual(['Turns 1', 'Typical turn cost —', 'Share of the costliest 10% —'])
+    // such turns do not pull the typical cost of the others down
+    const mixed = await render({ turns: [unknown, { ...unknown, id: 'cc:u2' }, turn({ id: 'cc:p', cost_usd: 6 })] })
+    expect(facts(mixed)).toEqual(['Turns 3', 'Typical turn cost $6.00', 'Share of the costliest 10% —'])
+  })
+
+  it('leaves the tool calls out of a turn the filter splits', async () => {
+    const target = await render({ turns: [turn({ calls_hidden: true, tool_calls: 0, tool_failed: 0 })] })
+    expect(rows(target)[0]).toBe('Nov 12, 02:32 PM notes · Turn 3 | 84 | 3 | — | 18 min | $11.40')
+    expect(target.querySelector('tbody td[title]')?.getAttribute('title')).toContain('the tool calls are not counted')
   })
 
   it('shows five turns first and says how many requests belong to none', async () => {

@@ -11,7 +11,7 @@ use std::time::SystemTime;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use tracker_core::capture::claude_settings as cs;
 use tracker_core::capture::refresh_hook as rh;
-use tracker_core::model::{LimitSnapshot, Tool};
+use tracker_core::model::{LimitStop, Tool};
 use tracker_core::store::Store;
 
 const LOG_KEY: &str = "limit_resumes";
@@ -69,15 +69,16 @@ fn save(state: &AppState, b: &mut Book) {
     }
 }
 
-/// The reset the limit itself named when it turned the conversation's request down, and its
-/// window. Without that record the reset is not known, and nothing is guessed in its place.
-fn rejection(limits: &[LimitSnapshot], stopped_ms: i64) -> Option<(i64, String)> {
-    limits
+/// The reset the limit itself named when it turned this conversation's request down, and its
+/// window: the nearest of the conversation's own stops, and of two at the same distance the one
+/// that resets later. Another conversation's stop, on this account or another, tells nothing
+/// about this one; without a record of its own the reset is not known, and nothing is guessed.
+fn rejection(stops: &[LimitStop], stopped_ms: i64) -> Option<(i64, String)> {
+    stops
         .iter()
-        .filter(|l| l.tool == Tool::ClaudeCode && l.status.as_deref() == Some("rejected") && (l.ts_ms - stopped_ms).abs() <= NEAR_MS)
-        .filter_map(|l| Some((l, l.resets_at_ms()?)))
-        .min_by_key(|(l, _)| (l.ts_ms - stopped_ms).abs())
-        .map(|(l, reset)| (reset, l.window.clone()))
+        .filter(|s| (s.ts_ms - stopped_ms).abs() <= NEAR_MS)
+        .min_by_key(|s| ((s.ts_ms - stopped_ms).abs(), std::cmp::Reverse(s.resets_at)))
+        .map(|s| (s.resets_at * 1000, s.window.clone()))
 }
 
 fn reset_of(store: &Store, b: &mut Book, session: &str, stopped_ms: i64) -> Option<(i64, String)> {
@@ -85,11 +86,11 @@ fn reset_of(store: &Store, b: &mut Book, session: &str, stopped_ms: i64) -> Opti
     if let Some(found) = b.resets.get(&key) {
         return Some(found.clone());
     }
-    let limits = store.limits_between(stopped_ms - NEAR_MS, stopped_ms + NEAR_MS + 1).unwrap_or_else(|e| {
-        log::warn!("limits around a stopped conversation: {e}");
+    let stops = store.limit_stops(session, stopped_ms - NEAR_MS, stopped_ms + NEAR_MS + 1).unwrap_or_else(|e| {
+        log::warn!("the limit that stopped a conversation: {e}");
         Vec::new()
     });
-    let found = rejection(&limits, stopped_ms)?;
+    let found = rejection(&stops, stopped_ms)?;
     b.resets.insert(key, found.clone());
     Some(found)
 }
@@ -309,9 +310,9 @@ pub async fn set_limit_resume(window: WebviewWindow, app: AppHandle, on: bool) -
         let mut st = cs::read_state(&state.data_dir).map_err(|e| e.to_string())?;
         cs::uninstall_hook(&mut st, cs::Hook::Resume, &state.data_dir).map_err(|e| e.to_string())?;
         drop(guard);
-        let clock = SystemTime::now();
+        // every hook goes, one not heard from lately too: it would be woken if the switch went on again
         for dir in crate::refresh::hook_dirs(&state) {
-            for session in rh::limit_waiters(&dir, clock) {
+            for session in rh::limit_hooks(&dir) {
                 rh::retire_limit(&dir, &session);
             }
         }
@@ -344,9 +345,8 @@ pub async fn cancel_limit_resume(window: WebviewWindow, app: AppHandle, session_
 /// "Delete all data" takes the record of continued conversations too, and sends away the hooks
 /// that wait: what told when their conversations stopped is gone.
 pub fn forget(state: &AppState) {
-    let clock = SystemTime::now();
     for dir in crate::refresh::hook_dirs(state) {
-        for session in rh::limit_waiters(&dir, clock) {
+        for session in rh::limit_hooks(&dir) {
             rh::retire_limit(&dir, &session);
         }
     }
@@ -374,39 +374,62 @@ pub fn follow_app(state: &AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tracker_core::model::{Accuracy, Provider};
+    fn stop(session: &str, ts_ms: i64, window: &str, resets_at: i64) -> LimitStop {
+        LimitStop { session_id: session.into(), ts_ms, window: window.into(), resets_at }
+    }
 
-    fn limit(ts_ms: i64, status: &str, window: &str, resets_at: Option<i64>) -> LimitSnapshot {
-        LimitSnapshot {
-            ts_ms,
-            provider: Provider::Anthropic,
-            tool: Tool::ClaudeCode,
-            account: None,
-            limit_id: String::new(),
-            window: window.into(),
-            used_pct: None,
-            resets_at,
-            status: Some(status.into()),
-            plan: None,
-            source: "claude_code".into(),
-            accuracy: Accuracy::Exact,
-        }
+    fn keep(store: &mut Store, s: LimitStop) {
+        let mut tx = store.transaction().unwrap();
+        tx.insert_limit_stops(&[s]).unwrap();
+        tx.commit().unwrap();
     }
 
     #[test]
     fn the_reset_is_the_one_the_limit_named_when_it_stopped_the_conversation() {
         let stopped = 1_000_000_000;
-        let limits = [
-            limit(stopped - 90_000, "rejected", "seven_day", Some(2_000_000)),
-            limit(stopped - 400, "rejected", "five_hour", Some(1_018_000)),
-            limit(stopped + 30_000, "allowed", "five_hour", Some(1_500_000)),
-            limit(stopped - 100, "rejected", "five_hour", None),
-        ];
-        assert_eq!(rejection(&limits, stopped), Some((1_018_000_000, "five_hour".into())), "the nearest one that names a reset");
-        assert_eq!(rejection(&limits[2..], stopped), None, "a reading with room, or without a reset, tells nothing");
-        assert_eq!(rejection(&[limit(stopped - NEAR_MS - 1, "rejected", "five_hour", Some(1_018_000))], stopped), None, "an older stop is another one");
-        let codex = LimitSnapshot { tool: Tool::Codex, ..limit(stopped, "rejected", "five_hour", Some(1_018_000)) };
-        assert_eq!(rejection(&[codex], stopped), None);
+        let stops = [stop("s", stopped - 90_000, "seven_day", 2_000_000), stop("s", stopped - 400, "five_hour", 1_018_000)];
+        assert_eq!(rejection(&stops, stopped), Some((1_018_000_000, "five_hour".into())), "the nearest one");
+        assert_eq!(rejection(&[stop("s", stopped - NEAR_MS - 1, "five_hour", 1_018_000)], stopped), None, "an older stop is another one");
+        assert_eq!(rejection(&[], stopped), None);
+        // both windows turned the same request down: it goes on once the later one starts again
+        let both = [stop("s", stopped, "five_hour", 1_018_000), stop("s", stopped, "seven_day", 2_000_000)];
+        assert_eq!(rejection(&both, stopped), Some((2_000_000_000, "seven_day".into())));
+    }
+
+    #[test]
+    fn a_conversation_waits_for_its_own_limit_not_for_one_that_stopped_another() {
+        use std::time::{Duration, Instant};
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("refresh");
+        let dirs = [dir.clone()];
+        let mut store = Store::open(&d.path().join("t.db")).unwrap();
+        let t = 1_700_000_000_000;
+        let (long, short) = (t + 4 * 3_600_000, t + 600_000);
+        // two accounts stopped half a second apart; the other one's limit starts again far sooner
+        keep(&mut store, stop("a", t - 1_000, "five_hour", long / 1000));
+        keep(&mut store, stop("b", t + 500, "five_hour", short / 1000));
+        let wait = |session: &'static str| {
+            let dir = dir.clone();
+            let hook = std::thread::spawn(move || rh::wait(&dir, rh::Wait::Limit, session, session, None, Duration::from_millis(10), Instant::now() + Duration::from_secs(10), || true).unwrap());
+            while !rh::waiting(&dirs[0], rh::Wait::Limit, session, SystemTime::now()) {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            hook
+        };
+        let (a, b, c) = (wait("a"), wait("b"), wait("c"));
+        rh::stopped(&dir, "a", t);
+        rh::stopped(&dir, "b", t + 500);
+        // stopped at the same moment, with no stop of its own in the logs
+        rh::stopped(&dir, "c", t + 200);
+        let mut book = Book::default();
+        wake_due(&store, &mut book, &dirs, short + MARGIN_MS, SystemTime::now());
+        assert_eq!(book.signaled.keys().collect::<Vec<_>>(), ["b"]);
+        assert_eq!(b.join().unwrap(), rh::Outcome::Wake(String::new()));
+        wake_due(&store, &mut book, &dirs, long + MARGIN_MS, SystemTime::now());
+        assert!(book.signaled.contains_key("a") && !book.signaled.contains_key("c"));
+        assert_eq!(a.join().unwrap(), rh::Outcome::Wake(String::new()));
+        rh::retire_limit(&dir, "c");
+        assert_eq!(c.join().unwrap(), rh::Outcome::Moved);
     }
 
     #[test]
@@ -418,12 +441,7 @@ mod tests {
         let mut store = Store::open(&d.path().join("t.db")).unwrap();
         let stopped = 1_700_000_000_000;
         let reset = stopped + 3 * 3_600_000;
-        let add = |store: &mut Store, l: LimitSnapshot| {
-            let mut tx = store.transaction().unwrap();
-            tx.insert_limits(&[l]).unwrap();
-            tx.commit().unwrap();
-        };
-        add(&mut store, limit(stopped - 800, "rejected", "five_hour", Some(reset / 1000)));
+        keep(&mut store, stop("s", stopped - 800, "five_hour", reset / 1000));
         let wait = |me: &'static str| {
             let dir = dir.clone();
             let hook = std::thread::spawn(move || rh::wait(&dir, rh::Wait::Limit, "s", me, None, Duration::from_millis(10), Instant::now() + Duration::from_secs(10), || true).unwrap());
@@ -455,7 +473,7 @@ mod tests {
 
         // the limit stops it again at once: the same reset is not a reason to go on again right away
         let again = reset + MARGIN_MS + 30_000;
-        add(&mut store, limit(again, "rejected", "five_hour", Some(reset / 1000)));
+        keep(&mut store, stop("s", again, "five_hour", reset / 1000));
         let hook = wait("b");
         rh::stopped(&dir, "s", again);
         wake_due(&store, &mut b, &dirs, again + APART_MS - 60_000, SystemTime::now());
