@@ -656,6 +656,85 @@ fn a_part_of_a_conversation_copied_into_another_log_does_not_move_its_turns_star
     in_every_order(&m, [own, copy], &damage, check, vec![(600, 2, "human".to_owned())]);
 }
 
+/// A conversation whose first prompt's line was written again under its second prompt's id, and
+/// another that carries the later part of it, beginning at that rewritten line.
+fn rewritten_and_copied(m: &Machine, own: &str, copy: &str, with_own: bool) {
+    let dir = m.home.join(".claude/projects/C--Work-Turns");
+    let line = |time: &str, prompt: &str, uuid: &str| {
+        let mut v = user(own, time, prompt, Some("human"));
+        v["uuid"] = json!(uuid);
+        v
+    };
+    let again = [line("10:00:00", "rp2", "u-rp1"), reply(own, "12:00:05", "msg_rp2", None)];
+    if with_own {
+        let mut lines = vec![line("10:00:00", "rp1", "u-rp1"), reply(own, "10:00:05", "msg_rp1", None), line("12:00:00", "rp2", "u-rp2"), reply(own, "12:00:05", "msg_rp2", None)];
+        lines.extend(again.clone());
+        write(&dir.join(format!("{own}.jsonl")), &lines);
+    }
+    let mut lines = again.to_vec();
+    lines.extend([user(copy, "13:00:00", "rp3", Some("human")), reply(copy, "13:00:05", "msg_rp3", None)]);
+    write(&dir.join(format!("{copy}.jsonl")), &lines);
+}
+
+#[test]
+fn a_rewritten_line_copied_without_what_it_rewrites_does_not_move_the_turns_start() {
+    let (own, copy) = ("cccccccc-0000-4000-8000-000000000001", "dddddddd-0000-4000-8000-000000000002");
+    let m = machine();
+    rewritten_and_copied(&m, own, copy, true);
+    // what the build before this one left: the turn begun at the copied line
+    let damage = format!("UPDATE turn SET ts_ms = {} WHERE id = 'cc:rp2'", DAY.from_ms + 10 * 3_600_000);
+    in_every_order(&m, [own, copy], &damage, |store| hours_and_requests(store, own), vec![(10, 1), (12, 1)]);
+}
+
+#[test]
+fn a_copied_part_still_gives_the_turn_when_its_own_log_is_gone() {
+    let (own, copy) = ("cccccccc-0000-4000-8000-000000000003", "dddddddd-0000-4000-8000-000000000004");
+    let m = machine();
+    rewritten_and_copied(&m, own, copy, false);
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &m.env);
+    assert_eq!(hours_and_requests(&store, own), [(10, 1)]);
+}
+
+#[test]
+fn what_began_a_turn_is_its_own_logs_word_in_whatever_order_the_logs_are_read() {
+    let (own, copy) = ("cccccccc-0000-4000-8000-000000000005", "dddddddd-0000-4000-8000-000000000006");
+    let m = machine();
+    let dir = m.home.join(".claude/projects/C--Work-Turns");
+    let line = |time: &str, prompt: &str, uuid: &str, origin: Option<&str>| {
+        let mut v = user(own, time, prompt, origin);
+        v["uuid"] = json!(uuid);
+        v
+    };
+    let mut note = line("12:00:00", "oq2", "u-note", None);
+    note["isMeta"] = json!(true);
+    let again = [line("10:00:00", "oq2", "u-oq1", Some("human")), reply(own, "12:00:05", "msg_oq2", None)];
+    let mut lines = vec![line("10:00:00", "oq1", "u-oq1", Some("human")), reply(own, "10:00:05", "msg_oq1", None), note, line("12:00:01", "oq2", "u-oq2", Some("task-notification")), reply(own, "12:00:05", "msg_oq2", None)];
+    lines.extend(again.clone());
+    write(&dir.join(format!("{own}.jsonl")), &lines);
+    write(&dir.join(format!("{copy}.jsonl")), &again);
+    let damage = "UPDATE turn SET origin = 'human' WHERE id = 'cc:oq2'";
+    let check = |store: &Store| of(store, own).iter().map(|t| ((t.started_ms - DAY.from_ms) / 3_600_000, t.origin.clone())).collect::<Vec<_>>();
+    in_every_order(&m, [own, copy], damage, check, vec![(10, "human".to_owned()), (12, "task_notification".to_owned())]);
+}
+
+#[test]
+fn a_turn_continued_in_the_log_it_was_copied_into_keeps_where_it_began() {
+    let (own, copy) = ("cccccccc-0000-4000-8000-000000000007", "dddddddd-0000-4000-8000-000000000008");
+    let m = machine();
+    let mut note = user(copy, "13:00:00", "cg1", None);
+    note["isMeta"] = json!(true);
+    // the conversation it came from is gone
+    write(
+        &m.home.join(format!(".claude/projects/C--Work-Turns/{copy}.jsonl")),
+        &[user(own, "10:00:00", "cg1", Some("human")), reply(own, "10:00:05", "msg_cg1", None), note, reply(copy, "13:00:05", "msg_cg2", None)],
+    );
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &m.env);
+    let began: (i64, String) = store.conn().query_row("SELECT ts_ms, session_id FROM turn WHERE id = 'cc:cg1'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+    assert_eq!(began, (DAY.from_ms + 10 * 3_600_000, own.to_owned()));
+}
+
 #[test]
 fn a_tool_call_copied_into_a_codex_fork_keeps_the_turn_its_own_log_gave_it() {
     let (parent, fork) = ("0199eeee-0000-7000-8000-000000000001", "0199eeee-0000-7000-8000-000000000002");

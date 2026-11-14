@@ -208,6 +208,9 @@ pub struct Turn {
     pub ts_ms: i64,
     /// `human`, `task_notification`, `peer`, `scheduled`, `sdk` or `other`.
     pub origin: String,
+    /// Whether the conversation's own log gave this record; `false` for a part of it copied
+    /// into another conversation's log.
+    pub own: bool,
 }
 
 /// A plan limit turning a conversation's request down, as Claude Code writes it into that
