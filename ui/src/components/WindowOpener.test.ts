@@ -128,7 +128,7 @@ describe('the window scheduler', () => {
     mocks.openWindowNow.mockRejectedValueOnce('running')
     button().click()
     await settle()
-    expect(target.querySelector('[role=alert]')?.textContent).toContain('running')
+    expect(target.querySelector('[role=alert]')?.textContent).toContain('a request is already on its way')
 
     const none = await render(info({ available: false }))
     expect(none.querySelector<HTMLButtonElement>('.btn.try')!.disabled).toBe(true)

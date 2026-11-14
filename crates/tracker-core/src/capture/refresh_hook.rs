@@ -226,16 +226,18 @@ pub fn refresh_turn(dir: &Path, session: &str, now_ms: i64) -> bool {
     took(dir, session).is_some_and(|t| (0..REFRESH_TURN_MS).contains(&(now_ms - t)) && last_prompt(dir, session).is_none_or(|p| p < t))
 }
 
-/// The conversations a limit stopped whose hook still waits for the reset.
-pub fn limit_waiters(dir: &Path, now: SystemTime) -> Vec<String> {
+/// Every conversation with a limit hook's file, whether the hook was heard from lately or not:
+/// one that slept with the computer has not written yet when it wakes.
+pub fn limit_hooks(dir: &Path) -> Vec<String> {
     let Ok(entries) = fs::read_dir(dir) else { return Vec::new() };
-    let mut out: Vec<String> = entries
-        .flatten()
-        .filter_map(|e| e.file_name().to_string_lossy().strip_prefix("limit-").map(str::to_owned))
-        .filter(|s| valid_session(s) && waiting(dir, Wait::Limit, s, now))
-        .collect();
+    let mut out: Vec<String> = entries.flatten().filter_map(|e| e.file_name().to_string_lossy().strip_prefix("limit-").map(str::to_owned)).filter(|s| valid_session(s)).collect();
     out.sort();
     out
+}
+
+/// The conversations a limit stopped whose hook still waits for the reset.
+pub fn limit_waiters(dir: &Path, now: SystemTime) -> Vec<String> {
+    limit_hooks(dir).into_iter().filter(|s| waiting(dir, Wait::Limit, s, now)).collect()
 }
 
 /// Marks the turn a wake is about to start, so its prompt is not taken for the user's, and keeps

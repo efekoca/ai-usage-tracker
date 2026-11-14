@@ -30,21 +30,23 @@
     return sort === 'cost' ? list.sort((a, b) => b.cost_usd - a.cost_usd || b.started_ms - a.started_ms) : list.sort((a, b) => b.started_ms - a.started_ms)
   })
 
+  const priced = (x: TurnCost) => x.unpriced_requests < x.requests || x.cost_usd > 0
+
   const summary = $derived.by(() => {
-    const costs = (data?.turns ?? []).map((x) => x.cost_usd).sort((a, b) => b - a)
+    // a turn none of whose requests has a price cost an unknown amount, not nothing
+    const costs = (data?.turns ?? []).filter(priced).map((x) => x.cost_usd).sort((a, b) => b - a)
     const total = costs.reduce((a, b) => a + b, 0)
     const top = costs.slice(0, Math.max(1, Math.ceil(costs.length / 10))).reduce((a, b) => a + b, 0)
     return {
-      n: costs.length,
+      n: data?.turns.length ?? 0,
       // the lower of the two middle ones, as the archive's own medians are taken
-      median: costs.length ? costs[Math.floor(costs.length / 2)] : 0,
+      median: costs.length ? costs[Math.floor(costs.length / 2)] : null,
       topShare: total > 0 && costs.length >= 10 ? (top / total) * 100 : null,
     }
   })
 
   const project = (x: TurnCost) => (x.hidden ? `${t('projects.hidden')}${x.project_id === null ? '' : ` #${x.project_id}`}` : x.project || t('projects.noProject'))
   const origin = (x: TurnCost) => (x.origin === 'human' ? '' : t(has(`turns.origin.${x.origin}`) ? `turns.origin.${x.origin}` : 'turns.origin.other'))
-  const priced = (x: TurnCost) => x.unpriced_requests < x.requests || x.cost_usd > 0
   const agentsCost = (x: TurnCost) => x.parts.filter((p) => p.agent !== null).reduce((a, p) => a + p.cost_usd, 0)
   /** How much of the turn's cost its subagents made, 0 to 100. */
   const agentShare = (x: TurnCost) => (x.cost_usd > 0 ? Math.min(100, (agentsCost(x) / x.cost_usd) * 100) : 0)
@@ -80,7 +82,7 @@
     {:else}
       <dl class="facts">
         <div><dt>{t('turns.count')}</dt><dd class="num">{fmtInt(summary.n)}</dd></div>
-        <div title={t('turns.median.help')}><dt>{t('turns.median')}</dt><dd class="num">{fmtMoney(summary.median)}</dd></div>
+        <div title={t('turns.median.help')}><dt>{t('turns.median')}</dt><dd class="num">{summary.median === null ? '—' : fmtMoney(summary.median)}</dd></div>
         <div title={t('turns.top.help')}><dt>{t('turns.top')}</dt><dd class="num">{summary.topShare === null ? '—' : fmtPct(summary.topShare)}</dd></div>
       </dl>
       <div class="scroll">
@@ -116,9 +118,9 @@
                 </th>
                 <td class="num">{fmtInt(x.requests)}</td>
                 <td class="num">{x.agents ? fmtInt(x.agents) : '—'}</td>
-                <td class="num">
-                  {x.tool_calls ? fmtInt(x.tool_calls) : '—'}
-                  {#if x.tool_failed}<span class="failed small">{t('turns.failed', { n: fmtInt(x.tool_failed) })}</span>{/if}
+                <td class="num" title={x.calls_hidden ? t('turns.callsHidden') : undefined}>
+                  {x.tool_calls && !x.calls_hidden ? fmtInt(x.tool_calls) : '—'}
+                  {#if x.tool_failed && !x.calls_hidden}<span class="failed small">{t('turns.failed', { n: fmtInt(x.tool_failed) })}</span>{/if}
                 </td>
                 <td class="num wide">{fmtSpan(x.ended_ms - x.started_ms)}</td>
                 <td class="num cost">

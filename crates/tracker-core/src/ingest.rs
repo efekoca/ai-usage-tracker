@@ -136,7 +136,7 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<FileR
         let more = f.parser.is_incremental() && out.round_full() && out.next_offset > offset && (packed || out.next_offset < size);
         let latest = crate::store::latest_accepted_ms();
         let ahead = |ts: i64| ts > latest && ts - latest <= HOLD_AHEAD_MS;
-        if hold.is_none() && (out.events.iter().any(|e| ahead(e.ts_ms)) || out.limits.iter().any(|l| ahead(l.ts_ms)) || out.tool_calls.iter().any(|c| ahead(c.ts_ms)) || out.turns.iter().any(|t| ahead(t.ts_ms))) {
+        if hold.is_none() && (out.events.iter().any(|e| ahead(e.ts_ms)) || out.limits.iter().any(|l| ahead(l.ts_ms)) || out.tool_calls.iter().any(|c| ahead(c.ts_ms)) || out.turns.iter().any(|t| ahead(t.ts_ms)) || out.stops.iter().any(|s| ahead(s.ts_ms)) || out.cache_misses.iter().any(|r| ahead(r.ts_ms))) {
             hold = Some((offset, state.clone()));
             out.warn("records dated ahead of the clock are read once it reaches them");
         }
@@ -151,10 +151,13 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<FileR
         tx.upsert_events(&out.events).map_err(|e| e.to_string())?;
         tx.insert_limits(&out.limits).map_err(|e| e.to_string())?;
         tx.insert_session_accounts(&out.sessions).map_err(|e| e.to_string())?;
-        // one dated too far ahead would hold the conversation's report until the clock got there
+        // stored ahead of the clock, a report would stand in for the conversation's later ones;
+        // it is read again once the clock reaches it, like every record
         out.cache_misses.retain(|r| r.ts_ms <= latest);
         tx.insert_cache_miss_reports(&out.cache_misses).map_err(|e| e.to_string())?;
         tx.insert_turns(&out.turns).map_err(|e| e.to_string())?;
+        tx.insert_limit_stops(&out.stops).map_err(|e| e.to_string())?;
+        tx.note_carried(&out.carried).map_err(|e| e.to_string())?;
         if f.parser == ParserKind::ClaudeCodeJsonl
             && let Some((root, session)) = crate::accounts::claude_log_session(&f.path)
         {
@@ -196,7 +199,7 @@ pub fn ingest_file(store: &mut Store, f: &DiscoveredFile) -> Result<Option<FileR
         )
         .map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())?;
-        read.records += out.events.len() + out.limits.len() + out.tool_calls.len() + out.tool_results.len() + out.sessions.len();
+        read.records += out.events.len() + out.limits.len() + out.tool_calls.len() + out.tool_results.len() + out.sessions.len() + out.cache_misses.len();
         if !more {
             return Ok(Some(read));
         }

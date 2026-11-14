@@ -34,6 +34,9 @@ pub struct Run {
     /// The request's tokens, in and out.
     tokens: Option<u64>,
     error: Option<String>,
+    /// The account the request went with, when its sign-in was known.
+    #[serde(default)]
+    account: Option<String>,
 }
 
 #[derive(Default)]
@@ -92,25 +95,70 @@ fn due<Tz: TimeZone>(o: &OpenerSettings, runs: &[Run], now: &DateTime<Tz>) -> Op
     ((0..GRACE_MS).contains(&(now - at)) && again).then_some(day)
 }
 
-/// The next time it runs, looking a week ahead.
+/// The next time it runs, looking a week ahead, by the rule [`due`] goes by: today's run is
+/// over once one went out or found a window open, or after the last try; a try that failed is
+/// made again a little later, while the time is not missed.
 fn next_ms<Tz: TimeZone>(o: &OpenerSettings, runs: &[Run], now: &DateTime<Tz>) -> Option<i64> {
-    let ran_today = runs.iter().any(|r| r.day.as_deref() == Some(&day_of(now)));
-    (0..=7).filter_map(|d| scheduled(o, now, d)).map(|t| t.timestamp_millis()).find(|&t| t > now.timestamp_millis() - GRACE_MS && !(ran_today && t <= now.timestamp_millis()))
+    let day = day_of(now);
+    let today: Vec<&Run> = runs.iter().filter(|r| r.day.as_deref() == Some(&day)).collect();
+    let over = today.len() >= TRIES || today.iter().any(|r| r.outcome != "failed");
+    let now_ms = now.timestamp_millis();
+    (0..=7).filter_map(|d| Some((d, scheduled(o, now, d)?.timestamp_millis()))).find_map(|(d, t)| {
+        if d > 0 {
+            return Some(t);
+        }
+        let again = today.iter().map(|r| r.at_ms + RETRY_MS).max().map_or(t, |a| a.max(t));
+        (!over && now_ms - t < GRACE_MS && again - t < GRACE_MS).then_some(again)
+    })
 }
 
-/// When Claude's window ends, if the readings show one open now.
-fn open_until(limits: &[LimitSnapshot], now: i64) -> Option<i64> {
-    limits.iter().filter(|l| l.provider == Provider::Anthropic && l.window == "five_hour").filter_map(LimitSnapshot::resets_at_ms).filter(|&r| r > now).max()
+/// When the window the opener's own earlier request opened for `account` ends, if it is still open.
+fn opened_until(runs: &[Run], account: Option<&str>, now: i64) -> Option<i64> {
+    runs.iter().filter(|r| r.outcome == "sent" && account.is_some() && r.account.as_deref() == account).filter_map(|r| r.resets_ms).filter(|&r| r > now).max()
+}
+
+/// A failure in words the card can show in the user's language.
+fn error_code(e: &str) -> String {
+    match e {
+        e if e.starts_with("claude did not answer in time") => "claude_timeout".into(),
+        e if e.starts_with("cannot start claude") => "claude_not_started".into(),
+        e => e.to_owned(),
+    }
+}
+
+/// When the window of the account the request would go to ends, if its readings show one open
+/// now. `target` is that account when its sign-in is known; another account's open window says
+/// nothing about it. Without a known account the readings count only while they are all one
+/// account's.
+fn open_until(limits: &[(LimitSnapshot, Option<String>)], target: Option<&str>, now: i64) -> Option<i64> {
+    let five: Vec<&(LimitSnapshot, Option<String>)> = limits.iter().filter(|(l, _)| l.provider == Provider::Anthropic && l.window == "five_hour").collect();
+    let owners: std::collections::BTreeSet<Option<&str>> = five.iter().map(|(_, o)| o.as_deref()).collect();
+    let counts = |owner: Option<&str>| match target {
+        Some(t) => owner == Some(t),
+        None => owners.len() == 1,
+    };
+    five.iter().filter(|(_, o)| counts(o.as_deref())).filter_map(|(l, _)| l.resets_at_ms()).filter(|&r| r > now).max()
 }
 
 /// Sends the request, unless a scheduled run finds a window already open: then there is nothing to open.
-fn run(app: &AppHandle, day: Option<String>) -> Run {
+fn run(app: &AppHandle, day: Option<String>, earlier: &[Run]) -> Run {
+    use crate::capture::CliSignIn;
     let state = app.state::<AppState>();
     let s = state.settings.read().unwrap().clone();
     let at_ms = now_ms();
-    let base = Run { at_ms, day: day.clone(), outcome: "failed".into(), resets_ms: None, tokens: None, error: None };
+    let sign_in = crate::capture::claude_cli_sign_in(&s);
+    let account = match &sign_in {
+        CliSignIn::Account(a) => Some(a.clone()),
+        _ => None,
+    };
+    let base = Run { at_ms, day: day.clone(), outcome: "failed".into(), resets_ms: None, tokens: None, error: None, account: account.clone() };
+    // a request billed by use opens no plan window
+    if sign_in == CliSignIn::OwnKey {
+        return Run { error: Some("claude_own_key".into()), ..base };
+    }
+    let open = || open_until(&state.db().latest_owned_limits().unwrap_or_default(), account.as_deref(), at_ms).or_else(|| opened_until(earlier, account.as_deref(), at_ms));
     if day.is_some()
-        && let Some(resets) = open_until(&state.db().latest_limits().unwrap_or_default(), at_ms)
+        && let Some(resets) = open()
     {
         return Run { outcome: "open".into(), resets_ms: Some(resets), ..base };
     }
@@ -122,22 +170,23 @@ fn run(app: &AppHandle, day: Option<String>) -> Run {
     let config = claude_usage::config_dir(&Env::from_system(), &s.extra_paths);
     match claude_usage::open_window(&bin, &work, config.as_deref(), TIMEOUT) {
         Ok(o) => Run { outcome: "sent".into(), resets_ms: o.resets_at.map(|r| r * 1000), tokens: Some(o.tokens), ..base },
-        Err(e) => Run { error: Some(e.to_string()), ..base },
+        Err(e) => Run { error: Some(error_code(&e.to_string())), ..base },
     }
 }
 
 /// One run at a time; its outcome is kept and the limits are read again.
 fn run_and_keep(app: &AppHandle, day: Option<String>) -> Option<Run> {
     let state = app.state::<AppState>();
-    {
+    let earlier = {
         let mut b = BOOK.lock().unwrap();
         load(&state, &mut b);
         if b.running {
             return None;
         }
         b.running = true;
-    }
-    let done = run(app, day);
+        b.runs.clone()
+    };
+    let done = run(app, day, &earlier);
     log::info!("window opener: {}", done.outcome);
     let mut b = BOOK.lock().unwrap();
     b.running = false;
@@ -228,7 +277,7 @@ mod tests {
     }
 
     fn ran(day: &str) -> Run {
-        Run { at_ms: 0, day: Some(day.into()), outcome: "sent".into(), resets_ms: None, tokens: None, error: None }
+        Run { at_ms: 0, day: Some(day.into()), outcome: "sent".into(), resets_ms: None, tokens: None, error: None, account: None }
     }
 
     #[test]
@@ -265,8 +314,32 @@ mod tests {
         assert_eq!(next_ms(&o, &[ran("2026-11-13")], &at("2026-11-13T06:35:00+03:00")), ms("2026-11-16T06:30:00+03:00"), "done for today: Monday");
         assert_eq!(next_ms(&o, &[], &at("2026-11-13T07:00:00+03:00")), ms("2026-11-16T06:30:00+03:00"), "missed today");
         assert_eq!(next_ms(&o, &[], &at("2026-11-16T06:30:00+03:00")), ms("2026-11-16T06:30:00+03:00"));
-        let never = OpenerSettings { days: Vec::new(), ..o };
+        let never = OpenerSettings { days: Vec::new(), ..o.clone() };
         assert_eq!(next_ms(&never, &[], &at("2026-11-13T05:00:00+03:00")), None);
+
+        // the time moved to later after today's run went out: nothing more is sent today, so none is promised
+        let afternoon = OpenerSettings { minute: 15 * 60, ..o.clone() };
+        assert_eq!(next_ms(&afternoon, &[ran("2026-11-13")], &at("2026-11-13T10:00:00+03:00")), ms("2026-11-16T15:00:00+03:00"));
+        assert_eq!(due(&afternoon, &[ran("2026-11-13")], &at("2026-11-13T15:00:10+03:00")), None);
+        // a try that failed is made again in a few minutes, and the card says so
+        let failed = |clock: &str| Run { at_ms: at(clock).timestamp_millis(), outcome: "failed".into(), ..ran("2026-11-13") };
+        assert_eq!(next_ms(&o, &[failed("2026-11-13T06:30:20+03:00")], &at("2026-11-13T06:31:00+03:00")), ms("2026-11-13T06:33:20+03:00"));
+        let thrice = [failed("2026-11-13T06:30:20+03:00"), failed("2026-11-13T06:33:30+03:00"), failed("2026-11-13T06:36:40+03:00")];
+        assert_eq!(next_ms(&o, &thrice, &at("2026-11-13T06:40:00+03:00")), ms("2026-11-16T06:30:00+03:00"), "out of tries");
+    }
+
+    #[test]
+    fn the_openers_own_request_keeps_the_next_one_from_going_out_twice() {
+        let now = 1_000_000_000;
+        let sent = |account: Option<&str>, resets_ms| Run { outcome: "sent".into(), resets_ms, account: account.map(Into::into), ..ran("2026-11-13") };
+        let runs = [sent(Some("me"), Some(now + 600_000)), sent(Some("other"), Some(now + 9_000_000)), sent(None, Some(now + 9_000_000))];
+        assert_eq!(opened_until(&runs, Some("me"), now), Some(now + 600_000));
+        assert_eq!(opened_until(&runs, Some("me"), now + 600_000), None, "it ended");
+        assert_eq!(opened_until(&runs, None, now), None, "whose window it was is not known");
+        assert_eq!(opened_until(&[Run { outcome: "failed".into(), ..sent(Some("me"), Some(now + 600_000)) }], Some("me"), now), None);
+        assert_eq!(error_code("claude did not answer in time"), "claude_timeout");
+        assert_eq!(error_code("cannot start claude: No such file"), "claude_not_started");
+        assert_eq!(error_code("claude_limit_full"), "claude_limit_full");
     }
 
     #[test]
@@ -286,13 +359,26 @@ mod tests {
             accuracy: Accuracy::Captured,
         };
         let now = 1_000_000_000;
+        let mine = |l: LimitSnapshot| (l, Some("me".to_owned()));
         let limits = [
-            limit(Provider::Anthropic, "five_hour", Some(now / 1000 + 600)),
-            limit(Provider::Anthropic, "seven_day", Some(now / 1000 + 9_000)),
-            limit(Provider::OpenAI, "five_hour", Some(now / 1000 + 9_000)),
+            mine(limit(Provider::Anthropic, "five_hour", Some(now / 1000 + 600))),
+            mine(limit(Provider::Anthropic, "seven_day", Some(now / 1000 + 9_000))),
+            mine(limit(Provider::OpenAI, "five_hour", Some(now / 1000 + 9_000))),
         ];
-        assert_eq!(open_until(&limits, now), Some(now + 600_000));
-        assert_eq!(open_until(&limits, now + 600_000), None, "it ended");
-        assert_eq!(open_until(&[limit(Provider::Anthropic, "five_hour", None)], now), None, "no window is open");
+        assert_eq!(open_until(&limits, Some("me"), now), Some(now + 600_000));
+        assert_eq!(open_until(&limits, None, now), Some(now + 600_000), "one account's readings need no name");
+        assert_eq!(open_until(&limits, Some("me"), now + 600_000), None, "it ended");
+        assert_eq!(open_until(&[mine(limit(Provider::Anthropic, "five_hour", None))], Some("me"), now), None, "no window is open");
+
+        // another account's open window does not stand for the one the request goes to
+        let other = (limit(Provider::Anthropic, "five_hour", Some(now / 1000 + 3_600)), Some("other".to_owned()));
+        assert_eq!(open_until(std::slice::from_ref(&other), Some("me"), now), None);
+        let two = [limits[0].clone(), other.clone()];
+        assert_eq!(open_until(&two, Some("me"), now), Some(now + 600_000));
+        assert_eq!(open_until(&two, Some("other"), now), Some(now + 3_600_000));
+        assert_eq!(open_until(&two, None, now), None, "which of the two the request goes to is not known");
+        let unowned = (limit(Provider::Anthropic, "five_hour", Some(now / 1000 + 600)), None);
+        assert_eq!(open_until(std::slice::from_ref(&unowned), Some("me"), now), None, "a reading no account is tied to is not mine for sure");
+        assert_eq!(open_until(&[unowned], None, now), Some(now + 600_000));
     }
 }

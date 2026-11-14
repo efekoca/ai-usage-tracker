@@ -61,10 +61,10 @@ describe('before and after a marker', () => {
     const card = target.querySelector('.marker')!
     expect(card.querySelector('.what')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Shorter CLAUDE.md Wednesday, November 4, 2026 · notes · Claude Code · 7 days on each side')
     expect(figures(card)).toEqual([
-      'Cost per session | $2.86 → $2.21 | −23%',
-      'Starting load | 38.4K → 29.5K | −23%',
-      'Tool error rate | 9.2% → 5.7% | −3.5 pp',
-      'Cache hit rate | 91.4% → 95.8% | +4.4 pp',
+      'Cost per session | $2.86 → $2.21 | −23% better',
+      'Starting load | 38.4K → 29.5K | −23% better',
+      'Tool error rate | 9.2% → 5.7% | −3.5 pp better',
+      'Cache hit rate | 91.4% → 95.8% | +4.4 pp better',
     ])
     expect(tones(card)).toEqual(['good', 'good', 'good', 'good'])
     expect(card.querySelector('.basis')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Oct 28 – Nov 3: 11 sessions, 341 requests · Nov 4 – Nov 10: 12 sessions, 372 requests')

@@ -4,7 +4,7 @@ use crate::analytics::{local_date, Filter, Range, Totals};
 use crate::model::{Accuracy, Provider, Tool};
 use crate::pricing::{CostInput, PriceBook};
 use crate::store::{EventRow, ProjectRow, Store};
-use chrono::{NaiveDate, TimeZone};
+use chrono::{Days, NaiveDate, TimeZone};
 use rusqlite::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
@@ -457,6 +457,7 @@ pub struct StartingLoad {
 /// of a change are compared.
 const START_RECENT: usize = 5;
 pub const START_POINTS: usize = 60;
+const START_RUN: usize = 3;
 const START_STEP_TOKENS: u64 = 2_000;
 const START_STEP_SHARE: f64 = 0.10;
 
@@ -467,14 +468,16 @@ fn median(values: &[u64]) -> u64 {
 }
 
 /// Whether the conversations from `i` on start clearly larger or smaller than those before: the
-/// medians of up to five on each side differ by at least 2,000 tokens and a tenth, and every one
-/// of those after lies beyond every one of those before.
+/// medians of up to five on each side differ by at least 2,000 tokens and a tenth, and the first
+/// three after lie beyond every one of those before.
 fn step_at(starts: &[Start], i: usize) -> Option<StartChange> {
     let before: Vec<u64> = starts[i.saturating_sub(START_RECENT)..i].iter().map(|s| s.tokens).collect();
     let after: Vec<u64> = starts[i..(i + START_RECENT).min(starts.len())].iter().map(|s| s.tokens).collect();
     let (was, is) = (median(&before), median(&after));
     let apart = was.abs_diff(is) >= START_STEP_TOKENS.max((was as f64 * START_STEP_SHARE) as u64);
-    let (low, high) = (after.iter().min()?, after.iter().max()?);
+    // three in a row beyond all of those before: a long prompt among the later ones hides nothing
+    let run = &after[..after.len().min(START_RUN)];
+    let (low, high) = (run.iter().min()?, run.iter().max()?);
     let clear = low > before.iter().max()? || high < before.iter().min()?;
     (apart && clear).then(|| StartChange { at_ms: starts[i].ts_ms, before: was, after: is })
 }
@@ -493,7 +496,8 @@ fn start_change(starts: &[Start]) -> Option<StartChange> {
 
 /// The first main-conversation request of every conversation that began in `range`, the oldest
 /// first: subagents, advisors and captured telemetry (which also holds helper requests) are left
-/// out, and so is a conversation that began before the range and only goes on in it.
+/// out, and so are a conversation that began before the range and only goes on in it and one
+/// that began with another's history.
 fn first_requests(store: &Store, range: Range, filter: &Filter) -> Result<Vec<EventRow>> {
     firsts_among(store, store.events_between(range.from_ms, range.to_ms)?, range, filter)
 }
@@ -510,8 +514,13 @@ fn firsts_among(store: &Store, events: Vec<EventRow>, range: Range, filter: &Fil
             firsts.entry((e.tool.as_str(), session)).or_insert(e);
         }
     }
+    // a conversation resumed under a new id or forked begins with all the earlier one carried
+    let carried = store.carried_sessions()?;
     let mut out = Vec::new();
-    for ((_, session), e) in firsts {
+    for ((tool, session), e) in firsts {
+        if carried.contains(&(tool.to_owned(), session.clone())) {
+            continue;
+        }
         if filter.matches(&e) && !store.session_started_ms(&session)?.is_some_and(|t| t < range.from_ms) {
             out.push(e);
         }
@@ -603,13 +612,21 @@ fn experiment_side(store: &Store, book: &PriceBook, range: Range, filter: &Filte
 /// The use in the `days` days before `at_ms` against the same number of days from it on, as far
 /// as they have passed by `now_ms`: what changed after something the user did at `at_ms`. Only
 /// the tool and the project of `filter` narrow it.
-pub fn experiment(store: &Store, book: &PriceBook, at_ms: i64, days: u32, now_ms: i64, filter: &Filter) -> Result<Experiment> {
-    let span = i64::from(days) * 86_400_000;
+pub fn experiment<Tz: TimeZone>(store: &Store, book: &PriceBook, at_ms: i64, days: u32, now_ms: i64, filter: &Filter, tz: &Tz) -> Result<Experiment> {
     let filter = Filter { tools: filter.tools.clone(), projects: filter.projects.clone(), ..Default::default() };
     Ok(Experiment {
-        before: experiment_side(store, book, Range { from_ms: at_ms - span, to_ms: at_ms }, &filter)?,
-        after: experiment_side(store, book, Range { from_ms: at_ms, to_ms: (at_ms + span).min(now_ms) }, &filter)?,
+        before: experiment_side(store, book, Range { from_ms: shift_days(tz, at_ms, -i64::from(days)), to_ms: at_ms }, &filter)?,
+        after: experiment_side(store, book, Range { from_ms: at_ms, to_ms: shift_days(tz, at_ms, i64::from(days)).min(now_ms) }, &filter)?,
     })
+}
+
+/// `ms` moved by whole local calendar days, to the same local time: a day of 23 or 25 hours is
+/// still one day. A time the clock skips on the day it lands on falls back to 24-hour days.
+fn shift_days<Tz: TimeZone>(tz: &Tz, ms: i64, days: i64) -> i64 {
+    let fixed = ms.saturating_add(days.saturating_mul(86_400_000));
+    let Some(local) = tz.timestamp_millis_opt(ms).single().map(|d| d.naive_local()) else { return fixed };
+    let moved = if days >= 0 { local.checked_add_days(Days::new(days.unsigned_abs())) } else { local.checked_sub_days(Days::new(days.unsigned_abs())) };
+    moved.and_then(|d| tz.from_local_datetime(&d).earliest()).map_or(fixed, |t| t.timestamp_millis())
 }
 
 /// The starting load of each project, per tool and where it runs, from the conversations that
@@ -904,9 +921,56 @@ pub const MISS_EVENTS: usize = 50;
 /// A report comes with the next status-line update after the miss; one this much later still
 /// tells about a miss in the period.
 const MISS_REPORT_LAG_MS: i64 = 7 * 86_400_000;
+/// How far the log's time of a request may lie from the time Claude Code gives its miss.
+const MISS_NEAR_MS: i64 = 60_000;
 
-/// The misses Claude Code reported for the conversations the filter keeps, each at the time it
-/// happened. Two reports in a row tell what happened in between; counts that start over begin a
+/// The counts one window on a conversation has told so far: its latest report, and whether the
+/// counts were seen at nothing after it, which ends the run.
+struct MissRun<'a> {
+    head: &'a crate::model::CacheMissReport,
+    closed: bool,
+}
+
+/// The earlier report `r` goes on from. Two windows can hold one conversation, each with counts
+/// of its own, and a conversation resumed begins its counts again; nothing in a report says which
+/// it is, so a report joins the run it can be the next step of, and begins a new one when there
+/// is none. `Some(None)` is a new run; `None` a state already told, which adds nothing.
+fn miss_base<'a>(runs: &mut Vec<MissRun<'a>>, high: Option<i64>, r: &'a crate::model::CacheMissReport) -> Option<Option<&'a crate::model::CacheMissReport>> {
+    let no_fewer = |h: &crate::model::CacheMissReport| h.misses <= r.misses && h.rebuilds <= r.rebuilds;
+    // misses told before: their latest is no later than one already told
+    let told = r.misses > 0 && matches!((r.last_miss_ms, high), (Some(l), Some(h)) if l <= h);
+    let fits = |run: &MissRun| {
+        let h = run.head;
+        if told {
+            // the same run going on (a rebuild since, or the report once more)
+            h.last_miss_ms == r.last_miss_ms && no_fewer(h)
+        } else if r.misses == 0 {
+            // rebuilds alone: no miss tells a new run from the old one, so none is assumed
+            h.misses == 0 && no_fewer(h)
+        } else if r.last_miss_ms.is_some() && h.last_miss_ms.is_some() {
+            // a later miss is one more miss
+            !run.closed && h.misses < r.misses && no_fewer(h)
+        } else {
+            !run.closed && no_fewer(h)
+        }
+    };
+    let found = runs.iter().enumerate().filter(|(_, run)| fits(run)).max_by_key(|(_, run)| (run.head.misses, run.head.rebuilds)).map(|(i, _)| i);
+    match found {
+        Some(i) => {
+            let base = runs[i].head;
+            runs[i] = MissRun { head: r, closed: false };
+            Some(Some(base))
+        }
+        None if told => None,
+        None => {
+            runs.push(MissRun { head: r, closed: false });
+            Some(None)
+        }
+    }
+}
+
+/// The misses Claude Code reported, each at the time it happened and counted when the request
+/// that missed (the main conversation's nearest to that time) passes the filter. Two reports in a row tell what happened in between; counts that start over begin a
 /// new run.
 pub fn cache_misses<Tz: TimeZone>(store: &Store, range: Range, filter: &Filter, tz: &Tz) -> Result<CacheMisses> {
     let projects: HashMap<i64, ProjectRow> = store.projects()?.into_iter().map(|p| (p.id, p)).collect();
@@ -930,8 +994,8 @@ pub fn cache_misses<Tz: TimeZone>(store: &Store, range: Range, filter: &Filter, 
     let reports = store.cache_miss_reports(range.from_ms, range.to_ms.saturating_add(MISS_REPORT_LAG_MS))?;
     for group in reports.chunk_by(|a, b| a.session_id == b.session_id) {
         let session_id = &group[0].session_id;
-        // the filter keeps a conversation by its own requests, whenever they were
         let events: Vec<EventRow> = store.session_events(session_id)?.into_iter().filter(|e| e.tool == Tool::ClaudeCode).collect();
+        // a conversation none of whose requests is in the archive has no project, model or account to count under
         if !events.iter().any(|e| filter.matches(e)) {
             continue;
         }
@@ -943,19 +1007,38 @@ pub fn cache_misses<Tz: TimeZone>(store: &Store, range: Range, filter: &Filter, 
         // a miss is the main conversation's: a subagent's request tells nothing about it
         let main: Vec<&EventRow> = events.iter().filter(|e| e.agent.is_none() && !e.advisor).collect();
         let mut missed = false;
-        let mut prev: Option<&crate::model::CacheMissReport> = None;
+        let mut runs: Vec<MissRun> = Vec::new();
+        // the latest miss told so far
+        let mut high: Option<i64> = None;
         for r in group {
-            let base = prev.filter(|p| r.misses >= p.misses && r.rebuilds >= p.rebuilds);
-            prev = Some(r);
+            if r.misses == 0 && r.rebuilds == 0 {
+                runs.iter_mut().for_each(|run| run.closed = true);
+                continue;
+            }
+            let Some(base) = miss_base(&mut runs, high, r) else { continue };
+            high = high.max(r.last_miss_ms);
             let (misses, rebuilds) = (r.misses - base.map_or(0, |p| p.misses), r.rebuilds - base.map_or(0, |p| p.rebuilds));
             let at = if misses > 0 { r.last_miss_ms.unwrap_or(r.ts_ms) } else { r.ts_ms };
             if misses + rebuilds == 0 || at < range.from_ms || at >= range.to_ms {
                 continue;
             }
+            // the request that missed: Claude Code names the miss to the second and the log stamps
+            // the response on its own, so it is the nearest one within a minute, or else the last before
+            let near = main
+                .iter()
+                .filter(|e| (e.ts_ms - at).abs() <= MISS_NEAR_MS)
+                .min_by_key(|e| (e.ts_ms - at).abs())
+                .or_else(|| main.iter().rev().find(|e| e.ts_ms <= at))
+                .or(main.first());
+            // a conversation can change model or account: a miss of a request the filter leaves out is not its
+            if !filter.is_empty() && !near.is_some_and(|e| filter.matches(e)) {
+                continue;
+            }
             let before = |cause: &str| base.and_then(|p| p.causes.iter().find(|(c, _)| c == cause)).map_or(0, |(_, n)| *n);
-            let new: Vec<(String, u64)> = r.causes.iter().filter_map(|(c, n)| Some((c.clone(), n.checked_sub(before(c)).filter(|d| *d > 0)?))).collect();
+            // Claude Code's own name for a miss it found no cause for is counted with the rest of those
+            let new: Vec<(String, u64)> = r.causes.iter().filter(|(c, _)| c != "unknown").filter_map(|(c, n)| Some((c.clone(), n.checked_sub(before(c)).filter(|d| *d > 0)?))).collect();
             let recached = r.recached_tokens.saturating_sub(base.map_or(0, |p| p.recached_tokens));
-            let undetermined = if new.is_empty() { misses } else { 0 };
+            let undetermined = misses.saturating_sub(new.iter().map(|(_, n)| n).sum());
             let acc = by_project.entry(project_id).or_insert_with(|| {
                 let (project, hidden) = project_label(&projects, project_id);
                 Acc { project, hidden, misses: 0, rebuilds: 0, recached: 0, last_miss: None, last: 0, causes: BTreeMap::new(), undetermined: 0, events: Vec::new() }
@@ -982,8 +1065,6 @@ pub fn cache_misses<Tz: TimeZone>(store: &Store, range: Range, filter: &Filter, 
             out.rebuilds += rebuilds;
             out.recached_tokens += recached;
             out.undetermined += undetermined;
-            // the request that missed, or the last one before it
-            let near = main.iter().rev().find(|e| e.ts_ms <= at).or(main.first());
             acc.events.push(MissEvent {
                 ts_ms: at,
                 session_id: session_id.clone(),

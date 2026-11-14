@@ -937,7 +937,7 @@ export function installMock() {
               id: `cc:${i}`, tool: s.tool, client: s.client, session_id: s.session_id, ordinal: 1 + ((i * 3) % 28), origin: origins[i % origins.length],
               project_id: s.project_id, project: hidden ? '' : s.project, hidden,
               started_ms: Date.now() - i * 47 * 60000, ended_ms: Date.now() - i * 47 * 60000 + (20 + ((i * 37) % 1500)) * 1000,
-              requests: requests + agentRequests, agents, tool_calls: i % 11 === 5 ? 0 : requests + agentRequests + ((i * 3) % 30), tool_failed: i % 3 === 0 ? (i % 7) + 1 : 0,
+              requests: requests + agentRequests, agents, tool_calls: i % 11 === 5 ? 0 : requests + agentRequests + ((i * 3) % 30), tool_failed: i % 3 === 0 ? (i % 7) + 1 : 0, calls_hidden: false,
               total_tokens: Math.round((main + sub) * 2.4e6), cost_usd: unpriced ? 0 : main + sub, unpriced_requests: unpriced ? requests + agentRequests : 0,
               models: i % 6 === 0 ? [s.models[0].model, 'claude-haiku-5-5'] : [s.models[0].model], parts,
             }

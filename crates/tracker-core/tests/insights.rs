@@ -489,6 +489,7 @@ fn add_calls(store: &mut Store, calls: &[Call]) {
             name: (*name).into(),
             failed: *failed,
             turn: None,
+            request: None,
         })
         .collect();
     let mut tx = store.transaction().unwrap();
@@ -760,6 +761,7 @@ fn a_session_timeline_marks_rebuilt_caches_compactions_subagents_and_failed_call
             name: (*name).into(),
             failed: *failed,
             turn: None,
+            request: None,
         })
         .collect();
     let mut tx = store.transaction().unwrap();
@@ -803,6 +805,7 @@ fn a_session_timeline_keeps_the_filter_of_the_session_list() {
             name: (*key).into(),
             failed: None,
             turn: None,
+            request: None,
         })
         .collect();
     let mut tx = store.transaction().unwrap();
@@ -857,6 +860,7 @@ fn a_call_from_before_the_row() -> (Store, i64, i64) {
         name: "Read".into(),
         failed: Some(true),
         turn: None,
+        request: None,
     };
     let mut tx = store.transaction().unwrap();
     tx.upsert_tool_calls(&[call]).unwrap();
@@ -1124,7 +1128,7 @@ fn a_marker_compares_the_days_before_it_with_the_days_after() {
         ],
     );
     // calls of another project, and of none, are not the project's
-    let elsewhere = |key: &str, project: Option<&str>| ToolCall { key: key.into(), ts_ms: at + DAY, tool: Tool::ClaudeCode, session_id: Some("x".into()), project_path: project.map(Into::into), agent: None, name: "Bash".into(), failed: Some(true), turn: None };
+    let elsewhere = |key: &str, project: Option<&str>| ToolCall { key: key.into(), ts_ms: at + DAY, tool: Tool::ClaudeCode, session_id: Some("x".into()), project_path: project.map(Into::into), agent: None, name: "Bash".into(), failed: Some(true), turn: None, request: None };
     let mut tx = store.transaction().unwrap();
     tx.upsert_tool_calls(&[elsewhere("u1", Some("C:/w/other")), elsewhere("u2", None)]).unwrap();
     tx.commit().unwrap();
@@ -1132,7 +1136,7 @@ fn a_marker_compares_the_days_before_it_with_the_days_after() {
     let app = store.projects().unwrap().into_iter().find(|p| p.name == "app").unwrap().id;
     let scope = Filter { tools: vec![Tool::ClaudeCode], projects: vec![app], models: vec!["no-such-model".into()], ..Default::default() };
     let now = at + 30 * DAY;
-    let x = experiment(&store, &book, at, 7, now, &scope).unwrap();
+    let x = experiment(&store, &book, at, 7, now, &scope, &chrono::Utc).unwrap();
 
     let b = &x.before;
     assert_eq!((b.from_ms, b.to_ms), (at - 7 * DAY, at));
@@ -1148,13 +1152,13 @@ fn a_marker_compares_the_days_before_it_with_the_days_after() {
     assert!(close(a.cache_hit_pct.unwrap(), 61_000.0 * 100.0 / 153_000.0));
 
     // the days after are counted as far as they have passed
-    let early = experiment(&store, &book, at, 7, at + HOUR + 90_000, &scope).unwrap().after;
+    let early = experiment(&store, &book, at, 7, at + HOUR + 90_000, &scope, &chrono::Utc).unwrap().after;
     assert_eq!((early.to_ms, early.sessions, early.requests, early.started), (at + HOUR + 90_000, 1, 2, 1));
     // nothing yet: no rate is made up
-    let ahead = experiment(&store, &book, now, 7, now, &scope).unwrap().after;
+    let ahead = experiment(&store, &book, now, 7, now, &scope, &chrono::Utc).unwrap().after;
     assert_eq!((ahead.sessions, ahead.cost_per_session, ahead.starting_load, ahead.tool_error_pct, ahead.cache_hit_pct), (0, None, None, None, None));
     // without a scope every tool and project counts
-    let all_of_it = experiment(&store, &book, at, 7, now, &Filter::default()).unwrap().after;
+    let all_of_it = experiment(&store, &book, at, 7, now, &Filter::default(), &chrono::Utc).unwrap().after;
     assert_eq!((all_of_it.sessions, all_of_it.tool_calls), (5, 7));
 
     // a model without a price is in no cost, and its conversation in no cost per session
@@ -1166,11 +1170,172 @@ fn a_marker_compares_the_days_before_it_with_the_days_after() {
         // a failed request used no token and would cost nothing at any price
         ev("q3", at + 3 * HOUR, Tool::ClaudeCode, "<synthetic>", Some("q"), "C:/w/app", 0, 0, 0),
     ]);
-    let u = experiment(&unpriced, &book, at, 7, now, &Filter::default()).unwrap().after;
-    let one = experiment(&store_with(&[cc("p1", at + HOUR, "p", "C:/w/app", 30_000, 0)]), &book, at, 7, now, &Filter::default()).unwrap().after;
+    let u = experiment(&unpriced, &book, at, 7, now, &Filter::default(), &chrono::Utc).unwrap().after;
+    let one = experiment(&store_with(&[cc("p1", at + HOUR, "p", "C:/w/app", 30_000, 0)]), &book, at, 7, now, &Filter::default(), &chrono::Utc).unwrap().after;
     assert_eq!((u.sessions, u.requests, u.unpriced_requests), (2, 5, 2));
     assert!(close(u.cost_per_session.unwrap(), one.cost_per_session.unwrap()), "only the priced conversation, and not the request without one");
     assert!(close(u.cost_usd, 2.0 * one.cost_usd), "the request of no conversation is still in the cost");
-    let none = experiment(&store_with(&[ev("q1", at + HOUR, Tool::ClaudeCode, "no-such-model", Some("q"), "C:/w/app", 30_000, 0, 100)]), &book, at, 7, now, &Filter::default()).unwrap().after;
+    let none = experiment(&store_with(&[ev("q1", at + HOUR, Tool::ClaudeCode, "no-such-model", Some("q"), "C:/w/app", 30_000, 0, 100)]), &book, at, 7, now, &Filter::default(), &chrono::Utc).unwrap().after;
     assert_eq!((none.sessions, none.unpriced_requests, none.cost_per_session), (1, 1, None));
+}
+
+#[test]
+fn a_miss_counts_only_where_the_request_that_missed_passes_the_filter() {
+    let t = ms(2026, 11, 10, 12, 0);
+    let mut store = store_with(&[
+        ev("a", t, Tool::ClaudeCode, "claude-sonnet-5-5", Some("s1"), "/p/notes", 10, 100, 5),
+        // the log stamps the response a little after the second Claude Code names for the miss
+        ev("b", t + 20 * MIN + 400, Tool::ClaudeCode, "claude-opus-5-5", Some("s1"), "/p/notes", 10, 100, 5),
+    ]);
+    let mut tx = store.transaction().unwrap();
+    tx.insert_cache_miss_reports(&[CacheMissReport {
+        session_id: "s1".into(),
+        ts_ms: t + 21 * MIN,
+        last_miss_ms: Some(t + 20 * MIN),
+        requests: 2,
+        misses: 1,
+        rebuilds: 0,
+        recached_tokens: 1_000,
+        causes: vec![("tools_changed".into(), 1)],
+    }])
+    .unwrap();
+    tx.commit().unwrap();
+    let range = Range { from_ms: t - HOUR, to_ms: t + HOUR };
+    let of = |model: &str| cache_misses(&store, range, &Filter { models: vec![model.into()], ..Default::default() }, &chrono::Utc).unwrap();
+    assert_eq!(cache_misses(&store, range, &Filter::default(), &chrono::Utc).unwrap().misses, 1);
+    let sonnet = of("claude-sonnet-5-5");
+    assert_eq!((sonnet.misses, sonnet.sessions, sonnet.projects.len(), sonnet.recached_tokens), (0, 0, 0, 0), "the conversation had moved to the other model by then");
+    assert_eq!(of("claude-opus-5-5").misses, 1);
+}
+
+#[test]
+fn the_days_around_a_marker_are_calendar_days_where_the_clock_changes() {
+    let cet = Dst::europe();
+    // 27 October 00:00 in Central Europe; the clock went back an hour on the 25th
+    let at = ms(2026, 10, 26, 23, 0);
+    let store = store_with(&[
+        // 24 October 00:30 there: inside the three days before, which are 73 hours long
+        ev("d1", ms(2026, 10, 23, 22, 30), Tool::ClaudeCode, "claude-sonnet-5", Some("p"), "C:/w/app", 1_000, 0, 10),
+        ev("d0", ms(2026, 10, 23, 21, 30), Tool::ClaudeCode, "claude-sonnet-5", Some("p"), "C:/w/app", 1_000, 0, 10),
+    ]);
+    let book = PriceBook::default_book();
+    let before = experiment(&store, &book, at, 3, at + 30 * 86_400_000, &Filter::default(), &cet).unwrap().before;
+    assert_eq!((before.from_ms, before.requests), (ms(2026, 10, 23, 22, 0), 1));
+    // and forward over the same night: three days from the 24th end on the 27th at midnight
+    let from = ms(2026, 10, 23, 22, 0);
+    let after = experiment(&store, &book, from, 3, from + 30 * 86_400_000, &Filter::default(), &cet).unwrap().after;
+    assert_eq!((after.to_ms, after.requests), (at, 1));
+    // where no clock changes, a day is 24 hours
+    let plain = experiment(&store, &book, at, 3, at + 30 * 86_400_000, &Filter::default(), &chrono::Utc).unwrap();
+    assert_eq!((plain.before.from_ms, plain.after.to_ms), (at - 3 * 86_400_000, at + 3 * 86_400_000));
+}
+
+#[test]
+fn counts_that_began_again_and_reached_the_same_number_tell_of_new_misses() {
+    let t = ms(2026, 11, 10, 12, 0);
+    let mut store = store_with(&[ev("a", t, Tool::ClaudeCode, "claude-opus-5-5", Some("s1"), "/p/notes", 10, 100, 5)]);
+    let report = |ts_ms: i64, last: i64, misses: u64, rebuilds: u64| CacheMissReport { session_id: "s1".into(), ts_ms, last_miss_ms: Some(last), requests: 5, misses, rebuilds, recached_tokens: misses * 1_000, causes: Vec::new() };
+    let mut tx = store.transaction().unwrap();
+    tx.insert_cache_miss_reports(&[
+        report(t + MIN, t + MIN, 1, 0),
+        // the same miss told again, with a rebuild since
+        report(t + 2 * MIN, t + MIN, 1, 1),
+        // the conversation was resumed and its counts began again, unseen: one miss, but a later one
+        report(t + 10 * MIN, t + 9 * MIN, 1, 1),
+        // seen at nothing, then two new ones
+        report(t + 20 * MIN, t + 9 * MIN, 0, 0),
+        report(t + 30 * MIN, t + 29 * MIN, 2, 0),
+    ])
+    .unwrap();
+    tx.commit().unwrap();
+    let m = cache_misses(&store, Range { from_ms: t - HOUR, to_ms: t + HOUR }, &Filter::default(), &chrono::Utc).unwrap();
+    assert_eq!((m.misses, m.rebuilds, m.recached_tokens), (4, 2, 4_000));
+}
+
+#[test]
+fn a_state_shown_again_adds_no_miss() {
+    let t = ms(2026, 11, 10, 12, 0);
+    let report = |s: &str, ts_ms: i64, last: i64, misses: u64, rebuilds: u64| CacheMissReport { session_id: s.into(), ts_ms, last_miss_ms: Some(last), requests: 5, misses, rebuilds, recached_tokens: misses * 1_000, causes: vec![("tools_changed".into(), misses)] };
+    let mut store = store_with(&[
+        ev("a", t, Tool::ClaudeCode, "claude-opus-5-5", Some("idle"), "/p/notes", 10, 100, 5),
+        ev("b", t, Tool::ClaudeCode, "claude-opus-5-5", Some("two"), "/p/notes", 10, 100, 5),
+        ev("c", t, Tool::ClaudeCode, "claude-opus-5-5", Some("quiet"), "/p/notes", 10, 100, 5),
+    ]);
+    let mut tx = store.transaction().unwrap();
+    tx.insert_cache_miss_reports(&[
+        // a second window on the conversation, with nothing to tell, takes turns with the first
+        report("idle", t + MIN, t + MIN, 2, 1),
+        report("idle", t + 2 * MIN, t + MIN, 0, 0),
+        report("idle", t + 3 * MIN, t + MIN, 2, 1),
+        report("idle", t + 4 * MIN, t + MIN, 0, 0),
+        report("idle", t + 5 * MIN, t + MIN, 2, 2),
+        // two windows that both missed: the second one's count began again with a later miss
+        report("two", t + 10 * MIN, t + 9 * MIN, 5, 0),
+        report("two", t + 20 * MIN, t + 19 * MIN, 1, 0),
+        report("two", t + 21 * MIN, t + 9 * MIN, 5, 0),
+        report("two", t + 22 * MIN, t + 19 * MIN, 1, 0),
+        report("two", t + 30 * MIN, t + 29 * MIN, 2, 0),
+        // rebuilds alone, with the counts at nothing in between, are not told twice
+        report("quiet", t + MIN, t, 0, 1),
+        report("quiet", t + 2 * MIN, t, 0, 0),
+        report("quiet", t + 3 * MIN, t, 0, 1),
+    ])
+    .unwrap();
+    tx.commit().unwrap();
+    let m = cache_misses(&store, Range { from_ms: t - HOUR, to_ms: t + HOUR }, &Filter::default(), &chrono::Utc).unwrap();
+    assert_eq!((m.misses, m.rebuilds, m.recached_tokens), (2 + 5 + 1 + 1, 2 + 1, 9_000));
+    assert_eq!(m.causes, [MissCause { cause: "tools_changed".into(), misses: 9 }]);
+}
+
+#[test]
+fn two_windows_on_one_conversation_each_count_their_own_misses() {
+    let t = ms(2026, 11, 10, 12, 0);
+    let report = |ts_ms: i64, last: i64, misses: u64, causes: &[(&str, u64)]| CacheMissReport {
+        session_id: "s1".into(),
+        ts_ms,
+        last_miss_ms: Some(last),
+        requests: 5,
+        misses,
+        rebuilds: 0,
+        recached_tokens: misses * 1_000,
+        causes: causes.iter().map(|(c, n)| ((*c).into(), *n)).collect(),
+    };
+    let mut store = store_with(&[ev("a", t, Tool::ClaudeCode, "claude-opus-5-5", Some("s1"), "/p/notes", 10, 100, 5)]);
+    let mut tx = store.transaction().unwrap();
+    tx.insert_cache_miss_reports(&[
+        // the first window is at three misses, one of them with no cause found
+        report(t + MIN, t + MIN, 3, &[("ttl_expired_5m", 2), ("unknown", 1)]),
+        // a second one opens the conversation and misses once
+        report(t + 10 * MIN, t + 9 * MIN, 1, &[("tools_changed", 1)]),
+        // then the first misses again: one more for it, not three more than the second's one
+        report(t + 20 * MIN, t + 19 * MIN, 4, &[("ttl_expired_5m", 3), ("unknown", 1)]),
+        report(t + 30 * MIN, t + 29 * MIN, 2, &[("tools_changed", 2)]),
+    ])
+    .unwrap();
+    tx.commit().unwrap();
+    let m = cache_misses(&store, Range { from_ms: t - HOUR, to_ms: t + HOUR }, &Filter::default(), &chrono::Utc).unwrap();
+    assert_eq!((m.misses, m.recached_tokens, m.undetermined), (6, 6_000, 1));
+    assert_eq!(m.causes, [MissCause { cause: "ttl_expired_5m".into(), misses: 3 }, MissCause { cause: "tools_changed".into(), misses: 2 }], "the causes and the ones without add up to the misses");
+}
+
+#[test]
+fn a_long_prompt_after_a_step_does_not_hide_it_and_a_carried_conversation_is_no_start() {
+    const DAY: i64 = 24 * HOUR;
+    let cc = |key, at, session, project, size| ev(key, at, Tool::ClaudeCode, "claude-opus-5-5", Some(session), project, size, 0, 50);
+    let t = ms(2026, 10, 1, 9, 0);
+    let book = PriceBook::default_book();
+    let sizes = [50_000, 50_200, 50_100, 50_300, 50_000, 30_000, 30_200, 30_100, 80_000, 30_300, 30_000];
+    let keys = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"];
+    let mut rows: Vec<Ev> = sizes.iter().zip(keys).enumerate().map(|(i, (&size, key))| cc(key, t + i as i64 * DAY, key, "/w/p", size)).collect();
+    // resumed under a new id: its first request of its own carries the whole earlier conversation
+    rows.push(cc("z", t + 11 * DAY, "z", "/w/p", 140_000));
+    let mut store = store_with(&rows);
+    let load = |store: &Store| starting_loads(store, &book, all(), &Filter::default()).unwrap().remove(0);
+    assert_eq!(load(&store).conversations, 12);
+    let mut tx = store.transaction().unwrap();
+    tx.note_carried(&[(Tool::ClaudeCode, "z".into())]).unwrap();
+    tx.commit().unwrap();
+    let l = load(&store);
+    assert_eq!((l.conversations, l.starts.last().map(|s| s.tokens), l.typical), (11, Some(30_000), 30_200));
+    assert_eq!(l.change, Some(StartChange { at_ms: t + 5 * DAY, before: 50_100, after: 30_200 }), "three in a row below all before; the long prompt came after");
 }

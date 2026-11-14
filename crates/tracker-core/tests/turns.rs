@@ -79,9 +79,10 @@ fn a_prompt_gathers_its_requests_subagents_and_tool_calls_into_one_turn() {
         &[
             user("s-turn", "10:00:00", "p1", Some("human")),
             reply("s-turn", "10:00:05", "msg_1", Some("toolu_task")),
-            // the conversation is compacted on its own in the middle of the turn
+            // the conversation is compacted on its own in the middle of the turn; the summary's
+            // line is dated when an earlier summary was made
             {
-                let mut c = user("s-turn", "10:03:00", "p1", None);
+                let mut c = user("s-turn", "07:03:00", "p1", None);
                 c["isCompactSummary"] = json!(true);
                 c
             },
@@ -178,20 +179,31 @@ fn what_began_a_turn_is_read_from_its_first_line() {
             // a prompt nothing answered is no turn to show, and takes no place in the order
             user("s-kind", "09:53:00", "k9", Some("human")),
             user("s-kind", "09:55:00", "k7", Some("human")),
-            // a line with no prompt id names no turn: the response stays with the one before
+            reply("s-kind", "09:55:05", "msg_k7", Some("toolu_k7")),
+            // a tool result with no prompt id leaves the turn open
+            {
+                let mut bare = result("s-kind", "09:55:30", "", "toolu_k7", false);
+                bare.as_object_mut().unwrap().remove("promptId");
+                bare
+            },
+            reply("s-kind", "09:55:35", "msg_k7b", None),
+            // a prompt with no prompt id ends it: what answers that prompt belongs to no turn
             {
                 let mut bare = user("s-kind", "09:56:00", "", Some("human"));
                 bare.as_object_mut().unwrap().remove("promptId");
                 bare
             },
-            reply("s-kind", "09:56:05", "msg_k7", None),
+            reply("s-kind", "09:56:05", "msg_k10", None),
         ],
     );
     let mut store = Store::open_in_memory().unwrap();
     run(&mut store, &m.env);
     let got: Vec<(String, u32, u64)> = of(&store, "s-kind").into_iter().map(|t| (t.origin, t.ordinal, t.requests)).collect();
-    let want = [("human", 1, 2), ("scheduled", 2, 1), ("other", 3, 1), ("peer", 4, 1), ("other", 5, 1), ("task_notification", 6, 1), ("human", 7, 1)];
+    let want = [("human", 1, 2), ("scheduled", 2, 1), ("other", 3, 1), ("peer", 4, 1), ("other", 5, 1), ("task_notification", 6, 1), ("human", 7, 2)];
     assert_eq!(got, want.map(|(o, n, r)| (o.to_owned(), n, r)));
+    let project = store.projects().unwrap().into_iter().find(|p| p.name == "Turns").unwrap().id;
+    let r = turns(&store, &PriceBook::default_book(), DAY, &Filter { projects: vec![project], ..Default::default() }).unwrap();
+    assert_eq!(r.requests_outside, 1, "the request after the prompt that named no turn");
 }
 
 #[test]
@@ -303,6 +315,12 @@ fn turns_survive_a_backup_and_go_with_the_data() {
     let backup = dir.path().join("backup.db");
     let mut store = Store::open_in_memory().unwrap();
     run(&mut store, &m.env);
+    let mut tx = store.transaction().unwrap();
+    let report = tracker_core::model::CacheMissReport { session_id: "s-keep".into(), ts_ms: DAY.from_ms, last_miss_ms: None, requests: 3, misses: 1, rebuilds: 0, recached_tokens: 10, causes: vec![("tools_changed".into(), 1)] };
+    tx.insert_cache_miss_reports(&[report]).unwrap();
+    tx.insert_limit_stops(&[tracker_core::model::LimitStop { session_id: "s-keep".into(), ts_ms: DAY.from_ms, window: "five_hour".into(), resets_at: 1_788_500_000 }]).unwrap();
+    tx.note_carried(&[(Tool::ClaudeCode, "s-keep".into())]).unwrap();
+    tx.commit().unwrap();
     store.backup_to(&backup).unwrap();
 
     let mut fresh = Store::open_in_memory().unwrap();
@@ -312,6 +330,9 @@ fn turns_survive_a_backup_and_go_with_the_data() {
     // the same backup again changes nothing
     fresh.merge_from(&backup).unwrap();
     assert_eq!(of(&fresh, "s-keep").len(), 1);
+    assert_eq!(fresh.cache_miss_reports(0, i64::MAX).unwrap().len(), 1, "kept nowhere else once the status-line file is rotated away");
+    assert_eq!(fresh.limit_stops("s-keep", 0, i64::MAX).unwrap().len(), 1);
+    assert!(fresh.carried_sessions().unwrap().contains(&("claude_code".to_owned(), "s-keep".to_owned())));
 
     fresh.wipe_data().unwrap();
     assert!(!turns(&fresh, &PriceBook::default_book(), DAY, &Filter::default()).unwrap().tracked);
@@ -323,7 +344,7 @@ fn before_turns(path: &std::path::Path) {
     s.conn()
         .execute_batch(
             "DROP INDEX usage_event_turn; DROP INDEX tool_call_turn; ALTER TABLE usage_event DROP COLUMN turn; ALTER TABLE tool_call DROP COLUMN turn;
-             DROP TABLE turn; PRAGMA user_version = 15;",
+             ALTER TABLE tool_call DROP COLUMN request; DROP TABLE turn; DROP TABLE limit_stop; DROP TABLE session_carried; PRAGMA user_version = 15;",
         )
         .unwrap();
 }
@@ -387,4 +408,124 @@ fn a_backup_from_before_turns_brings_its_requests_without_them() {
     run(&mut fresh, &m.env);
     let got = of(&fresh, "s-old-backup");
     assert_eq!((got.len(), got[0].requests, got[0].tool_calls), (1, 1, 1));
+}
+
+#[test]
+fn a_turn_the_filter_splits_keeps_the_tool_calls_of_the_requests_it_keeps() {
+    let m = machine();
+    let mut opus = reply("s-mix", "16:00:20", "msg_m2", Some("toolu_m2"));
+    opus["message"]["model"] = json!("claude-opus-5-5");
+    write(
+        &m.home.join(".claude/projects/C--Work-Turns/s-mix.jsonl"),
+        &[
+            user("s-mix", "16:00:00", "m1", Some("human")),
+            reply("s-mix", "16:00:05", "msg_m1", Some("toolu_m1")),
+            result("s-mix", "16:00:10", "m1", "toolu_m1", false),
+            opus,
+            result("s-mix", "16:00:30", "m1", "toolu_m2", true),
+        ],
+    );
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &m.env);
+    let book = PriceBook::default_book();
+    let all = of(&store, "s-mix");
+    assert_eq!((all[0].requests, all[0].tool_calls, all[0].tool_failed, all[0].calls_hidden), (2, 2, 1, false));
+
+    // each call counts with the request that made it: the other model's failure is not this one's
+    let only = |model: &str, store: &Store| {
+        let got = turns(store, &book, DAY, &Filter { models: vec![model.into()], ..Default::default() }).unwrap().turns;
+        let t = got.into_iter().find(|t| t.session_id.as_deref() == Some("s-mix")).unwrap();
+        (t.requests, t.tool_calls, t.tool_failed, t.calls_hidden)
+    };
+    assert_eq!(only("claude-sonnet-5", &store), (1, 1, 0, false));
+    assert_eq!(only("claude-opus-5-5", &store), (1, 1, 1, false));
+
+    // a call whose log does not say which request made it cannot be split: none is shown
+    let mut tx = store.transaction().unwrap();
+    tx.upsert_tool_calls(&[tracker_core::model::ToolCall {
+        key: "cct:untied".into(),
+        ts_ms: DAY.from_ms + 16 * 3_600_000 + 40_000,
+        tool: Tool::ClaudeCode,
+        session_id: Some("s-mix".into()),
+        project_path: Some("C:/Work/Turns".into()),
+        agent: None,
+        name: "Bash".into(),
+        failed: Some(true),
+        turn: Some("cc:m1".into()),
+        request: None,
+    }])
+    .unwrap();
+    tx.commit().unwrap();
+    assert_eq!(only("claude-sonnet-5", &store), (1, 0, 0, true));
+    assert_eq!(of(&store, "s-mix")[0].tool_calls, 3, "with every request kept, every call counts");
+
+    // a filter every request of the turn passes hides nothing
+    let project = store.projects().unwrap().into_iter().find(|p| p.name == "Turns").unwrap().id;
+    let both = Filter { projects: vec![project], tools: vec![Tool::ClaudeCode], ..Default::default() };
+    let got = turns(&store, &book, DAY, &both).unwrap().turns;
+    let t = got.iter().find(|t| t.session_id.as_deref() == Some("s-mix")).unwrap();
+    assert_eq!((t.tool_calls, t.tool_failed, t.calls_hidden), (3, 2, false));
+}
+
+#[test]
+fn lines_written_again_under_a_later_prompts_id_do_not_move_its_start() {
+    let m = machine();
+    let line = |time: &str, prompt: &str, uuid: &str| {
+        let mut v = user("s-again", time, prompt, Some("human"));
+        v["uuid"] = json!(uuid);
+        v
+    };
+    write(
+        &m.home.join(".claude/projects/C--Work-Turns/s-again.jsonl"),
+        &[
+            line("10:00:00", "w1", "u-1"),
+            reply("s-again", "10:00:05", "msg_w1", None),
+            // the desktop app writes the earlier lines once more, now under the next prompt's id
+            line("10:00:00", "w2", "u-1"),
+            reply("s-again", "10:00:05", "msg_w1", None),
+            line("12:00:00", "w2", "u-2"),
+            reply("s-again", "12:00:05", "msg_w2", None),
+            // and again after it
+            line("10:00:00", "w2", "u-1"),
+        ],
+    );
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &m.env);
+    let got: Vec<(i64, u32, u64)> = of(&store, "s-again").iter().map(|t| ((t.started_ms - DAY.from_ms) / 3_600_000, t.ordinal, t.requests)).collect();
+    assert_eq!(got, [(10, 1, 1), (12, 2, 1)]);
+}
+
+#[test]
+fn a_codex_subagent_whose_log_names_no_root_turn_is_no_turn_of_its_own() {
+    let m = machine();
+    let (main_id, sub_id) = ("0199dddd-0000-7000-8000-000000000001", "0199dddd-0000-7000-8000-000000000002");
+    let dir = m.home.join(".codex/sessions/2026/09/04");
+    let began = DAY.from_ms / 1000 + 17 * 3600;
+    write(
+        &dir.join(format!("rollout-2026-09-04T17-00-00-{main_id}.jsonl")),
+        &[
+            json!({"timestamp": at("17:00:00"), "type": "session_meta", "payload": {"id": main_id, "cwd": "C:\\Work\\Turns", "originator": "codex_cli_rs", "source": "cli"}}),
+            json!({"timestamp": at("17:00:00"), "type": "turn_context", "payload": {"model": "gpt-5.3-codex"}}),
+            // an older version: the turn names itself only
+            cx("17:00:01", json!({"type": "task_started", "turn_id": "o1", "started_at": began})),
+            cx_tokens("17:00:10", 1000),
+            cx("17:00:20", json!({"type": "task_complete", "turn_id": "o1"})),
+        ],
+    );
+    write(
+        &dir.join(format!("rollout-2026-09-04T17-00-05-{sub_id}.jsonl")),
+        &[
+            json!({"timestamp": at("17:00:05"), "type": "session_meta", "payload": {"id": sub_id, "session_id": main_id, "cwd": "C:\\Work\\Turns", "originator": "codex_cli_rs",
+                   "source": {"subagent": {"other": "guardian"}}, "parent_thread_id": main_id}}),
+            json!({"timestamp": at("17:00:05"), "type": "turn_context", "payload": {"model": "gpt-5.3-codex"}}),
+            cx("17:00:06", json!({"type": "task_started", "turn_id": "o9", "started_at": began + 6})),
+            cx_tokens("17:00:08", 1000),
+        ],
+    );
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &m.env);
+    let got = of(&store, main_id);
+    assert_eq!((got.len(), got[0].requests, got[0].agents, got[0].origin.as_str()), (1, 1, 0, "human"), "the main thread's own turn");
+    let r = turns(&store, &PriceBook::default_book(), DAY, &Filter { tools: vec![Tool::Codex], ..Default::default() }).unwrap();
+    assert_eq!(r.requests_outside, 1, "the subagent's request belongs to no turn the log names");
 }

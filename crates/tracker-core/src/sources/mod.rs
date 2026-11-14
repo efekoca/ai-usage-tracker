@@ -9,7 +9,7 @@ pub mod codex;
 pub mod cowork_audit;
 pub mod opencode;
 
-use crate::model::{CacheMissReport, LimitSnapshot, SessionAccount, ToolCall, Turn, UsageEvent};
+use crate::model::{CacheMissReport, LimitSnapshot, LimitStop, SessionAccount, ToolCall, Turn, UsageEvent};
 use serde_json::Value;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
@@ -79,6 +79,11 @@ pub struct ParseOutput {
     pub cache_misses: Vec<CacheMissReport>,
     /// Turns the file saw begin.
     pub turns: Vec<Turn>,
+    /// Requests a plan limit turned down, each with its conversation.
+    pub stops: Vec<LimitStop>,
+    /// Conversations that began with another one's history (resumed under a new id, or forked):
+    /// their first request of their own is no fresh start.
+    pub carried: Vec<(crate::model::Tool, String)>,
     /// Human-readable, content-free warnings (line numbers / offsets only), at most
     /// `MAX_WARNING_DETAILS`; the last one is always the latest. Added with `warn`.
     pub warnings: Vec<String>,

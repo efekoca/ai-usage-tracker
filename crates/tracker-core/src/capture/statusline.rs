@@ -109,6 +109,8 @@ pub fn record(data_dir: &Path, windows: &Map<String, Value>, now_ms: i64) -> boo
 
 /// Conversations whose miss counts were last written, the newest last.
 const MISSES_KEPT: usize = 64;
+/// States kept for one conversation.
+const MISSES_PER_SESSION: usize = 4;
 /// Claude Code names a cause in lower case with underscores; anything else is not kept.
 fn cause_name(s: &str) -> bool {
     !s.is_empty() && s.len() <= 48 && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
@@ -120,11 +122,18 @@ pub fn record_cache_misses(data_dir: &Path, input: &Value, now_ms: i64) -> bool 
     let session = str_at(input, "session_id").filter(|s| crate::capture::refresh_hook::valid_session(s));
     let (Some(session), Some(cache)) = (session, input.get("prompt_cache").filter(|c| c.is_object())) else { return false };
     let (misses, rebuilds) = (u64_at(cache, "misses"), u64_at(cache, "expected_rebuilds"));
-    if (misses == 0 && rebuilds == 0) || paused_file(data_dir).exists() {
+    if paused_file(data_dir).exists() {
         return false;
     }
-    let mut seen: Vec<(String, u64, u64)> = fs::read(misses_file(data_dir)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-    if seen.iter().any(|(s, m, r)| s == session && *m == misses && *r == rebuilds) {
+    let last = i64_at(cache, "last_miss_at").and_then(|s| s.checked_mul(1000));
+    // a list an older version wrote, without the time of the last miss, is started anew
+    let mut seen: Vec<(String, u64, u64, Option<i64>)> = fs::read(misses_file(data_dir)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    // every state written for the conversation is kept: two windows on it take turns reporting
+    // their own counts, and neither is new the second time
+    let known = seen.iter().any(|(s, m, r, l)| s == session && (*m, *r, *l) == (misses, rebuilds, last));
+    // counts that started over are written too, at nothing or at the same number with a later
+    // miss: climbing back to what was written would else look like nothing new
+    if known || (misses == 0 && rebuilds == 0 && !seen.iter().any(|(s, ..)| s == session)) {
         return false;
     }
     let causes: Map<String, Value> = cache
@@ -132,14 +141,19 @@ pub fn record_cache_misses(data_dir: &Path, input: &Value, now_ms: i64) -> bool 
         .and_then(Value::as_object)
         .map(|m| m.iter().filter(|(k, v)| cause_name(k) && v.as_u64().is_some_and(|n| n > 0)).take(32).map(|(k, v)| (k.clone(), v.clone())).collect())
         .unwrap_or_default();
-    let last = i64_at(cache, "last_miss_at").and_then(|s| s.checked_mul(1000));
     let report = json!({ "requests": u64_at(cache, "requests"), "misses": misses, "rebuilds": rebuilds, "recached": u64_at(cache, "miss_recache_tokens"), "last": last, "causes": causes });
     let _ = fs::create_dir_all(capture_dir(data_dir));
     if !append_line(data_dir, &json!({ "ts": now_ms, "session": session, "cache": report }).to_string()) {
         return false;
     }
-    seen.retain(|(s, _, _)| s != session);
-    seen.push((session.to_owned(), misses, rebuilds));
+    let of_session: Vec<usize> = seen.iter().enumerate().filter(|(_, (s, ..))| s == session).map(|(i, _)| i).collect();
+    // counts at nothing end what was told before them
+    if misses == 0 && rebuilds == 0 {
+        seen.retain(|(s, ..)| s != session);
+    } else if of_session.len() >= MISSES_PER_SESSION {
+        seen.remove(of_session[0]);
+    }
+    seen.push((session.to_owned(), misses, rebuilds, last));
     let drop = seen.len().saturating_sub(MISSES_KEPT);
     seen.drain(..drop);
     // several bridges write it at once; a note lost to another only writes the line once more
@@ -225,8 +239,9 @@ const TAIL_BYTES: [u64; 3] = [256 * 1024, 2 * 1024 * 1024, 8 * 1024 * 1024];
 /// 2.1.251 and later send it as `prompt_cache.expires_at` (`null` once it went cold); for an older
 /// one the transcript tells.
 pub fn session_cache_expiry(input: &Value, now_ms: i64) -> Option<i64> {
-    if let Some(cache) = input.get("prompt_cache").filter(|c| c.is_object()) {
-        let at = cache.get("expires_at").and_then(Value::as_i64)?.checked_mul(1000)?;
+    // without the field itself the transcript tells, as for an older version
+    if let Some((cache, at)) = input.get("prompt_cache").and_then(|c| Some((c, c.get("expires_at")?))) {
+        let at = at.as_i64()?.checked_mul(1000)?;
         return (at > now_ms && cache.get("warm").and_then(Value::as_bool) != Some(false)).then_some(at);
     }
     cache_expiry(Path::new(input.get("transcript_path")?.as_str()?), now_ms)
@@ -547,5 +562,21 @@ mod tests {
         set_paused(dir.path(), false).unwrap();
         delete_records(dir.path()).unwrap();
         assert!(record_cache_misses(dir.path(), &report(2, 1, json!({})), 7_000), "deleted with the records");
+
+        // counts that go back to nothing and climb to the same number again tell of a new miss
+        assert!(record_cache_misses(dir.path(), &report(0, 0, json!({})), 8_000), "started over");
+        assert!(!record_cache_misses(dir.path(), &report(0, 0, json!({})), 8_500));
+        assert!(record_cache_misses(dir.path(), &report(2, 1, json!({})), 9_000));
+        // and so do the same counts with a later miss, when the bridge never saw them at nothing
+        let mut later = report(2, 1, json!({}));
+        later["prompt_cache"]["last_miss_at"] = json!(1_738_425_999);
+        assert!(record_cache_misses(dir.path(), &later, 10_000));
+        assert!(!record_cache_misses(dir.path(), &later, 11_000));
+        let counts: Vec<(i64, u64, u64)> = parse_file(&capture_file(dir.path()), 0).unwrap().cache_misses.iter().map(|r| (r.ts_ms, r.misses, r.rebuilds)).collect();
+        assert_eq!(counts, [(7_000, 2, 1), (8_000, 0, 0), (9_000, 2, 1), (10_000, 2, 1)]);
+        // a list an older version kept is not read as this one's
+        fs::write(misses_file(dir.path()), br#"[["s-1",2,1]]"#).unwrap();
+        assert!(record_cache_misses(dir.path(), &later, 12_000));
+        assert!(!record_cache_misses(dir.path(), &later, 13_000));
     }
 }

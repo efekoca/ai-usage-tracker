@@ -42,6 +42,9 @@ pub struct TurnCost {
     pub agents: u64,
     pub tool_calls: u64,
     pub tool_failed: u64,
+    /// The filter left out some of the turn's requests and the log does not say which request
+    /// made each tool call (Codex), so the calls are not counted.
+    pub calls_hidden: bool,
     pub total_tokens: u64,
     pub cost_usd: f64,
     /// Requests of a model with no price, which the cost leaves out.
@@ -99,6 +102,7 @@ struct Acc {
     parts: BTreeMap<Option<String>, Part>,
     calls: u64,
     failed: u64,
+    partial: bool,
 }
 
 /// The turns that began in `range`, each with everything it set off, whenever that ran: a
@@ -106,8 +110,22 @@ struct Acc {
 /// none of whose requests pass `filter` is left out.
 pub fn turns(store: &Store, book: &PriceBook, range: Range, filter: &Filter) -> Result<Turns> {
     let mut map: HashMap<String, Acc> = HashMap::new();
-    for e in store.turn_events(range.from_ms, range.to_ms)?.iter().filter(|e| filter.matches(e)) {
+    // what a tool call records too, so calls can be narrowed by it
+    let scope = Filter { tools: filter.tools.clone(), projects: filter.projects.clone(), ..Default::default() };
+    let mut partial: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut kept: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut left_out: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (e, key) in &store.turn_events(range.from_ms, range.to_ms)? {
         let Some(turn) = e.turn.as_deref() else { continue };
+        if !filter.matches(e) {
+            // an advisor calls no tools
+            if scope.matches(e) && !e.advisor {
+                partial.insert(turn.to_owned());
+            }
+            left_out.insert(key.clone());
+            continue;
+        }
+        kept.insert(key.clone());
         let a = map.entry(turn.to_owned()).or_default();
         if a.client.is_none() {
             a.client = e.client.clone();
@@ -145,10 +163,21 @@ pub fn turns(store: &Store, book: &PriceBook, range: Range, filter: &Filter) -> 
     }
     for c in store.turn_calls(range.from_ms, range.to_ms)? {
         let passes = (filter.tools.is_empty() || filter.tools.contains(&c.tool)) && (filter.projects.is_empty() || c.project_id.is_some_and(|p| filter.projects.contains(&p)));
-        if let (true, Some(a)) = (passes, map.get_mut(&c.turn)) {
-            a.calls += 1;
-            a.failed += u64::from(c.failed == Some(true));
+        let (true, Some(a)) = (passes, map.get_mut(&c.turn)) else { continue };
+        // in a turn the filter splits, a call counts with the request that made it
+        match (&c.request, partial.contains(&c.turn)) {
+            (Some(r), true) if left_out.contains(r) => {}
+            // no request, or one the archive holds no usage for: which side it is on is not known
+            (Some(r), true) if !kept.contains(r) => a.partial = true,
+            (None, true) => a.partial = true,
+            _ => {
+                a.calls += 1;
+                a.failed += u64::from(c.failed == Some(true));
+            }
         }
+    }
+    for a in map.values_mut().filter(|a| a.partial) {
+        (a.calls, a.failed) = (0, 0);
     }
 
     let projects: HashMap<i64, ProjectRow> = store.projects()?.into_iter().map(|p| (p.id, p)).collect();
@@ -189,6 +218,7 @@ pub fn turns(store: &Store, book: &PriceBook, range: Range, filter: &Filter) -> 
                 agents,
                 tool_calls: a.calls,
                 tool_failed: a.failed,
+                calls_hidden: a.partial,
                 total_tokens: a.tokens,
                 cost_usd: a.cost,
                 unpriced_requests: a.unpriced,

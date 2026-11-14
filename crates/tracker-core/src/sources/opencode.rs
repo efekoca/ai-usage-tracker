@@ -287,6 +287,7 @@ fn read_session(conn: &Connection, sessions: &HashMap<String, Session>, id: &str
                         _ => None,
                     },
                     turn: None,
+                    request: None,
                 });
             }
             _ => {}

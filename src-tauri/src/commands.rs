@@ -903,7 +903,7 @@ pub async fn experiments(app: AppHandle) -> Res<Vec<MarkerView>> {
             // a project that is gone is narrowed to an id no request has
             let projects_wanted = if gone { vec![i64::MIN] } else { m.project_id.into_iter().collect() };
             let filter = Filter { tools: m.tool.as_deref().and_then(Tool::parse).into_iter().collect(), projects: projects_wanted, ..Default::default() };
-            let use_ = insights::experiment(&store, &book, m.at_ms, m.days, now, &filter).map_err(err)?;
+            let use_ = insights::experiment(&store, &book, m.at_ms, m.days, now, &filter, &chrono::Local).map_err(err)?;
             Ok(MarkerView {
                 id: m.id,
                 at_ms: m.at_ms,

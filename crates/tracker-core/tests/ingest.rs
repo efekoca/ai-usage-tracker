@@ -1329,6 +1329,7 @@ fn projects_are_found_again_after_a_wipe_or_a_rolled_back_write() {
             name: "shell".into(),
             failed: None,
             turn: None,
+            request: None,
         }])
         .unwrap();
     }
@@ -1361,6 +1362,7 @@ fn a_wipe_on_another_connection_does_not_leave_stale_project_ids() {
         name: "shell".into(),
         failed: None,
         turn: None,
+        request: None,
     }])
     .unwrap();
     tx.commit().unwrap();
@@ -1464,4 +1466,56 @@ fn the_status_lines_cache_misses_are_stored_with_their_largest_counts() {
     tracker_core::ingest::ingest(&mut again, &files, |_| {});
     tracker_core::ingest::ingest(&mut again, &files, |_| {});
     assert_eq!(again.cache_miss_reports(0, 10_000).unwrap().len(), 2);
+}
+
+#[test]
+fn a_cache_miss_report_dated_ahead_of_the_clock_is_read_once_the_clock_reaches_it() {
+    use serde_json::json;
+    use tracker_core::capture::statusline;
+    let dir = tempfile::tempdir().unwrap();
+    let now = chrono::Utc::now().timestamp_millis();
+    let report = |session: &str, misses: u64| json!({"session_id": session, "prompt_cache": {"requests": 20, "misses": misses, "expected_rebuilds": 0, "miss_recache_tokens": 1000}});
+    assert!(statusline::record_cache_misses(dir.path(), &report("s-now", 1), now - 60_000));
+    assert!(statusline::record_cache_misses(dir.path(), &report("s-ahead", 1), now + 2 * 86_400_000));
+    assert!(statusline::record_cache_misses(dir.path(), &report("s-far", 1), now + 4000 * 86_400_000));
+    let path = statusline::capture_file(dir.path());
+    let files = [DiscoveredFile { file_id: file_identity(&path), path, parser: tracker_core::sources::ParserKind::StatuslineCapture, source: SourceId::ClaudeCode }];
+    let mut store = Store::open_in_memory().unwrap();
+    let stored = |store: &Store| store.cache_miss_reports(0, i64::MAX).unwrap().into_iter().map(|r| r.session_id).collect::<Vec<_>>();
+    tracker_core::ingest::ingest(&mut store, &files, |_| {});
+    assert_eq!(stored(&store), ["s-now"]);
+    tracker_core::store::shift_clock_for_tests(3 * 86_400_000);
+    tracker_core::ingest::ingest(&mut store, &files, |_| {});
+    tracker_core::store::shift_clock_for_tests(0);
+    assert_eq!(stored(&store), ["s-ahead", "s-now"], "the one a clock error can explain; the damaged one stays out");
+}
+
+#[test]
+fn a_limit_stop_is_kept_with_the_conversation_it_stopped() {
+    let m = machine();
+    let p = m.home.join(".claude/projects/C--Work-stop/s.jsonl");
+    fs::create_dir_all(p.parent().unwrap()).unwrap();
+    let line = |session: &str, time: &str, status: &str, reset: &str| {
+        format!(r#"{{"type":"assistant","sessionId":"{session}","timestamp":"2026-09-05T{time}.000Z","isApiErrorMessage":true,"message":{{"model":"<synthetic>"}},"quotaLimits":{{"status":"{status}","rateLimitType":"five_hour"{reset}}}}}"#)
+    };
+    fs::write(
+        &p,
+        [
+            line("stop-a", "10:00:00", "rejected", r#","resetsAt":1788613200"#),
+            line("stop-b", "10:00:01", "rejected", r#","resetsAt":1788600000"#),
+            line("stop-a", "10:05:00", "allowed_warning", r#","resetsAt":1788613200"#),
+            line("stop-a", "10:06:00", "rejected", ""),
+        ]
+        .join("\n")
+            + "\n",
+    )
+    .unwrap();
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &m.env);
+    run(&mut store, &m.env);
+    let got: Vec<(String, i64)> = store.limit_stops("stop-a", 0, i64::MAX).unwrap().into_iter().map(|s| (s.window, s.resets_at)).collect();
+    assert_eq!(got, [("five_hour".to_owned(), 1_788_613_200)], "its own stop that names a reset, once");
+    assert_eq!(store.limit_stops("stop-b", 0, i64::MAX).unwrap().len(), 1);
+    store.wipe_data().unwrap();
+    assert!(store.limit_stops("stop-a", 0, i64::MAX).unwrap().is_empty());
 }

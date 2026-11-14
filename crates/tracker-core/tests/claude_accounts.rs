@@ -662,6 +662,7 @@ fn the_account_filter_keeps_only_that_accounts_tool_calls() {
         name: name.into(),
         failed: Some(false),
         turn: None,
+        request: None,
     };
     let mut tx = c.store.transaction().unwrap();
     tx.upsert_tool_calls(&[call("Read", "sa"), call("Write", "sb")]).unwrap();

@@ -892,6 +892,29 @@ fn read_claude(state: &AppState, s: &Settings, bin: &Path) -> Result<Vec<tracker
     Ok(snaps)
 }
 
+/// What Claude Code sends its requests with, when the app starts it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CliSignIn {
+    /// A token or key the CLI is handed, which wins over its folder's sign-in: such a request is
+    /// billed by use and touches no plan window.
+    OwnKey,
+    /// Its config folder's sign-in.
+    Account(String),
+    /// The folder names no account.
+    Unknown,
+}
+
+pub fn claude_cli_sign_in(s: &Settings) -> CliSignIn {
+    let env = Env::from_system();
+    let Some(root) = claude_usage::config_dir(&env, &s.extra_paths).or_else(|| env.home.as_ref().map(|h| h.join(".claude"))) else { return CliSignIn::Unknown };
+    let mut docs = managed_settings();
+    docs.extend(cs::read_settings(&cs::settings_path(&root)));
+    if cs::own_sign_in_env() || cs::own_sign_in(&docs) {
+        return CliSignIn::OwnKey;
+    }
+    claude_signin::signed_in(&claude_signin::config_file(&env, &root)).ok().flatten().map_or(CliSignIn::Unknown, CliSignIn::Account)
+}
+
 /// A settings file's size and change time, and the account it named then.
 type SeenSignin = std::collections::HashMap<PathBuf, ((u64, Option<std::time::SystemTime>), Option<String>)>;
 
