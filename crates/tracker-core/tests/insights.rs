@@ -146,7 +146,7 @@ fn cache_misses_are_told_by_project_and_day_each_when_it_happened() {
     ]);
     let range = Range { from_ms: t - HOUR, to_ms: t + HOUR };
     let utc = chrono::Utc;
-    assert!(!cache_misses(&store, range, &Filter::default(), &utc).unwrap().reported);
+    assert!(!cache_misses(&store, &PriceBook::default_book(), range, &Filter::default(), &utc).unwrap().reported);
 
     let report = |s: &str, ts_ms: i64, last: Option<i64>, misses: u64, rebuilds: u64, recached_tokens: u64, causes: &[(&str, u64)]| CacheMissReport {
         session_id: s.into(),
@@ -176,7 +176,7 @@ fn cache_misses_are_told_by_project_and_day_each_when_it_happened() {
     .unwrap();
     tx.commit().unwrap();
 
-    let m = cache_misses(&store, range, &Filter::default(), &utc).unwrap();
+    let m = cache_misses(&store, &PriceBook::default_book(), range, &Filter::default(), &utc).unwrap();
     assert!(m.reported);
     assert_eq!((m.sessions, m.misses, m.rebuilds, m.recached_tokens, m.undetermined), (3, 6, 1, 280_000, 1));
     assert_eq!(m.causes, [MissCause { cause: "likely_server_side".into(), misses: 3 }, MissCause { cause: "tools_changed".into(), misses: 1 }, MissCause { cause: "ttl_expired_5m".into(), misses: 1 }]);
@@ -203,12 +203,46 @@ fn cache_misses_are_told_by_project_and_day_each_when_it_happened() {
     assert_eq!((notes.events[1].branch.as_deref(), notes.events[1].model.as_deref()), (Some("fix"), Some("claude-sonnet-5-5")), "not the subagent's");
 
     let codex = Filter { tools: vec![Tool::Codex], ..Filter::default() };
-    assert_eq!(cache_misses(&store, range, &codex, &utc).unwrap().sessions, 0, "another tool's filter keeps none");
-    let later = cache_misses(&store, Range { from_ms: t + 30 * MIN, to_ms: t + HOUR }, &Filter::default(), &utc).unwrap();
+    assert_eq!(cache_misses(&store, &PriceBook::default_book(), range, &codex, &utc).unwrap().sessions, 0, "another tool's filter keeps none");
+    let later = cache_misses(&store, &PriceBook::default_book(), Range { from_ms: t + 30 * MIN, to_ms: t + HOUR }, &Filter::default(), &utc).unwrap();
     assert_eq!((later.misses, later.projects.len()), (2, 2), "only what happened in the period");
 
     store.wipe_data().unwrap();
     assert!(!store.has_cache_misses().unwrap());
+}
+
+#[test]
+fn a_cache_rewrite_is_priced_above_a_warm_cache_against_claude_codes_whole_cost() {
+    let t = ms(2026, 11, 10, 12, 0);
+    let book = PriceBook::default_book();
+    let opus = "claude-opus-5-5";
+    let mut store = store_with(&[
+        ev("a", t, Tool::ClaudeCode, opus, Some("s1"), "/p", 10, 0, 5).cache_write(200_000, 200_000),
+        ev("b", t + 10 * MIN, Tool::ClaudeCode, opus, Some("s1"), "/p", 10, 0, 5).cache_write(150_000, 150_000),
+        // a subagent's five-minute cache is not the main conversation's
+        ev("c", t + 11 * MIN, Tool::ClaudeCode, opus, Some("s1"), "/p", 10, 0, 5).agent("Explore", "x1").cache_write(9_000, 0),
+        ev("d", t + 20 * MIN, Tool::ClaudeCode, "mystery-model-1", Some("s2"), "/p", 10, 0, 5).cache_write(1_000, 0),
+        ev("e", t, Tool::Codex, "gpt-5.6-terra", Some("x"), "/p", 10, 100, 5),
+    ]);
+    let range = Range { from_ms: t - HOUR, to_ms: t + HOUR };
+    let report = |s: &str, ts_ms: i64, recached_tokens: u64| CacheMissReport { session_id: s.into(), ts_ms, last_miss_ms: Some(ts_ms - 30_000), requests: 5, misses: 1, rebuilds: 0, recached_tokens, causes: vec![("ttl_expired_1h".into(), 1)] };
+    let mut tx = store.transaction().unwrap();
+    tx.insert_cache_miss_reports(&[report("s1", t + 10 * MIN + 30_000, 100_000)]).unwrap();
+    tx.commit().unwrap();
+
+    let price = |model: &str, tokens: Tokens, request_input: u64| book.cost(&CostInput { model, tokens: &tokens, request_input, web_search_requests: 0, speed: None, inference_geo: None, ts_ms: None }).unwrap().total();
+    let m = cache_misses(&store, &book, range, &Filter::default(), &chrono::Utc).unwrap();
+    let extra = price(opus, Tokens { cache_write: 100_000, cache_write_1h: 100_000, ..Default::default() }, 150_010) - price(opus, Tokens { cache_read: 100_000, ..Default::default() }, 150_010);
+    assert!((m.extra_usd.unwrap() - extra).abs() < 1e-9, "{:?} {extra}", m.extra_usd);
+    let written = |all: u64, one_hour: u64| price(opus, Tokens { input: 10, output: 5, cache_write: all, cache_write_1h: one_hour, ..Default::default() }, 10 + all);
+    let claude_code = written(200_000, 200_000) + written(150_000, 150_000) + written(9_000, 0);
+    assert!((m.cost_usd - claude_code).abs() < 1e-9, "subagents count, Codex and an unpriced model do not: {} {claude_code}", m.cost_usd);
+
+    let mut tx = store.transaction().unwrap();
+    tx.insert_cache_miss_reports(&[report("s2", t + 20 * MIN + 30_000, 800)]).unwrap();
+    tx.commit().unwrap();
+    let m = cache_misses(&store, &book, range, &Filter::default(), &chrono::Utc).unwrap();
+    assert_eq!((m.misses, m.extra_usd), (2, None), "a rewrite with no price leaves the sum unknown");
 }
 
 #[test]
@@ -1201,8 +1235,8 @@ fn a_miss_counts_only_where_the_request_that_missed_passes_the_filter() {
     .unwrap();
     tx.commit().unwrap();
     let range = Range { from_ms: t - HOUR, to_ms: t + HOUR };
-    let of = |model: &str| cache_misses(&store, range, &Filter { models: vec![model.into()], ..Default::default() }, &chrono::Utc).unwrap();
-    assert_eq!(cache_misses(&store, range, &Filter::default(), &chrono::Utc).unwrap().misses, 1);
+    let of = |model: &str| cache_misses(&store, &PriceBook::default_book(), range, &Filter { models: vec![model.into()], ..Default::default() }, &chrono::Utc).unwrap();
+    assert_eq!(cache_misses(&store, &PriceBook::default_book(), range, &Filter::default(), &chrono::Utc).unwrap().misses, 1);
     let sonnet = of("claude-sonnet-5-5");
     assert_eq!((sonnet.misses, sonnet.sessions, sonnet.projects.len(), sonnet.recached_tokens), (0, 0, 0, 0), "the conversation had moved to the other model by then");
     assert_eq!(of("claude-opus-5-5").misses, 1);
@@ -1248,7 +1282,7 @@ fn counts_that_began_again_and_reached_the_same_number_tell_of_new_misses() {
     ])
     .unwrap();
     tx.commit().unwrap();
-    let m = cache_misses(&store, Range { from_ms: t - HOUR, to_ms: t + HOUR }, &Filter::default(), &chrono::Utc).unwrap();
+    let m = cache_misses(&store, &PriceBook::default_book(), Range { from_ms: t - HOUR, to_ms: t + HOUR }, &Filter::default(), &chrono::Utc).unwrap();
     assert_eq!((m.misses, m.rebuilds, m.recached_tokens), (4, 2, 4_000));
 }
 
@@ -1282,7 +1316,7 @@ fn a_state_shown_again_adds_no_miss() {
     ])
     .unwrap();
     tx.commit().unwrap();
-    let m = cache_misses(&store, Range { from_ms: t - HOUR, to_ms: t + HOUR }, &Filter::default(), &chrono::Utc).unwrap();
+    let m = cache_misses(&store, &PriceBook::default_book(), Range { from_ms: t - HOUR, to_ms: t + HOUR }, &Filter::default(), &chrono::Utc).unwrap();
     assert_eq!((m.misses, m.rebuilds, m.recached_tokens), (2 + 5 + 1 + 1, 2 + 1, 9_000));
     assert_eq!(m.causes, [MissCause { cause: "tools_changed".into(), misses: 9 }]);
 }
@@ -1313,7 +1347,7 @@ fn two_windows_on_one_conversation_each_count_their_own_misses() {
     ])
     .unwrap();
     tx.commit().unwrap();
-    let m = cache_misses(&store, Range { from_ms: t - HOUR, to_ms: t + HOUR }, &Filter::default(), &chrono::Utc).unwrap();
+    let m = cache_misses(&store, &PriceBook::default_book(), Range { from_ms: t - HOUR, to_ms: t + HOUR }, &Filter::default(), &chrono::Utc).unwrap();
     assert_eq!((m.misses, m.recached_tokens, m.undetermined), (6, 6_000, 1));
     assert_eq!(m.causes, [MissCause { cause: "ttl_expired_5m".into(), misses: 3 }, MissCause { cause: "tools_changed".into(), misses: 2 }], "the causes and the ones without add up to the misses");
 }
@@ -1354,7 +1388,7 @@ fn a_report_joins_the_window_whose_causes_it_carries_on() {
     ])
     .unwrap();
     tx.commit().unwrap();
-    let m = cache_misses(&store, Range { from_ms: t - HOUR, to_ms: t + HOUR }, &Filter::default(), &chrono::Utc).unwrap();
+    let m = cache_misses(&store, &PriceBook::default_book(), Range { from_ms: t - HOUR, to_ms: t + HOUR }, &Filter::default(), &chrono::Utc).unwrap();
     assert_eq!((m.misses, m.recached_tokens), (11, 11_000));
     assert_eq!(m.causes, [MissCause { cause: "tools_changed".into(), misses: 6 }, MissCause { cause: "ttl_expired_5m".into(), misses: 5 }]);
 }
@@ -1370,7 +1404,7 @@ fn a_miss_two_requests_of_its_second_could_have_made_is_counted_under_neither_fi
     tx.insert_cache_miss_reports(&[CacheMissReport { session_id: "s1".into(), ts_ms: t + MIN, last_miss_ms: Some(t), requests: 2, misses: 1, rebuilds: 0, recached_tokens: 1_000, causes: vec![("model_changed".into(), 1)] }]).unwrap();
     tx.commit().unwrap();
     let range = Range { from_ms: t - HOUR, to_ms: t + HOUR };
-    let of = |model: &str| cache_misses(&store, range, &Filter { models: vec![model.into()], ..Default::default() }, &chrono::Utc).unwrap().misses;
+    let of = |model: &str| cache_misses(&store, &PriceBook::default_book(), range, &Filter { models: vec![model.into()], ..Default::default() }, &chrono::Utc).unwrap().misses;
     assert_eq!((of("claude-sonnet-5-5"), of("claude-opus-5-5")), (0, 0), "the second it happened in does not say which");
     // nor does a response the log stamped just past that second
     let mut drift = store_with(&[
@@ -1381,8 +1415,8 @@ fn a_miss_two_requests_of_its_second_could_have_made_is_counted_under_neither_fi
     tx.insert_cache_miss_reports(&[CacheMissReport { session_id: "s2".into(), ts_ms: t + MIN, last_miss_ms: Some(t), requests: 2, misses: 1, rebuilds: 0, recached_tokens: 1_000, causes: vec![("model_changed".into(), 1)] }]).unwrap();
     tx.commit().unwrap();
     for model in ["claude-sonnet-5-5", "claude-opus-5-5"] {
-        assert_eq!(cache_misses(&drift, range, &Filter { models: vec![model.into()], ..Default::default() }, &chrono::Utc).unwrap().misses, 0, "{model}");
+        assert_eq!(cache_misses(&drift, &PriceBook::default_book(), range, &Filter { models: vec![model.into()], ..Default::default() }, &chrono::Utc).unwrap().misses, 0, "{model}");
     }
-    let all = cache_misses(&store, range, &Filter::default(), &chrono::Utc).unwrap();
+    let all = cache_misses(&store, &PriceBook::default_book(), range, &Filter::default(), &chrono::Utc).unwrap();
     assert_eq!((all.misses, all.projects[0].events[0].model.as_deref()), (1, Some("claude-opus-5-5")), "shown with the later request of that second");
 }

@@ -1157,7 +1157,8 @@ pub async fn get_cache_misses(app: AppHandle, period: Period, filter: Option<Fil
     let state = app.state::<AppState>();
     let hide_all = state.settings.read().unwrap().hide_project_names;
     let store = state.db();
-    let mut r = insights::cache_misses(&store, range_for(&store, period)?, &filter.unwrap_or_default(), &chrono::Local).map_err(err)?;
+    let book = state.book.read().unwrap();
+    let mut r = insights::cache_misses(&store, &book, range_for(&store, period)?, &filter.unwrap_or_default(), &chrono::Local).map_err(err)?;
     for p in &mut r.projects {
         // a branch name can tell the project too
         if hide_all || p.hidden {
