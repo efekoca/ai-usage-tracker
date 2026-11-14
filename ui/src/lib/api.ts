@@ -1297,6 +1297,7 @@ export const api = {
   importDb: (path: string) => invoke<{ events: number; limits: number }>('import_database', { path }),
   wipe: () => invoke<void>('wipe_all_data'),
   openDataFolder: () => invoke<void>('open_data_folder'),
+  cliCommand: () => invoke<string>('cli_command'),
   openUrl: (url: string) => invoke<void>('open_url', { url }),
   openMain: () => invoke<void>('open_main'),
   setWidgetVisible: (visible: boolean) => invoke<void>('set_widget_visible', { visible }),

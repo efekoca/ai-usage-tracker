@@ -35,6 +35,7 @@ A private app for Windows, macOS, and Linux that reads the usage logs your AI to
 - **Check whether a change helped.** Mark the day you added an MCP server, shortened `CLAUDE.md` or switched models, and see your use before and after it side by side: cost per session, starting load, tool error rate and cache hit rate.
 - **See what one prompt cost you.** Every request, subagent and tool call that one prompt set off is gathered into one line: "the turn at 14:32: 84 requests, 3 subagents, $11.40". The prompt itself is never read or stored.
 - **Keep your history.** Resumed and forked sessions are never counted twice, and your history stays in the archive even after the tools delete their own logs (Claude Code does so after 30 days).
+- **Use your figures in your own tools.** `ai-usage-tracker --json` prints your usage and limits as JSON, for scripts and tools such as Raycast or tmux.
 - **Share your use, not your work.** Turn a day, a week, a month or a year into a card in four sizes. A card holds totals, tool names and model names only.
 
 ![A short tour: the overview with a chart tooltip and plan value, the account filter, separate limits for each Claude account, limit history, tips, the daily view, the model comparison, a session's details and timeline, a summary card, the Menu bar page and the Widget studio changing the widget's layout](assets/readme/demo-en.webp)
@@ -356,6 +357,20 @@ A card shows only totals, tool names and model names, never project names or any
 - **Pricing rules covered:** 5-minute and 1-hour cache writes, the OpenAI long-context tier (>272K input tokens), fast-mode and US data-residency multipliers, web-search fees, and prices that change on a set date, such as an introductory price that ends: each request is priced at the rate of its own day.
 - **Unknown models:** never priced by guesswork. They are listed as "no price" and left out of costs. You can dismiss the overview warning about them; it returns only if another model becomes unpriced, or through **Settings → Prices → Show the warning again**.
 - **Edits:** change prices in **Settings → Prices**. The list starts with the models found in your logs; **Show all models** lists every priced model. Your copy, stored as `pricing.json` in the app's data folder (see [Privacy](#privacy)), keeps only the prices you change; every other model, including corrections and models added later, follows the newest list. A changed price is marked **changed** and goes back to the list price with one click. For a model with no price, type one in under **Enter a price for a model without one**; it is marked **yours** and no newer list changes it. You can also map an unpriced model to another model's price or restore the defaults.
+
+### Your usage from the command line
+
+`ai-usage-tracker --json` prints the usage and limits the app shows as JSON, for your scripts or tools such as Raycast, tmux or SketchyBar. **Settings → Data → Command line** shows the command for your installation with a **Copy** button. On Windows, run it in PowerShell; the command there ends in `| Out-String` so that PowerShell waits for the output.
+
+```sh
+ai-usage-tracker --json | jq '.limits[] | select(.window == "five_hour") | .used_pct'
+```
+
+- The period is today unless you add `--period` with `7d`, `30d`, `3m`, `6m`, `1y` or `all`.
+- `usage` holds the period's requests, tokens and API-equivalent cost, in all and per tool.
+- `limits` holds every limit of the account in use, for the sources you turned on: the percentage used, when it resets, when it was read, and when it fills at the current pace. `used_pct` is empty when the window has reset since it was read.
+- It only reads the app's data and never changes it. The app does not have to be open, but the figures are as recent as its last scan.
+- Times are in your time zone (ISO 8601). `schema` goes up only when a field changes its meaning or goes away.
 
 ## Supported sources
 

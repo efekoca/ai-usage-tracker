@@ -588,6 +588,22 @@ impl Store {
         Self::init(conn)
     }
 
+    /// Opens an archive that exists to read it only: nothing is migrated or written, so a copy of
+    /// the app run from a terminal never changes what the running app holds. Check
+    /// [`Store::is_current`] before reading.
+    pub fn open_read_only(path: &Path) -> Result<Store> {
+        let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        Ok(Store { conn, project_cache: RefCell::default() })
+    }
+
+    /// Whether the archive's tables are this build's: an older build's are migrated only when the
+    /// app opens it, and a newer build's may hold what this one cannot read.
+    pub fn is_current(&self) -> Result<bool> {
+        let version: i64 = self.conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        Ok(version == MIGRATIONS.len() as i64)
+    }
+
     pub fn open_in_memory() -> Result<Store> {
         Self::init(Connection::open_in_memory()?)
     }

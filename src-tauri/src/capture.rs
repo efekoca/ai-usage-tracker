@@ -138,7 +138,7 @@ pub fn limit_hook_command(exe: &Path) -> String {
 }
 
 /// Single quotes: inside double quotes both shells would still expand `$` and backticks.
-fn quoted_command(full: &str, short: Option<&str>, bash: bool, flag: &str) -> String {
+pub(crate) fn quoted_command(full: &str, short: Option<&str>, bash: bool, flag: &str) -> String {
     // only Windows paths are turned into forward slashes; a backslash is an ordinary file name character elsewhere
     let fwd = |s: &str| if cfg!(windows) { s.replace('\\', "/") } else { s.to_owned() };
     let plain = |s: &str| s.chars().all(|c| c.is_ascii_alphanumeric() || "/:._-~".contains(c));
