@@ -262,7 +262,7 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
                 if let (Some(id), Some(ts_ms), true) = (st.turn.clone(), began, root == own && who.agent.is_none()) {
                     let trigger = p.get("turn_attribution").and_then(|a| str_at(a, "turn_trigger"));
                     let origin = if matches!(trigger, None | Some("composer" | "edit_user_message")) { "human" } else { "other" };
-                    out.turns.push(Turn { id, tool: Tool::Codex, session_id: Some(who.session), ts_ms, origin: origin.to_owned() });
+                    out.turns.push(Turn { id, tool: Tool::Codex, session_id: Some(who.session), ts_ms, origin: origin.to_owned(), own: true });
                 }
                 out.lines_recognised += 1;
             }

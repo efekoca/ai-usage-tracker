@@ -85,6 +85,8 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
     // the prompt lines read so far, by their own ids
     let mut prompts: Vec<String> = state.get("prompts").and_then(Value::as_array).map(|a| a.iter().filter_map(|u| u.as_str().map(str::to_owned)).collect()).unwrap_or_default();
     let own = own_session(path);
+    // the turn this log's copied lines were last in: it began in another conversation's log
+    let mut copied_turn = str_at(state, "copied_turn").map(str::to_owned);
     let mut carried = false;
     let mut typed = 0u64;
     let mut undated = 0u64;
@@ -103,9 +105,14 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
         if root_cwd.is_none() {
             root_cwd = str_at(v, "cwd").filter(|s| !s.is_empty()).map(|c| launch_dir(c, folder.as_deref()));
         }
+        let copied = str_at(v, "sessionId").is_some_and(|s| !s.is_empty() && own.as_deref().is_some_and(|o| o != s));
         match turn_of(v) {
             Some((id, start)) => {
-                if let Some(start) = start {
+                if copied {
+                    copied_turn = Some(id.clone());
+                }
+                if let Some(mut start) = start {
+                    start.own = copied_turn.as_deref() != Some(id.as_str());
                     let again = str_at(v, "uuid").is_some_and(|u| prompts.iter().any(|p| p == u));
                     if !again {
                         prompts.extend(str_at(v, "uuid").map(str::to_owned));
@@ -118,12 +125,9 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
             None if unnamed_prompt(v) => turn = None,
             None => {}
         }
-        if matches!(str_at(v, "type"), Some("user" | "assistant")) {
-            let other = str_at(v, "sessionId").is_some_and(|s| !s.is_empty() && own.as_deref().is_some_and(|o| o != s));
-            if other && !carried && v.get("isSidechain").and_then(Value::as_bool) != Some(true) {
-                carried = true;
-                out.carried.extend(own.clone().map(|o| (Tool::ClaudeCode, o)));
-            }
+        if copied && !carried && matches!(str_at(v, "type"), Some("user" | "assistant")) && v.get("isSidechain").and_then(Value::as_bool) != Some(true) {
+            carried = true;
+            out.carried.extend(own.clone().map(|o| (Tool::ClaudeCode, o)));
         }
         let mut recognised = false;
         // each Cowork session runs in its own scratch folder; group them as one project
@@ -161,7 +165,7 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value, ctx: &ClaudeCtx) -> s
     }
     out.warn_undated(undated);
     let from = prompts.len().saturating_sub(PROMPTS_KEPT);
-    out.state = json!({ "root_cwd": root_cwd, "turn": turn, "prompts": &prompts[from..] });
+    out.state = json!({ "root_cwd": root_cwd, "turn": turn, "copied_turn": copied_turn, "prompts": &prompts[from..] });
     out.next_offset = lines.finish()?;
     Ok(out)
 }
@@ -381,6 +385,7 @@ fn turn_of(v: &Value) -> Option<(String, Option<Turn>)> {
         session_id: str_at(v, "sessionId").map(str::to_owned),
         ts_ms,
         origin,
+        own: true,
     });
     Some((id, start))
 }

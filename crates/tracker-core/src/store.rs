@@ -244,6 +244,25 @@ const MIGRATIONS: &[&str] = &[
     DELETE FROM turn;
     DELETE FROM file_checkpoint WHERE parser IN ('claude_code_jsonl', 'cowork_jsonl', 'codex_rollout');
     "#,
+    // v20: a turn's record says whether the conversation's own log gave it, so a part copied into
+    // another log cannot move the start; what was stored without that is built again.
+    r#"
+    DROP TABLE IF EXISTS turn;
+    CREATE TABLE turn (
+        id         TEXT PRIMARY KEY,
+        tool       TEXT NOT NULL,
+        session_id TEXT,
+        ts_ms      INTEGER NOT NULL,
+        origin     TEXT NOT NULL,
+        own        INTEGER NOT NULL,
+        origin_key INTEGER NOT NULL
+    );
+    CREATE INDEX turn_ts ON turn(ts_ms);
+    CREATE INDEX turn_session ON turn(session_id);
+    UPDATE usage_event SET turn = NULL WHERE turn IS NOT NULL;
+    UPDATE tool_call SET turn = NULL, request = NULL WHERE turn IS NOT NULL OR request IS NOT NULL;
+    DELETE FROM file_checkpoint WHERE parser IN ('claude_code_jsonl', 'cowork_jsonl', 'codex_rollout');
+    "#,
 ];
 
 /// How long the sign-in of a Claude config folder may go unseen and still count as unchanged: the
@@ -455,12 +474,24 @@ const UPSERT_EVENT_TAIL: &str = "ON CONFLICT(key) DO UPDATE SET
     turn = COALESCE(turn, excluded.turn)";
 
 /// The line a turn began with is its earliest; later lines of the same turn change nothing. A
-/// line that names what began the turn outranks one that does not (`other`), whichever came first:
-/// a note written just before the prompt carries the prompt's id but no origin.
+/// line of the conversation's own log outranks one copied into another's, which can lack what
+/// tells a line written again from the prompt. What began the turn is taken from the line with
+/// the lowest `origin_key` ([`origin_key`]), in whatever order the lines are read.
 const UPSERT_TURN_TAIL: &str = "ON CONFLICT(id) DO UPDATE SET
-    origin = CASE WHEN excluded.origin = 'other' THEN origin WHEN origin = 'other' OR excluded.ts_ms < ts_ms THEN excluded.origin ELSE origin END,
-    session_id = CASE WHEN excluded.ts_ms < ts_ms THEN COALESCE(excluded.session_id, session_id) ELSE COALESCE(session_id, excluded.session_id) END,
-    ts_ms = MIN(ts_ms, excluded.ts_ms)";
+    origin = CASE WHEN excluded.origin_key < origin_key THEN excluded.origin ELSE origin END,
+    origin_key = MIN(origin_key, excluded.origin_key),
+    session_id = CASE WHEN excluded.own > own OR (excluded.own = own AND excluded.ts_ms < ts_ms) THEN COALESCE(excluded.session_id, session_id)
+                      ELSE COALESCE(session_id, excluded.session_id) END,
+    ts_ms = CASE WHEN excluded.own > own THEN excluded.ts_ms WHEN excluded.own < own THEN ts_ms ELSE MIN(ts_ms, excluded.ts_ms) END,
+    own = MAX(own, excluded.own)";
+
+/// Orders the lines of a turn by how well they say what began it: one that names it before one
+/// that does not (`other`: a note written just before the prompt carries the prompt's id but no
+/// origin), the conversation's own log before a copy, then the earliest.
+fn origin_key(t: &Turn) -> i64 {
+    let rank = i64::from(t.origin == "other") * 2 + i64::from(!t.own);
+    (rank << 44) | t.ts_ms
+}
 
 pub struct Store {
     conn: Connection,
@@ -944,7 +975,7 @@ impl Store {
             let their_v7 = if theirs >= 7 { "e.branch, e.agent, e.thread_id" } else { "NULL, NULL, NULL" };
             let their_v12 = if theirs >= 12 { "e.limit_reset, e.creator" } else { "NULL, NULL" };
             // turns as a build before v19 derived them can be wrong, and nothing here could set them right
-            let their_turn = |t: &str| if theirs >= 19 { format!("{t}.turn") } else { "NULL".to_owned() };
+            let their_turn = |t: &str| if theirs >= 20 { format!("{t}.turn") } else { "NULL".to_owned() };
             // Codex rows from before v10 use other keys: take them only for sessions this database lacks
             self.conn.execute_batch(
                 "DROP TABLE IF EXISTS temp.codex_sessions;
@@ -980,7 +1011,7 @@ impl Store {
                 event_optional.push("creator");
             }
             let mut call_optional = vec!["session_id", "agent"];
-            if theirs >= 19 {
+            if theirs >= 20 {
                 event_optional.push("turn");
                 call_optional.push("turn");
             }
@@ -1051,13 +1082,13 @@ impl Store {
                     [],
                 )?;
             }
-            if theirs >= 19 {
+            if theirs >= 20 {
                 tx.execute(
                     &format!(
-                        "INSERT INTO turn(id, tool, session_id, ts_ms, origin)
-                         SELECT id, tool, session_id, ts_ms, origin FROM other.turn
+                        "INSERT INTO turn(id, tool, session_id, ts_ms, origin, own, origin_key)
+                         SELECT id, tool, session_id, ts_ms, origin, own, origin_key FROM other.turn
                          WHERE typeof(id) = 'text' AND typeof(tool) = 'text' AND typeof(session_id) IN ('text', 'null') AND typeof(origin) = 'text'
-                           AND typeof(ts_ms) = 'integer' AND ts_ms BETWEEN 0 AND {latest}
+                           AND typeof(ts_ms) = 'integer' AND ts_ms BETWEEN 0 AND {latest} AND own IN (0, 1) AND typeof(origin_key) = 'integer'
                          {UPSERT_TURN_TAIL}"
                     ),
                     [],
@@ -1398,11 +1429,11 @@ impl StoreTx<'_> {
         Ok(())
     }
 
-    /// A turn seen again (a resumed conversation copies its history) keeps its earliest record.
+    /// A turn seen again (a resumed conversation copies its history) keeps its own log's earliest record.
     pub fn insert_turns(&mut self, turns: &[Turn]) -> Result<()> {
-        let mut st = self.tx.prepare_cached(&format!("INSERT INTO turn(id, tool, session_id, ts_ms, origin) VALUES(?1, ?2, ?3, ?4, ?5) {UPSERT_TURN_TAIL}"))?;
+        let mut st = self.tx.prepare_cached(&format!("INSERT INTO turn(id, tool, session_id, ts_ms, origin, own, origin_key) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7) {UPSERT_TURN_TAIL}"))?;
         for t in turns.iter().filter(|t| (0..=latest_accepted_ms()).contains(&t.ts_ms)) {
-            st.execute(params![t.id, t.tool.as_str(), t.session_id, t.ts_ms, t.origin])?;
+            st.execute(params![t.id, t.tool.as_str(), t.session_id, t.ts_ms, t.origin, t.own, origin_key(t)])?;
         }
         Ok(())
     }
