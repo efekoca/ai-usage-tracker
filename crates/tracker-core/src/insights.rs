@@ -859,6 +859,11 @@ pub struct CacheMisses {
     pub misses: u64,
     pub rebuilds: u64,
     pub recached_tokens: u64,
+    /// What writing those tokens again cost above reading them from a warm cache (API
+    /// equivalent); `None` when a model of them has no price.
+    pub extra_usd: Option<f64>,
+    /// Claude Code's API-equivalent cost over the period, as the filter allows.
+    pub cost_usd: f64,
     /// How many misses had each cause, the most frequent first; one miss can have several.
     pub causes: Vec<MissCause>,
     /// Misses Claude Code gave no cause for.
@@ -977,12 +982,25 @@ fn miss_base<'a>(runs: &mut Vec<MissRun<'a>>, high: Option<i64>, r: &'a crate::m
     }
 }
 
+/// What writing `tokens` again cost above reading them, at the model and rate of `e`, the request
+/// that missed, and the lifetimes its conversation's cache was last written with (`main`, oldest first).
+fn recache_extra_usd(book: &PriceBook, main: &[&EventRow], e: &EventRow, tokens: u64) -> Option<f64> {
+    if tokens == 0 {
+        return Some(0.0);
+    }
+    // captured telemetry does not tell the two cache lifetimes apart
+    let w = main.iter().rev().find(|w| w.model == e.model && w.ts_ms <= e.ts_ms && w.tokens.cache_write > 0 && w.accuracy != Accuracy::Captured)?;
+    let one_hour = (u128::from(tokens) * u128::from(w.tokens.cache_write_1h.min(w.tokens.cache_write)) / u128::from(w.tokens.cache_write)) as u64;
+    let cost = |t: crate::model::Tokens| book.cost(&CostInput { tokens: &t, web_search_requests: 0, ..input_of(e) }).map(|c| c.total());
+    Some(cost(crate::model::Tokens { cache_write: tokens, cache_write_1h: one_hour, ..Default::default() })? - cost(crate::model::Tokens { cache_read: tokens, ..Default::default() })?)
+}
+
 /// The misses Claude Code reported, each at the time it happened and counted when the request
 /// that missed (the main conversation's nearest to that time) passes the filter. Two reports in a row tell what happened in between; counts that start over begin a
 /// new run.
-pub fn cache_misses<Tz: TimeZone>(store: &Store, range: Range, filter: &Filter, tz: &Tz) -> Result<CacheMisses> {
+pub fn cache_misses<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filter: &Filter, tz: &Tz) -> Result<CacheMisses> {
     let projects: HashMap<i64, ProjectRow> = store.projects()?.into_iter().map(|p| (p.id, p)).collect();
-    let mut out = CacheMisses { reported: store.has_cache_misses()?, ..CacheMisses::default() };
+    let mut out = CacheMisses { reported: store.has_cache_misses()?, extra_usd: Some(0.0), ..CacheMisses::default() };
     let mut causes: BTreeMap<String, u64> = BTreeMap::new();
     let mut days: BTreeMap<NaiveDate, (BTreeMap<String, u64>, u64)> = BTreeMap::new();
     struct Acc {
@@ -1077,6 +1095,7 @@ pub fn cache_misses<Tz: TimeZone>(store: &Store, range: Range, filter: &Filter, 
             out.misses += misses;
             out.rebuilds += rebuilds;
             out.recached_tokens += recached;
+            out.extra_usd = out.extra_usd.zip(near.and_then(|e| recache_extra_usd(book, &main, e, recached))).map(|(a, b)| a + b);
             out.undetermined += undetermined;
             acc.events.push(MissEvent {
                 ts_ms: at,
@@ -1120,6 +1139,9 @@ pub fn cache_misses<Tz: TimeZone>(store: &Store, range: Range, filter: &Filter, 
         })
         .collect();
     out.projects.sort_by(|a, b| b.misses.cmp(&a.misses).then(b.last_ms.cmp(&a.last_ms)).then(a.project.cmp(&b.project)));
+    if out.recached_tokens > 0 {
+        out.cost_usd = store.events_between(range.from_ms, range.to_ms)?.iter().filter(|e| e.tool == Tool::ClaudeCode && filter.matches(e)).filter_map(|e| book.cost(&input_of(e))).map(|c| c.total()).sum();
+    }
     Ok(out)
 }
 

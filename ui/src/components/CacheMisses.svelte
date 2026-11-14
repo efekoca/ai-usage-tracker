@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, type CacheMisses, type MissEvent, type MissProject } from '../lib/api'
   import { app, latest } from '../lib/store.svelte'
-  import { fmtCompact, fmtDate, fmtDateTime, fmtInt, fmtPct, has, localDate, t } from '../lib/i18n.svelte'
+  import { fmtCompact, fmtDate, fmtDateTime, fmtInt, fmtMoney, fmtPct, has, localDate, t } from '../lib/i18n.svelte'
   import { shortModel } from '../lib/caches'
   import StatTile from './StatTile.svelte'
   import BarValue from './BarValue.svelte'
@@ -28,6 +28,8 @@
   const shown = $derived(!!app.settings?.enabled_sources.includes('claude_code'))
   const bridge = $derived(!!app.settings?.capture.statusline)
   const any = $derived(!!data && (data.misses > 0 || data.rebuilds > 0))
+  /** The rewrites' extra cost as a share of Claude Code's; unknown while a model of them has no price. */
+  const share = $derived(!data || data.recached_tokens === 0 ? 0 : data.extra_usd !== null && data.cost_usd > 0 ? (data.extra_usd / data.cost_usd) * 100 : null)
 
   const UNKNOWN = 'undetermined'
   // Claude Code may name a cause this version does not know yet: it is shown as written
@@ -98,6 +100,9 @@
             <span class="subtle">{t('cachemiss.in', { n: fmtInt(data.sessions) })}</span>
           </StatTile>
           <StatTile label={t('cachemiss.recached')} value={fmtCompact(data.recached_tokens)} />
+          <StatTile label={t('cachemiss.share')} hint={t('cachemiss.share.help')} value={share === null ? '—' : fmtPct(share, 1)}>
+            <span class="subtle">{data.extra_usd === null ? t('cachemiss.share.unpriced') : t('cachemiss.share.extra', { usd: fmtMoney(data.extra_usd) })}</span>
+          </StatTile>
           <StatTile label={t('cachemiss.rebuilds')} hint={t('cachemiss.rebuilds.help')} value={fmtInt(data.rebuilds)} />
         </div>
 
@@ -242,7 +247,7 @@
   }
   .tiles {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 24px;
     padding-top: 16px;
     border-top: 0.5px solid var(--hairline);
@@ -258,6 +263,9 @@
   @container main (max-width: 860px) {
     .split {
       grid-template-columns: minmax(0, 1fr);
+    }
+    .tiles {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
   @container main (max-width: 520px) {

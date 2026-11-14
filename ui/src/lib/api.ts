@@ -844,6 +844,10 @@ export interface CacheMisses {
   /** Rebuilds after a compaction or a clearing of old tool results, which Claude Code expects. */
   rebuilds: number
   recached_tokens: number
+  /** What writing those tokens again cost above reading them from a warm cache (API equivalent); `null` when a model of them has no price. */
+  extra_usd: number | null
+  /** Claude Code's API-equivalent cost over the period, as the filter allows. */
+  cost_usd: number
   /** One miss can have several causes. */
   causes: MissCause[]
   /** Misses Claude Code gave no cause for. */

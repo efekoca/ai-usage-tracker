@@ -13,7 +13,7 @@ vi.mock('../lib/api', async (actual) => ({
 const { app } = await import('../lib/store.svelte')
 const { default: CacheMisses } = await import('./CacheMisses.svelte')
 
-const misses = (over: Partial<Misses>): Misses => ({ reported: true, sessions: 4, misses: 9, rebuilds: 2, recached_tokens: 1_840_000, causes: [], undetermined: 0, days: [], projects: [], ...over })
+const misses = (over: Partial<Misses>): Misses => ({ reported: true, sessions: 4, misses: 9, rebuilds: 2, recached_tokens: 1_840_000, extra_usd: 8.6, cost_usd: 215, causes: [], undetermined: 0, days: [], projects: [], ...over })
 const event = (over: Partial<MissEvent>): MissEvent => ({ ts_ms: Date.UTC(2026, 10, 13, 9, 30), session_id: 's1', branch: 'main', model: 'claude-opus-5-5', misses: 1, rebuilds: 0, recached_tokens: 64_000, causes: ['ttl_expired_5m'], ...over })
 const project = (over: Partial<MissProject>): MissProject => ({ project_id: 1, project: 'notes', hidden: false, misses: 1, rebuilds: 0, recached_tokens: 64_000, last_ms: Date.UTC(2026, 10, 13, 9, 30), cause: 'ttl_expired_5m', events: [event({})], more: 0, ...over })
 
@@ -43,7 +43,8 @@ async function render(data: Misses) {
 describe('the cache misses card', () => {
   it('shows the misses by cause, with an explanation for each cause it knows', async () => {
     const t = await render(misses({ causes: [{ cause: 'ttl_expired_5m', misses: 5 }, { cause: 'tools_changed', misses: 3 }, { cause: 'model_switched', misses: 1 }], undetermined: 1 }))
-    expect([...t.querySelectorAll('.tile .value')].map((v) => v.textContent)).toEqual(['9', '1.8M', '2'])
+    expect([...t.querySelectorAll('.tile .value')].map((v) => v.textContent)).toEqual(['9', '1.8M', '4.0%', '2'])
+    expect(t.querySelectorAll('.tile')[2].textContent).toContain('$8.60 extra')
     expect([...t.querySelectorAll('.legend .cname')].map((n) => n.textContent)).toEqual(['The 5-minute lifetime ran out', 'Tool definitions changed', 'Model switched', 'Cause not found'])
     const tip = t.querySelector('.legend tr:first-child [role="tooltip"]')!
     expect(tip.textContent).toContain('5 minutes')
@@ -93,6 +94,12 @@ describe('the cache misses card', () => {
     first.querySelector<HTMLButtonElement>('.toggle-col button')!.click()
     flushSync()
     expect(t.querySelector('tr.detail')).toBeNull()
+  })
+
+  it('leaves the share of cost unknown while a model of the rewrites has no price', async () => {
+    const t = await render(misses({ extra_usd: null }))
+    const tile = t.querySelectorAll('.tile')[2]
+    expect([tile.querySelector('.value')?.textContent, tile.textContent?.includes('A model has no price')]).toEqual(['—', true])
   })
 
   it('asks for the status-line bridge until Claude Code has reported anything', async () => {
