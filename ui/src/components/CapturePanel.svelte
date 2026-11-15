@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { app } from '../lib/store.svelte'
+  import { app, saveSettings } from '../lib/store.svelte'
   import { api, type CaptureKind, type CaptureStatus } from '../lib/api'
   import { fmtDuration, fmtInt, t } from '../lib/i18n.svelte'
   import Toggle from './Toggle.svelte'
@@ -149,6 +149,13 @@
               {#if everyError[kind]}<Icon name="warning" size={13} /> <span class="msg">{everyError[kind]}</span>{/if}
             </dd>
           {/if}
+          {#if kind === 'statusline' && on && app.settings}
+            <dt>{t('cap.statusline.cost')}</dt>
+            <dd class="cost">
+              <Toggle small checked={app.settings.statusline_cost} label={t('cap.statusline.cost')} onchange={(v) => saveSettings({ statusline_cost: v })} />
+              <span class="subtle small">{t('cap.statusline.cost.help')}</span>
+            </dd>
+          {/if}
           <dt>{t('cap.status')}</dt>
           <dd class="status">
             {#if busy === kind}
@@ -243,6 +250,9 @@
   /* a status message can wrap; its icon stays on the first line */
   .status {
     align-items: flex-start;
+  }
+  .cost {
+    gap: 10px;
   }
   .status > :global(svg) {
     height: 1lh;

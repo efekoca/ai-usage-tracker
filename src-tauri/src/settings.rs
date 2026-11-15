@@ -647,6 +647,8 @@ pub struct Settings {
     /// The time the conversation's cache runs out, at the end of its own Claude Code status line;
     /// shown through the status-line bridge, so off by default like the bridge.
     pub cache_statusline: bool,
+    /// The conversation's cost so far at the end of Claude Code's status line (needs the bridge).
+    pub statusline_cost: bool,
     /// "all" or "picked": whose caches are followed.
     pub cache_projects: String,
     /// The projects followed while `cache_projects` is "picked", by path.
@@ -846,6 +848,7 @@ impl Default for Settings {
             cache_widget: true,
             cache_menubar: true,
             cache_statusline: false,
+            statusline_cost: false,
             cache_projects: "all".into(),
             cache_picked: Vec::new(),
             cache_auto: false,
