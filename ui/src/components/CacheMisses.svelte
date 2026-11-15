@@ -337,7 +337,7 @@
     top: 50%;
     z-index: 5;
     width: max-content;
-    max-width: 260px;
+    max-width: min(260px, 45cqw);
     padding: 8px 10px;
     border-radius: 9px;
     border: 0.5px solid var(--hairline-strong);
@@ -347,17 +347,14 @@
     font-size: 12px;
     line-height: 1.45;
     white-space: normal;
-    opacity: 0;
-    transform: translate(-4px, -50%);
-    transition:
-      opacity var(--dur) var(--ease),
-      transform var(--dur) var(--ease);
+    transform: translateY(-50%);
     pointer-events: none;
+    /* out of the layout until shown, so a hidden one never widens the page */
+    display: none;
   }
   .tip:hover .tip-box,
   .tip-btn:focus-visible + .tip-box {
-    opacity: 1;
-    transform: translate(0, -50%);
+    display: block;
   }
   .legend td.num {
     width: 1%;

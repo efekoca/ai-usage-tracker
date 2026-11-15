@@ -76,6 +76,12 @@
     border: 0.5px solid var(--hairline);
     min-width: max-content;
   }
+  /* where room is short each segment takes only its own label's width */
+  @container main (max-width: 640px) {
+    .seg {
+      grid-template-columns: repeat(var(--n), auto);
+    }
+  }
   .thumb {
     position: absolute;
     top: 2px;

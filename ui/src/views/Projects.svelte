@@ -58,7 +58,7 @@
       <span>{t('branches.col.project')}</span>
       <span class="num">{t('metric.tokens')}</span>
       <span class="num">{t('metric.cost')}</span>
-      <span class="num">{t('breakdown.share')}</span>
+      <span class="num share">{t('breakdown.share')}</span>
       <span class="hide">{t('projects.hide')}</span>
     </div>
   {:else}
@@ -113,7 +113,7 @@
   }
   .list-row {
     display: grid;
-    grid-template-columns: 1fr 90px 100px 60px 110px;
+    grid-template-columns: minmax(0, 1fr) 90px 100px 60px 110px;
     gap: 14px;
     align-items: center;
   }
@@ -147,10 +147,16 @@
     color: var(--ink-3);
   }
   .txt {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     font-weight: 500;
     white-space: nowrap;
   }
+  /* the path gives way before the name */
   .path {
+    flex: 1 1 0;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -168,5 +174,20 @@
     align-items: center;
     justify-content: flex-end;
     gap: 8px;
+  }
+  @container main (max-width: 640px) {
+    .list-row {
+      grid-template-columns: minmax(0, 1fr) auto auto auto;
+      gap: 12px;
+    }
+    .share {
+      display: none;
+    }
+    .idle {
+      grid-column: span 2;
+    }
+    .head .hide {
+      white-space: nowrap;
+    }
   }
 </style>

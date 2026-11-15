@@ -60,7 +60,19 @@
 <header class="bar">
   <h1>{t(`nav.${app.view}`)}</h1>
   <div class="spacer"></div>
-  <Segmented label={t('period.label')} options={kinds.map((k) => ({ value: k, label: t(`period.${k}`) }))} bind:value={kind} onchange={pick} />
+  <span class="wide"><Segmented label={t('period.label')} options={kinds.map((k) => ({ value: k, label: t(`period.${k}`) }))} bind:value={kind} onchange={pick} /></span>
+  <span class="narrow">
+    <Select
+      label={t('period.label')}
+      value={kind}
+      minWidth={150}
+      options={kinds.map((k) => ({ value: k, label: t(`period.${k}`) }))}
+      onchange={(v) => {
+        kind = v as Kind
+        pick(kind)
+      }}
+    />
+  </span>
   <button class="btn" class:primary={activeFilters > 0} aria-expanded={showFilters} onclick={() => (showFilters = !showFilters)}>
     <Icon name="filter" size={15} />{t('common.filters')}{activeFilters ? ` · ${activeFilters}` : ''}
   </button>
@@ -139,6 +151,17 @@
   }
   .err {
     color: var(--bad-ink);
+  }
+  .narrow {
+    display: none;
+  }
+  @container main (max-width: 680px) {
+    .wide {
+      display: none;
+    }
+    .narrow {
+      display: contents;
+    }
   }
   @container main (max-width: 1040px) {
     .bar {

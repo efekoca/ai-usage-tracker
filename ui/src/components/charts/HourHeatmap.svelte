@@ -70,7 +70,7 @@
 <style>
   .hm {
     display: grid;
-    grid-template-columns: 36px repeat(24, minmax(10px, 1fr));
+    grid-template-columns: 36px repeat(24, minmax(6px, 1fr));
     gap: 3px;
     align-items: center;
   }

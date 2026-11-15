@@ -3,6 +3,7 @@
   import { api, type ModelCompare, type Provider } from '../lib/api'
   import { fmtCompact, fmtInt, fmtMoney, fmtPct, t } from '../lib/i18n.svelte'
   import Segmented from './Segmented.svelte'
+  import Select from './Select.svelte'
   import AccuracyBadge from './AccuracyBadge.svelte'
   import Icon from './Icon.svelte'
 
@@ -24,6 +25,7 @@
   })
 
   let provider = $state<'all' | Provider>('all')
+  const choices = $derived([{ value: 'all', label: t('compare.all') }, { value: 'anthropic', label: t('provider.anthropic') }, { value: 'openai', label: t('provider.openai') }, { value: 'google', label: t('provider.google') }])
   const used = $derived(new Set((c?.actual_by_model ?? []).map(([m]) => m)))
   const rows = $derived((c?.targets ?? []).filter((x) => provider === 'all' || x.provider === provider))
   const top = $derived(Math.max(1e-9, c?.actual_cost_usd ?? 0, ...rows.map((r) => r.cost_usd)))
@@ -34,11 +36,8 @@
     <h2>{t('compare.title')}</h2>
     <AccuracyBadge kind="estimated" compact />
     <span class="spacer"></span>
-    <Segmented
-      label={t('compare.title')}
-      bind:value={provider}
-      options={[{ value: 'all', label: t('compare.all') }, { value: 'anthropic', label: t('provider.anthropic') }, { value: 'openai', label: t('provider.openai') }, { value: 'google', label: t('provider.google') }]}
-    />
+    <span class="wide"><Segmented label={t('compare.title')} value={provider} onchange={(v) => (provider = v as typeof provider)} options={choices} /></span>
+    <span class="narrow"><Select label={t('compare.title')} value={provider} minWidth={130} onchange={(v) => (provider = v as typeof provider)} options={choices} /></span>
   </div>
   <p class="subtle small lead">{t('compare.lead')}</p>
 
@@ -215,6 +214,17 @@
   }
   .spacer {
     flex: 1;
+  }
+  .narrow {
+    display: none;
+  }
+  @container main (max-width: 540px) {
+    .wide {
+      display: none;
+    }
+    .narrow {
+      display: contents;
+    }
   }
   @container main (max-width: 1040px) {
     li {

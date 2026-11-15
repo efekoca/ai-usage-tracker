@@ -167,7 +167,7 @@
               <div><span class="muted small">{t('days.sessions')}</span><b class="big">{fmtInt(detail.sessions)}</b></div>
               <div>
                 <span class="muted small">{t('days.activeHours')}</span>
-                <b class="big">{detail.first_ms && detail.last_ms ? `${fmtClock(detail.first_ms)}–${fmtClock(detail.last_ms)}` : '—'}</b>
+                <b class="big span">{detail.first_ms && detail.last_ms ? `${fmtClock(detail.first_ms)}–${fmtClock(detail.last_ms)}` : '—'}</b>
               </div>
               <div>
                 <span class="muted small">{t('days.cacheHit')}</span>
@@ -358,6 +358,12 @@
   @container main (max-width: 700px) {
     .lists {
       grid-template-columns: minmax(0, 1fr);
+    }
+    .facts {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .big.span {
+      white-space: normal;
     }
   }
   .peaks {
