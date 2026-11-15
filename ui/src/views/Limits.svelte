@@ -142,8 +142,11 @@
   <Segmented label={t('limits.title')} bind:value={app.limitsTab} options={[{ value: 'current', label: t('limits.tab.current') }, { value: 'history', label: t('limits.tab.history') }]} />
   <span class="spacer"></span>
   {#if app.limitsTab === 'current'}
-    <span class="subtle small" title={t('limits.mode.help')}>{t('limits.mode')}</span>
-    <Segmented label={t('limits.mode')} value={app.settings?.limit_display ?? 'used'} options={[{ value: 'used', label: t('limits.mode.used') }, { value: 'remaining', label: t('limits.mode.remaining') }]} onchange={(v) => saveSettings({ limit_display: v })} />
+    <!-- the name and its switch wrap together -->
+    <span class="mode">
+      <span class="subtle small" title={t('limits.mode.help')}>{t('limits.mode')}</span>
+      <Segmented label={t('limits.mode')} value={app.settings?.limit_display ?? 'used'} options={[{ value: 'used', label: t('limits.mode.used') }, { value: 'remaining', label: t('limits.mode.remaining') }]} onchange={(v) => saveSettings({ limit_display: v })} />
+    </span>
   {/if}
 </header>
 
@@ -415,9 +418,14 @@
       grid-column: 1;
     }
   }
+  .mode {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
   .cards {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
     gap: 16px;
     margin-bottom: 16px;
   }

@@ -3,6 +3,7 @@
   import { app, latest, toolColor } from '../lib/store.svelte'
   import { agentLabel, fmtCompact, fmtInt, fmtMoney, fmtPct, has, t, toolLabel } from '../lib/i18n.svelte'
   import Segmented from './Segmented.svelte'
+  import Select from './Select.svelte'
   import Icon from './Icon.svelte'
   import BarValue from './BarValue.svelte'
 
@@ -121,7 +122,9 @@
           <p class="subtle small lead">{t('tools.lead')}</p>
         </div>
         {#if toolTools.length > 1}
-          <Segmented label={t('tools.title')} value={pick} onchange={(v) => (which = v)} options={[{ value: 'all', label: t('tools.all') }, ...toolTools.map((x) => ({ value: x, label: toolLabel(x) }))]} />
+          {@const choices = [{ value: 'all', label: t('tools.all') }, ...toolTools.map((x) => ({ value: x, label: toolLabel(x) }))]}
+          <span class="wide"><Segmented label={t('tools.title')} value={pick} onchange={(v) => (which = v as typeof which)} options={choices} /></span>
+          <span class="narrow"><Select label={t('tools.title')} value={pick} minWidth={140} onchange={(v) => (which = v as typeof which)} options={choices} /></span>
         {/if}
       </div>
       {#if rows.length === 0}
@@ -194,6 +197,17 @@
   .lead {
     margin: 4px 0 8px;
     max-width: 560px;
+  }
+  .narrow {
+    display: none;
+  }
+  @container main (max-width: 620px) {
+    .wide {
+      display: none;
+    }
+    .narrow {
+      display: contents;
+    }
   }
   .empty {
     padding-bottom: 12px;

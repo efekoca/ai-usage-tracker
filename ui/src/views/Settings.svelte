@@ -946,6 +946,18 @@
   .item:last-child {
     border-bottom: 0;
   }
+  @container main (max-width: 760px) {
+    .item {
+      flex-wrap: wrap;
+    }
+    .item > :first-child {
+      flex: 1 1 200px;
+      min-width: 0;
+    }
+    .item :global(.row) {
+      flex-wrap: wrap;
+    }
+  }
   /* a switch and the places it shows, in a panel under it */
   .bundle {
     border-bottom: 0.5px solid var(--hairline);
@@ -1019,14 +1031,16 @@
   }
   .tints {
     flex: none;
+    max-width: 100%;
     display: flex;
     flex-direction: column;
     gap: 8px;
   }
   .tint {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 14px;
+    gap: 8px 14px;
   }
   .tname {
     min-width: 110px;
@@ -1116,7 +1130,7 @@
     background: var(--surface-2);
     border: 0.5px solid var(--hairline);
     border-radius: 8px;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     user-select: all;
   }
   .danger-text {

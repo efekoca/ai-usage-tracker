@@ -188,4 +188,10 @@
       padding-right: 8px;
     }
   }
+  /* the table scrolls sideways here: a heading on one line beats one squeezed into several */
+  @container main (max-width: 700px) {
+    thead th {
+      white-space: nowrap;
+    }
+  }
 </style>
