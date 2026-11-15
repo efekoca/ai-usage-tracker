@@ -8,6 +8,7 @@
   import Segmented from '../components/Segmented.svelte'
   import Select from '../components/Select.svelte'
   import Toggle from '../components/Toggle.svelte'
+  import CliScripts from '../components/CliScripts.svelte'
   import Icon from '../components/Icon.svelte'
   import BrandIcon from '../components/BrandIcon.svelte'
   import ColorPick, { type Swatch } from '../components/ColorPick.svelte'
@@ -94,18 +95,6 @@
   }
 
   let cli: { command?: string; error?: string } = $state({})
-  /** Its flags set as code, so a line never breaks inside one. */
-  const flagged = (s: string) => s.split(/(--[a-z]+(?: \d+[a-z]+)?)/).map((text, i) => ({ text, flag: i % 2 === 1 }))
-  let cliCopied = $state(false)
-  async function copyCli() {
-    try {
-      await navigator.clipboard.writeText(cli.command ?? '')
-      cliCopied = true
-      setTimeout(() => (cliCopied = false), 1500)
-    } catch {
-      /* clipboard unavailable */
-    }
-  }
 
   let loadFailed = $state('')
   onMount(async () => {
@@ -895,10 +884,9 @@
   <div class="item">
     <div class="cli">
       <span>{t('settings.cli')}</span>
-      <div class="subtle small">{#each flagged(t('settings.cli.help')) as p}{#if p.flag}<code class="flag">{p.text}</code>{:else}{p.text}{/if}{/each}</div>
-      {#if cli.command}<code class="path cmd">{cli.command}</code>{:else if cli.error}<div class="subtle small">{has(`cap.msg.${cli.error}`) ? t(`cap.msg.${cli.error}`) : cli.error}</div>{/if}
+      <div class="subtle small">{t('settings.cli.help')}</div>
+      {#if cli.command}<CliScripts command={cli.command} platform={app.info?.platform ?? ''} />{:else if cli.error}<div class="subtle small">{has(`cap.msg.${cli.error}`) ? t(`cap.msg.${cli.error}`) : cli.error}</div>{/if}
     </div>
-    <button class="btn" disabled={!cli.command} onclick={copyCli}><Icon name={cliCopied ? 'check' : 'copy'} size={15} />{cliCopied ? t('settings.cli.copied') : t('settings.cli.copy')}</button>
   </div>
   <div class="item">
     <span class="danger-text">{t('settings.data.wipe')}</span>
@@ -1117,25 +1105,11 @@
   }
   .path {
     font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    overflow-wrap: anywhere;
   }
   .cli {
+    flex: 1 1 auto;
     min-width: 0;
-  }
-  .flag {
-    font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
-    white-space: nowrap;
-  }
-  .cmd {
-    display: block;
-    margin-top: 8px;
-    padding: 7px 10px;
-    font-size: 12px;
-    color: var(--ink-2);
-    background: var(--surface-2);
-    border: 0.5px solid var(--hairline);
-    border-radius: 8px;
-    overflow-wrap: break-word;
-    user-select: all;
   }
   .danger-text {
     color: var(--bad-ink);

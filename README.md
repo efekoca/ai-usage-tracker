@@ -360,7 +360,7 @@ A card shows only totals, tool names and model names, never project names or any
 
 ### Your usage from the command line
 
-`ai-usage-tracker --json` prints the usage and limits the app shows as JSON, for your scripts or tools such as Raycast, tmux or SketchyBar. **Settings → Data → Command line** shows the command for your installation with a **Copy** button. On Windows, run it in PowerShell; the command there ends in `| Out-String` so that PowerShell waits for the output.
+`ai-usage-tracker --json` prints the usage and limits the app shows as JSON, for your scripts or tools such as Raycast, tmux or SketchyBar. **Settings → Data → Command line** shows the command for your installation and ready-made scripts with its path filled in, each with a **Copy** button. On Windows, run it in PowerShell; the command there ends in `| Out-String` so that PowerShell waits for the output.
 
 ```sh
 ai-usage-tracker --json | jq '.limits[] | select(.window == "five_hour") | .used_pct'
@@ -371,6 +371,56 @@ ai-usage-tracker --json | jq '.limits[] | select(.window == "five_hour") | .used
 - `limits` holds every limit of the account in use, for the sources you turned on: the percentage used, when it resets, when it was read, and when it fills at the current pace. `used_pct` is empty when the window has reset since it was read.
 - It only reads the app's data and never changes it. The app does not have to be open, but the figures are as recent as its last scan.
 - Times are in your time zone (ISO 8601). `schema` goes up only when a field changes its meaning or goes away.
+
+**Ready-made scripts.** Save this as `~/bin/claude-status.sh` and make it executable with `chmod +x ~/bin/claude-status.sh`. It prints one line such as `5h 46% · 7d 64% · $12.84`, leaving out a window that has reset since it was read. It needs `jq`, which macOS 15 and later include; elsewhere, install it with your package manager. On Linux, or when the app is installed somewhere else, take the scripts from **Settings → Data → Command line**, which use your installation's path.
+
+```sh
+#!/bin/sh
+# One line for a status bar: Claude's five-hour and weekly use, and today's cost.
+tracker="/Applications/AI Usage Tracker.app/Contents/MacOS/ai-usage-tracker"
+"$tracker" --json | jq -r '
+  [ .limits[]
+    | select(.provider == "anthropic" and .used_pct != null and (.window == "five_hour" or .window == "seven_day"))
+    | "\(if .window == "five_hour" then "5h" else "7d" end) \(.used_pct | floor)%" ]
+  + [ "$\(.usage.cost_usd * 100 | floor / 100)" ]
+  | join(" · ")'
+```
+
+For tmux, add this to `~/.tmux.conf`:
+
+```
+set -g status-interval 60
+set -g status-right '#(~/bin/claude-status.sh)'
+```
+
+For SketchyBar, add an item in `sketchybarrc`, and save the plugin it runs as `plugins/claude.sh`:
+
+```sh
+sketchybar --add item claude right --set claude update_freq=120 script="$PLUGIN_DIR/claude.sh"
+```
+
+```sh
+#!/bin/sh
+sketchybar --set "$NAME" label="$(~/bin/claude-status.sh)"
+```
+
+For Raycast, save this as a script command; it shows the line in the root search and refreshes it every five minutes:
+
+```sh
+#!/bin/sh
+# @raycast.schemaVersion 1
+# @raycast.title Claude usage
+# @raycast.mode inline
+# @raycast.refreshTime 5m
+~/bin/claude-status.sh
+```
+
+On Windows, PowerShell turns the output into objects you can filter and format:
+
+```powershell
+$usage = & "$env:LOCALAPPDATA\AI Usage Tracker\ai-usage-tracker.exe" --json | Out-String | ConvertFrom-Json
+$usage.limits | Where-Object provider -eq anthropic | Format-Table window, used_pct, resets_at
+```
 
 ## Supported sources
 
