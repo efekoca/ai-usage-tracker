@@ -34,30 +34,29 @@ describe('cliScripts', () => {
     expect(ps.files[0].code.split('\n')[0]).toBe(`$usage = ${win} | ConvertFrom-Json`)
   })
 
-  it.skipIf(process.platform === 'win32' || !hasJq)('prints one status line from the JSON output', () => {
+  it.skipIf(process.platform === 'win32' || !hasJq)('prints one status line from the JSON output, marking a reading that is behind', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cli-scripts-'))
+    const fake = join(dir, 'fake tracker')
+    const json = join(dir, 'out.json')
+    writeFileSync(fake, `#!/bin/sh\ncat '${json}'\n`)
+    chmodSync(fake, 0o755)
+    const tabs = cliScripts(`'${fake}' --json`, 'macos')
+    const limit = (window: string, used_pct: number | null, state = 'fresh', budget = false) => ({ provider: 'anthropic', window, used_pct, state, budget })
+    const week = limit('seven_day', 64.2)
+    const line = (five: object) => {
+      writeFileSync(json, JSON.stringify({ limits: [five, week, limit('seven_day_opus', 10), { ...limit('five_hour', 12), provider: 'openai' }], usage: { cost_usd: 12.849 } }))
+      const outs = (['tmux', 'raycast'] as const).map((kind) => execFileSync('sh', ['-c', tabs.find((x) => x.kind === kind)!.files[0].code], { encoding: 'utf8' }).trim())
+      const plugin = tabs.find((x) => x.kind === 'sketchybar')!.files[1].code.replace('sketchybar --set', 'echo')
+      outs.push(execFileSync('sh', ['-c', plugin], { encoding: 'utf8', env: { ...process.env, NAME: 'claude' } }).trim().replace(/^claude label=/, ''))
+      expect(new Set(outs).size).toBe(1)
+      return outs[0]
+    }
     try {
-      const json = {
-        limits: [
-          { provider: 'anthropic', window: 'five_hour', used_pct: 46.7 },
-          { provider: 'anthropic', window: 'seven_day', used_pct: 64.2 },
-          { provider: 'anthropic', window: 'seven_day_opus', used_pct: 10 },
-          { provider: 'openai', window: 'five_hour', used_pct: 12 },
-          { provider: 'anthropic', window: 'seven_day', used_pct: null },
-        ],
-        usage: { cost_usd: 12.849 },
-      }
-      const fake = join(dir, 'fake tracker')
-      writeFileSync(fake, `#!/bin/sh\ncat <<'EOF'\n${JSON.stringify(json)}\nEOF\n`)
-      chmodSync(fake, 0o755)
-      const tabs = cliScripts(`'${fake}' --json`, 'macos')
-      for (const kind of ['tmux', 'raycast'] as const) {
-        const f = tabs.find((x) => x.kind === kind)!.files[0]
-        expect(execFileSync('sh', ['-c', f.code], { encoding: 'utf8' }).trim()).toBe('5h 46% · 7d 64% · $12.84')
-      }
-      const plugin = tabs.find((x) => x.kind === 'sketchybar')!.files[1].code
-      const out = execFileSync('sh', ['-c', plugin.replace('sketchybar --set', 'echo')], { encoding: 'utf8', env: { ...process.env, NAME: 'claude' } })
-      expect(out.trim()).toBe('claude label=5h 46% · 7d 64% · $12.84')
+      expect(line(limit('five_hour', 46.7))).toBe('5h 46% · 7d 64% · $12.84')
+      expect(line(limit('five_hour', 46.7, 'behind'))).toBe('5h ~46% · 7d 64% · $12.84')
+      expect(line(limit('five_hour', 46.7, 'stale'))).toBe('7d 64% · $12.84')
+      expect(line(limit('five_hour', null, 'reset'))).toBe('7d 64% · $12.84')
+      expect(line(limit('five_hour', 46.7, 'fresh', true))).toBe('7d 64% · $12.84')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

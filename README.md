@@ -368,11 +368,11 @@ ai-usage-tracker --json | jq '.limits[] | select(.window == "five_hour") | .used
 
 - The period is today unless you add `--period` with `7d`, `30d`, `3m`, `6m`, `1y` or `all`.
 - `usage` holds the period's requests, tokens and API-equivalent cost, in all and per tool.
-- `limits` holds every limit of the account in use, for the sources you turned on: the percentage used, when it resets, when it was read, and when it fills at the current pace. `used_pct` is empty when the window has reset since it was read.
+- `limits` holds every limit of the account in use, for the sources you turned on: the percentage used, when it resets, when it was read, and when it fills at the current pace. `used_pct` is empty when the window has reset since it was read. `state` is `fresh`, `behind` (used since it was read, so most likely higher now), `stale` (an old reading with no known reset) or `reset`; `budget` is true for a budget you set on the Limits page rather than a reading.
 - It only reads the app's data and never changes it. The app does not have to be open, but the figures are as recent as its last scan.
 - Times are in your time zone (ISO 8601). `schema` goes up only when a field changes its meaning or goes away.
 
-**Ready-made scripts.** Save this as `~/bin/claude-status.sh` and make it executable with `chmod +x ~/bin/claude-status.sh`. It prints one line such as `5h 46% · 7d 64% · $12.84`, leaving out a window that has reset since it was read. It needs `jq`, which macOS 15 and later include; elsewhere, install it with your package manager. On Linux, or when the app is installed somewhere else, take the scripts from **Settings → Data → Command line**, which use your installation's path.
+**Ready-made scripts.** Save this as `~/bin/claude-status.sh` and make it executable with `chmod +x ~/bin/claude-status.sh`. It prints one line such as `5h ~46% · 7d 64% · $12.84`: `~` marks a reading with use since, which is most likely higher now, and a window that has reset since it was read or whose reading is stale is left out. It needs `jq`, which macOS 15 and later include; elsewhere, install it with your package manager. On Linux, or when the app is installed somewhere else, take the scripts from **Settings → Data → Command line**, which use your installation's path.
 
 ```sh
 #!/bin/sh
@@ -380,8 +380,10 @@ ai-usage-tracker --json | jq '.limits[] | select(.window == "five_hour") | .used
 tracker="/Applications/AI Usage Tracker.app/Contents/MacOS/ai-usage-tracker"
 "$tracker" --json | jq -r '
   [ .limits[]
-    | select(.provider == "anthropic" and .used_pct != null and (.window == "five_hour" or .window == "seven_day"))
-    | "\(if .window == "five_hour" then "5h" else "7d" end) \(.used_pct | floor)%" ]
+    | select(.provider == "anthropic" and (.window == "five_hour" or .window == "seven_day"))
+    | select(.used_pct != null and (.state == "fresh" or .state == "behind") and (.budget | not))
+    | (if .window == "five_hour" then "5h " else "7d " end)
+      + (if .state == "behind" then "~" else "" end) + "\(.used_pct | floor)%" ]
   + [ "$\(.usage.cost_usd * 100 | floor / 100)" ]
   | join(" · ")'
 ```
@@ -419,7 +421,7 @@ On Windows, PowerShell turns the output into objects you can filter and format:
 
 ```powershell
 $usage = & "$env:LOCALAPPDATA\AI Usage Tracker\ai-usage-tracker.exe" --json | Out-String | ConvertFrom-Json
-$usage.limits | Where-Object provider -eq anthropic | Format-Table window, used_pct, resets_at
+$usage.limits | Where-Object provider -eq anthropic | Format-Table window, used_pct, state, resets_at
 ```
 
 ## Supported sources

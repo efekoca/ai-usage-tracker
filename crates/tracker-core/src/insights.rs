@@ -850,6 +850,17 @@ pub fn live_caches(store: &Store, book: &PriceBook, now_ms: i64) -> Result<Vec<L
     Ok(out)
 }
 
+/// Why a cache rewrite's extra cost is not known.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExtraUnknown {
+    /// Its model has no price.
+    Unpriced,
+    /// The requests it could belong to differ in model, account or cache lifetime, or the write
+    /// it replaced is not in the logs.
+    Unsure,
+}
+
 /// Prompt cache misses Claude Code reported over a period: in all, day by day and project by project.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct CacheMisses {
@@ -861,8 +872,9 @@ pub struct CacheMisses {
     pub rebuilds: u64,
     pub recached_tokens: u64,
     /// What writing those tokens again cost above reading them from a warm cache (API
-    /// equivalent); `None` when a model of them has no price.
+    /// equivalent); `None` when a rewrite's cost is not known, for the reason in `extra_unknown`.
     pub extra_usd: Option<f64>,
+    pub extra_unknown: Option<ExtraUnknown>,
     /// Claude Code's API-equivalent cost over the period, as the filter allows.
     pub cost_usd: f64,
     /// How many misses had each cause, the most frequent first; one miss can have several.
@@ -986,15 +998,33 @@ fn miss_base<'a>(runs: &mut Vec<MissRun<'a>>, high: Option<i64>, r: &'a crate::m
 /// What writing `tokens` again cost above reading them, at the model and rate of `e`, the request
 /// that missed, and the lifetimes its account's cache in the conversation was last written with
 /// (`main`, oldest first). Each account keeps a cache of its own, as in [`live_caches`].
-fn recache_extra_usd(book: &PriceBook, main: &[&EventRow], e: &EventRow, tokens: u64) -> Option<f64> {
-    if tokens == 0 {
-        return Some(0.0);
-    }
+fn recache_extra_usd(book: &PriceBook, main: &[&EventRow], e: &EventRow, tokens: u64) -> Result<f64, ExtraUnknown> {
     // captured telemetry does not tell the two cache lifetimes apart
-    let w = main.iter().rev().find(|w| w.model == e.model && w.account == e.account && w.ts_ms <= e.ts_ms && w.tokens.cache_write > 0 && w.accuracy != Accuracy::Captured)?;
+    let w = main
+        .iter()
+        .rev()
+        .find(|w| w.model == e.model && w.account == e.account && w.ts_ms <= e.ts_ms && w.tokens.cache_write > 0 && w.accuracy != Accuracy::Captured)
+        .ok_or(ExtraUnknown::Unsure)?;
     let one_hour = (u128::from(tokens) * u128::from(w.tokens.cache_write_1h.min(w.tokens.cache_write)) / u128::from(w.tokens.cache_write)) as u64;
-    let cost = |t: crate::model::Tokens| book.cost(&CostInput { tokens: &t, web_search_requests: 0, ..input_of(e) }).map(|c| c.total());
-    Some(cost(crate::model::Tokens { cache_write: tokens, cache_write_1h: one_hour, ..Default::default() })? - cost(crate::model::Tokens { cache_read: tokens, ..Default::default() })?)
+    let cost = |t: crate::model::Tokens| book.cost(&CostInput { tokens: &t, web_search_requests: 0, ..input_of(e) }).map(|c| c.total()).ok_or(ExtraUnknown::Unpriced);
+    Ok(cost(crate::model::Tokens { cache_write: tokens, cache_write_1h: one_hour, ..Default::default() })? - cost(crate::model::Tokens { cache_read: tokens, ..Default::default() })?)
+}
+
+/// The extra cost of a rewrite that any of `candidates` may have made: known only when they all
+/// agree on it.
+fn rewrite_extra_usd(book: &PriceBook, main: &[&EventRow], candidates: &[&EventRow], tokens: u64) -> Result<f64, ExtraUnknown> {
+    if tokens == 0 {
+        return Ok(0.0);
+    }
+    let costs: Vec<Result<f64, ExtraUnknown>> = candidates.iter().map(|e| recache_extra_usd(book, main, e, tokens)).collect();
+    if costs.contains(&Err(ExtraUnknown::Unpriced)) {
+        return Err(ExtraUnknown::Unpriced);
+    }
+    let known: Vec<f64> = costs.into_iter().collect::<Result<_, _>>()?;
+    match known.split_first() {
+        Some((a, rest)) if rest.iter().all(|b| (a - b).abs() < 1e-9) => Ok(*a),
+        _ => Err(ExtraUnknown::Unsure),
+    }
 }
 
 /// The misses Claude Code reported, each at the time it happened and counted when the request
@@ -1097,7 +1127,17 @@ pub fn cache_misses<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range,
             out.misses += misses;
             out.rebuilds += rebuilds;
             out.recached_tokens += recached;
-            out.extra_usd = out.extra_usd.zip(near.and_then(|e| recache_extra_usd(book, &main, e, recached))).map(|(a, b)| a + b);
+            let candidates: Vec<&EventRow> = if around.is_empty() { near.into_iter().copied().collect() } else { around.iter().map(|e| **e).collect() };
+            match rewrite_extra_usd(book, &main, &candidates, recached) {
+                Ok(usd) => out.extra_usd = out.extra_usd.map(|sum| sum + usd),
+                Err(why) => {
+                    out.extra_usd = None;
+                    // a price that can be added is the more useful thing to name
+                    if out.extra_unknown != Some(ExtraUnknown::Unpriced) {
+                        out.extra_unknown = Some(why);
+                    }
+                }
+            }
             out.undetermined += undetermined;
             acc.events.push(MissEvent {
                 ts_ms: at,
@@ -1705,9 +1745,10 @@ pub struct WorkingDay {
     pub days: u32,
     /// When to open a window so that the day spans the most windows, with at least an hour of it in
     /// the first and the last and the same in both: never later than the first request, which would
-    /// open one anyway. `None` when that falls on the day before.
+    /// open one anyway. `None` when that falls on the day before, or when the day is too short to
+    /// give two windows an hour each.
     pub open_minute: Option<u32>,
-    /// How many windows the day then spans.
+    /// How many windows the day then spans: one for a day that short.
     pub windows: u32,
 }
 
@@ -1742,6 +1783,9 @@ pub fn working_day<Tz: TimeZone>(store: &Store, now_ms: i64, tz: &Tz, weekdays: 
     firsts.sort_unstable();
     lasts.sort_unstable();
     let (first, last) = (firsts[firsts.len() / 2], lasts[lasts.len() / 2].max(firsts[firsts.len() / 2]));
+    if i64::from(last - first) < 2 * EDGE_MIN {
+        return Ok(Some(WorkingDay { first_minute: first, last_minute: last, days: firsts.len() as u32, open_minute: None, windows: 1 }));
+    }
     // whole windows in between, the rest shared by the two ends; to the nearest quarter hour
     let windows = 2 + (i64::from(last - first) - 2 * EDGE_MIN).max(0) / FIVE_HOURS_MIN;
     let open = ((i64::from(first + last) / 2 - windows * FIVE_HOURS_MIN / 2 + 7).div_euclid(15) * 15).min(i64::from(first - first % 15));

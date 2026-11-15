@@ -13,7 +13,7 @@ vi.mock('../lib/api', async (actual) => ({
 const { app } = await import('../lib/store.svelte')
 const { default: CacheMisses } = await import('./CacheMisses.svelte')
 
-const misses = (over: Partial<Misses>): Misses => ({ reported: true, sessions: 4, misses: 9, rebuilds: 2, recached_tokens: 1_840_000, extra_usd: 8.6, cost_usd: 215, causes: [], undetermined: 0, days: [], projects: [], ...over })
+const misses = (over: Partial<Misses>): Misses => ({ reported: true, sessions: 4, misses: 9, rebuilds: 2, recached_tokens: 1_840_000, extra_usd: 8.6, extra_unknown: null, cost_usd: 215, causes: [], undetermined: 0, days: [], projects: [], ...over })
 const event = (over: Partial<MissEvent>): MissEvent => ({ ts_ms: Date.UTC(2026, 10, 13, 9, 30), session_id: 's1', branch: 'main', model: 'claude-opus-5-5', misses: 1, rebuilds: 0, recached_tokens: 64_000, causes: ['ttl_expired_5m'], ...over })
 const project = (over: Partial<MissProject>): MissProject => ({ project_id: 1, project: 'notes', hidden: false, misses: 1, rebuilds: 0, recached_tokens: 64_000, last_ms: Date.UTC(2026, 10, 13, 9, 30), cause: 'ttl_expired_5m', events: [event({})], more: 0, ...over })
 
@@ -97,9 +97,15 @@ describe('the cache misses card', () => {
   })
 
   it('leaves the share of cost unknown while a model of the rewrites has no price', async () => {
-    const t = await render(misses({ extra_usd: null }))
+    const t = await render(misses({ extra_usd: null, extra_unknown: 'unpriced' }))
     const tile = t.querySelectorAll('.tile')[2]
     expect([tile.querySelector('.value')?.textContent, tile.textContent?.includes('A model has no price')]).toEqual(['—', true])
+  })
+
+  it('says a rewrite of an unknown model is not a missing price', async () => {
+    const t = await render(misses({ extra_usd: null, extra_unknown: 'unsure' }))
+    const tile = t.querySelectorAll('.tile')[2]
+    expect([tile.querySelector('.value')?.textContent, tile.textContent?.includes("A rewrite's model or cache lifetime is not known")]).toEqual(['—', true])
   })
 
   it('asks for the status-line bridge until Claude Code has reported anything', async () => {

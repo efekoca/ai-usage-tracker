@@ -40,9 +40,10 @@
   /** `text` in a hint is set as code. */
   const marked = (s: string) => s.split('`').map((text, i) => ({ text, code: i % 2 === 1 }))
   const hint = $derived(
-    [t(`settings.cli.hint.${tab.kind}`), ['tmux', 'sketchybar', 'raycast'].includes(tab.kind) ? t(platform === 'macos' ? 'settings.cli.jq.macos' : 'settings.cli.jq.linux') : '']
-      .filter(Boolean)
-      .join(' '),
+    (['tmux', 'sketchybar', 'raycast'].includes(tab.kind)
+      ? [t(`settings.cli.hint.${tab.kind}`), t('settings.cli.behind'), t(platform === 'macos' ? 'settings.cli.jq.macos' : 'settings.cli.jq.linux')]
+      : [t(`settings.cli.hint.${tab.kind}`)]
+    ).join(' '),
   )
 </script>
 

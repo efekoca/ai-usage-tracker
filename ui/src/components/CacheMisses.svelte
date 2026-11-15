@@ -28,7 +28,7 @@
   const shown = $derived(!!app.settings?.enabled_sources.includes('claude_code'))
   const bridge = $derived(!!app.settings?.capture.statusline)
   const any = $derived(!!data && (data.misses > 0 || data.rebuilds > 0))
-  /** The rewrites' extra cost as a share of Claude Code's; unknown while a model of them has no price. */
+  /** The rewrites' extra cost as a share of Claude Code's; unknown while a rewrite's cost is. */
   const share = $derived(!data || data.recached_tokens === 0 ? 0 : data.extra_usd !== null && data.cost_usd > 0 ? (data.extra_usd / data.cost_usd) * 100 : null)
 
   const UNKNOWN = 'undetermined'
@@ -101,7 +101,7 @@
           </StatTile>
           <StatTile label={t('cachemiss.recached')} value={fmtCompact(data.recached_tokens)} />
           <StatTile label={t('cachemiss.share')} hint={t('cachemiss.share.help')} value={share === null ? '—' : fmtPct(share, 1)}>
-            <span class="subtle">{data.extra_usd === null ? t('cachemiss.share.unpriced') : t('cachemiss.share.extra', { usd: fmtMoney(data.extra_usd) })}</span>
+            <span class="subtle">{data.extra_usd === null ? t(data.extra_unknown === 'unsure' ? 'cachemiss.share.unsure' : 'cachemiss.share.unpriced') : t('cachemiss.share.extra', { usd: fmtMoney(data.extra_usd) })}</span>
           </StatTile>
           <StatTile label={t('cachemiss.rebuilds')} hint={t('cachemiss.rebuilds.help')} value={fmtInt(data.rebuilds)} />
         </div>
