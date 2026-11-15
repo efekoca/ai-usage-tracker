@@ -5,7 +5,8 @@
   let hover: [number, number] | null = $state(null)
   // one tab stop for the whole grid; arrow keys move it
   let cursor: [number, number] = $state([0, 0])
-  let cells: HTMLElement[][] = $state([])
+  // only for moving the focus, so not state
+  const cells: HTMLElement[][] = []
   const max = $derived(Math.max(1, ...grid.flat()))
   const ramp = ['var(--seq-0)', 'var(--seq-1)', 'var(--seq-2)', 'var(--seq-3)', 'var(--seq-4)', 'var(--seq-5)', 'var(--seq-6)']
   const color = (v: number) => (v <= 0 ? ramp[0] : ramp[Math.min(6, 1 + Math.floor((Math.sqrt(v / max)) * 5.999))])

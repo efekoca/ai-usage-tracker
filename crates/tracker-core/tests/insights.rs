@@ -272,6 +272,83 @@ fn a_cache_keeps_the_lifetime_it_was_last_written_with() {
     assert_eq!((live[0].model.as_str(), live[3].model.as_str()), (opus, opus));
 }
 
+#[test]
+fn each_account_keeps_its_own_cache_in_one_conversation() {
+    let t = ms(2026, 11, 10, 12, 0);
+    let book = PriceBook::default_book();
+    let opus = "claude-opus-5-5";
+    let store = store_with(&[
+        // A writes for an hour, B for five minutes, then A reads its own cache
+        ev("a1", t, Tool::ClaudeCode, opus, Some("aba"), "/p", 10, 0, 5).cache_write(1_000, 1_000),
+        ev("b1", t + MIN, Tool::ClaudeCode, opus, Some("aba"), "/p", 10, 0, 5).cache_write(1_000, 0),
+        ev("a2", t + 2 * MIN, Tool::ClaudeCode, opus, Some("aba"), "/p", 10, 1_000, 5),
+        // B writes for five minutes, A for an hour, then B reads: B's cache runs out five minutes on
+        ev("b2", t, Tool::ClaudeCode, opus, Some("bab"), "/p", 10, 0, 5).cache_write(1_000, 0),
+        ev("a3", t + MIN, Tool::ClaudeCode, opus, Some("bab"), "/p", 10, 0, 5).cache_write(1_000, 1_000),
+        ev("b3", t + 2 * MIN, Tool::ClaudeCode, opus, Some("bab"), "/p", 10, 1_000, 5),
+        // both accounts write for an hour: each keeps its own
+        ev("a5", t, Tool::ClaudeCode, opus, Some("same"), "/p", 10, 0, 5).cache_write(1_000, 1_000),
+        ev("b5", t + MIN, Tool::ClaudeCode, opus, Some("same"), "/p", 10, 0, 5).cache_write(1_000, 1_000),
+        ev("a6", t + 2 * MIN, Tool::ClaudeCode, opus, Some("same"), "/p", 10, 1_000, 5),
+        // a request no evidence ties to an account borrows no known account's write
+        ev("a4", t, Tool::ClaudeCode, opus, Some("unknown"), "/p", 10, 0, 5).cache_write(1_000, 1_000),
+        ev("u1", t + 2 * MIN, Tool::ClaudeCode, opus, Some("unknown"), "/p", 10, 1_000, 5),
+    ]);
+    store
+        .conn()
+        .execute_batch("UPDATE usage_event SET owner = 'A' WHERE key IN ('a1', 'a2', 'a3', 'a4', 'a5', 'a6'); UPDATE usage_event SET owner = 'B' WHERE key IN ('b1', 'b2', 'b3', 'b5');")
+        .unwrap();
+    let at = |now: i64| -> Vec<(String, i64, i64)> { live_caches(&store, &book, now).unwrap().into_iter().map(|c| (c.session_id, c.ttl_ms, c.expires_ms)).collect() };
+    assert_eq!(at(t + 3 * MIN), [("bab".to_owned(), 5 * MIN, t + 7 * MIN), ("aba".to_owned(), HOUR, t + 62 * MIN), ("same".to_owned(), HOUR, t + 62 * MIN)]);
+    assert_eq!(at(t + 8 * MIN), [("aba".to_owned(), HOUR, t + 62 * MIN), ("same".to_owned(), HOUR, t + 62 * MIN)], "B's five minutes ran out");
+    let five = live_caches(&store, &book, t + 3 * MIN).unwrap().into_iter().find(|c| c.session_id == "bab").unwrap();
+    let price = |tokens: Tokens| book.cost(&CostInput { model: opus, tokens: &tokens, request_input: 1_000, web_search_requests: 0, speed: None, inference_geo: None, ts_ms: None }).unwrap().total();
+    assert!(close(five.rewrite_usd.unwrap(), price(Tokens { cache_write: 1_000, ..Default::default() })), "priced as B's five-minute cache");
+}
+
+#[test]
+fn a_cache_rewrite_is_priced_at_its_own_accounts_lifetime() {
+    let t = ms(2026, 11, 10, 12, 0);
+    let book = PriceBook::default_book();
+    let opus = "claude-opus-5-5";
+    let mut store = store_with(&[
+        ev("a1", t, Tool::ClaudeCode, opus, Some("s"), "/p", 10, 0, 5).cache_write(150_000, 150_000),
+        // the other account writes for five minutes in between
+        ev("b1", t + MIN, Tool::ClaudeCode, opus, Some("s"), "/p", 10, 0, 5).cache_write(150_000, 0),
+        // the request that missed logs no write of its own
+        ev("a2", t + 2 * MIN, Tool::ClaudeCode, opus, Some("s"), "/p", 150_000, 0, 5),
+    ]);
+    store.conn().execute_batch("UPDATE usage_event SET owner = 'A' WHERE key IN ('a1', 'a2'); UPDATE usage_event SET owner = 'B' WHERE key = 'b1';").unwrap();
+    let mut tx = store.transaction().unwrap();
+    tx.insert_cache_miss_reports(&[CacheMissReport { session_id: "s".into(), ts_ms: t + 2 * MIN + 30_000, last_miss_ms: Some(t + 2 * MIN), requests: 3, misses: 1, rebuilds: 0, recached_tokens: 100_000, causes: vec![] }]).unwrap();
+    tx.commit().unwrap();
+
+    let m = cache_misses(&store, &book, Range { from_ms: t - HOUR, to_ms: t + HOUR }, &Filter::default(), &chrono::Utc).unwrap();
+    let price = |tokens: Tokens| book.cost(&CostInput { model: opus, tokens: &tokens, request_input: 150_000, web_search_requests: 0, speed: None, inference_geo: None, ts_ms: None }).unwrap().total();
+    let hour = price(Tokens { cache_write: 100_000, cache_write_1h: 100_000, ..Default::default() }) - price(Tokens { cache_read: 100_000, ..Default::default() });
+    assert!(close(m.extra_usd.unwrap(), hour), "{:?} {hour}", m.extra_usd);
+}
+
+#[test]
+fn a_switch_to_another_account_is_no_rewrite_after_a_pause() {
+    let t = ms(2026, 11, 10, 12, 0);
+    let opus = "claude-opus-5-5";
+    let store = store_with(&[
+        ev("a1", t, Tool::ClaudeCode, opus, Some("s"), "/p", 1, 0, 10).cache_write(60_000, 0),
+        // another account writes the same context after a pause: its cache was never warm
+        ev("b1", t + 10 * MIN, Tool::ClaudeCode, opus, Some("s"), "/p", 1, 0, 10).cache_write(60_000, 0),
+        // the first account back after its five minutes ran out: its own cache written again
+        ev("a2", t + 20 * MIN, Tool::ClaudeCode, opus, Some("s"), "/p", 1, 0, 10).cache_write(60_000, 0),
+    ]);
+    store.conn().execute_batch("UPDATE usage_event SET owner = 'A' WHERE key IN ('a1', 'a2'); UPDATE usage_event SET owner = 'B' WHERE key = 'b1';").unwrap();
+    let book = PriceBook::default_book();
+    let r = cache_rebuilds(&store.events_between(0, i64::MAX / 2).unwrap(), &book);
+    assert_eq!((r.requests, r.tokens), (1, 60_000));
+    let tl = session_timeline(&store, &book, Tool::ClaudeCode, "s", 0, i64::MAX / 2, &Filter::default()).unwrap();
+    let rewrites: Vec<(u64, Option<i64>)> = tl.requests.iter().map(|q| (q.rewritten, q.pause_ms)).collect();
+    assert_eq!(rewrites, [(0, None), (0, None), (60_000, Some(20 * MIN))]);
+}
+
 fn all() -> Range {
     Range { from_ms: 0, to_ms: i64::MAX / 2 }
 }
