@@ -15,7 +15,7 @@ const { default: WindowOpener } = await import('./WindowOpener.svelte')
 
 const now = Date.now()
 const run = (over: Partial<OpenerRun> = {}): OpenerRun => ({ at_ms: now - 60_000, day: '2026-11-13', outcome: 'sent', resets_ms: now + 5 * 3_600_000, tokens: 1313, error: null, ...over })
-const info = (over: Partial<OpenerInfo> = {}): OpenerInfo => ({ available: true, running: false, next_ms: now + 3_600_000, runs: [], ...over })
+const info = (over: Partial<OpenerInfo> = {}): OpenerInfo => ({ available: true, running: false, next_ms: now + 3_600_000, runs: [], day: null, ...over })
 const settings = (o: Partial<Settings['window_opener']> = {}) => ({ window_opener: { enabled: true, minute: 360, days: [1, 2, 3, 4, 5], ...o } }) as unknown as Settings
 
 let done: (() => void)[] = []
@@ -68,6 +68,24 @@ describe('the window scheduler', () => {
     const late = await render(info())
     expect(bands(late).map((b) => b[0])).toEqual([93.75, 0, 14.58])
     expect(marks(late)).toEqual(['00:00', '22:30opens', '03:30resets'])
+  })
+
+  it("draws the user's own day and offers the time that resets in the middle of it", async () => {
+    const day = { first_minute: 9 * 60 + 5, last_minute: 18 * 60 + 40, days: 12, open_minute: 6 * 60 + 15, windows: 3 }
+    const target = await render(info({ day }))
+    const bracket = target.querySelector<HTMLElement>('.workday')!
+    expect([bracket.textContent?.trim(), bracket.style.getPropertyValue('--from'), bracket.style.getPropertyValue('--to')]).toEqual(['Your day 09:05–18:40', `${((545 / 1440) * 100).toString()}%`, `${((1120 / 1440) * 100).toString()}%`])
+    const suggest = target.querySelector('.suggest')!
+    expect(suggest.textContent).toContain('Opening the window at 06:15 fits 3 windows into your day. Resets at 11:15 and 16:15.')
+    suggest.querySelector<HTMLButtonElement>('button')!.click()
+    await settle()
+    expect(saved().minute).toBe(6 * 60 + 15)
+
+    app.settings = settings({ minute: 6 * 60 + 20 })
+    const set = await render(info({ day }))
+    expect(set.querySelector('.suggest'), 'within a quarter hour of the one set').toBeNull()
+    expect([...set.querySelectorAll('.band')].map((b) => b.textContent), 'every window the day reaches into').toEqual(['Window 1', 'Window 2', 'Window 3'])
+    expect((await render(info())).querySelector('.workday')?.textContent?.trim(), 'too few days to tell').toBe('Working day 09:00–18:00')
   })
 
   it('shows only what it does and what it costs while it is off', async () => {

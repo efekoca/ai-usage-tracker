@@ -25,6 +25,7 @@
 
   const save = (patch: Partial<Settings['window_opener']>) => saveSettings((c) => ({ window_opener: { ...c.window_opener, ...patch } }))
   const hm = (minute: number) => `${String(Math.floor(minute / 60) % 24).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`
+  const list = (items: string[]) => new Intl.ListFormat(i18n.lang, { type: 'conjunction' }).format(items)
   function setClock(value: string) {
     const [h, m] = value.split(':').map(Number)
     if (Number.isInteger(h) && Number.isInteger(m)) save({ minute: h * 60 + m })
@@ -45,17 +46,19 @@
   }
 
   const pct = (minute: number) => (minute / DAY) * 100
-  /** The parts of a window on today's line: one that runs past midnight goes on from the left. */
-  function pieces(from: number, first: boolean) {
+  /** The parts of the `n`th window on today's line: one that runs past midnight goes on from the left. */
+  function pieces(from: number, n: number) {
     return [
       [from, from + WINDOW],
       [from - DAY, from + WINDOW - DAY],
     ]
       .map(([a, b]) => [Math.max(0, a), Math.min(DAY, b)])
       .filter(([a, b]) => b > a)
-      .map(([a, b]) => ({ left: pct(a), width: pct(b - a), first }))
+      .map(([a, b]) => ({ left: pct(a), width: pct(b - a), n }))
   }
-  const bands = $derived(o ? [...pieces(o.minute, true), ...pieces(o.minute + WINDOW, false)] : [])
+  // as many windows as the user's day reaches into, else two
+  const count = $derived(o && info?.day && info.day.last_minute > o.minute ? Math.min(4, Math.max(2, Math.floor((info.day.last_minute - o.minute) / WINDOW) + 1)) : 2)
+  const bands = $derived(o ? Array.from({ length: count }, (_, i) => pieces(o.minute + i * WINDOW, i + 1)).flat() : [])
   // the times under the line; the day's ends make room for one that sits near them
   const marks = $derived(
     o
@@ -70,6 +73,8 @@
   const why = (code: string) => (has(`opener.error.${code}`) ? t(`opener.error.${code}`) : code)
   const window = (r: OpenerRun) => (r.resets_ms === null ? '' : t(r.resets_ms > Date.now() ? 'opener.run.resets' : 'opener.run.reset', { at: clockCase(r.resets_ms, 'at') }))
   const tag = $derived(o?.enabled && info?.next_ms != null ? t('opener.next', { when: fmtWhen(info.next_ms) }) : '')
+  /** A time drawn from the user's own days, offered while it differs from the one set. */
+  const suggest = $derived(o && info?.day?.open_minute != null && Math.abs(info.day.open_minute - o.minute) >= 15 ? info.day.open_minute : null)
 </script>
 
 {#snippet icon()}
@@ -80,10 +85,12 @@
   <AutoCard title={t('opener.title')} help={t('opener.help')} {tag} on={o.enabled} onchange={(v) => save({ enabled: v })} {icon}>
     {#if o.enabled}
       <div class="inset line" role="img" aria-label={t('opener.line', { opens: hm(o.minute), resets: hm(o.minute + WINDOW), ends: hm(o.minute + 2 * WINDOW) })}>
-        <div class="workday"><span>{t('opener.line.workday')}</span></div>
+        <div class="workday" style={info.day ? `--from: ${pct(info.day.first_minute)}%; --to: ${pct(info.day.last_minute)}%` : undefined}>
+          <span>{info.day ? t('opener.line.yourDay', { from: hm(info.day.first_minute), to: hm(info.day.last_minute) }) : t('opener.line.workday')}</span>
+        </div>
         <div class="track">
-          {#each bands as b (`${b.first}${b.left}`)}
-            <div class="band" class:first={b.first} style="left: {b.left}%; width: {b.width}%">{#if b.width > 9}{t(b.first ? 'opener.line.first' : 'opener.line.second')}{/if}</div>
+          {#each bands as b (`${b.n}-${b.left}`)}
+            <div class="band" class:first={b.n === 1} style="left: {b.left}%; width: {b.width}%">{#if b.width > 9}{t('opener.line.nth', { n: b.n })}{/if}</div>
           {/each}
         </div>
         <div class="scale num">
@@ -115,6 +122,12 @@
           {busy || info.running ? t('opener.running') : t('opener.now')}
         </button>
       </div>
+      {#if suggest !== null && info.day}
+        <div class="suggest" title={t('opener.suggest.basis', { n: info.day.days })}>
+          <span>{t('opener.suggest', { from: hm(info.day.first_minute), to: hm(info.day.last_minute), open: hm(suggest), n: info.day.windows, resets: list(Array.from({ length: info.day.windows - 1 }, (_, i) => hm(suggest + (i + 1) * WINDOW))) })}</span>
+          <button class="btn small" onclick={() => save({ minute: suggest })}>{t('opener.suggest.use', { open: hm(suggest) })}</button>
+        </div>
+      {/if}
       {#if !info.available}<p class="subtle small plain">{t('opener.unavailable')}</p>{/if}
       {#if error}<p class="error small plain" role="alert">{t('common.error', { e: why(error) })}</p>{/if}
 
@@ -161,12 +174,12 @@
     font-size: 11px;
     color: var(--ink-3);
   }
-  /* nine to six, as a bracket over the line */
+  /* the user's own day, else nine to six, as a bracket over the line */
   .workday::before {
     content: '';
     position: absolute;
-    left: 37.5%;
-    width: 37.5%;
+    left: var(--from, 37.5%);
+    width: calc(var(--to, 75%) - var(--from, 37.5%));
     bottom: 0;
     height: 6px;
     box-sizing: border-box;
@@ -176,10 +189,26 @@
   }
   .workday span {
     position: absolute;
-    left: 56.25%;
+    left: calc((var(--from, 37.5%) + var(--to, 75%)) / 2);
     top: 0;
     transform: translateX(-50%);
     white-space: nowrap;
+  }
+  .suggest {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 14px;
+    padding: 10px 12px 10px 14px;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--ink-2);
+  }
+  .suggest span {
+    flex: 1 1 260px;
   }
   .track {
     position: relative;

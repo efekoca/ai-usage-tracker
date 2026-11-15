@@ -4,7 +4,7 @@ use crate::analytics::{local_date, Filter, Range, Totals};
 use crate::model::{Accuracy, Provider, Tool};
 use crate::pricing::{CostInput, PriceBook};
 use crate::store::{EventRow, ProjectRow, Store};
-use chrono::{Days, NaiveDate, TimeZone};
+use chrono::{Datelike, Days, NaiveDate, TimeZone, Timelike};
 use rusqlite::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
@@ -1693,6 +1693,60 @@ pub struct Forecast {
 const FALL_PCT: f64 = 10.0;
 /// How old a reading may be: a request still running reports the limit as it was when it began.
 pub(crate) const STALE_MS: i64 = 10 * 60_000;
+
+/// The hours Claude is used on a typical day: the middle of each day's first and of each day's
+/// last request.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq)]
+pub struct WorkingDay {
+    /// Minutes after local midnight.
+    pub first_minute: u32,
+    pub last_minute: u32,
+    /// How many days it is drawn from.
+    pub days: u32,
+    /// When to open a window so that the day spans the most windows, with at least an hour of it in
+    /// the first and the last and the same in both: never later than the first request, which would
+    /// open one anyway. `None` when that falls on the day before.
+    pub open_minute: Option<u32>,
+    /// How many windows the day then spans.
+    pub windows: u32,
+}
+
+/// Days looked back on, and the fewest that make a typical day.
+const WORKING_DAYS_BACK: u64 = 28;
+const WORKING_DAYS_MIN: usize = 5;
+/// A day counts when it holds this many Claude requests: a quick question is no working day.
+const WORKING_DAY_REQUESTS: usize = 10;
+const FIVE_HOURS_MIN: i64 = 300;
+/// The least of the day a first or last window is worth opening for.
+const EDGE_MIN: i64 = 60;
+
+/// The typical working day over the last four weeks' `weekdays` (1 is Monday), today left out as it
+/// is not over; `None` before enough days have been worked.
+pub fn working_day<Tz: TimeZone>(store: &Store, now_ms: i64, tz: &Tz, weekdays: &[u8]) -> Result<Option<WorkingDay>> {
+    let today = local_date(tz, now_ms);
+    let (from, to) = (crate::analytics::start_of_day(tz, today - Days::new(WORKING_DAYS_BACK)), crate::analytics::start_of_day(tz, today));
+    let mut by_day: BTreeMap<NaiveDate, (i64, i64, usize)> = BTreeMap::new();
+    for e in store.events_between(from, to)?.iter().filter(|e| e.tool.provider() == Some(Provider::Anthropic)) {
+        let day = local_date(tz, e.ts_ms);
+        if !weekdays.contains(&(day.weekday().number_from_monday() as u8)) {
+            continue;
+        }
+        let d = by_day.entry(day).or_insert((e.ts_ms, e.ts_ms, 0));
+        (d.0, d.1, d.2) = (d.0.min(e.ts_ms), d.1.max(e.ts_ms), d.2 + 1);
+    }
+    let minute = |ms: i64| tz.timestamp_millis_opt(ms).single().map(|t| t.hour() * 60 + t.minute());
+    let (mut firsts, mut lasts): (Vec<u32>, Vec<u32>) = by_day.values().filter(|d| d.2 >= WORKING_DAY_REQUESTS).filter_map(|d| Some((minute(d.0)?, minute(d.1)?))).unzip();
+    if firsts.len() < WORKING_DAYS_MIN {
+        return Ok(None);
+    }
+    firsts.sort_unstable();
+    lasts.sort_unstable();
+    let (first, last) = (firsts[firsts.len() / 2], lasts[lasts.len() / 2].max(firsts[firsts.len() / 2]));
+    // whole windows in between, the rest shared by the two ends; to the nearest quarter hour
+    let windows = 2 + (i64::from(last - first) - 2 * EDGE_MIN).max(0) / FIVE_HOURS_MIN;
+    let open = ((i64::from(first + last) / 2 - windows * FIVE_HOURS_MIN / 2 + 7).div_euclid(15) * 15).min(i64::from(first - first % 15));
+    Ok(Some(WorkingDay { first_minute: first, last_minute: last, days: firsts.len() as u32, open_minute: u32::try_from(open).ok(), windows: windows as u32 }))
+}
 
 /// Each time use started again from zero inside a window: the provider granted a reset without
 /// moving the window's end. Each is the index of the last reading before a fall that the readings
