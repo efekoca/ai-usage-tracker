@@ -11,8 +11,9 @@
     disabled = false,
     onchange,
     icon,
+    about,
     children,
-  }: { title: string; help: string; tag?: string; on: boolean; disabled?: boolean; onchange: (v: boolean) => void; icon: Snippet; children?: Snippet } = $props()
+  }: { title: string; help: string; tag?: string; on: boolean; disabled?: boolean; onchange: (v: boolean) => void; icon: Snippet; about?: Snippet; children?: Snippet } = $props()
 </script>
 
 <section class="card auto" class:off={!on}>
@@ -24,6 +25,7 @@
         {#if tag}<span class="tag">{tag}</span>{/if}
       </div>
       <p class="subtle small">{help}</p>
+      {@render about?.()}
     </div>
     <Toggle checked={on} {disabled} label={title} {onchange} />
   </div>

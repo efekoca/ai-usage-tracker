@@ -78,7 +78,25 @@ describe('continuing after a limit resets', () => {
     await settle()
     expect(mocks.cancelLimitResume).toHaveBeenCalledWith('s')
     expect(rows(target)).toEqual([])
-    expect(target.textContent).toContain('No conversation stopped by a limit is waiting.')
+    expect(target.querySelector('.empty-line')?.textContent?.trim()).toBe('No conversation is waiting')
+  })
+
+  it('keeps what to know folded away until asked for', async () => {
+    const target = await render(info({ waiting: [waiting()] }))
+    const how = target.querySelector<HTMLButtonElement>('.how')!
+    expect([how.getAttribute('aria-expanded'), target.querySelector('#resume-how')]).toEqual(['false', null])
+    expect(target.querySelector('.empty-line'), 'a conversation waits').toBeNull()
+    how.click()
+    flushSync()
+    expect(how.getAttribute('aria-expanded')).toBe('true')
+    expect([...target.querySelectorAll('#resume-how li')].map((l) => l.textContent?.trim())).toEqual([
+      'Keep the conversation open. If the computer sleeps, it continues when it wakes.',
+      "It runs with the conversation's own permissions and uses your plan limit.",
+      'Typing in the conversation, or closing it, cancels the wait.',
+    ])
+    how.click()
+    flushSync()
+    expect(target.querySelector('#resume-how')).toBeNull()
   })
 
   it('asks before it adds the hook, and says why it could not', async () => {

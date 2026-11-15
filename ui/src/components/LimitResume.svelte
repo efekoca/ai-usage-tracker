@@ -4,11 +4,13 @@
   import { cacheClient } from '../lib/caches'
   import { fmtClock, fmtDuration, fmtWhen, has, t, windowLabel } from '../lib/i18n.svelte'
   import AutoCard from './AutoCard.svelte'
+  import Icon from './Icon.svelte'
 
   type Waiting = ResumeInfo['waiting'][number]
 
   let info = $state<ResumeInfo | null>(null)
   let asking = $state(false)
+  let how = $state(false)
   let busy = $state(false)
   let error = $state('')
   // the time left is told to the minute
@@ -81,8 +83,31 @@
   <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5" /><path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none" /></svg>
 {/snippet}
 
+<!-- what to know sits under the description, folded away until asked for -->
+{#snippet about()}
+  <button class="how" aria-expanded={how} aria-controls="resume-how" onclick={() => (how = !how)}>
+    {t('limits.resume.how')}<span class="chev" class:up={how}><Icon name="chevron" size={11} /></span>
+  </button>
+  {#if how}
+    <ul class="how-list" id="resume-how">
+      <li>
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8M12 17v4" /></svg>
+        <span>{t('limits.resume.note.awake')}</span>
+      </li>
+      <li>
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z" /></svg>
+        <span>{t('limits.resume.note.permissions')}</span>
+      </li>
+      <li>
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z" /></svg>
+        <span>{t('limits.resume.note.ends')}</span>
+      </li>
+    </ul>
+  {/if}
+{/snippet}
+
 {#if info}
-  <AutoCard title={t('limits.resume.title')} help={t('limits.resume.help')} {tag} {on} disabled={busy} onchange={toggle} {icon}>
+  <AutoCard title={t('limits.resume.title')} help={t('limits.resume.help')} {tag} {on} disabled={busy} onchange={toggle} {icon} {about}>
     {#if asking}
       <div class="inset ask" role="group" aria-label={t('limits.resume.ask.title')}>
         <div class="ask-head">
@@ -107,66 +132,55 @@
       <p class="error small" role="alert">{t('common.error', { e: error })}</p>
     {/if}
     {#if on}
-      {#if info.waiting.length || info.resumed.length}
-        <div class="inset">
-          {#each info.waiting as w (w.session_id)}
-            <div class="row waiting">
-              {#if scheduled(w)}
-                <svg class="state" role="img" aria-label={t('limits.resume.state.waiting')} width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="9" fill="none" stroke="var(--accent)" stroke-width="2" /><path d={wedge(waited(w))} fill="var(--accent)" /></svg>
+      {@const empty = !info.waiting.length && !info.resumed.length}
+      <div class="inset">
+        {#each info.waiting as w (w.session_id)}
+          <div class="row waiting">
+            {#if scheduled(w)}
+              <svg class="state" role="img" aria-label={t('limits.resume.state.waiting')} width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="9" fill="none" stroke="var(--accent)" stroke-width="2" /><path d={wedge(waited(w))} fill="var(--accent)" /></svg>
+            {:else}
+              <svg class="state" role="img" aria-label={t('limits.resume.state.unknown')} width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="9" fill="none" stroke="var(--ink-3)" stroke-width="2" stroke-dasharray="2.7 2.95" stroke-linecap="round" /></svg>
+            {/if}
+            <div class="who">
+              <span class="name"><b>{project(w)}</b>{#if w.branch}<span class="subtle">{` · ${w.branch}`}</span>{/if}</span>
+              <span class="chips">
+                {#if cacheClient(w.client)}<span class="chip">{cacheClient(w.client)}</span>{/if}
+                {#if w.window}<span class="chip">{stopped(w.window)}</span>{/if}
+              </span>
+            </div>
+            <div class="when">
+              {#if w.held}
+                <span class="subtle small">{t('limits.resume.held')}</span>
+              {:else if w.resumes_ms === null}
+                <span class="small">{t('limits.resume.unknown')}</span>
+                <span class="subtle small">{t('limits.resume.stoppedAgo', { span: fmtDuration(now - w.stopped_ms) })}</span>
               {:else}
-                <svg class="state" role="img" aria-label={t('limits.resume.state.unknown')} width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="9" fill="none" stroke="var(--ink-3)" stroke-width="2" stroke-dasharray="2.7 2.95" stroke-linecap="round" /></svg>
+                <b class="clock num">{clock(w.resumes_ms)}</b>
+                <span class="subtle small">{w.resumes_ms <= now ? t('limits.resume.soon') : t('limits.resume.in', { span: fmtDuration(w.resumes_ms - now) })}</span>
               {/if}
-              <div class="who">
-                <span class="name"><b>{project(w)}</b>{#if w.branch}<span class="subtle">{` · ${w.branch}`}</span>{/if}</span>
-                <span class="chips">
-                  {#if cacheClient(w.client)}<span class="chip">{cacheClient(w.client)}</span>{/if}
-                  {#if w.window}<span class="chip">{stopped(w.window)}</span>{/if}
-                </span>
-              </div>
-              <div class="when">
-                {#if w.held}
-                  <span class="subtle small">{t('limits.resume.held')}</span>
-                {:else if w.resumes_ms === null}
-                  <span class="small">{t('limits.resume.unknown')}</span>
-                  <span class="subtle small">{t('limits.resume.stoppedAgo', { span: fmtDuration(now - w.stopped_ms) })}</span>
-                {:else}
-                  <b class="clock num">{clock(w.resumes_ms)}</b>
-                  <span class="subtle small">{w.resumes_ms <= now ? t('limits.resume.soon') : t('limits.resume.in', { span: fmtDuration(w.resumes_ms - now) })}</span>
-                {/if}
-              </div>
-              <button class="btn small" aria-label="{t('limits.resume.cancel')}: {name(w)}" onclick={() => cancel(w.session_id)}>{t('limits.resume.cancel')}</button>
             </div>
-          {/each}
-          {#each info.resumed as r (r.session_id + r.at_ms)}
-            <div class="row done">
-              <svg class="state" role="img" aria-label={t('limits.resume.state.done')} width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="10" fill="var(--good-ink)" /><path d="M6.8 11.3l2.8 2.8 5.6-6" fill="none" stroke="var(--surface)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
-              <div class="who">
-                <span class="name"><b>{project(r)}</b>{#if r.branch}<span class="subtle">{` · ${r.branch}`}</span>{/if}</span>
-                <span class="subtle small">{t('limits.resume.went')}</span>
-              </div>
-              <div class="when">
-                <b class="clock num good">{clock(r.at_ms)}</b>
-                <span class="subtle small">{t('limits.resume.done')}</span>
-              </div>
+            <button class="btn small" aria-label="{t('limits.resume.cancel')}: {name(w)}" onclick={() => cancel(w.session_id)}>{t('limits.resume.cancel')}</button>
+          </div>
+        {/each}
+        {#each info.resumed as r (r.session_id + r.at_ms)}
+          <div class="row done">
+            <svg class="state" role="img" aria-label={t('limits.resume.state.done')} width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="10" fill="var(--good-ink)" /><path d="M6.8 11.3l2.8 2.8 5.6-6" fill="none" stroke="var(--surface)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            <div class="who">
+              <span class="name"><b>{project(r)}</b>{#if r.branch}<span class="subtle">{` · ${r.branch}`}</span>{/if}</span>
+              <span class="subtle small">{t('limits.resume.went')}</span>
             </div>
-          {/each}
-        </div>
-      {:else}
-        <p class="subtle small none">{t('limits.resume.none')}</p>
-      {/if}
-      <div class="notes">
-        <p class="note">
-          <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8M12 17v4" /></svg>
-          <span>{t('limits.resume.note.awake')}</span>
-        </p>
-        <p class="note">
-          <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z" /></svg>
-          <span>{t('limits.resume.note.permissions')}</span>
-        </p>
-        <p class="note">
-          <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z" /></svg>
-          <span>{t('limits.resume.note.ends')}</span>
-        </p>
+            <div class="when">
+              <b class="clock num good">{clock(r.at_ms)}</b>
+              <span class="subtle small">{t('limits.resume.done')}</span>
+            </div>
+          </div>
+        {/each}
+        {#if empty}
+          <div class="empty-line">
+            <svg aria-hidden="true" width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="8" fill="none" stroke="var(--ink-3)" stroke-width="2" stroke-dasharray="2.7 2.95" stroke-linecap="round" /></svg>
+            {t('limits.resume.none')}
+          </div>
+        {/if}
       </div>
     {/if}
   </AutoCard>
@@ -216,13 +230,67 @@
   .good {
     color: var(--good-ink);
   }
-  .notes {
+  .empty-line {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 11px 16px;
+    font-size: 13px;
+    color: var(--ink-2);
+  }
+  .empty-line svg {
+    flex: none;
+  }
+  .how {
+    justify-self: start;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 2px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: var(--tint-ink);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .how:hover {
+    color: var(--ink);
+  }
+  .how:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .chev {
+    display: inline-flex;
+    transform: rotate(90deg);
+    transition: transform var(--dur) var(--ease);
+  }
+  .chev.up {
+    transform: rotate(-90deg);
+  }
+  .how-list {
+    margin: 4px 0 0;
+    padding: 0;
+    max-width: 640px;
+    list-style: none;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 7px;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--ink-3);
+  }
+  .how-list li {
+    display: flex;
+    align-items: flex-start;
     gap: 10px;
   }
-  .none {
-    margin: 0;
+  .how-list svg {
+    flex: none;
+    margin-top: 2px;
   }
   .ask {
     display: grid;
@@ -259,7 +327,7 @@
     font: 12px ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
     overflow-wrap: anywhere;
   }
-  ul {
+  .ask ul {
     margin: 0;
     padding: 0 0 0 30px;
     list-style: none;
@@ -268,11 +336,11 @@
     color: var(--ink-2);
     font-size: 13px;
   }
-  li {
+  .ask li {
     display: flex;
     gap: 9px;
   }
-  li::before {
+  .ask li::before {
     content: '•';
     color: var(--tint-ink);
   }
