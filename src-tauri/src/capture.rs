@@ -170,8 +170,12 @@ pub fn statusline_main() -> i32 {
         Some(cmd) => run_chained(cmd, input).unwrap_or_default(),
         None => statusline::render_default(windows.as_ref()),
     };
-    // a static clock time: Claude Code redraws the line only when the conversation changes
     let options = statusline::read_options(&data_dir);
+    // as with the cache time, a bridge run as someone's previous command adds nothing
+    if let Some(part) = (options.cost && std::env::var_os(CHAINED).is_none()).then(|| statusline::cost_text(&json, &options)).flatten() {
+        out = statusline::append(&out, &part);
+    }
+    // a static clock time: Claude Code redraws the line only when the conversation changes
     let cache = (options.cache && std::env::var_os(CHAINED).is_none())
         .then(|| statusline::session_cache_expiry(&json, now_ms()))
         .flatten()
@@ -1544,7 +1548,14 @@ fn refresh_statusline(data_dir: &Path) {
 
 /// The bridge runs as a process of its own, so what it adds is written down for it.
 pub fn write_statusline_options(data_dir: &Path, s: &Settings) {
-    let options = statusline::Options { cache: s.cache_timer && s.cache_statusline, turkish: crate::tray::turkish(s), resume: s.limit_resume };
+    let options = statusline::Options {
+        cache: s.cache_timer && s.cache_statusline,
+        turkish: crate::tray::turkish(s),
+        resume: s.limit_resume,
+        cost: s.statusline_cost,
+        currency: s.currency.clone(),
+        fx: s.fx_rate,
+    };
     if let Err(e) = statusline::write_options(data_dir, &options) {
         log::warn!("could not save the status-line options: {e}");
     }
@@ -1702,11 +1713,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut s = Settings { language: "tr".into(), cache_statusline: true, ..Settings::default() };
         write_statusline_options(dir.path(), &s);
-        assert_eq!(statusline::read_options(dir.path()), statusline::Options { cache: true, turkish: true, resume: false });
+        let usd = |cache, turkish| statusline::Options { cache, turkish, resume: false, cost: false, currency: "USD".into(), fx: 1.0 };
+        assert_eq!(statusline::read_options(dir.path()), usd(true, true));
         s.cache_timer = false;
         s.language = "en".into();
         write_statusline_options(dir.path(), &s);
-        assert_eq!(statusline::read_options(dir.path()), statusline::Options { cache: false, turkish: false, resume: false });
+        assert_eq!(statusline::read_options(dir.path()), usd(false, false));
+        // the cost goes in the app's own currency
+        (s.statusline_cost, s.currency, s.fx_rate) = (true, "EUR".into(), 0.92);
+        write_statusline_options(dir.path(), &s);
+        assert_eq!(statusline::read_options(dir.path()), statusline::Options { cost: true, currency: "EUR".into(), fx: 0.92, ..usd(false, false) });
     }
 
     #[test]

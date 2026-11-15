@@ -212,6 +212,11 @@ pub struct Options {
     pub turkish: bool,
     /// A conversation the usage limit stopped is continued once the limit starts again.
     pub resume: bool,
+    /// The conversation's cost so far, as Claude Code itself counts it, before the cache time.
+    pub cost: bool,
+    /// The app's display currency and its rate from US dollars.
+    pub currency: String,
+    pub fx: f64,
 }
 
 /// A missing or unreadable file adds nothing.
@@ -291,6 +296,20 @@ pub fn cache_text<Tz: TimeZone>(expires_ms: i64, turkish: bool, tz: &Tz) -> Opti
     let at = tz.timestamp_millis_opt(expires_ms).single()?;
     let hm = format!("{:02}:{:02}", at.hour(), at.minute());
     Some(if turkish { format!("önbellek {hm}'{} silinir", turkish_at(at.hour(), at.minute())) } else { format!("cache until {hm}") })
+}
+
+/// What the conversation has cost so far, from Claude Code's own `cost.total_cost_usd`, in the
+/// app's currency: "conversation $3.42".
+pub fn cost_text(input: &Value, o: &Options) -> Option<String> {
+    let usd = input.get("cost")?.get("total_cost_usd")?.as_f64().filter(|v| v.is_finite() && *v >= 0.0)?;
+    let symbol = match o.currency.as_str() {
+        "TRY" => "₺",
+        "EUR" => "€",
+        "GBP" => "£",
+        _ => "$",
+    };
+    let amount = format!("{:.2}", usd * if o.fx > 0.0 { o.fx } else { 1.0 });
+    Some(if o.turkish { format!("konuşma {symbol}{}", amount.replace('.', ",")) } else { format!("conversation {symbol}{amount}") })
 }
 
 /// The Turkish ending of a clock time follows its last number as it is read aloud: "14:32'de".
@@ -514,6 +533,18 @@ mod tests {
     }
 
     #[test]
+    fn the_conversation_cost_is_claude_codes_own_in_the_apps_currency() {
+        let input = json!({"cost": {"total_cost_usd": 3.4187, "total_duration_ms": 45_000}});
+        assert_eq!(cost_text(&input, &Options::default()).unwrap(), "conversation $3.42");
+        let tr = Options { turkish: true, currency: "TRY".into(), fx: 41.5, ..Options::default() };
+        assert_eq!(cost_text(&input, &tr).unwrap(), "konuşma ₺141,88");
+        assert_eq!(cost_text(&json!({"cost": {"total_cost_usd": 0}}), &Options::default()).unwrap(), "conversation $0.00");
+        for none in [json!({}), json!({"cost": {}}), json!({"cost": {"total_cost_usd": -1}}), json!({"cost": {"total_cost_usd": "3"}})] {
+            assert_eq!(cost_text(&none, &Options::default()), None, "{none}");
+        }
+    }
+
+    #[test]
     fn the_cache_time_is_a_local_clock_time_at_the_end_of_the_line() {
         let tz = chrono::FixedOffset::east_opt(3 * 3600).unwrap();
         let at = ms("10:32:59");
@@ -531,7 +562,7 @@ mod tests {
     fn options_are_read_back_and_a_missing_file_adds_nothing() {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(read_options(dir.path()), Options::default());
-        let on = Options { cache: true, turkish: true, resume: true };
+        let on = Options { cache: true, turkish: true, resume: true, ..Options::default() };
         write_options(dir.path(), &on).unwrap();
         assert_eq!(read_options(dir.path()), on);
         fs::write(options_file(dir.path()), b"{").unwrap();

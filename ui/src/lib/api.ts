@@ -634,6 +634,8 @@ export interface Settings {
   cache_menubar: boolean
   /** The time the cache runs out at the end of the conversation's own status line, through the status-line bridge. */
   cache_statusline: boolean
+  /** The conversation's cost so far at the end of Claude Code's status line (needs the bridge). */
+  statusline_cost: boolean
   /** "all" or "picked": whose caches are followed. */
   cache_projects: 'all' | 'picked'
   /** The projects followed while `cache_projects` is "picked", by path. */
