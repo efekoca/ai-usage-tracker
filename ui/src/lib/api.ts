@@ -575,6 +575,8 @@ export interface NotifySettings {
   cache: boolean
   /** When a conversation the limit stopped is continued after the limit's reset. */
   resume: boolean
+  /** Shortly before a weekly limit resets with much of it unused. */
+  unused: boolean
 }
 
 export interface Settings {

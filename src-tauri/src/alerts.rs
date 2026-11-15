@@ -1,7 +1,7 @@
 //! System notifications when a limit in use passes the warning threshold, fills up, and starts
-//! again after filling, when the monthly budget gets close or is exceeded, when a signed-out
-//! CLI leaves the limits unread, and shortly before Claude Code's cache runs out. Clicking one
-//! opens the page it is about.
+//! again after filling, when a weekly limit is about to reset with much of it unused, when the
+//! monthly budget gets close or is exceeded, when a signed-out CLI leaves the limits unread, and
+//! shortly before Claude Code's cache runs out. Clicking one opens the page it is about.
 
 use crate::caches::Cache;
 use crate::capture::SignIn;
@@ -22,6 +22,13 @@ static BUDGET: Mutex<Option<BudgetSeen>> = Mutex::new(None);
 static SIGNED_OUT: LazyLock<Mutex<HashSet<Provider>>> = LazyLock::new(Default::default);
 /// When the cache already told about runs out.
 static CACHE_TOLD: LazyLock<Mutex<HashMap<String, i64>>> = LazyLock::new(Default::default);
+/// The reset of each week already told to be largely unused.
+static UNUSED_TOLD: LazyLock<Mutex<HashMap<Limit, i64>>> = LazyLock::new(Default::default);
+/// A week with this much left this close to its reset is told about, while there is time to use it.
+const UNUSED_LEFT_PCT: f64 = 30.0;
+const UNUSED_LEAD_S: i64 = 12 * 3600;
+/// An older reading may miss use from elsewhere (the web, a phone, another computer).
+const UNUSED_READING_MS: i64 = 24 * 3600 * 1000;
 
 /// The budget sums the whole month, so it is checked only every few minutes.
 const BUDGET_EVERY_MS: i64 = 5 * 60_000;
@@ -118,6 +125,7 @@ pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading], caches:
     // a cache refreshed by itself, or on its way to it, is not told about
     let caches: Vec<Cache> = caches.iter().filter(|c| !(c.auto && !c.auto_capped && (c.refreshable || c.refreshing))).cloned().collect();
     let cache = cache_due(&mut CACHE_TOLD.lock().unwrap(), &caches, now_ms);
+    let unused = unused_due(&mut UNUSED_TOLD.lock().unwrap(), readings, now_ms);
     if !n.enabled {
         return;
     }
@@ -147,6 +155,11 @@ pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading], caches:
             send(app, &format!("route-{}", a.limit().provider.as_str()), &title, &h, |_| {});
         }
     }
+    for (l, used, at) in unused.into_iter().filter(|_| n.unused) {
+        let (title, body) = unused_text(&l, used, at, &f);
+        log::info!("unused week notification: {}", l.tag());
+        send(app, &format!("unused-{}", l.tag()), &title, &body, |_| {});
+    }
     if let Some(b) = budget.filter(|_| n.budget) {
         let (title, body) = budget_text(&b, &f);
         log::info!("budget notification");
@@ -162,6 +175,36 @@ pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading], caches:
         log::info!("cache notification");
         let button = c.refreshable.then_some(if f.tr { "Tazele" } else { "Refresh" });
         send_with(app, &format!("cache-{}", c.session_id), &title, &body, button, |_| {});
+    }
+}
+
+/// The weekly limits of the accounts in use with much left shortly before they reset, each week
+/// once. A reading with use after it, or an old one, could leave out what was used meanwhile.
+fn unused_due(told: &mut HashMap<Limit, i64>, readings: &[Reading], now_ms: i64) -> Vec<(Limit, f64, i64)> {
+    let now = now_ms / 1000;
+    let mut due = Vec::new();
+    for r in readings.iter().filter(|r| r.active && r.window == "seven_day" && !r.behind && r.observed_ms.is_some_and(|t| now_ms - t <= UNUSED_READING_MS)) {
+        let Some(at) = r.resets_at.filter(|at| *at > now && *at - now <= UNUSED_LEAD_S) else { continue };
+        let limit = Limit { provider: r.provider, pool: r.pool.clone(), window: r.window.clone(), account: r.account.clone() };
+        // a reset time read a little differently is the same week
+        if 100.0 - r.used < UNUSED_LEFT_PCT || told.get(&limit).is_some_and(|was| (was - at).abs() <= MOVED_SECS) {
+            continue;
+        }
+        told.insert(limit.clone(), at);
+        due.push((limit, r.used, at));
+    }
+    due
+}
+
+fn unused_text<Tz: TimeZone>(l: &Limit, used: f64, at: i64, f: &Format<'_, Tz>) -> (String, String) {
+    let (left, who) = (shown_value(used, true), name(l.provider, &l.pool, f.tr));
+    let hours = ((at - f.now_ms / 1000 + 1800) / 3600).max(1);
+    let clock = f.clock(at).unwrap_or_default();
+    if f.tr {
+        (format!("{who} haftalık limit: %{left} kullanılmadı"), format!("{hours} saat sonra ({clock}) sıfırlanacak; kalan kısım sonraki haftaya geçmez."))
+    } else {
+        let unit = if hours == 1 { "hour" } else { "hours" };
+        (format!("{who} weekly limit: {left}% unused"), format!("It resets in {hours} {unit} ({clock}); what is left does not carry over."))
     }
 }
 
@@ -826,6 +869,35 @@ mod tests {
         assert!(changes(&mut seen, &[], 70.0, NOW + 3700).is_empty());
         let next = [read(Provider::Anthropic, "five_hour", 75.0, 4 * 3600)];
         assert_eq!(kinds(&changes(&mut seen, &next, 70.0, NOW)), ["close"], "the new window starts from below");
+    }
+
+    #[test]
+    fn a_week_with_much_left_is_told_once_shortly_before_it_resets() {
+        let now_ms = NOW * 1000;
+        let week = |used: f64, resets_in: i64| Reading { observed_ms: Some(now_ms - 3_600_000), ..read(Provider::Anthropic, "seven_day", used, resets_in) };
+        let mut told = HashMap::new();
+        assert!(unused_due(&mut told, &[week(40.0, 2 * 86_400)], now_ms).is_empty(), "two days before the reset");
+        assert!(unused_due(&mut told, &[week(75.0, 6 * 3600)], now_ms).is_empty(), "a quarter left is not much");
+        let due = unused_due(&mut told, &[week(40.0, 6 * 3600), read(Provider::Anthropic, "five_hour", 0.0, 3600)], now_ms);
+        assert_eq!(due.iter().map(|(l, used, _)| (l.window.as_str(), *used)).collect::<Vec<_>>(), [("seven_day", 40.0)], "the week, not the five hours");
+        assert!(unused_due(&mut told, &[week(40.0, 6 * 3600 + 60)], now_ms).is_empty(), "the same week read again");
+        let later_ms = now_ms + (7 * 86_400 - 13 * 3600) * 1000;
+        let next = Reading { observed_ms: Some(later_ms - 60_000), ..read(Provider::Anthropic, "seven_day", 10.0, 7 * 86_400 - 3600) };
+        assert_eq!(unused_due(&mut told, &[next], later_ms).len(), 1, "the next week is told again");
+
+        let mut fresh = HashMap::new();
+        let stale = Reading { observed_ms: Some(now_ms - 2 * 86_400_000), ..week(40.0, 6 * 3600) };
+        let used_since = Reading { behind: true, ..week(40.0, 6 * 3600) };
+        let other = Reading { active: false, ..week(40.0, 6 * 3600) };
+        assert!(unused_due(&mut fresh, &[stale, used_since, other], now_ms).is_empty(), "an old reading, use after it, or an account not in use");
+
+        let tz = FixedOffset::east_opt(3 * 3600).unwrap();
+        let cfg = TraySettings::default();
+        let f = |tr| Format { cfg: &cfg, tr, app_remaining: false, warn_at: 70.0, currency: "USD", fx: 1.0, now_ms, tz: &tz };
+        let (l, used, at) = &due[0];
+        let clock = f(true).clock(*at).unwrap();
+        assert_eq!(unused_text(l, *used, *at, &f(true)), ("Claude haftalık limit: %60 kullanılmadı".into(), format!("6 saat sonra ({clock}) sıfırlanacak; kalan kısım sonraki haftaya geçmez.")));
+        assert_eq!(unused_text(l, *used, *at, &f(false)).0, "Claude weekly limit: 60% unused");
     }
 
     #[test]
