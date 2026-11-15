@@ -1051,7 +1051,7 @@ export function installMock() {
           const o = settings.window_opener
           const at = (days: number) => new Date(new Date().setHours(0, o.minute, 0, 0) + days * 86_400_000)
           const next = [0, 1, 2, 3, 4, 5, 6, 7].map(at).find((d) => d.getTime() > Date.now() && o.days.includes(((d.getDay() + 6) % 7) + 1))
-          return { available: claudeMode !== 'missing', running: false, next_ms: o.enabled && next ? next.getTime() : null, runs: openerRuns.slice(0, 5) }
+          return { available: claudeMode !== 'missing', running: false, next_ms: o.enabled && next ? next.getTime() : null, runs: openerRuns.slice(0, 5), day: { first_minute: 9 * 60 + 5, last_minute: 18 * 60 + 40, days: 17, open_minute: 6 * 60 + 15, windows: 3 } }
         }
         case 'limit_resume_info':
         case 'set_limit_resume': {

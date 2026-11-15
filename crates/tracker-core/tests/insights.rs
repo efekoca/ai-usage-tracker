@@ -4,7 +4,7 @@ use chrono::{FixedOffset, TimeZone};
 use common::Dst;
 use tracker_core::analytics::{account_key, Filter, Range};
 use tracker_core::insights::{agents_tools, branches, compare_models, context_stats, day_detail, forecast, plan_value, restarted, session_timeline, sessions, subagent_cache, ForecastKind, PromptShare};
-use tracker_core::insights::{cache_misses, experiment, live_caches, starting_loads, MissCause, StartChange};
+use tracker_core::insights::{cache_misses, experiment, live_caches, starting_loads, working_day, MissCause, StartChange, WorkingDay};
 use tracker_core::tips::{cache_rebuilds, tips, Tip, Tips};
 use tracker_core::model::{Accuracy, CacheMissReport, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
 use tracker_core::pricing::{CostInput, PriceBook};
@@ -347,6 +347,57 @@ fn a_switch_to_another_account_is_no_rewrite_after_a_pause() {
     let tl = session_timeline(&store, &book, Tool::ClaudeCode, "s", 0, i64::MAX / 2, &Filter::default()).unwrap();
     let rewrites: Vec<(u64, Option<i64>)> = tl.requests.iter().map(|q| (q.rewritten, q.pause_ms)).collect();
     assert_eq!(rewrites, [(0, None), (0, None), (60_000, Some(20 * MIN))]);
+}
+
+#[test]
+fn a_working_day_is_the_middle_of_the_days_first_and_last_requests() {
+    let tz = FixedOffset::east_opt(3 * 3600).unwrap();
+    let at = |d: u32, h: u32, m: u32| tz.with_ymd_and_hms(2026, 11, d, h, m, 0).unwrap().timestamp_millis();
+    // Monday 16 November, then four weeks back
+    let now = at(16, 10, 0);
+    let mut evs = Vec::new();
+    let day = |evs: &mut Vec<Ev>, d: u32, from: (u32, u32), to: (u32, u32), n: u32| {
+        let (a, b) = (at(d, from.0, from.1), at(d, to.0, to.1));
+        for i in 0..n {
+            let key: &'static str = Box::leak(format!("d{d}-{i}").into_boxed_str());
+            evs.push(ev(key, a + (b - a) * i64::from(i) / i64::from(n - 1), Tool::ClaudeCode, "claude-opus-5-5", Some("s"), "/p", 10, 0, 5));
+        }
+    };
+    // weekdays from about nine to six
+    for (d, from, to) in [(2, (9, 5), (18, 0)), (3, (8, 50), (17, 40)), (4, (9, 10), (18, 30)), (5, (9, 0), (18, 10)), (6, (9, 20), (17, 50)), (9, (9, 0), (18, 0))] {
+        day(&mut evs, d, from, to, 12);
+    }
+    // a Saturday, a day with a quick question, and today, which is not over
+    day(&mut evs, 7, (13, 0), (23, 0), 20);
+    day(&mut evs, 10, (6, 0), (6, 5), 3);
+    day(&mut evs, 16, (7, 0), (9, 50), 15);
+    // Codex is not Claude's window
+    evs.push(ev("x", at(11, 4, 0), Tool::Codex, "gpt-5.6-terra", Some("x"), "/p", 10, 0, 5));
+    let store = store_with(&evs);
+
+    let weekdays = [1, 2, 3, 4, 5];
+    let w = working_day(&store, now, &tz, &weekdays).unwrap().unwrap();
+    // 09:05 to 18:00 spans three windows: 06:00, 11:00 and 16:00, with about three hours in the first and two in the last
+    assert_eq!(w, WorkingDay { first_minute: 9 * 60 + 5, last_minute: 18 * 60, days: 6, open_minute: Some(6 * 60), windows: 3 });
+    assert_eq!(working_day(&store, now, &tz, &[6, 7]).unwrap(), None, "one Saturday is too few");
+
+    let of = |from: (u32, u32), to: (u32, u32)| {
+        let evs: Vec<Ev> = [2, 3, 4, 5, 6].into_iter().flat_map(|d| {
+            let mut v = Vec::new();
+            day(&mut v, d, from, to, 12);
+            v
+        }).collect();
+        let w = working_day(&store_with(&evs), now, &tz, &weekdays).unwrap().unwrap();
+        (w.open_minute, w.windows)
+    };
+    // a short day is split in two, its reset in the middle
+    assert_eq!(of((9, 0), (12, 0)), (Some(5 * 60 + 30), 2));
+    // seven hours fit a whole window between an hour at each end
+    assert_eq!(of((9, 0), (16, 0)), (Some(5 * 60), 3));
+    // a little less does not, as an end would get under an hour
+    assert_eq!(of((9, 0), (15, 50)), (Some(7 * 60 + 30), 2));
+    // a day that starts just after midnight would open on the day before
+    assert_eq!(of((0, 30), (8, 0)), (None, 3));
 }
 
 fn all() -> Range {

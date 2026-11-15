@@ -362,6 +362,19 @@ export interface OpenerInfo {
   next_ms: number | null
   /** The latest runs, the newest first. */
   runs: OpenerRun[]
+  /** The hours Claude is used on the days it runs, and when to open a window for them. */
+  day: WorkingDay | null
+}
+
+/** A typical day's first and last Claude request, in minutes after local midnight. */
+export interface WorkingDay {
+  first_minute: number
+  last_minute: number
+  days: number
+  /** When to open a window so the day spans the most windows, an hour or more at each end; `null` when that is the day before. */
+  open_minute: number | null
+  /** How many windows the day then spans. */
+  windows: number
 }
 
 /** A conversation the usage limit stopped, whose hook waits for the limit's reset. */

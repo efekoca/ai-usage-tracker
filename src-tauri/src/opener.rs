@@ -228,6 +228,8 @@ pub struct OpenerInfo {
     next_ms: Option<i64>,
     /// The latest runs, the newest first.
     runs: Vec<Run>,
+    /// The hours Claude is used on the days it runs, and when to open a window for them.
+    day: Option<tracker_core::insights::WorkingDay>,
 }
 
 fn info(state: &AppState) -> OpenerInfo {
@@ -239,6 +241,7 @@ fn info(state: &AppState) -> OpenerInfo {
         running: b.running,
         next_ms: s.window_opener.enabled.then(|| next_ms(&s.window_opener, &b.runs, &Local::now())).flatten(),
         runs: b.runs.iter().rev().take(5).cloned().collect(),
+        day: tracker_core::insights::working_day(&state.db(), Local::now().timestamp_millis(), &Local, &s.window_opener.days).ok().flatten(),
     }
 }
 
