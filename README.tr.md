@@ -352,7 +352,7 @@ Haftalık kullanımınızı PDF olarak kaydedebilir, verilerinizi dışa aktarı
 
 ### Kullanımınızı komut satırından alın
 
-`ai-usage-tracker --json`, uygulamanın gösterdiği kullanımı ve limitleri JSON olarak yazar; betiklerinize ya da Raycast, tmux, SketchyBar gibi araçlara bağlayabilirsiniz. Kurulumunuza uygun komutu **Ayarlar → Veriler → Komut satırı** bölümünden **Kopyala** ile alın. Windows'ta komutu PowerShell'de çalıştırın; oradaki komut `| Out-String` ile biter, böylece PowerShell çıktıyı bekler.
+`ai-usage-tracker --json`, uygulamanın gösterdiği kullanımı ve limitleri JSON olarak yazar; betiklerinize ya da Raycast, tmux, SketchyBar gibi araçlara bağlayabilirsiniz. Kurulumunuza uygun komutu ve yolu doldurulmuş hazır betikleri **Ayarlar → Veriler → Komut satırı** bölümünden **Kopyala** ile alın. Windows'ta komutu PowerShell'de çalıştırın; oradaki komut `| Out-String` ile biter, böylece PowerShell çıktıyı bekler.
 
 ```sh
 ai-usage-tracker --json | jq '.limits[] | select(.window == "five_hour") | .used_pct'
@@ -363,6 +363,56 @@ ai-usage-tracker --json | jq '.limits[] | select(.window == "five_hour") | .used
 - `limits`, açtığınız kaynaklarda kullandığınız hesabın bütün limitlerini verir: kullanılan yüzde, sıfırlanma zamanı, okumanın alındığı an ve bu hızla ne zaman dolacağı. Okumadan sonra pencere sıfırlandıysa `used_pct` boş gelir.
 - Komut uygulamanın verilerini yalnızca okur, hiçbir şeyi değiştirmez. Uygulamanın açık olması gerekmez, ama rakamlar uygulamanın son taraması kadar günceldir.
 - Zamanlar sizin saat diliminizdedir (ISO 8601). `schema` yalnızca bir alanın anlamı değiştiğinde ya da bir alan kaldırıldığında artar.
+
+**Hazır betikler.** Aşağıdakini `~/bin/claude-status.sh` olarak kaydedin ve `chmod +x ~/bin/claude-status.sh` ile çalıştırılabilir yapın. Betik `5h 46% · 7d 64% · $12.84` gibi tek bir satır yazar; okunduktan sonra sıfırlanmış bir pencereyi atlar. `jq` gerektirir; macOS 15 ve sonrasında yüklü gelir, diğer sistemlerde paket yöneticinizle kurun. Linux'ta ya da uygulama başka bir yerdeyse betikleri **Ayarlar → Veriler → Komut satırı** bölümünden alın; oradakiler kurulumunuzun yolunu kullanır.
+
+```sh
+#!/bin/sh
+# One line for a status bar: Claude's five-hour and weekly use, and today's cost.
+tracker="/Applications/AI Usage Tracker.app/Contents/MacOS/ai-usage-tracker"
+"$tracker" --json | jq -r '
+  [ .limits[]
+    | select(.provider == "anthropic" and .used_pct != null and (.window == "five_hour" or .window == "seven_day"))
+    | "\(if .window == "five_hour" then "5h" else "7d" end) \(.used_pct | floor)%" ]
+  + [ "$\(.usage.cost_usd * 100 | floor / 100)" ]
+  | join(" · ")'
+```
+
+tmux için `~/.tmux.conf` dosyasına şunu ekleyin:
+
+```
+set -g status-interval 60
+set -g status-right '#(~/bin/claude-status.sh)'
+```
+
+SketchyBar için `sketchybarrc` dosyasına bir öğe ekleyin ve çalıştırdığı eklentiyi `plugins/claude.sh` olarak kaydedin:
+
+```sh
+sketchybar --add item claude right --set claude update_freq=120 script="$PLUGIN_DIR/claude.sh"
+```
+
+```sh
+#!/bin/sh
+sketchybar --set "$NAME" label="$(~/bin/claude-status.sh)"
+```
+
+Raycast için şunu betik komutu olarak kaydedin; satırı ana aramada gösterir ve beş dakikada bir tazeler:
+
+```sh
+#!/bin/sh
+# @raycast.schemaVersion 1
+# @raycast.title Claude usage
+# @raycast.mode inline
+# @raycast.refreshTime 5m
+~/bin/claude-status.sh
+```
+
+Windows'ta PowerShell çıktıyı süzüp biçimlendirebileceğiniz nesnelere çevirir:
+
+```powershell
+$usage = & "$env:LOCALAPPDATA\AI Usage Tracker\ai-usage-tracker.exe" --json | Out-String | ConvertFrom-Json
+$usage.limits | Where-Object provider -eq anthropic | Format-Table window, used_pct, resets_at
+```
 
 ## Desteklenen kaynaklar
 
