@@ -888,6 +888,8 @@ export function installMock() {
           return { version: '1.5.0', data_dir: 'C:\\Users\\you\\AppData\\Local\\AIUsageTracker', pricing_origin: 'bundled', pricing_updated_at: '2026-10-26', platform, supports_mica: false, accent_color: null, started_hidden: false, reports_dir: 'C:\\Users\\you\\Documents\\AI Usage Tracker' }
         case 'get_settings':
           return settings
+        case 'cli_command':
+          return platform === 'windows' ? "& 'C:/Users/you/AppData/Local/AI Usage Tracker/ai-usage-tracker.exe' --json | Out-String" : "'/Applications/AI Usage Tracker.app/Contents/MacOS/ai-usage-tracker' --json"
         case 'save_settings':
           Object.assign(settings, a.settings)
           return settings

@@ -4,7 +4,7 @@
   import { onMount } from 'svelte'
   import { app, refresh, saveSettings } from '../lib/store.svelte'
   import { api, providersOf, type HotkeyStatus, type ModelPrice, type NotifySettings, type PricingFile, type PricingInfo, type ProjectChoice, type Provider } from '../lib/api'
-  import { fmtDate, fmtDateTime, fmtDuration, fmtInput, fmtInt, fmtPct, localDate, parseNumber, t, windowLabel } from '../lib/i18n.svelte'
+  import { fmtDate, fmtDateTime, fmtDuration, fmtInput, fmtInt, fmtPct, has, localDate, parseNumber, t, windowLabel } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
   import Select from '../components/Select.svelte'
   import Toggle from '../components/Toggle.svelte'
@@ -93,8 +93,23 @@
     saveSettings({ cache_auto: on })
   }
 
+  let cli: { command?: string; error?: string } = $state({})
+  /** Its flags set as code, so a line never breaks inside one. */
+  const flagged = (s: string) => s.split(/(--[a-z]+(?: \d+[a-z]+)?)/).map((text, i) => ({ text, flag: i % 2 === 1 }))
+  let cliCopied = $state(false)
+  async function copyCli() {
+    try {
+      await navigator.clipboard.writeText(cli.command ?? '')
+      cliCopied = true
+      setTimeout(() => (cliCopied = false), 1500)
+    } catch {
+      /* clipboard unavailable */
+    }
+  }
+
   let loadFailed = $state('')
   onMount(async () => {
+    api.cliCommand().then((command) => (cli = { command }), (e) => (cli = { error: String(e) }))
     hk = await api.hotkeyStatus().catch(() => null)
     try {
       await loadPricing()
@@ -874,6 +889,14 @@
     <button class="btn" onclick={() => api.openDataFolder()}><Icon name="folder" size={15} />{t('settings.data.openFolder')}</button>
   </div>
   <div class="item">
+    <div class="cli">
+      <span>{t('settings.cli')}</span>
+      <div class="subtle small">{#each flagged(t('settings.cli.help')) as p}{#if p.flag}<code class="flag">{p.text}</code>{:else}{p.text}{/if}{/each}</div>
+      {#if cli.command}<code class="path cmd">{cli.command}</code>{:else if cli.error}<div class="subtle small">{has(`cap.msg.${cli.error}`) ? t(`cap.msg.${cli.error}`) : cli.error}</div>{/if}
+    </div>
+    <button class="btn" disabled={!cli.command} onclick={copyCli}><Icon name={cliCopied ? 'check' : 'copy'} size={15} />{cliCopied ? t('settings.cli.copied') : t('settings.cli.copy')}</button>
+  </div>
+  <div class="item">
     <span class="danger-text">{t('settings.data.wipe')}</span>
     <button class="btn danger" onclick={doWipe}><Icon name="trash" size={15} />{t('settings.data.wipe')}</button>
   </div>
@@ -1076,6 +1099,25 @@
   }
   .path {
     font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  }
+  .cli {
+    min-width: 0;
+  }
+  .flag {
+    font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    white-space: nowrap;
+  }
+  .cmd {
+    display: block;
+    margin-top: 8px;
+    padding: 7px 10px;
+    font-size: 12px;
+    color: var(--ink-2);
+    background: var(--surface-2);
+    border: 0.5px solid var(--hairline);
+    border-radius: 8px;
+    overflow-wrap: anywhere;
+    user-select: all;
   }
   .danger-text {
     color: var(--bad-ink);

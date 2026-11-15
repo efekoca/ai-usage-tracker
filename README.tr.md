@@ -35,6 +35,7 @@ AI Usage Tracker, Windows, macOS ve Linux'ta çalışan bir uygulamadır. Yapay 
 - **Bir değişikliğin işe yarayıp yaramadığını görün.** MCP sunucusu eklediğiniz, `CLAUDE.md` dosyasını kısalttığınız ya da model değiştirdiğiniz günü işaretleyin; öncesindeki ve sonrasındaki kullanımınızı yan yana görün: oturum başına maliyet, başlangıç yükü, araç hata oranı ve önbellek isabeti.
 - **Tek bir isteminizin neye mal olduğunu görün.** Bir isteminizin tetiklediği bütün istekler, alt ajanlar ve araç çağrıları tek satırda toplanır: "14:32'deki tur: 84 istek, 3 alt ajan, 11,40 $". İstem metni okunmaz ve saklanmaz.
 - **Geçmişinizi kaybetmeyin.** Devam ettirdiğiniz ya da kopyasından yeni oturum açtığınız sohbetler iki kez sayılmaz. Claude Code kayıtlarını 30 gün sonra silse bile geçmişiniz uygulamanın veri tabanında kalır.
+- **Rakamlarınızı kendi araçlarınızda kullanın.** `ai-usage-tracker --json` kullanımınızı ve limitlerinizi JSON olarak yazar; betiklerinize ya da Raycast, tmux gibi araçlara bağlayabilirsiniz.
 - **İşinizi değil, kullanımınızı paylaşın.** Bir gününüzü, haftanızı, ayınızı ya da yılınızı dört boyutta karta dönüştürün. Kartta yalnızca toplamlar, araç adları ve model adları bulunur.
 
 ![Kısa bir tur: grafik ipucu ve abonelik değeriyle genel bakış, hesap filtresi, her Claude hesabı için ayrı limitler, limit geçmişi, öneriler, günlük görünüm, model karşılaştırması, bir oturumun ayrıntıları ve zaman çizelgesi, bir özet kartı, Menü çubuğu sayfası ve widget'ın yerleşimini değiştiren Widget stüdyosu](assets/readme/demo-tr.webp)
@@ -348,6 +349,20 @@ Haftalık kullanımınızı PDF olarak kaydedebilir, verilerinizi dışa aktarı
 - Hesaba katılan fiyat kalemleri: önbelleğe yazma (5 dk / 1 sa), önbellekten okuma, OpenAI uzun bağlam katmanı (>272K), hızlı mod (fast mode) ve ABD veri yerleşimi çarpanları, web araması ücreti ve biten bir tanıtım fiyatı gibi belli bir tarihte değişen fiyatlar. Her istek kendi gününün fiyatıyla hesaplanır.
 - Fiyatı bilinmeyen modeller **maliyete eklenmez** ve "fiyat tanımsız" uyarısıyla listelenir. Ad benzerliğine bakılarak tahmini fiyat atanmaz. **Genel bakış**'taki bu uyarıyı kapatabilirsiniz; yalnızca başka bir model fiyatsız kalırsa yeniden çıkar. Uyarıyı **Ayarlar → Fiyatlar → Uyarıyı tekrar göster** ile de geri getirebilirsiniz.
 - Fiyatları **Ayarlar → Fiyatlar** ekranında düzenleyebilirsiniz. Listede önce kayıtlarınızda geçen modeller görünür; fiyatı tanımlı bütün modelleri görmek için **Tüm modelleri göster**'e basın. Uygulamanın veri klasöründeki `pricing.json` dosyasına (bkz. [Gizlilik](#gizlilik)) yalnızca değiştirdiğiniz fiyatlar kaydedilir; diğer bütün modeller, düzeltmeler ve sonradan eklenen modeller dahil, en yeni listeyi izler. Değiştirdiğiniz fiyat **değiştirildi** olarak işaretlenir ve tek tıkla listedeki fiyata döner. Fiyatı olmayan bir modelin fiyatını **Fiyatı olmayan bir modele fiyat girin** bölümünden kendiniz yazın; bu fiyat **sizin** olarak işaretlenir ve yeni bir liste onu değiştirmez. Aynı ekranda fiyatsız bir modeli başka bir modelin fiyatıyla hesaplatabilir ya da varsayılan fiyatlara dönebilirsiniz.
+
+### Kullanımınızı komut satırından alın
+
+`ai-usage-tracker --json`, uygulamanın gösterdiği kullanımı ve limitleri JSON olarak yazar; betiklerinize ya da Raycast, tmux, SketchyBar gibi araçlara bağlayabilirsiniz. Kurulumunuza uygun komutu **Ayarlar → Veriler → Komut satırı** bölümünden **Kopyala** ile alın. Windows'ta komutu PowerShell'de çalıştırın; oradaki komut `| Out-String` ile biter, böylece PowerShell çıktıyı bekler.
+
+```sh
+ai-usage-tracker --json | jq '.limits[] | select(.window == "five_hour") | .used_pct'
+```
+
+- Varsayılan dönem bugündür. Başka bir dönem için `--period` ile birlikte `7d`, `30d`, `3m`, `6m`, `1y` ya da `all` yazın.
+- `usage` dönemdeki istekleri, tokenleri ve API karşılığı maliyeti hem toplam hem araç araç verir.
+- `limits`, açtığınız kaynaklarda kullandığınız hesabın bütün limitlerini verir: kullanılan yüzde, sıfırlanma zamanı, okumanın alındığı an ve bu hızla ne zaman dolacağı. Okumadan sonra pencere sıfırlandıysa `used_pct` boş gelir.
+- Komut uygulamanın verilerini yalnızca okur, hiçbir şeyi değiştirmez. Uygulamanın açık olması gerekmez, ama rakamlar uygulamanın son taraması kadar günceldir.
+- Zamanlar sizin saat diliminizdedir (ISO 8601). `schema` yalnızca bir alanın anlamı değiştiğinde ya da bir alan kaldırıldığında artar.
 
 ## Desteklenen kaynaklar
 

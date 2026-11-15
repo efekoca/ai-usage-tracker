@@ -651,6 +651,12 @@ pub fn open_data_folder(window: WebviewWindow, state: State<AppState>) -> Res<()
     crate::open_path(&state.data_dir).map_err(err)
 }
 
+/// What to type in a terminal to print the usage and limits as JSON.
+#[tauri::command]
+pub fn cli_command() -> Res<String> {
+    Ok(crate::cli::terminal_command(&crate::app_path()?))
+}
+
 #[tauri::command]
 pub fn open_url(window: WebviewWindow, url: String) -> Res<()> {
     main_only(&window)?;

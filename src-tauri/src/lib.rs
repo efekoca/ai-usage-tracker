@@ -1,5 +1,6 @@
 mod alerts;
 mod caches;
+mod cli;
 mod opener;
 mod refresh;
 mod resume;
@@ -103,6 +104,9 @@ fn warn_if_temporary(app: &tauri::AppHandle, s: &Settings) {
 /// Runs before the GUI so these modes never start it or hit the single-instance check.
 pub fn cli_mode() -> Option<i32> {
     let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == cli::FLAG) {
+        return Some(cli::json_main());
+    }
     if args.iter().any(|a| a == "--statusline") {
         return Some(capture::statusline_main());
     }
@@ -497,6 +501,7 @@ pub fn run() {
             commands::import_database,
             commands::wipe_all_data,
             commands::open_data_folder,
+            commands::cli_command,
             commands::open_url,
             commands::open_main,
             commands::set_widget_visible,
