@@ -588,6 +588,10 @@
       <span>{t('settings.notify.weekly')}</span>
       <Toggle checked={s.notify.seven_day} label={t('settings.notify.weekly')} onchange={(v) => saveNotify({ seven_day: v })} />
     </div>
+    <div class="item">
+      <div><span>{t('settings.notify.unused')}</span><div class="subtle small">{t('settings.notify.unused.help')}</div></div>
+      <Toggle checked={s.notify.unused} label={t('settings.notify.unused')} onchange={(v) => saveNotify({ unused: v })} />
+    </div>
     {#if s.monthly_budget_usd > 0}
       <div class="item">
         <span>{t('settings.notify.budget')}</span>

@@ -389,6 +389,8 @@ pub struct NotifySettings {
     pub cache: bool,
     /// When a conversation the limit stopped is continued after the limit started again.
     pub resume: bool,
+    /// Shortly before a weekly limit resets with much of it unused.
+    pub unused: bool,
     /// Fields this version does not know (a newer one wrote them), kept so saving does not drop them.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
@@ -396,7 +398,7 @@ pub struct NotifySettings {
 
 impl Default for NotifySettings {
     fn default() -> Self {
-        NotifySettings { enabled: true, early: "warn".into(), full: true, reset: true, five_hour: true, seven_day: true, budget: true, sign_in: true, route: true, cache: false, resume: true, extra: Default::default() }
+        NotifySettings { enabled: true, early: "warn".into(), full: true, reset: true, five_hour: true, seven_day: true, budget: true, sign_in: true, route: true, cache: false, resume: true, unused: true, extra: Default::default() }
     }
 }
 
