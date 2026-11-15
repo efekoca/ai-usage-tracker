@@ -183,7 +183,12 @@ export async function init() {
     checkDay()
     if (!app.settings?.onboarded) return
     const gen = refreshGen
-    api.limits().then((l) => gen === refreshGen && (app.limits = l)).catch(() => {})
+    api
+      .limits()
+      .then((l) => {
+        if (gen === refreshGen) app.limits = l
+      })
+      .catch(() => {})
   }, 60_000)
 
   await refresh()

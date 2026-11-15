@@ -310,14 +310,15 @@ pub fn session_timeline(store: &Store, book: &PriceBook, tool: Tool, session_id:
     let mut rewritten = vec![0; events.len()];
     let mut pause = vec![None; events.len()];
     if tool.provider() == Some(Provider::Anthropic) {
-        // the cache is per conversation and model, as in `tips::cache_rebuilds`
-        let mut last: HashMap<(Option<&str>, &str), usize> = HashMap::new();
+        // the cache is per conversation, model and account, as in `tips::cache_rebuilds`
+        let mut last: HashMap<(Option<&str>, &str, Option<&str>), usize> = HashMap::new();
         for (i, e) in events.iter().enumerate().filter(|(_, e)| logged(e)) {
-            if let Some(&p) = last.get(&(e.thread_id.as_deref(), e.model.as_str())) {
+            let key = (e.thread_id.as_deref(), e.model.as_str(), e.account.as_deref());
+            if let Some(&p) = last.get(&key) {
                 rewritten[i] = crate::tips::rewritten_after_pause(&events[p], e).unwrap_or(0);
                 pause[i] = (rewritten[i] > 0).then(|| e.ts_ms - events[p].ts_ms);
             }
-            last.insert((e.thread_id.as_deref(), e.model.as_str()), i);
+            last.insert(key, i);
         }
     }
     let mut compacted_from = vec![None; events.len()];
@@ -822,7 +823,7 @@ pub fn live_caches(store: &Store, book: &PriceBook, now_ms: i64) -> Result<Vec<L
         // a failed request logs no tokens and leaves the cache as it was
         let Some(last) = evs.iter().filter(|e| e.tokens.cache_read + e.tokens.cache_write > 0).max_by_key(|e| e.ts_ms) else { continue };
         // the lifetime is the one the cache was last written with, however long reads kept it since
-        let Some((written, written_1h)) = store.last_cache_write(session_id, &last.model, last.ts_ms)? else { continue };
+        let Some((written, written_1h)) = store.last_cache_write(session_id, &last.model, last.account.as_deref(), last.ts_ms)? else { continue };
         let ttl_ms = cache_ttl_ms(written, written_1h);
         let expires_ms = last.ts_ms + ttl_ms;
         if expires_ms <= now_ms {
@@ -983,13 +984,14 @@ fn miss_base<'a>(runs: &mut Vec<MissRun<'a>>, high: Option<i64>, r: &'a crate::m
 }
 
 /// What writing `tokens` again cost above reading them, at the model and rate of `e`, the request
-/// that missed, and the lifetimes its conversation's cache was last written with (`main`, oldest first).
+/// that missed, and the lifetimes its account's cache in the conversation was last written with
+/// (`main`, oldest first). Each account keeps a cache of its own, as in [`live_caches`].
 fn recache_extra_usd(book: &PriceBook, main: &[&EventRow], e: &EventRow, tokens: u64) -> Option<f64> {
     if tokens == 0 {
         return Some(0.0);
     }
     // captured telemetry does not tell the two cache lifetimes apart
-    let w = main.iter().rev().find(|w| w.model == e.model && w.ts_ms <= e.ts_ms && w.tokens.cache_write > 0 && w.accuracy != Accuracy::Captured)?;
+    let w = main.iter().rev().find(|w| w.model == e.model && w.account == e.account && w.ts_ms <= e.ts_ms && w.tokens.cache_write > 0 && w.accuracy != Accuracy::Captured)?;
     let one_hour = (u128::from(tokens) * u128::from(w.tokens.cache_write_1h.min(w.tokens.cache_write)) / u128::from(w.tokens.cache_write)) as u64;
     let cost = |t: crate::model::Tokens| book.cost(&CostInput { tokens: &t, web_search_requests: 0, ..input_of(e) }).map(|c| c.total());
     Some(cost(crate::model::Tokens { cache_write: tokens, cache_write_1h: one_hour, ..Default::default() })? - cost(crate::model::Tokens { cache_read: tokens, ..Default::default() })?)

@@ -113,7 +113,7 @@
   const money = (usd: number | null) => (usd === null ? '—' : fmtMoney(usd))
 
   // the row menu takes the focus when it opens and gives it back to its button when it closes
-  const triggers: Record<string, HTMLButtonElement> = {}
+  const triggers: Record<string, HTMLButtonElement | null> = {}
   function focusFirst(node: HTMLElement) {
     node.querySelector<HTMLElement>('[role^="menuitem"]')?.focus()
   }
@@ -177,7 +177,7 @@
                 onclick={() => refreshNow(c)}>{t('cache.live.refresh')}</button
               >
               <div class="menu-wrap">
-                <button class="btn ghost square" bind:this={triggers[c.session_id]} aria-label={t('cache.live.more', { name })} aria-haspopup="menu" aria-expanded={menu === c.session_id} onclick={() => (menu = menu === c.session_id ? null : c.session_id)}><Icon name="more" size={16} /></button>
+                <button class="btn ghost square" bind:this={() => triggers[c.session_id], (el) => (triggers[c.session_id] = el)} aria-label={t('cache.live.more', { name })} aria-haspopup="menu" aria-expanded={menu === c.session_id} onclick={() => (menu = menu === c.session_id ? null : c.session_id)}><Icon name="more" size={16} /></button>
                 {#if menu === c.session_id}
                   <div class="menu" role="menu" tabindex="-1" use:focusFirst onkeydown={(e) => menuKeys(e, c.session_id)}>
                     <button role="menuitemcheckbox" aria-checked={c.auto} onclick={() => flipAuto(c)}><span class="check" class:on={c.auto}><Icon name="check" size={13} /></span>{t('cache.live.auto')}</button>

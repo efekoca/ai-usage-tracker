@@ -95,11 +95,12 @@ pub struct Rebuilds {
 /// (the shared system prompt usually stays cached, the conversation after it does not). Captured
 /// telemetry is left out, as in `insights::live_caches`: it names no subagent or cache lifetime.
 pub fn cache_rebuilds(events: &[EventRow], book: &PriceBook) -> Rebuilds {
-    // the cache is per model, so each model's requests in a conversation are a sequence of their own
-    let mut threads: HashMap<(&str, &str, &str), Vec<&EventRow>> = HashMap::new();
+    // the cache is per model and account, so each one's requests in a conversation are a sequence
+    // of their own: a switch to another account writes its cache anew after any pause
+    let mut threads: HashMap<(&str, &str, &str, Option<&str>), Vec<&EventRow>> = HashMap::new();
     for e in events.iter().filter(|e| e.tool.provider() == Some(Provider::Anthropic) && e.accuracy != Accuracy::Captured) {
         if let Some(s) = e.session_id.as_deref() {
-            threads.entry((s, e.thread_id.as_deref().unwrap_or(""), e.model.as_str())).or_default().push(e);
+            threads.entry((s, e.thread_id.as_deref().unwrap_or(""), e.model.as_str(), e.account.as_deref())).or_default().push(e);
         }
     }
     let mut r = Rebuilds::default();
