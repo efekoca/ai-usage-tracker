@@ -2,11 +2,14 @@ export type ScriptKind = 'command' | 'tmux' | 'sketchybar' | 'raycast' | 'powers
 export type ScriptFile = { name: string; code: string }
 export type ScriptTab = { kind: ScriptKind; label: string; files: ScriptFile[] }
 
-/** One line for a status bar: Claude's five-hour and weekly use, and today's cost. */
+/** One line for a status bar: Claude's five-hour and weekly use, and today's cost. A reading with use
+ * since is marked `~`, as in the menu bar; a stale one, one past its reset and a budget are left out. */
 const STATUS_LINE = String.raw`jq -r '
   [ .limits[]
-    | select(.provider == "anthropic" and .used_pct != null and (.window == "five_hour" or .window == "seven_day"))
-    | "\(if .window == "five_hour" then "5h" else "7d" end) \(.used_pct | floor)%" ]
+    | select(.provider == "anthropic" and (.window == "five_hour" or .window == "seven_day"))
+    | select(.used_pct != null and (.state == "fresh" or .state == "behind") and (.budget | not))
+    | (if .window == "five_hour" then "5h " else "7d " end)
+      + (if .state == "behind" then "~" else "" end) + "\(.used_pct | floor)%" ]
   + [ "$\(.usage.cost_usd * 100 | floor / 100)" ]
   | join(" · ")'`
 
@@ -21,7 +24,7 @@ export function cliScripts(command: string, platform: string): ScriptTab[] {
         files: [
           {
             name: 'PowerShell',
-            code: `$usage = ${command} | ConvertFrom-Json\n$usage.limits | Where-Object provider -eq anthropic | Format-Table window, used_pct, resets_at`,
+            code: `$usage = ${command} | ConvertFrom-Json\n$usage.limits | Where-Object provider -eq anthropic | Format-Table window, used_pct, state, resets_at`,
           },
         ],
       },

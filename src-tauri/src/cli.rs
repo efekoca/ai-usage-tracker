@@ -109,6 +109,8 @@ where
                 "resets_at": l.resets_at.and_then(|s| at(s.saturating_mul(1000))),
                 "observed_at": l.observed_ms.and_then(at),
                 "state": l.state,
+                // a budget set under Limits, not a reading
+                "budget": l.source == "user_threshold",
                 "fills_at": l.forecast.as_ref().and_then(|f| f.fills_at_ms).and_then(at),
                 "blocked": l.blocked,
                 "plan": l.plan,
@@ -242,6 +244,7 @@ mod tests {
         assert_eq!(limits.len(), 1, "a source that is off shows no limits: {limits:?}");
         assert_eq!((limits[0]["provider"].as_str(), limits[0]["window"].as_str(), limits[0]["used_pct"].as_f64()), (Some("anthropic"), Some("five_hour"), Some(46.0)));
         assert_eq!(limits[0]["resets_at"], "2026-11-15T13:00:00+03:00");
+        assert_eq!((limits[0]["state"].as_str(), limits[0]["budget"].as_bool()), (Some("fresh"), Some(false)));
 
         let week = build(&store, &book, &settings, ("7d", Period::Days7), now, &tz).unwrap();
         assert_eq!((week["period"]["name"].as_str(), week["usage"]["requests"].as_u64()), (Some("7d"), Some(3)));

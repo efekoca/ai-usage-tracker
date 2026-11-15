@@ -4,7 +4,7 @@ use chrono::{FixedOffset, TimeZone};
 use common::Dst;
 use tracker_core::analytics::{account_key, Filter, Range};
 use tracker_core::insights::{agents_tools, branches, compare_models, context_stats, day_detail, forecast, plan_value, restarted, session_timeline, sessions, subagent_cache, ForecastKind, PromptShare};
-use tracker_core::insights::{cache_misses, experiment, live_caches, starting_loads, working_day, MissCause, StartChange, WorkingDay};
+use tracker_core::insights::{cache_misses, experiment, live_caches, starting_loads, working_day, ExtraUnknown, MissCause, StartChange, WorkingDay};
 use tracker_core::tips::{cache_rebuilds, tips, Tip, Tips};
 use tracker_core::model::{Accuracy, CacheMissReport, LimitSnapshot, Provider, Tokens, Tool, ToolCall, UsageEvent};
 use tracker_core::pricing::{CostInput, PriceBook};
@@ -242,7 +242,43 @@ fn a_cache_rewrite_is_priced_above_a_warm_cache_against_claude_codes_whole_cost(
     tx.insert_cache_miss_reports(&[report("s2", t + 20 * MIN + 30_000, 800)]).unwrap();
     tx.commit().unwrap();
     let m = cache_misses(&store, &book, range, &Filter::default(), &chrono::Utc).unwrap();
-    assert_eq!((m.misses, m.extra_usd), (2, None), "a rewrite with no price leaves the sum unknown");
+    assert_eq!((m.misses, m.extra_usd, m.extra_unknown), (2, None, Some(ExtraUnknown::Unpriced)), "a rewrite with no price leaves the sum unknown");
+}
+
+#[test]
+fn a_rewrite_the_requests_around_it_price_differently_has_no_extra_cost() {
+    let t = ms(2026, 11, 10, 12, 0);
+    let book = PriceBook::default_book();
+    // Claude Code names the miss to the second; two models answered within it
+    let mut store = store_with(&[
+        ev("a", t + 100, Tool::ClaudeCode, "claude-sonnet-5", Some("mixed"), "/p", 10, 0, 5).cache_write(10_000, 0),
+        ev("b", t + 900, Tool::ClaudeCode, "claude-opus-5-5", Some("mixed"), "/p", 10, 0, 5).cache_write(10_000, 10_000),
+        // the same model and lifetime twice within the second agree on the cost
+        ev("c", t + 100, Tool::ClaudeCode, "claude-sonnet-5", Some("same"), "/p", 10, 0, 5).cache_write(10_000, 0),
+        ev("d", t + 900, Tool::ClaudeCode, "claude-sonnet-5", Some("same"), "/p", 10, 0, 5).cache_write(10_000, 0),
+    ]);
+    let report = |s: &str| CacheMissReport { session_id: s.into(), ts_ms: t + 1_200, last_miss_ms: Some(t), requests: 2, misses: 1, rebuilds: 0, recached_tokens: 10_000, causes: vec![] };
+    let range = Range { from_ms: t - HOUR, to_ms: t + HOUR };
+    let only = |model: &str| Filter { models: vec![model.into()], ..Filter::default() };
+
+    let mut tx = store.transaction().unwrap();
+    tx.insert_cache_miss_reports(&[report("same")]).unwrap();
+    tx.commit().unwrap();
+    let price = |tokens: Tokens| book.cost(&CostInput { model: "claude-sonnet-5", tokens: &tokens, request_input: 10_010, web_search_requests: 0, speed: None, inference_geo: None, ts_ms: None }).unwrap().total();
+    let sonnet = price(Tokens { cache_write: 10_000, ..Default::default() }) - price(Tokens { cache_read: 10_000, ..Default::default() });
+    let m = cache_misses(&store, &book, range, &Filter::default(), &chrono::Utc).unwrap();
+    assert!((m.extra_usd.unwrap() - sonnet).abs() < 1e-9, "{:?} {sonnet}", m.extra_usd);
+    assert_eq!(m.extra_unknown, None);
+
+    let mut tx = store.transaction().unwrap();
+    tx.insert_cache_miss_reports(&[report("mixed")]).unwrap();
+    tx.commit().unwrap();
+    let m = cache_misses(&store, &book, range, &Filter::default(), &chrono::Utc).unwrap();
+    assert_eq!((m.misses, m.extra_usd, m.extra_unknown), (2, None, Some(ExtraUnknown::Unsure)), "neither model's price is the rewrite's");
+    let opus = cache_misses(&store, &book, range, &only("claude-opus-5-5"), &chrono::Utc).unwrap();
+    assert_eq!(opus.misses, 0, "nor is the miss either model's");
+    let sonnet_only = cache_misses(&store, &book, range, &only("claude-sonnet-5"), &chrono::Utc).unwrap();
+    assert_eq!((sonnet_only.misses, sonnet_only.extra_unknown), (1, None), "the agreeing conversation alone");
 }
 
 #[test]
@@ -398,6 +434,11 @@ fn a_working_day_is_the_middle_of_the_days_first_and_last_requests() {
     assert_eq!(of((9, 0), (15, 50)), (Some(7 * 60 + 30), 2));
     // a day that starts just after midnight would open on the day before
     assert_eq!(of((0, 30), (8, 0)), (None, 3));
+    // a day under two hours cannot give two windows an hour each, so opening early gains nothing
+    for to in [(9, 0), (9, 9), (9, 59), (10, 59)] {
+        assert_eq!(of((9, 0), to), (None, 1), "09:00 to {to:?}");
+    }
+    assert_eq!(of((9, 0), (11, 0)), (Some(5 * 60), 2));
 }
 
 fn all() -> Range {

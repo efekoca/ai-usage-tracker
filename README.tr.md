@@ -360,11 +360,11 @@ ai-usage-tracker --json | jq '.limits[] | select(.window == "five_hour") | .used
 
 - Varsayılan dönem bugündür. Başka bir dönem için `--period` ile birlikte `7d`, `30d`, `3m`, `6m`, `1y` ya da `all` yazın.
 - `usage` dönemdeki istekleri, tokenleri ve API karşılığı maliyeti hem toplam hem araç araç verir.
-- `limits`, açtığınız kaynaklarda kullandığınız hesabın bütün limitlerini verir: kullanılan yüzde, sıfırlanma zamanı, okumanın alındığı an ve bu hızla ne zaman dolacağı. Okumadan sonra pencere sıfırlandıysa `used_pct` boş gelir.
+- `limits`, açtığınız kaynaklarda kullandığınız hesabın bütün limitlerini verir: kullanılan yüzde, sıfırlanma zamanı, okumanın alındığı an ve bu hızla ne zaman dolacağı. Okumadan sonra pencere sıfırlandıysa `used_pct` boş gelir. `state` değeri `fresh`, `behind` (okumadan sonra kullanım var, gerçek değer büyük olasılıkla daha yüksek), `stale` (sıfırlanma zamanı bilinmeyen eski bir okuma) ya da `reset` olur; `budget`, okuma değil de Limitler sayfasında kendi tanımladığınız bir bütçeyse `true` olur.
 - Komut uygulamanın verilerini yalnızca okur, hiçbir şeyi değiştirmez. Uygulamanın açık olması gerekmez, ama rakamlar uygulamanın son taraması kadar günceldir.
 - Zamanlar sizin saat diliminizdedir (ISO 8601). `schema` yalnızca bir alanın anlamı değiştiğinde ya da bir alan kaldırıldığında artar.
 
-**Hazır betikler.** Aşağıdakini `~/bin/claude-status.sh` olarak kaydedin ve `chmod +x ~/bin/claude-status.sh` ile çalıştırılabilir yapın. Betik `5h 46% · 7d 64% · $12.84` gibi tek bir satır yazar; okunduktan sonra sıfırlanmış bir pencereyi atlar. `jq` gerektirir; macOS 15 ve sonrasında yüklü gelir, diğer sistemlerde paket yöneticinizle kurun. Linux'ta ya da uygulama başka bir yerdeyse betikleri **Ayarlar → Veriler → Komut satırı** bölümünden alın; oradakiler kurulumunuzun yolunu kullanır.
+**Hazır betikler.** Aşağıdakini `~/bin/claude-status.sh` olarak kaydedin ve `chmod +x ~/bin/claude-status.sh` ile çalıştırılabilir yapın. Betik `5h ~46% · 7d 64% · $12.84` gibi tek bir satır yazar: `~` okumadan sonra kullanım olduğunu, gerçek değerin büyük olasılıkla daha yüksek olduğunu gösterir. Okunduktan sonra sıfırlanmış ya da okuması eskimiş bir pencere atlanır. `jq` gerektirir; macOS 15 ve sonrasında yüklü gelir, diğer sistemlerde paket yöneticinizle kurun. Linux'ta ya da uygulama başka bir yerdeyse betikleri **Ayarlar → Veriler → Komut satırı** bölümünden alın; oradakiler kurulumunuzun yolunu kullanır.
 
 ```sh
 #!/bin/sh
@@ -372,8 +372,10 @@ ai-usage-tracker --json | jq '.limits[] | select(.window == "five_hour") | .used
 tracker="/Applications/AI Usage Tracker.app/Contents/MacOS/ai-usage-tracker"
 "$tracker" --json | jq -r '
   [ .limits[]
-    | select(.provider == "anthropic" and .used_pct != null and (.window == "five_hour" or .window == "seven_day"))
-    | "\(if .window == "five_hour" then "5h" else "7d" end) \(.used_pct | floor)%" ]
+    | select(.provider == "anthropic" and (.window == "five_hour" or .window == "seven_day"))
+    | select(.used_pct != null and (.state == "fresh" or .state == "behind") and (.budget | not))
+    | (if .window == "five_hour" then "5h " else "7d " end)
+      + (if .state == "behind" then "~" else "" end) + "\(.used_pct | floor)%" ]
   + [ "$\(.usage.cost_usd * 100 | floor / 100)" ]
   | join(" · ")'
 ```
@@ -411,7 +413,7 @@ Windows'ta PowerShell çıktıyı süzüp biçimlendirebileceğiniz nesnelere ç
 
 ```powershell
 $usage = & "$env:LOCALAPPDATA\AI Usage Tracker\ai-usage-tracker.exe" --json | Out-String | ConvertFrom-Json
-$usage.limits | Where-Object provider -eq anthropic | Format-Table window, used_pct, resets_at
+$usage.limits | Where-Object provider -eq anthropic | Format-Table window, used_pct, state, resets_at
 ```
 
 ## Desteklenen kaynaklar

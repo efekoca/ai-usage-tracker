@@ -405,6 +405,7 @@ function mockMisses() {
     rebuilds: events.reduce((n, e) => n + e.rebuilds, 0),
     recached_tokens: events.reduce((n, e) => n + e.recached_tokens, 0),
     extra_usd: events.reduce((n, e) => n + e.recached_tokens, 0) * 9.5e-6,
+    extra_unknown: null,
     cost_usd: 214.8,
     causes: ['ttl_expired_5m', 'tools_changed', 'likely_server_side', 'system_prompt_changed'].map((cause) => ({ cause, misses: count(cause) })),
     undetermined: events.filter((e) => e.misses && !e.causes.length).reduce((n, e) => n + e.misses, 0),
@@ -1158,7 +1159,7 @@ export function installMock() {
         case 'get_cache_misses':
           // `?misses=0`: Claude Code has reported nothing yet
           return scenario.get('misses') === '0'
-            ? { reported: false, sessions: 0, misses: 0, rebuilds: 0, recached_tokens: 0, extra_usd: 0, cost_usd: 0, causes: [], undetermined: 0, days: [], projects: [] }
+            ? { reported: false, sessions: 0, misses: 0, rebuilds: 0, recached_tokens: 0, extra_usd: 0, extra_unknown: null, cost_usd: 0, causes: [], undetermined: 0, days: [], projects: [] }
             : mockMisses()
         case 'get_tips':
           return mockTips()
