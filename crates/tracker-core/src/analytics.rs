@@ -215,6 +215,38 @@ pub struct DayPoint {
     pub cache_savings_usd: f64,
 }
 
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct HourPoint {
+    /// Local clock hour, 0 to 23.
+    pub hour: u32,
+    pub tokens: u64,
+    pub cost_usd: f64,
+    pub events: u64,
+    pub by_tool: BTreeMap<String, u64>,
+    pub cost_by_tool: BTreeMap<String, f64>,
+    /// As in [`DayPoint`].
+    pub prompt_tokens: u64,
+    pub cache_read: u64,
+}
+
+impl HourPoint {
+    pub(crate) fn add(&mut self, e: &EventRow, cost: Option<&Cost>) {
+        let usd = cost.map(Cost::total).unwrap_or(0.0);
+        self.tokens += e.tokens.total();
+        self.cost_usd += usd;
+        self.events += 1;
+        *self.by_tool.entry(e.tool.as_str().to_owned()).or_default() += e.tokens.total();
+        *self.cost_by_tool.entry(e.tool.as_str().to_owned()).or_default() += usd;
+        self.prompt_tokens += e.tokens.input + e.tokens.cache_read + e.tokens.cache_write;
+        self.cache_read += e.tokens.cache_read;
+    }
+}
+
+/// 24 empty local hours.
+pub(crate) fn day_hours() -> Vec<HourPoint> {
+    (0..24).map(|hour| HourPoint { hour, ..HourPoint::default() }).collect()
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Report {
     pub range: Range,
@@ -226,6 +258,8 @@ pub struct Report {
     pub by_model: Vec<Group>,
     pub by_project: Vec<Group>,
     pub daily: Vec<DayPoint>,
+    /// A range of one local day by the hour, up to the current hour while the day runs; empty for longer ranges.
+    pub hourly: Vec<HourPoint>,
     /// `[weekday Mon=0..Sun=6][hour 0..23]` total tokens, local time.
     pub heatmap: Vec<Vec<u64>>,
     pub peak_day: Option<DayPoint>,
@@ -298,6 +332,9 @@ pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filte
     // per local day: totals, tokens per tool, cost per tool
     type DayAcc = (Totals, BTreeMap<String, u64>, BTreeMap<String, f64>);
     let mut days: BTreeMap<NaiveDate, DayAcc> = BTreeMap::new();
+    let first = local_date(tz, range.from_ms);
+    let last = local_date(tz, range.to_ms - 1);
+    let mut hours = if first == last { day_hours() } else { Vec::new() };
     let mut heat = vec![vec![0u64; 24]; 7];
     let mut unpriced = BTreeMap::new();
     let mut catalog = std::collections::BTreeSet::new();
@@ -333,14 +370,21 @@ pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filte
             *d.1.entry(e.tool.as_str().to_owned()).or_insert(0) += e.tokens.total();
             *d.2.entry(e.tool.as_str().to_owned()).or_insert(0.0) += c.as_ref().map(Cost::total).unwrap_or(0.0);
             heat[local.weekday().num_days_from_monday() as usize][local.hour() as usize] += e.tokens.total();
+            if let Some(h) = hours.get_mut(local.hour() as usize) {
+                h.add(e, c.as_ref());
+            }
         }
     }
 
     let previous = totals_in(store, book, range.previous_until(tz, now_ms), filter)?;
 
+    if (range.from_ms..range.to_ms).contains(&now_ms)
+        && let Some(now) = tz.timestamp_millis_opt(now_ms).single()
+    {
+        hours.truncate(now.hour() as usize + 1);
+    }
+
     // dense daily series over the whole range
-    let first = local_date(tz, range.from_ms);
-    let last = local_date(tz, range.to_ms - 1);
     let mut daily = Vec::new();
     let mut d = first;
     while d <= last {
@@ -380,6 +424,7 @@ pub fn report<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, filte
         by_model: sorted_groups(by_model),
         by_project: sorted_groups(by_project),
         daily,
+        hourly: hours,
         heatmap: heat,
         peak_day,
         peak_hour,

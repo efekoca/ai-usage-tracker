@@ -1,6 +1,6 @@
 //! Derived views over the archive, computed from stored counts only.
 
-use crate::analytics::{local_date, Filter, Range, Totals};
+use crate::analytics::{local_date, Filter, HourPoint, Range, Totals};
 use crate::model::{Accuracy, Provider, Tool};
 use crate::pricing::{CostInput, PriceBook};
 use crate::store::{EventRow, ProjectRow, Store};
@@ -1586,15 +1586,6 @@ pub fn subagent_cache<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Rang
     })
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct HourPoint {
-    pub hour: u32,
-    pub tokens: u64,
-    pub cost_usd: f64,
-    pub events: u64,
-    pub by_tool: BTreeMap<String, u64>,
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct DayLimitPeak {
     pub provider: Provider,
@@ -1636,7 +1627,7 @@ pub fn day_detail<Tz: TimeZone>(store: &Store, book: &PriceBook, date: NaiveDate
     let to = crate::analytics::start_of_day(tz, date.succ_opt().unwrap_or(date));
     let projects: HashMap<i64, ProjectRow> = store.projects()?.into_iter().map(|p| (p.id, p)).collect();
     let mut totals = Totals::default();
-    let mut hourly: Vec<HourPoint> = (0..24).map(|h| HourPoint { hour: h, ..Default::default() }).collect();
+    let mut hourly: Vec<HourPoint> = crate::analytics::day_hours();
     let (mut by_tool, mut by_model, mut by_project) = (HashMap::new(), HashMap::new(), HashMap::new());
     let mut sessions = std::collections::HashSet::new();
     let (mut first, mut last) = (None::<i64>, None::<i64>);
@@ -1658,11 +1649,7 @@ pub fn day_detail<Tz: TimeZone>(store: &Store, book: &PriceBook, date: NaiveDate
             None => put(&mut by_project, "none".into(), String::new(), false),
         }
         if let Some(local) = tz.timestamp_millis_opt(e.ts_ms).single() {
-            let h = &mut hourly[local.hour() as usize];
-            h.tokens += e.tokens.total();
-            h.cost_usd += cost.map(|c| c.total()).unwrap_or(0.0);
-            h.events += 1;
-            *h.by_tool.entry(e.tool.as_str().to_owned()).or_default() += e.tokens.total();
+            hourly[local.hour() as usize].add(e, cost.as_ref());
         }
         if let Some(s) = &e.session_id {
             sessions.insert(format!("{}:{s}", e.tool.as_str()));

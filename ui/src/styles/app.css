@@ -339,10 +339,12 @@ select.field {
 }
 
 .swatch {
+  display: inline-block;
   width: 10px;
   height: 10px;
   border-radius: 3px;
   flex: none;
+  vertical-align: -1px;
 }
 
 .banner {

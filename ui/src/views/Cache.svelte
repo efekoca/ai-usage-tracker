@@ -1,6 +1,6 @@
 <script lang="ts">
   import { app, toolColor } from '../lib/store.svelte'
-  import { clientLabel, fmtCompact, fmtDec, fmtMoney, fmtPct, t, toolLabel } from '../lib/i18n.svelte'
+  import { clientLabel, fmtCompact, fmtDec, fmtMoney, fmtPct, hourLabels, t, toolLabel } from '../lib/i18n.svelte'
   import type { Group, Tokens } from '../lib/api'
   import StatTile from '../components/StatTile.svelte'
   import AreaChart from '../components/charts/AreaChart.svelte'
@@ -29,10 +29,15 @@
     return g.label
   }
 
+  // one day reads hour by hour
+  const hourly = $derived(r?.hourly ?? [])
   const days = $derived(r?.daily ?? [])
+  const points = $derived(hourly.length ? hourly : days)
+  const dates = $derived(hourly.length ? hourly.map((h) => String(h.hour)) : days.map((d) => d.date))
+  const trendTitle = $derived(t(hourly.length ? 'cache.trend.hourly' : 'cache.trend'))
   const series = [{ key: 'hit', label: t('cache.hitRate'), color: 'var(--s3)' }]
-  // days without prompts are gaps, not 0 %
-  const values = $derived(days.map((d) => ({ hit: d.prompt_tokens > 0 ? (d.cache_read / d.prompt_tokens) * 100 : NaN })))
+  // days or hours without prompts are gaps, not 0 %
+  const values = $derived(points.map((d) => ({ hit: d.prompt_tokens > 0 ? (d.cache_read / d.prompt_tokens) * 100 : NaN })))
   const tk = $derived(r?.totals.tokens)
 </script>
 
@@ -81,8 +86,8 @@
       </table>
     </section>
     <section class="card">
-      <h2>{t('cache.trend')}</h2>
-      <AreaChart dates={days.map((d) => d.date)} {values} {series} format={(v) => fmtPct(v)} height={200} ariaLabel={t('cache.trend')} />
+      <h2>{trendTitle}</h2>
+      <AreaChart {dates} {values} {series} format={(v) => fmtPct(v)} height={200} ariaLabel={trendTitle} {...hourly.length ? hourLabels : {}} />
     </section>
   </div>
 
@@ -260,7 +265,6 @@
     font-weight: 500;
   }
   tbody th .swatch {
-    display: inline-block;
     margin-right: 6px;
   }
   .neg {

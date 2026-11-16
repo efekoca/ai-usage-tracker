@@ -228,6 +228,8 @@ export interface Report {
   by_model: Group[]
   by_project: Group[]
   daily: DayPoint[]
+  /** A range of one local day by the hour, up to the current hour while the day runs; empty for longer ranges. */
+  hourly: HourPoint[]
   heatmap: number[][]
   peak_day: DayPoint | null
   peak_hour: number | null
@@ -1228,6 +1230,9 @@ export interface HourPoint {
   cost_usd: number
   events: number
   by_tool: Record<string, number>
+  cost_by_tool: Record<string, number>
+  prompt_tokens: number
+  cache_read: number
 }
 export interface DayDetail {
   date: string

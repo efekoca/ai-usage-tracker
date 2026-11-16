@@ -97,6 +97,32 @@ fn trend_compares_with_the_previous_period() {
 }
 
 #[test]
+fn a_single_day_is_split_by_the_hour_up_to_the_current_one() {
+    let (_m, store) = loaded();
+    let book = PriceBook::default_book();
+    let day = chrono::NaiveDate::from_ymd_opt(2026, 9, 1).unwrap();
+    let r = report(&store, &book, period_range(Period::Custom { from: day, to: day }, &tz(), 0, None), &Filter::default(), &tz(), i64::MAX).unwrap();
+    assert_eq!(r.hourly.iter().map(|h| h.hour).collect::<Vec<_>>(), (0..24).collect::<Vec<_>>());
+    assert_eq!(r.hourly.iter().map(|h| h.events).sum::<u64>(), r.totals.events);
+    assert_eq!(r.hourly.iter().map(|h| h.tokens).sum::<u64>(), r.totals.total_tokens);
+    assert!(close(r.hourly.iter().map(|h| h.cost_usd).sum(), r.totals.cost_usd));
+    assert_eq!(r.hourly.iter().map(|h| h.prompt_tokens).sum::<u64>(), r.daily[0].prompt_tokens);
+    assert_eq!(r.hourly.iter().map(|h| h.cache_read).sum::<u64>(), r.daily[0].cache_read);
+    for h in &r.hourly {
+        assert_eq!(h.by_tool.values().sum::<u64>(), h.tokens);
+        assert!(close(h.cost_by_tool.values().sum(), h.cost_usd));
+    }
+
+    // 2026-09-02 16:00 local, while the day runs
+    let now = ms(2026, 9, 2, 13, 0);
+    let today = report(&store, &book, period_range(Period::Today, &tz(), now, None), &Filter::default(), &tz(), now).unwrap();
+    assert_eq!(today.hourly.len(), 17);
+
+    let week = report(&store, &book, period_range(Period::Days7, &tz(), now, None), &Filter::default(), &tz(), now).unwrap();
+    assert!(week.hourly.is_empty());
+}
+
+#[test]
 fn hidden_projects_keep_their_data_but_are_flagged() {
     let (_m, store) = loaded();
     let book = PriceBook::default_book();

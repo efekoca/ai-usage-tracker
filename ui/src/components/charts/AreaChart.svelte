@@ -12,6 +12,8 @@
     height = 220,
     ariaLabel,
     sum = true,
+    xLabel = (d: string) => fmtDate(d, 'short'),
+    tipLabel = (d: string) => fmtDate(d, 'long'),
   }: {
     dates: string[]
     values: Record<string, number>[]
@@ -21,6 +23,8 @@
     ariaLabel: string
     /** false when the series are statistics of one quantity (avg, p90), which do not add up */
     sum?: boolean
+    xLabel?: (d: string) => string
+    tipLabel?: (d: string) => string
   } = $props()
 
   let width = $state(600)
@@ -100,7 +104,7 @@
       {/each}
       <line class="base" x1="0" x2={iw} y1={ih} y2={ih} />
       {#each xLabels as i (i)}
-        <text class="axis" x={x(i)} y={ih + 18} text-anchor={i === 0 ? 'start' : i === dates.length - 1 ? 'end' : 'middle'}>{fmtDate(dates[i], 'short')}</text>
+        <text class="axis" x={x(i)} y={ih + 18} text-anchor={i === 0 ? 'start' : i === dates.length - 1 ? 'end' : 'middle'}>{xLabel(dates[i])}</text>
       {/each}
       {#if hi !== null}
         <line class="cross" x1={x(hi)} x2={x(hi)} y1="0" y2={ih} />
@@ -116,7 +120,7 @@
   {#if hi !== null}
     {@const left = m.left + x(hi)}
     <div class="tip" style="left:{Math.min(Math.max(left, 90), width - 90)}px">
-      <div class="tip-date">{fmtDate(dates[hi], 'long')}</div>
+      <div class="tip-date">{tipLabel(dates[hi])}</div>
       {#each [...series].reverse() as s (s.key)}
         <div class="tip-row"><i style="background:{s.color}"></i><span>{s.label}</span><b class="num">{Number.isFinite(values[hi]?.[s.key] ?? 0) ? format(values[hi]?.[s.key] ?? 0) : '—'}</b></div>
       {/each}
