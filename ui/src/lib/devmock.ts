@@ -803,7 +803,7 @@ const openerRuns = [
 ]
 const autoOverride = new Map<string, boolean>()
 const refreshLog: { at: number; usd: number; session: string }[] = []
-function mockCaches() {
+function mockCaches(dropped = false) {
   if (!settings.cache_timer || scenario.get('cache') === '0') return []
   const at = (offset: number, ttl: number, id: string) => {
     // a refresh starts the lifetime again from when it reached the cache
@@ -842,7 +842,7 @@ function mockCaches() {
   // `?caches=2` keeps only that many, to see how the views look with fewer
   return all
     .slice(0, Number(scenario.get('caches') ?? all.length))
-    .filter((c) => !droppedCaches.has(c.session_id))
+    .filter((c) => droppedCaches.has(c.session_id) === dropped)
     .filter((c) => settings.cache_projects !== 'picked' || settings.cache_picked.includes(`C:\\Projects\\${c.project}`))
     .map((c) => (settings.hide_project_names ? { ...c, project: '', branch: null } : c))
     .sort((a, b) => a.expires_ms - b.expires_ms)
@@ -1029,6 +1029,11 @@ export function installMock() {
           return mockCaches()
         case 'drop_cache':
           droppedCaches.add(a.sessionId as string)
+          return null
+        case 'dropped_caches':
+          return mockCaches(true)
+        case 'restore_cache':
+          droppedCaches.delete(a.sessionId as string)
           return null
         case 'refresh_cache': {
           const c = mockCaches().find((x) => x.session_id === a.sessionId)

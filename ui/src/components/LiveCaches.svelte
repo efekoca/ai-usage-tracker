@@ -12,13 +12,18 @@
   let now = $state(Date.now())
   let open = $state<string | null>(null)
   let menu = $state<string | null>(null)
+  let dropped = $state<LiveCache[]>([])
+  let showDropped = $state(false)
 
   let gen = 0
   async function load() {
     const mine = ++gen
     try {
-      const [list] = await Promise.all([api.liveCaches(), loadRefreshInfo()])
-      if (mine === gen) caches = list
+      const [list, gone] = await Promise.all([api.liveCaches(), api.droppedCaches(), loadRefreshInfo()])
+      if (mine === gen) {
+        caches = list
+        dropped = gone
+      }
     } catch {
       /* backend busy; the next refresh retries */
     }
@@ -43,6 +48,10 @@
   })
 
   const live = $derived(caches.filter((c) => c.expires_ms > now))
+  const gone = $derived(dropped.filter((c) => c.expires_ms > now))
+  $effect(() => {
+    if (!gone.length) showDropped = false
+  })
   // while a refresh is on its way, the list looks again sooner than its usual round
   $effect(() => {
     if (!caches.some((c) => c.refreshing)) return
@@ -87,7 +96,8 @@
     load()
   }
   // when an automatic refresh comes: the lead set in Settings, a 5-minute cache in its last minute
-  const autoAt = (c: LiveCache) => c.expires_ms - (c.ttl_ms <= 300_000 ? 1 : (app.settings?.cache_lead ?? 2)) * 60_000
+  const lead = (c: LiveCache) => (c.ttl_ms <= 300_000 ? 1 : (app.settings?.cache_lead ?? 2))
+  const autoAt = (c: LiveCache) => c.expires_ms - lead(c) * 60_000
   function status(c: LiveCache): { text: string; tone: string; auto: boolean; help?: string } {
     if (errors[c.session_id]) return { text: errors[c.session_id], tone: 'bad', auto: false }
     if (c.refreshing || asked.includes(c.session_id)) return { text: t('cache.live.refreshing'), tone: 'busy', auto: false }
@@ -102,10 +112,17 @@
     // a list already on its way would bring the row back
     gen++
     caches = caches.filter((x) => x.session_id !== c.session_id)
+    dropped = [...dropped, c]
     api.dropCache(c.session_id).catch((e) => {
       showError(c.session_id, e)
       load()
     })
+  }
+  async function restore(c: LiveCache) {
+    gen++
+    dropped = dropped.filter((x) => x.session_id !== c.session_id)
+    await api.restoreCache(c.session_id).catch(() => {})
+    load()
   }
 
   const meta = (c: LiveCache) =>
@@ -143,7 +160,7 @@
       <button class="btn ghost square" aria-label={t('cache.live.settings')} title={t('cache.live.settings')} onclick={() => (app.view = 'settings')}><Icon name="gear" size={15} /></button>
     </div>
     {#if !live.length}
-      <p class="empty">{t('cache.live.empty')}</p>
+      {#if !gone.length}<p class="empty">{t('cache.live.empty')}</p>{/if}
     {:else}
       <ul>
         {#each live as c (c.session_id)}
@@ -177,11 +194,19 @@
                 onclick={() => refreshNow(c)}>{t('cache.live.refresh')}</button
               >
               <div class="menu-wrap">
-                <button class="btn ghost square" bind:this={() => triggers[c.session_id], (el) => (triggers[c.session_id] = el)} aria-label={t('cache.live.more', { name })} aria-haspopup="menu" aria-expanded={menu === c.session_id} onclick={() => (menu = menu === c.session_id ? null : c.session_id)}><Icon name="more" size={16} /></button>
+                <button class="btn ghost square" class:active={menu === c.session_id} bind:this={() => triggers[c.session_id], (el) => (triggers[c.session_id] = el)} aria-label={t('cache.live.more', { name })} aria-haspopup="menu" aria-expanded={menu === c.session_id} onclick={() => (menu = menu === c.session_id ? null : c.session_id)}><Icon name="more" size={16} /></button>
                 {#if menu === c.session_id}
                   <div class="menu" role="menu" tabindex="-1" use:focusFirst onkeydown={(e) => menuKeys(e, c.session_id)}>
-                    <button role="menuitemcheckbox" aria-checked={c.auto} onclick={() => flipAuto(c)}><span class="check" class:on={c.auto}><Icon name="check" size={13} /></span>{t('cache.live.auto')}</button>
-                    <button role="menuitem" onclick={() => untrack(c)}><span class="check"></span>{t('cache.live.untrack')}</button>
+                    <button role="menuitemcheckbox" aria-checked={c.auto} onclick={() => flipAuto(c)}>
+                      <span class="ico"><Icon name="refresh" size={14} /></span>
+                      <span class="label">{t('cache.live.auto')}<small>{t('cache.live.auto.when', { n: lead(c) })}</small></span>
+                      <span class="switch" class:on={c.auto}><span></span></span>
+                    </button>
+                    <div class="sep" role="separator"></div>
+                    <button role="menuitem" onclick={() => untrack(c)}>
+                      <span class="ico"><Icon name="eyeOff" size={14} /></span>
+                      <span class="label">{t('cache.live.untrack')}</span>
+                    </button>
                   </div>
                 {/if}
               </div>
@@ -197,6 +222,27 @@
           </li>
         {/each}
       </ul>
+    {/if}
+    {#if gone.length}
+      <div class="dropped">
+        <button class="toggle" aria-expanded={showDropped} onclick={() => (showDropped = !showDropped)}>
+          <Icon name="eyeOff" size={13} />{t('cache.live.dropped', { n: gone.length })}
+          <span class="chev" class:open={showDropped}><Icon name="chevron" size={11} /></span>
+        </button>
+        {#if showDropped}
+          <div class="gone">
+            {#each gone as c (c.session_id)}
+              {@const name = cacheName(c)}
+              <div class="gone-row">
+                <span class="name" class:hidden={!c.project}>{name}</span>
+                {#if c.branch}<span class="chip"><Icon name="branch" size={11} />{c.branch}</span>{/if}
+                <span class="meta">{t('cache.live.left', { t: mmss(c.expires_ms - now) })} · {shortModel(c.model)} · {cacheClient(c.client)}</span>
+                <button class="restore" aria-label={t('cache.live.restoreOne', { name })} onclick={() => restore(c)}>{t('cache.live.restore')}</button>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
     {/if}
   </section>
 {/if}
@@ -370,14 +416,9 @@
   .go:hover:not(:disabled) {
     background: color-mix(in srgb, var(--accent) 22%, transparent);
   }
-  .check {
-    display: inline-flex;
-    width: 13px;
-    margin-right: 9px;
-    color: transparent;
-  }
-  .check.on {
-    color: var(--accent);
+  .square.active {
+    background: var(--surface-hover);
+    color: var(--ink);
   }
   .menu-wrap {
     position: relative;
@@ -386,21 +427,30 @@
   .menu {
     position: absolute;
     right: 0;
-    top: 34px;
+    top: calc(100% + 6px);
     z-index: 5;
-    min-width: 180px;
+    width: max-content;
+    min-width: 220px;
     padding: 5px;
-    border-radius: 10px;
+    border-radius: 11px;
     background: var(--surface);
     border: 0.5px solid var(--hairline-strong);
     box-shadow: var(--shadow-pop);
+    animation: drop 120ms var(--ease);
+  }
+  @keyframes drop {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
   }
   .menu button {
     display: flex;
     align-items: center;
+    gap: 10px;
     width: 100%;
-    height: 32px;
-    padding: 0 10px;
+    min-height: 34px;
+    padding: 6px 10px 6px 8px;
     border: 0;
     border-radius: 7px;
     background: transparent;
@@ -408,11 +458,125 @@
     font: inherit;
     font-size: 13px;
     text-align: left;
+    white-space: nowrap;
   }
   .menu button:hover,
   .menu button:focus-visible {
     background: var(--surface-hover);
     outline: none;
+  }
+  .ico {
+    flex: none;
+    display: inline-flex;
+    color: var(--ink-3);
+  }
+  .label {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .label small {
+    font-size: 11.5px;
+    color: var(--ink-3);
+  }
+  .switch {
+    flex: none;
+    display: inline-flex;
+    width: 28px;
+    height: 16px;
+    margin-left: 12px;
+    padding: 2px;
+    border-radius: 8px;
+    background: var(--hairline-strong);
+    transition: background var(--dur) var(--ease);
+  }
+  .switch span {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+    transition: transform var(--dur) var(--ease);
+  }
+  .switch.on {
+    background: var(--accent);
+  }
+  .switch.on span {
+    transform: translateX(12px);
+  }
+  .sep {
+    height: 0.5px;
+    margin: 4px 6px;
+    background: var(--hairline);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .menu {
+      animation: none;
+    }
+  }
+  .dropped {
+    margin: 0 -20px;
+    padding: 6px 20px 2px;
+    border-top: 0.5px solid var(--hairline);
+  }
+  .toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 28px;
+    padding: 0 8px;
+    margin-left: -8px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--ink-3);
+    font: inherit;
+    font-size: 12.5px;
+  }
+  .toggle:hover {
+    background: var(--surface-hover);
+    color: var(--ink-2);
+  }
+  .toggle:focus-visible,
+  .restore:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  .gone {
+    display: flex;
+    flex-direction: column;
+    padding: 2px 0 6px 20px;
+  }
+  .gone-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    min-height: 36px;
+  }
+  .gone-row .name {
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .gone-row .meta {
+    flex: 1;
+    min-width: 0;
+  }
+  .restore {
+    flex: none;
+    height: 26px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--accent);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 500;
+  }
+  .restore:hover {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
   }
   .facts {
     display: grid;

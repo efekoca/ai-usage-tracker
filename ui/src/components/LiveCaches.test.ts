@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   refreshCache: vi.fn(),
   setCacheAuto: vi.fn(),
   dropCache: vi.fn(),
+  droppedCaches: vi.fn(),
+  restoreCache: vi.fn(),
 }))
 vi.mock('../lib/api', () => ({
   api: mocks,
@@ -29,6 +31,7 @@ let done: (() => void)[] = []
 beforeEach(() => {
   app.settings = { cache_timer: true, cache_lead: 2 } as unknown as Settings
   mocks.cacheRefreshInfo.mockResolvedValue({ installed: true, settings_file: '', today: 0, today_usd: 0 } satisfies RefreshInfo)
+  mocks.droppedCaches.mockResolvedValue([])
 })
 afterEach(() => {
   done.forEach((d) => d())
@@ -109,5 +112,31 @@ describe('the Live caches list', () => {
     answer([cache({ project: 'notes' })])
     await settle()
     expect(target.querySelector('li')).toBeNull()
+  })
+
+  it('brings back one conversation the user stopped following', async () => {
+    const { target, row } = await render([cache({ session_id: 'a', project: 'notes' }), cache({ session_id: 'b', project: 'site' })])
+    expect(target.querySelector('.dropped')).toBeNull()
+    mocks.dropCache.mockResolvedValue(undefined)
+    for (const name of ['notes', 'site']) {
+      row(name).querySelector<HTMLButtonElement>('.menu-wrap > button')!.click()
+      flushSync()
+      ;[...row(name).querySelectorAll<HTMLElement>('[role="menuitem"]')].at(-1)!.click()
+      flushSync()
+    }
+    expect(target.querySelector('li')).toBeNull()
+    expect(target.querySelector('.empty')).toBeNull()
+    const toggle = target.querySelector<HTMLButtonElement>('.dropped .toggle')!
+    expect(toggle.textContent).toContain('2 conversations you stopped following')
+    toggle.click()
+    flushSync()
+    mocks.restoreCache.mockResolvedValue(undefined)
+    mocks.liveCaches.mockResolvedValue([cache({ session_id: 'b', project: 'site' })])
+    mocks.droppedCaches.mockResolvedValue([cache({ session_id: 'a', project: 'notes' })])
+    target.querySelector<HTMLButtonElement>('.gone-row button[aria-label="site: bring back"]')!.click()
+    await settle()
+    expect(mocks.restoreCache).toHaveBeenCalledWith('b')
+    expect(row('site')).toBeDefined()
+    expect([...target.querySelectorAll('.gone-row .name')].map((n) => n.textContent)).toEqual(['notes'])
   })
 })

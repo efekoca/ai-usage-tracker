@@ -476,6 +476,8 @@ pub fn run() {
             commands::get_widget_data,
             caches::live_caches,
             caches::drop_cache,
+            caches::dropped_caches,
+            caches::restore_cache,
             caches::cache_project_choices,
             refresh::refresh_cache,
             refresh::set_cache_auto,
