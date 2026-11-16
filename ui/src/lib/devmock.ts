@@ -1,7 +1,7 @@
 // Dev-only IPC mock for running the UI in a plain browser; never in production builds (see main.ts).
 import { mockIPC } from '@tauri-apps/api/mocks'
 import plansJson from '../../../config/plans.json'
-import type { DayPoint, Group, LimitView, Period, Provider, Report, Settings, Totals, PanelModule, TimelineRequest, TrayItem, TraySettings } from './api'
+import type { DayPoint, Group, HourPoint, LimitView, Period, Provider, Report, Settings, Totals, PanelModule, TimelineRequest, TrayItem, TraySettings } from './api'
 
 const scenario = new URLSearchParams(location.search)
 let claudeMode = scenario.get('claude')
@@ -210,6 +210,7 @@ function report(p: Period): Report {
     by_model: models.filter(([, t]) => !(ocMissing && t === 'opencode')).map(([m, , s]) => g(m, m, s, m === 'codex-auto-review' || m === 'big-pickle')),
     by_project: projects.map((p, i) => ({ ...g(String(i + 1), p, [0.4, 0.25, 0.15, 0.12, 0.08][i]), hidden: i === 4 })),
     daily,
+    hourly: n === 1 ? mockHours(daily[0]) : [],
     heatmap: heat,
     peak_day: daily.reduce((a, b) => (b.tokens > a.tokens ? b : a)),
     peak_hour: 15,
@@ -638,6 +639,30 @@ function mockHistory() {
   }
 }
 
+function scaleHours(hours: HourPoint[], target: number) {
+  const raw = hours.reduce((a, h) => a + h.tokens, 0)
+  if (target <= 0 || raw <= 0) return
+  const f = target / raw
+  for (const h of hours) {
+    h.tokens = Math.round(h.tokens * f)
+    h.cost_usd *= f
+    h.events = Math.round(h.tokens / 120000)
+    h.prompt_tokens = Math.round(h.prompt_tokens * f)
+    h.cache_read = Math.round(h.cache_read * f)
+    for (const k of Object.keys(h.by_tool)) h.by_tool[k] = Math.round(h.by_tool[k] * f)
+    for (const k of Object.keys(h.cost_by_tool)) h.cost_by_tool[k] *= f
+  }
+}
+
+/** One day of the report by the hour, up to the current hour today. */
+function mockHours(d: DayPoint): HourPoint[] {
+  const now = new Date()
+  const today = d.date === `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  const hours = mockDay(d.date).hourly.filter((h) => !today || h.hour <= now.getHours())
+  scaleHours(hours, d.tokens)
+  return hours
+}
+
 function mockDay(date: string) {
   const seedDay = Number(date.slice(-2))
   const hourly = Array.from({ length: 24 }, (_, h) => {
@@ -645,19 +670,20 @@ function mockDay(date: string) {
     const cc = on ? Math.round((1 + ((h * 13 + seedDay) % 7)) * 1.9e6) : 0
     const cx = on && h % 3 === 0 ? Math.round(6e5 + (h % 4) * 2e5) : 0
     const oc = !ocMissing && on && h % 4 === 1 ? Math.round(3e5 + (h % 3) * 1e5) : 0
-    return { hour: h, tokens: cc + cx + oc, cost_usd: cc * 0.75e-6 + cx * 0.6e-6 + oc * 0.5e-6, events: Math.round((cc + cx + oc) / 120000), by_tool: { ...(cc ? { claude_code: cc } : {}), ...(cx ? { codex: cx } : {}), ...(oc ? { opencode: oc } : {}) } }
+    return {
+      hour: h,
+      tokens: cc + cx + oc,
+      cost_usd: cc * 0.75e-6 + cx * 0.6e-6 + oc * 0.5e-6,
+      events: Math.round((cc + cx + oc) / 120000),
+      by_tool: { ...(cc ? { claude_code: cc } : {}), ...(cx ? { codex: cx } : {}), ...(oc ? { opencode: oc } : {}) } as Record<string, number>,
+      cost_by_tool: { ...(cc ? { claude_code: cc * 0.75e-6 } : {}), ...(cx ? { codex: cx * 0.6e-6 } : {}), ...(oc ? { opencode: oc * 0.5e-6 } : {}) } as Record<string, number>,
+      prompt_tokens: Math.round((cc + cx + oc) * 0.99),
+      cache_read: Math.round((cc + cx + oc) * (0.8 + ((h * 7 + seedDay) % 9) / 50)),
+    }
   })
   // match the day's total in the 30-day chart
   const target = report({ kind: 'month1' } as Period).daily.find((d) => d.date === date)?.tokens ?? 0
-  const raw = hourly.reduce((a, h) => a + h.tokens, 0)
-  if (target > 0 && raw > 0)
-    for (const h of hourly) {
-      const f = target / raw
-      h.tokens = Math.round(h.tokens * f)
-      h.cost_usd *= f
-      h.events = Math.round(h.tokens / 120000)
-      for (const k of Object.keys(h.by_tool) as (keyof typeof h.by_tool)[]) h.by_tool[k] = Math.round(h.by_tool[k]! * f)
-    }
+  scaleHours(hourly, target)
   const tok = hourly.reduce((a, h) => a + h.tokens, 0)
   const cost = hourly.reduce((a, h) => a + h.cost_usd, 0)
   const g = (key: string, label: string, share: number, hidden = false) => ({ key, label, hidden, totals: totals(Math.round(tok * share), cost * share) })

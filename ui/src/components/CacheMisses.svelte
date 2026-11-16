@@ -299,10 +299,6 @@
   .legend td:first-child {
     width: 18px;
   }
-  .legend .swatch {
-    display: inline-block;
-    vertical-align: -1px;
-  }
   .legend .name {
     color: var(--ink-2);
     cursor: default;

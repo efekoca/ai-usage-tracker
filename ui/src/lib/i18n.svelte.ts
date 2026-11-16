@@ -1650,6 +1650,7 @@ const tr: Dict = {
   'cache.write5m': 'Önbelleğe yazma (5 dk)',
   'cache.write1h': 'Önbelleğe yazma (1 sa)',
   'cache.trend': 'Günlük isabet oranı',
+  'cache.trend.hourly': 'Saatlik isabet oranı',
   'cache.breakdown': 'Ayrıntı',
   'cache.method': 'İsabet oranı = önbellek okuma ÷ istem token\'ları. Net tasarruf, her istek kendi modelinin fiyatıyla hesaplanır: okunan token × (girdi fiyatı − okuma fiyatı) − yazılan token × (yazma fiyatı − girdi fiyatı). Negatif tasarruf, yazılan önbelleğin kendini amorti edecek kadar okunmadığını gösterir. Codex veya Antigravity önbelleğe yazmayı ayrıca bildirmediğinde yazma 0 sayılır.',
 
@@ -3430,6 +3431,7 @@ const en: Dict = {
   'cache.write5m': 'Cache write (5 min)',
   'cache.write1h': 'Cache write (1 h)',
   'cache.trend': 'Daily hit rate',
+  'cache.trend.hourly': 'Hit rate by hour',
   'cache.breakdown': 'Breakdown',
   'cache.method': 'Hit rate = cache read ÷ prompt tokens. Net savings are priced per request with that model\'s rates: read tokens × (input − read price) − written tokens × (write − input price). Negative savings mean written cache was not read enough to pay off. When Codex or Antigravity does not report cache writes separately they count as 0.',
   'subcache.title': 'Subagents and cache',
@@ -3710,6 +3712,12 @@ export function clockCase(ms: number, ending: 'at' | 'from'): string {
 
 export function fmtHour(h: number): string {
   return new Intl.DateTimeFormat(locale(), { hour: '2-digit', minute: '2-digit' }).format(new Date(2000, 0, 1, h))
+}
+
+/** Axis and tooltip labels for a chart over the hours of one day, keyed by the hour. */
+export const hourLabels = {
+  xLabel: (k: string) => fmtHour(Number(k)),
+  tipLabel: (k: string) => `${fmtHour(Number(k))}–${fmtHour((Number(k) + 1) % 24)}`,
 }
 
 /** A length of time (never "just now"): under a minute reads as "< 1 min". */

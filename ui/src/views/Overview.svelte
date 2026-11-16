@@ -1,7 +1,7 @@
 <script lang="ts">
   import { accountOf, app, saveSettings, toolColor } from '../lib/store.svelte'
   import type { Accuracy } from '../lib/api'
-  import { fmtCompact, fmtDate, fmtHour, fmtMoney, fmtPct, limitName, t, toolLabel, weekdayNames } from '../lib/i18n.svelte'
+  import { fmtCompact, fmtDate, fmtHour, fmtMoney, fmtPct, hourLabels, limitName, t, toolLabel, weekdayNames } from '../lib/i18n.svelte'
   import StatTile from '../components/StatTile.svelte'
   import Segmented from '../components/Segmented.svelte'
   import AreaChart from '../components/charts/AreaChart.svelte'
@@ -18,7 +18,10 @@
   const r = $derived(app.report)
   const toolsPresent = $derived((r?.by_tool ?? []).map((g) => g.key).filter((k) => k in toolColor).sort())
   const series = $derived(toolsPresent.map((k) => ({ key: k, label: toolLabel(k), color: toolColor[k] })))
-  const values = $derived((r?.daily ?? []).map((d) => (metric === 'tokens' ? d.by_tool : d.cost_by_tool)))
+  const points = $derived(r?.hourly.length ? r.hourly : (r?.daily ?? []))
+  const dates = $derived(r?.hourly.length ? r.hourly.map((h) => String(h.hour)) : (r?.daily ?? []).map((d) => d.date))
+  const values = $derived(points.map((d) => (metric === 'tokens' ? d.by_tool : d.cost_by_tool)))
+  const labels = $derived(r?.hourly.length ? hourLabels : {})
   const fmt = $derived(metric === 'tokens' ? fmtCompact : (v: number) => fmtMoney(v, { compact: true }))
   const headline = $derived(
     app.limits.filter((l) => l.active && (l.window === 'five_hour' || l.window === 'seven_day' || l.source === 'user_threshold')),
@@ -96,8 +99,9 @@
       <Segmented label={t('overview.trend')} options={[{ value: 'tokens', label: t('metric.tokens') }, { value: 'cost', label: t('metric.cost') }]} bind:value={metric} />
     </div>
     <AreaChart
-      dates={r.daily.map((d) => d.date)}
+      {dates}
       {values}
+      {...labels}
       {series}
       format={fmt}
       ariaLabel="{t('overview.trend')}: {metric === 'tokens' ? fmtCompact(r.totals.total_tokens) : fmtMoney(r.totals.cost_usd)}"

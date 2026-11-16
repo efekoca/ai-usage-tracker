@@ -176,12 +176,22 @@ export async function init() {
     app.today = d
     refresh()
   }
-  window.addEventListener('focus', checkDay)
-  document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && checkDay())
+  // nor does a running day's hourly chart when a new hour starts
+  const checkHour = () => {
+    const last = app.report?.hourly.at(-1)
+    if (!app.settings?.onboarded || !last || Date.now() >= (app.report?.range.to_ms ?? 0) || last.hour >= new Date().getHours()) return false
+    reload(false)
+    return true
+  }
+  const checkTime = () => {
+    checkDay()
+    return checkHour()
+  }
+  window.addEventListener('focus', checkTime)
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && checkTime())
   // limit states (reset/stale, countdowns) move with time
   setInterval(() => {
-    checkDay()
-    if (!app.settings?.onboarded) return
+    if (checkTime() || !app.settings?.onboarded) return
     const gen = refreshGen
     api
       .limits()
