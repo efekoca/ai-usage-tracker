@@ -52,6 +52,14 @@ pub fn followed(state: &AppState, s: &Settings, now_ms: i64) -> Vec<Cache> {
     if !s.cache_timer {
         return Vec::new();
     }
+    let dropped = DROPPED.lock().unwrap().clone();
+    let mut out = listed(state, s, now_ms, |id| !dropped.iter().any(|d| d == id));
+    crate::refresh::annotate(state, s, &mut out, now_ms);
+    out
+}
+
+/// The live caches of the followed projects that `keep` lets through, named and priced.
+fn listed(state: &AppState, s: &Settings, now_ms: i64, keep: impl Fn(&str) -> bool) -> Vec<Cache> {
     let (live, projects) = {
         let store = state.db();
         let book = state.book.read().unwrap();
@@ -62,10 +70,8 @@ pub fn followed(state: &AppState, s: &Settings, now_ms: i64) -> Vec<Cache> {
         (live, store.projects().unwrap_or_default())
     };
     let projects: HashMap<i64, _> = projects.into_iter().map(|p| (p.id, p)).collect();
-    let dropped = DROPPED.lock().unwrap();
-    let mut out: Vec<Cache> = live
-        .into_iter()
-        .filter(|c| !dropped.contains(&c.session_id))
+    live.into_iter()
+        .filter(|c| keep(&c.session_id))
         .filter_map(|c| {
             let p = c.project_id.and_then(|id| projects.get(&id));
             if s.cache_projects == "picked" && !p.is_some_and(|p| s.cache_picked.contains(&p.path)) {
@@ -87,10 +93,7 @@ pub fn followed(state: &AppState, s: &Settings, now_ms: i64) -> Vec<Cache> {
                 ..Cache::default()
             })
         })
-        .collect();
-    drop(dropped);
-    crate::refresh::annotate(state, s, &mut out, now_ms);
-    out
+        .collect()
 }
 
 /// Where a conversation runs, for a notification: "Terminal", "Claude desktop" and so on.
@@ -130,6 +133,29 @@ pub async fn drop_cache(window: WebviewWindow, app: AppHandle, session_id: Strin
         dropped.push(session_id);
     }
     drop(dropped);
+    crate::tray::refresh_soon();
+    let _ = app.emit("data-changed", ());
+    Ok(())
+}
+
+/// The live caches the user stopped following, to offer them back one by one.
+#[tauri::command]
+pub async fn dropped_caches(state: State<'_, AppState>) -> Result<Vec<Cache>, String> {
+    let s = state.settings.read().unwrap().clone();
+    let dropped = DROPPED.lock().unwrap().clone();
+    if !s.cache_timer || dropped.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(listed(&state, &s, chrono::Utc::now().timestamp_millis(), |id| dropped.iter().any(|d| d == id)))
+}
+
+/// Follows one conversation again after the user stopped following it.
+#[tauri::command]
+pub async fn restore_cache(window: WebviewWindow, app: AppHandle, session_id: String) -> Result<(), String> {
+    if window.label() != crate::windows::MAIN {
+        return Err("not_allowed".into());
+    }
+    DROPPED.lock().unwrap().retain(|d| *d != session_id);
     crate::tray::refresh_soon();
     let _ = app.emit("data-changed", ());
     Ok(())

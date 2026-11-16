@@ -197,8 +197,10 @@
     color: var(--ink-2);
   }
   .legend .sum td {
-    border-top: 0.5px solid var(--hairline);
     padding-top: 8px;
+  }
+  .legend .sum td + td {
+    border-top: 0.5px solid var(--hairline);
   }
   .num {
     text-align: right;
