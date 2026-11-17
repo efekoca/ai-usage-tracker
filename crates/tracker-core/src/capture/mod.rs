@@ -6,6 +6,7 @@ pub mod claude_settings;
 pub mod claude_signin;
 pub mod claude_usage;
 pub mod codex_limits;
+pub mod handoff;
 pub mod otlp;
 pub mod refresh_hook;
 pub mod statusline;
@@ -222,10 +223,16 @@ pub(crate) fn npm_roots(env: &crate::discovery::Env) -> Vec<PathBuf> {
 /// folder comes first, so a copy under a version manager runs with that manager's `node`.
 #[cfg(not(windows))]
 pub(crate) fn set_child_path(cmd: &mut std::process::Command, bin: &std::path::Path) {
-    let own = bin.parent().filter(|d| d.is_absolute()).map(|d| d.to_path_buf());
-    if let Ok(p) = std::env::join_paths(own.into_iter().chain(unix_bin_dirs(&crate::discovery::Env::from_system()))) {
+    if let Some(p) = child_path(bin) {
         cmd.env("PATH", p);
     }
+}
+
+/// The PATH [`set_child_path`] gives, for a program started some other way.
+#[cfg(not(windows))]
+pub fn child_path(bin: &std::path::Path) -> Option<std::ffi::OsString> {
+    let own = bin.parent().filter(|d| d.is_absolute()).map(|d| d.to_path_buf());
+    std::env::join_paths(own.into_iter().chain(unix_bin_dirs(&crate::discovery::Env::from_system()))).ok()
 }
 
 #[cfg(test)]

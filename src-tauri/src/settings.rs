@@ -389,6 +389,8 @@ pub struct NotifySettings {
     pub cache: bool,
     /// When a conversation the limit stopped is continued after the limit started again.
     pub resume: bool,
+    /// When the limit stopped a conversation that wrote its handoff note.
+    pub handoff: bool,
     /// Shortly before a weekly limit resets with much of it unused.
     pub unused: bool,
     /// Fields this version does not know (a newer one wrote them), kept so saving does not drop them.
@@ -398,7 +400,7 @@ pub struct NotifySettings {
 
 impl Default for NotifySettings {
     fn default() -> Self {
-        NotifySettings { enabled: true, early: "warn".into(), full: true, reset: true, five_hour: true, seven_day: true, budget: true, sign_in: true, route: true, cache: false, resume: true, unused: true, extra: Default::default() }
+        NotifySettings { enabled: true, early: "warn".into(), full: true, reset: true, five_hour: true, seven_day: true, budget: true, sign_in: true, route: true, cache: false, resume: true, handoff: true, unused: true, extra: Default::default() }
     }
 }
 
@@ -662,6 +664,9 @@ pub struct Settings {
     /// Continues a Claude Code conversation the usage limit stopped, once the limit starts again;
     /// needs the limit hook in Claude Code's settings, so off by default.
     pub limit_resume: bool,
+    /// Asks a Claude Code conversation near its usage limit to write a handoff note; needs the
+    /// handoff hook and its write rule in Claude Code's settings, so off by default.
+    pub limit_handoff: bool,
     /// Provider → `#rrggbb` for its limit bars and mark; a missing one uses the accent color.
     pub provider_colors: std::collections::BTreeMap<String, String>,
     /// Marks take the tool's color too; off keeps them in the text color.
@@ -856,6 +861,7 @@ impl Default for Settings {
             cache_auto: false,
             cache_lead: 2,
             limit_resume: false,
+            limit_handoff: false,
             provider_colors: Default::default(),
             tint_icons: false,
             show_icons: true,

@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tracker_core::capture::claude_settings::{self as cs, RevertOutcome};
-use tracker_core::capture::{antigravity_limits, claude_signin, claude_usage, codex_limits, otlp, statusline, Cli};
+use tracker_core::capture::{antigravity_limits, claude_signin, claude_usage, codex_limits, handoff, otlp, statusline, Cli};
 use tracker_core::discovery::{self, Env, SourceId};
 use tracker_core::model::Provider;
 use tracker_core::store::Store;
@@ -137,6 +137,11 @@ pub fn limit_hook_command(exe: &Path) -> String {
     if cfg!(windows) { format!("{cmd}; exit $LASTEXITCODE") } else { cmd }
 }
 
+/// The handoff hook runs after every tool call, so it answers at once and never waits.
+pub fn handoff_hook_command(exe: &Path) -> String {
+    quoted_command(&exe.to_string_lossy(), short_path(exe).as_deref(), !cfg!(windows) || git_bash().is_some(), "--handoff-hook")
+}
+
 /// Single quotes: inside double quotes both shells would still expand `$` and backticks.
 pub(crate) fn quoted_command(full: &str, short: Option<&str>, bash: bool, flag: &str) -> String {
     // only Windows paths are turned into forward slashes; a backslash is an ordinary file name character elsewhere
@@ -162,6 +167,12 @@ pub fn statusline_main() -> i32 {
         statusline::record(&data_dir, w, now_ms());
     }
     statusline::record_cache_misses(&data_dir, &json, now_ms());
+    let options = statusline::read_options(&data_dir);
+    // each conversation's own windows, so the handoff hook never takes another account's
+    let session = json.get("session_id").and_then(|v| v.as_str()).filter(|s| tracker_core::capture::refresh_hook::valid_session(s));
+    if let (true, Some(w), Some(session)) = (options.handoff, &windows, session) {
+        let _ = handoff::record_reading(&handoff::dir(&data_dir), session, w, now_ms());
+    }
     let state = cs::load_state(&data_dir);
     // a bridge run as someone's previous command (another copy of the app) does not chain again,
     // so two bridges can never call each other without end
@@ -170,7 +181,6 @@ pub fn statusline_main() -> i32 {
         Some(cmd) => run_chained(cmd, input).unwrap_or_default(),
         None => statusline::render_default(windows.as_ref()),
     };
-    let options = statusline::read_options(&data_dir);
     // as with the cache time, a bridge run as someone's previous command adds nothing
     if let Some(part) = (options.cost && std::env::var_os(CHAINED).is_none()).then(|| statusline::cost_text(&json, &options)).flatten() {
         out = statusline::append(&out, &part);
@@ -274,11 +284,61 @@ pub fn limit_hook_main() -> i32 {
     }
 }
 
+/// Run by Claude Code after each tool call, when a prompt is sent and when a conversation starts.
+/// Near the usage limit it asks the conversation, once a window, to write the handoff note; at the
+/// start it tells the conversation that such a request may come. Every check is cheap and the
+/// slow one last, since it runs this often.
+pub fn handoff_hook_main() -> i32 {
+    let Some(data_dir) = tracker_core::store::default_data_dir() else { return 0 };
+    if !statusline::read_options(&data_dir).handoff {
+        return 0;
+    }
+    let mut input = Vec::new();
+    let _ = std::io::stdin().take(1024 * 1024).read_to_end(&mut input);
+    let json: serde_json::Value = serde_json::from_slice(&input).unwrap_or(serde_json::Value::Null);
+    let Some(session) = json.get("session_id").and_then(|v| v.as_str()).filter(|s| tracker_core::capture::refresh_hook::valid_session(s)) else { return 0 };
+    let Some(cwd) = json.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from).filter(|p| p.is_absolute()) else { return 0 };
+    let event = json.get("hook_event_name").and_then(|v| v.as_str()).unwrap_or_default();
+    let dir = handoff::dir(&data_dir);
+    let key = handoff::note_key(&cwd);
+    let note = handoff::note_path(&dir, &key);
+    let text = match event {
+        // a start waits for its hooks, and on Windows reading the command lines takes a second, so
+        // there only an SDK run is told apart; the request itself never goes to a scripted run
+        "SessionStart" if !(if cfg!(windows) { sdk_run() } else { scripted() }) => handoff::intro(&note),
+        // a subagent's tool calls are its own task; the request is for the conversation itself
+        "PostToolUse" | "UserPromptSubmit" if json.get("agent_id").is_none() => {
+            let now = now_ms();
+            if handoff::told(&dir, session, now) {
+                return 0;
+            }
+            // the conversation's own reading tells its account; the app's only stands in without one
+            let reading = handoff::reading(&dir, session).filter(|r| handoff::fresh(r, now)).or_else(|| handoff::shared(&dir));
+            let Some(full) = reading.and_then(|r| handoff::nearly_full(&r, now)) else { return 0 };
+            if !handoff::claim(&dir, session, full.resets_ms) {
+                return 0;
+            }
+            // a scripted run is noted too, so its next tool calls skip this slow check
+            let scripted = scripted();
+            let told = handoff::Told { session: session.to_owned(), window: full.window.clone(), resets_ms: full.resets_ms, told_ms: now, cwd, key, notified: false, scripted, handed: false };
+            if handoff::mark_told(&dir, &told).is_err() || scripted {
+                return 0;
+            }
+            handoff::trigger(&note, &full)
+        }
+        _ => return 0,
+    };
+    let mut stdout = std::io::stdout();
+    let _ = stdout.write_all(handoff::hook_output(event, &text).as_bytes());
+    let _ = stdout.flush();
+    0
+}
+
 /// `claude -p` waits for its hooks before it exits, so in a scripted run the hook must not wait (and
 /// no one would see a refresh there). SDK runs say so in their entrypoint; a print run started from
 /// inside another session inherits that session's, so the command line that started it is read too.
 fn scripted() -> bool {
-    if std::env::var("CLAUDE_CODE_ENTRYPOINT").is_ok_and(|e| e.starts_with("sdk")) {
+    if sdk_run() {
         return true;
     }
     #[cfg(unix)]
@@ -302,6 +362,10 @@ fn scripted() -> bool {
         return true;
     }
     false
+}
+
+fn sdk_run() -> bool {
+    std::env::var("CLAUDE_CODE_ENTRYPOINT").is_ok_and(|e| e.starts_with("sdk"))
 }
 
 /// The command lines of the hook's parent and the two above it (the shell, then Claude Code). The
@@ -617,19 +681,28 @@ pub fn revert_all_main() -> i32 {
             return 2;
         }
     };
-    let had = (state.statusline.is_some(), state.otel.is_some(), state.refresh.is_some(), state.resume.is_some());
+    let had = (state.statusline.is_some(), state.otel.is_some(), state.refresh.is_some(), state.resume.is_some(), state.handoff.is_some());
     let statusline = cs::uninstall_statusline(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: status line: {e}"));
     let otel = cs::uninstall_otel(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: telemetry: {e}"));
     let refresh = cs::uninstall_refresh_hook(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: cache refresh: {e}"));
     let resume = cs::uninstall_hook(&mut state, cs::Hook::Resume, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: limit hook: {e}"));
+    let handoff = cs::uninstall_hook(&mut state, cs::Hook::Handoff, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: handoff hook: {e}"));
     let (statusline_ok, otel_ok, refresh_ok) = (statusline.is_ok(), otel.is_ok(), refresh.is_ok());
     // only what the uninstaller itself took out is put back; a value the user changed stays theirs
     let restored = |r: &Result<RevertOutcome, _>| matches!(r, Ok(RevertOutcome::Restored));
     let store = Store::open(&data_dir.join("tracker.db")).ok();
     let mut settings = store.as_ref().map(Settings::load);
     let auto = settings.as_ref().is_some_and(|s| s.cache_auto);
-    let reverted = Reverted { statusline: had.0 && restored(&statusline), otel: had.1 && restored(&otel), refresh: had.2 && restored(&refresh), resume: had.3 && restored(&resume), auto, at_ms: now_ms() };
-    if reverted.statusline || reverted.otel || reverted.refresh || reverted.resume {
+    let reverted = Reverted {
+        statusline: had.0 && restored(&statusline),
+        otel: had.1 && restored(&otel),
+        refresh: had.2 && restored(&refresh),
+        resume: had.3 && restored(&resume),
+        handoff: had.4 && restored(&handoff),
+        auto,
+        at_ms: now_ms(),
+    };
+    if reverted.statusline || reverted.otel || reverted.refresh || reverted.resume || reverted.handoff {
         let _ = std::fs::write(reverted_file(&data_dir), serde_json::to_string(&reverted).unwrap_or_default());
     }
     if let (Some(store), Some(s)) = (&store, settings.as_mut()) {
@@ -640,9 +713,10 @@ pub fn revert_all_main() -> i32 {
         s.cache_auto &= !refresh_ok;
         // without its hook nothing is continued, so the switch goes with it
         s.limit_resume &= !resume.is_ok();
+        s.limit_handoff &= !handoff.is_ok();
         let _ = s.save(store);
     }
-    if statusline_ok && otel_ok && refresh_ok && resume.is_ok() { 0 } else { 1 }
+    if statusline_ok && otel_ok && refresh_ok && resume.is_ok() && handoff.is_ok() { 0 } else { 1 }
 }
 
 /// What an uninstaller turned off. A manual upgrade runs the old uninstaller first, so a start
@@ -658,6 +732,8 @@ struct Reverted {
     auto: bool,
     #[serde(default)]
     resume: bool,
+    #[serde(default)]
+    handoff: bool,
     at_ms: i64,
 }
 
@@ -672,7 +748,7 @@ impl Reverted {
         if !(0..REINSTALL_WINDOW_MS).contains(&(now - self.at_ms)) {
             return Vec::new();
         }
-        [("statusline", self.statusline), ("otel", self.otel), ("refresh", self.refresh), ("resume", self.resume)].into_iter().filter(|k| k.1).map(|k| k.0).collect()
+        [("statusline", self.statusline), ("otel", self.otel), ("refresh", self.refresh), ("resume", self.resume), ("handoff", self.handoff)].into_iter().filter(|k| k.1).map(|k| k.0).collect()
     }
 }
 
@@ -694,6 +770,12 @@ fn restore_after_upgrade(app: &AppHandle) {
             "refresh" => crate::refresh::install(app).and_then(|()| restore_auto(app, reverted.auto)),
             "resume" => crate::resume::install(app).and_then(|()| {
                 let s = app.state::<AppState>().update_settings(|s| s.limit_resume = true)?;
+                let _ = app.emit("settings-changed", &s);
+                Ok("enabled".into())
+            }),
+            "handoff" => crate::handoff::install(app).and_then(|()| {
+                let s = app.state::<AppState>().update_settings(|s| s.limit_handoff = true)?;
+                write_statusline_options(&app.state::<AppState>().data_dir, &s);
                 let _ = app.emit("settings-changed", &s);
                 Ok("enabled".into())
             }),
@@ -792,7 +874,7 @@ pub(crate) fn sign_ins(app: &AppHandle, s: &Settings) -> [(Provider, SignIn); 3]
     ]
 }
 
-fn codex_binary(s: &Settings) -> Option<PathBuf> {
+pub(crate) fn codex_binary(s: &Settings) -> Option<PathBuf> {
     let configured = (!s.capture.codex_path.trim().is_empty()).then(|| PathBuf::from(s.capture.codex_path.trim()));
     codex_limits::find_codex(&Env::from_system(), configured.as_deref())
 }
@@ -1552,6 +1634,7 @@ pub fn write_statusline_options(data_dir: &Path, s: &Settings) {
         cache: s.cache_timer && s.cache_statusline,
         turkish: crate::tray::turkish(s),
         resume: s.limit_resume,
+        handoff: s.limit_handoff,
         cost: s.statusline_cost,
         currency: s.currency.clone(),
         fx: s.fx_rate,
@@ -1578,6 +1661,7 @@ pub fn start(app: &AppHandle) {
         }
         crate::refresh::follow_app(&app.state::<AppState>());
         crate::resume::follow_app(&app.state::<AppState>());
+        crate::handoff::follow_app(&app.state::<AppState>());
         restore_after_upgrade(app);
     }
     start_claude_poller(app);
@@ -1699,8 +1783,8 @@ mod tests {
 
     #[test]
     fn only_a_recent_uninstall_turns_captures_back_on() {
-        let r = Reverted { statusline: true, otel: false, refresh: true, auto: true, resume: false, at_ms: 1_000_000 };
-        assert_eq!(r.to_restore(1_000_000 + 5 * 60_000), ["statusline", "refresh"]);
+        let r = Reverted { statusline: true, otel: false, refresh: true, auto: true, resume: false, handoff: true, at_ms: 1_000_000 };
+        assert_eq!(r.to_restore(1_000_000 + 5 * 60_000), ["statusline", "refresh", "handoff"]);
         let older: Reverted = serde_json::from_str(r#"{"statusline": false, "otel": true, "at_ms": 1000000}"#).unwrap();
         assert_eq!(older.to_restore(1_000_000), ["otel"], "a record written before the refresh hook existed");
         assert!(r.to_restore(1_000_000 + REINSTALL_WINDOW_MS).is_empty());
@@ -1713,7 +1797,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut s = Settings { language: "tr".into(), cache_statusline: true, ..Settings::default() };
         write_statusline_options(dir.path(), &s);
-        let usd = |cache, turkish| statusline::Options { cache, turkish, resume: false, cost: false, currency: "USD".into(), fx: 1.0 };
+        let usd = |cache, turkish| statusline::Options { cache, turkish, resume: false, handoff: false, cost: false, currency: "USD".into(), fx: 1.0 };
         assert_eq!(statusline::read_options(dir.path()), usd(true, true));
         s.cache_timer = false;
         s.language = "en".into();

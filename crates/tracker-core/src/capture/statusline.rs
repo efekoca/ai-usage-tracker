@@ -212,6 +212,8 @@ pub struct Options {
     pub turkish: bool,
     /// A conversation the usage limit stopped is continued once the limit starts again.
     pub resume: bool,
+    /// A conversation near its usage limit is asked for a handoff note.
+    pub handoff: bool,
     /// The conversation's cost so far, as Claude Code itself counts it, before the cache time.
     pub cost: bool,
     /// The app's display currency and its rate from US dollars.

@@ -64,7 +64,8 @@ impl OtelChange {
     }
 }
 
-/// One of our hooks: the cache refresh, or the one that waits for a limit's reset.
+/// One of our hooks: the cache refresh, the one that waits for a limit's reset, or the one that asks
+/// for a handoff note before the limit is reached.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RefreshHookChange {
     pub settings_file: PathBuf,
@@ -76,6 +77,9 @@ pub struct RefreshHookChange {
     /// The groups we added to the other events, by event; empty for installs made before them.
     #[serde(default)]
     pub also: BTreeMap<String, Value>,
+    /// The permission rules we added to `permissions.allow`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow: Vec<String>,
     pub backup: PathBuf,
     pub installed_at_ms: i64,
 }
@@ -125,6 +129,8 @@ pub struct CaptureState {
     pub refresh: Option<RefreshHookChange>,
     #[serde(default)]
     pub resume: Option<RefreshHookChange>,
+    #[serde(default)]
+    pub handoff: Option<RefreshHookChange>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -357,6 +363,7 @@ pub const RESUME_HOOK_TIMEOUT_SECS: u64 = 8 * 86_400;
 
 const STOP: &str = "Stop";
 const STOP_FAILURE: &str = "StopFailure";
+const POST_TOOL_USE: &str = "PostToolUse";
 
 /// Which of our hooks. Each runs a command of its own, so one is told from the other in the file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -365,6 +372,8 @@ pub enum Hook {
     Refresh,
     /// Continues a conversation the usage limit stopped, once the limit starts again.
     Resume,
+    /// Asks a conversation for a handoff note when its usage limit is nearly full.
+    Handoff,
 }
 
 impl Hook {
@@ -372,6 +381,7 @@ impl Hook {
         match self {
             Hook::Refresh => |s| &mut s.refresh,
             Hook::Resume => |s| &mut s.resume,
+            Hook::Handoff => |s| &mut s.handoff,
         }
     }
 
@@ -379,20 +389,51 @@ impl Hook {
         match self {
             Hook::Refresh => STOP,
             Hook::Resume => STOP_FAILURE,
+            Hook::Handoff => POST_TOOL_USE,
         }
     }
 
-    /// The group that waits in the background and wakes the conversation when the app asks.
+    /// The main group: one that waits in the background and wakes the conversation when the app
+    /// asks, or the handoff check after every tool call.
     fn value(self, command: &str) -> Value {
         match self {
             Hook::Refresh => refresh_hook_value(command),
             Hook::Resume => resume_hook_value(command),
+            Hook::Handoff => quick_group(command),
         }
     }
 
-    fn change(self, settings_file: &Path, command: &str, backup: PathBuf, now_ms: i64) -> RefreshHookChange {
-        RefreshHookChange { settings_file: settings_file.to_owned(), event: self.event().to_owned(), installed: self.value(command), also: hook_others(command), backup, installed_at_ms: now_ms }
+    fn others(self, command: &str) -> BTreeMap<String, Value> {
+        match self {
+            Hook::Refresh | Hook::Resume => hook_others(command),
+            // the start tells the conversation about the note; a prompt sent near the limit is checked too
+            Hook::Handoff => ["SessionStart", "UserPromptSubmit"].into_iter().map(|e| (e.to_owned(), quick_group(command))).collect(),
+        }
     }
+
+    /// The handoff note is written outside the project, which Claude Code would otherwise ask about.
+    fn allow(self, data_dir: &Path) -> Vec<String> {
+        match self {
+            Hook::Handoff => super::handoff::permission_rules(&super::handoff::dir(data_dir)),
+            _ => Vec::new(),
+        }
+    }
+
+    fn change(self, data_dir: &Path, settings_file: &Path, command: &str, backup: PathBuf, now_ms: i64) -> RefreshHookChange {
+        RefreshHookChange {
+            settings_file: settings_file.to_owned(),
+            event: self.event().to_owned(),
+            installed: self.value(command),
+            also: self.others(command),
+            allow: self.allow(data_dir),
+            backup,
+            installed_at_ms: now_ms,
+        }
+    }
+}
+
+fn quick_group(command: &str) -> Value {
+    serde_json::json!({ "hooks": [{ "type": "command", "command": command, "timeout": 10 }] })
 }
 
 /// After each turn the hook waits in the background; when the app asks, it wakes the conversation
@@ -410,8 +451,35 @@ pub fn resume_hook_value(command: &str) -> Value {
 /// A new prompt and the end of a conversation (`/clear`, `/resume`, exit) send the waiting hook away
 /// at once; the prompt's time also tells the user's own turns from the refreshes.
 fn hook_others(command: &str) -> BTreeMap<String, Value> {
-    let quick = serde_json::json!({ "hooks": [{ "type": "command", "command": command, "timeout": 10 }] });
-    ["UserPromptSubmit", "SessionEnd"].into_iter().map(|e| (e.to_owned(), quick.clone())).collect()
+    ["UserPromptSubmit", "SessionEnd"].into_iter().map(|e| (e.to_owned(), quick_group(command))).collect()
+}
+
+/// `permissions.allow`, made where missing; an unexpected shape is refused rather than replaced.
+fn allow_rules(doc: &mut Map<String, Value>) -> Result<&mut Vec<Value>, SettingsError> {
+    let perms = doc.entry("permissions").or_insert_with(|| Value::Object(Map::new()));
+    let Value::Object(perms) = perms else { return Err(SettingsError::Unparseable("permissions is not an object".into())) };
+    match perms.entry("allow").or_insert_with(|| Value::Array(Vec::new())) {
+        Value::Array(rules) => Ok(rules),
+        _ => Err(SettingsError::Unparseable("permissions.allow is not a list".into())),
+    }
+}
+
+fn has_rule(doc: &Map<String, Value>, rule: &str) -> bool {
+    doc.get("permissions").and_then(|p| p.get("allow")).and_then(Value::as_array).is_some_and(|a| a.iter().any(|r| r.as_str() == Some(rule)))
+}
+
+/// Takes out our rules only, then the lists they leave empty.
+fn drop_rules(doc: &mut Map<String, Value>, rules: &[String]) {
+    let Some(Value::Object(perms)) = doc.get_mut("permissions") else { return };
+    if let Some(Value::Array(allow)) = perms.get_mut("allow") {
+        allow.retain(|r| !r.as_str().is_some_and(|r| rules.iter().any(|x| x == r)));
+        if allow.is_empty() {
+            perms.remove("allow");
+        }
+    }
+    if perms.is_empty() {
+        doc.remove("permissions");
+    }
 }
 
 /// `hooks.<event>`, made where missing; an unexpected shape is refused rather than replaced.
@@ -457,12 +525,17 @@ pub fn install_refresh_hook(st: &mut CaptureState, data_dir: &Path, settings_fil
 
 pub fn install_hook(st: &mut CaptureState, hook: Hook, data_dir: &Path, settings_file: &Path, command: &str, now_ms: i64) -> Result<RefreshHookChange, SettingsError> {
     let (mut doc, original) = read_doc(settings_file)?;
-    let mut change = hook.change(settings_file, command, PathBuf::new(), now_ms);
+    let mut change = hook.change(data_dir, settings_file, command, PathBuf::new(), now_ms);
     for (event, group) in change.groups() {
         let groups = event_groups(&mut doc, event)?;
         if !groups.iter().any(|g| same_group(g, group)) {
             groups.push(group.clone());
         }
+    }
+    // a rule the user already had stays theirs, so a revert leaves it
+    change.allow.retain(|r| !has_rule(&doc, r));
+    for rule in &change.allow {
+        allow_rules(&mut doc)?.push(Value::String(rule.clone()));
     }
     let backup = backup(settings_file, data_dir, now_ms)?;
     change.backup = backup.clone();
@@ -472,20 +545,21 @@ pub fn install_hook(st: &mut CaptureState, hook: Hook, data_dir: &Path, settings
 /// Whether Claude Code's settings still hold every part of our hook (the user may have removed
 /// some since). Without the prompt and end parts a refresh could wake a conversation that went on.
 pub fn refresh_hook_in_place(change: &RefreshHookChange) -> bool {
-    read_doc(&change.settings_file).is_ok_and(|(doc, _)| change.groups().into_iter().all(|(e, g)| has_group(&doc, e, g)))
+    read_doc(&change.settings_file).is_ok_and(|(doc, _)| change.groups().into_iter().all(|(e, g)| has_group(&doc, e, g)) && change.allow.iter().all(|r| has_rule(&doc, r)))
 }
 
 /// Removes our groups only; the user's own hooks stay as they are.
 pub fn revert_refresh_hook(change: &RefreshHookChange) -> Result<RevertOutcome, SettingsError> {
     let (mut doc, original) = read_doc(&change.settings_file)?;
     let ours: Vec<(&str, &Value)> = change.groups().into_iter().filter(|(e, g)| has_group(&doc, e, g)).collect();
-    if ours.is_empty() {
+    if ours.is_empty() && !change.allow.iter().any(|r| has_rule(&doc, r)) {
         return Ok(RevertOutcome::NothingToDo);
     }
     for (event, group) in &ours {
         event_groups(&mut doc, event)?.retain(|g| !same_group(g, group));
     }
     tidy_hooks(&mut doc, &ours.iter().map(|(e, _)| *e).collect::<Vec<_>>());
+    drop_rules(&mut doc, &change.allow);
     write_doc(&change.settings_file, &doc, &original)?;
     Ok(RevertOutcome::Restored)
 }
@@ -498,7 +572,7 @@ pub fn refresh_refresh_hook(st: &mut CaptureState, data_dir: &Path, command: &st
 
 pub fn refresh_hook(st: &mut CaptureState, hook: Hook, data_dir: &Path, command: &str) -> Result<bool, SettingsError> {
     let Some(old) = hook.slot()(st).clone() else { return Ok(false) };
-    let wanted = RefreshHookChange { installed: hook.value(command), also: hook_others(command), ..old.clone() };
+    let wanted = RefreshHookChange { installed: hook.value(command), also: hook.others(command), ..old.clone() };
     if old == wanted {
         return Ok(false);
     }
@@ -1063,7 +1137,7 @@ mod tests {
     #[test]
     fn state_round_trips_and_an_unreadable_record_is_an_error() {
         let dir = tempfile::tempdir().unwrap();
-        let st = CaptureState { statusline: None, otel: None, refresh: None, resume: None };
+        let st = CaptureState { statusline: None, otel: None, refresh: None, resume: None, handoff: None };
         save_state(dir.path(), &st).unwrap();
         assert_eq!(load_state(dir.path()), st);
         assert_eq!(load_state(&dir.path().join("missing")), CaptureState::default());
@@ -1155,6 +1229,46 @@ mod tests {
         assert_eq!(uninstall_hook(&mut st, Hook::Resume, &data).unwrap(), RevertOutcome::Restored);
         assert_eq!(read(&file), json!({"model": "opus"}));
         assert_eq!(st, CaptureState::default());
+    }
+
+    #[test]
+    fn the_handoff_hook_brings_its_write_rule_and_takes_only_its_own_away() {
+        let (_d, file, data) = setup(Some(r#"{"model": "opus", "permissions": {"allow": ["Bash(ls)"]}}"#));
+        let mut st = CaptureState::default();
+        let ch = install_hook(&mut st, Hook::Handoff, &data, &file, "aiut --handoff-hook", 1).unwrap();
+        let rules = super::super::handoff::permission_rules(&super::super::handoff::dir(&data));
+        let after = read(&file);
+        for event in ["PostToolUse", "SessionStart", "UserPromptSubmit"] {
+            assert_eq!(after["hooks"][event], json!([{"hooks": [{"type": "command", "command": "aiut --handoff-hook", "timeout": 10}]}]), "{event}");
+        }
+        let mut allow = vec![json!("Bash(ls)")];
+        allow.extend(rules.iter().map(|r| json!(r)));
+        assert_eq!(after["permissions"]["allow"], Value::Array(allow));
+        assert!(refresh_hook_in_place(&ch));
+
+        // a rule the user takes out makes the hook incomplete, so it is put back whole
+        let mut doc = after.as_object().unwrap().clone();
+        drop_rules(&mut doc, &rules[..1]);
+        fs::write(&file, Value::Object(doc).to_string()).unwrap();
+        assert!(!refresh_hook_in_place(&ch));
+
+        assert_eq!(uninstall_hook(&mut st, Hook::Handoff, &data).unwrap(), RevertOutcome::Restored);
+        assert_eq!(read(&file), json!({"model": "opus", "permissions": {"allow": ["Bash(ls)"]}}));
+        assert_eq!(st, CaptureState::default());
+    }
+
+    #[test]
+    fn a_write_rule_the_user_already_had_stays_after_the_handoff_hook_goes() {
+        let rules = super::super::handoff::permission_rules(&super::super::handoff::dir(Path::new("/d/data")));
+        let (_d, file, data) = setup(None);
+        let rules_here = super::super::handoff::permission_rules(&super::super::handoff::dir(&data));
+        assert_ne!(rules, rules_here);
+        fs::write(&file, json!({"permissions": {"allow": [rules_here[0]]}}).to_string()).unwrap();
+        let mut st = CaptureState::default();
+        let ch = install_hook(&mut st, Hook::Handoff, &data, &file, "aiut --handoff-hook", 1).unwrap();
+        assert_eq!(ch.allow, rules_here[1..].to_vec());
+        uninstall_hook(&mut st, Hook::Handoff, &data).unwrap();
+        assert_eq!(read(&file), json!({"permissions": {"allow": [rules_here[0]]}}));
     }
 
     #[test]

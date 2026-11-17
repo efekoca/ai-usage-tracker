@@ -4,6 +4,7 @@ mod cli;
 mod opener;
 mod refresh;
 mod resume;
+mod handoff;
 mod capture;
 mod commands;
 mod fonts;
@@ -115,6 +116,9 @@ pub fn cli_mode() -> Option<i32> {
     }
     if args.iter().any(|a| a == "--limit-hook") {
         return Some(capture::limit_hook_main());
+    }
+    if args.iter().any(|a| a == "--handoff-hook") {
+        return Some(capture::handoff_hook_main());
     }
     if args.iter().any(|a| a == "--revert-capture") {
         return Some(capture::revert_all_main());
@@ -486,6 +490,10 @@ pub fn run() {
             resume::limit_resume_info,
             resume::set_limit_resume,
             resume::cancel_limit_resume,
+            handoff::handoff_info,
+            handoff::set_limit_handoff,
+            handoff::open_handoff_note,
+            handoff::continue_handoff_in_codex,
             opener::window_opener_info,
             opener::open_window_now,
             commands::list_projects,

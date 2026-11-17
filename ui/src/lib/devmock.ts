@@ -55,7 +55,7 @@ const settings: Settings = {
   capture: { codex_poll: true, codex_poll_minutes: 5, codex_path: '', statusline: false, otel: false, otel_port: 43180, claude_poll: true, claude_poll_minutes: 5, claude_path: '', antigravity_poll: true, antigravity_poll_minutes: 5, antigravity_path: '' },
   autostart: false,
   show_in_dock: true,
-  notify: { enabled: true, early: 'warn', full: true, reset: true, five_hour: true, seven_day: true, budget: true, sign_in: true, route: true, cache: false, resume: true, unused: true },
+  notify: { enabled: true, early: 'warn', full: true, reset: true, five_hour: true, seven_day: true, budget: true, sign_in: true, route: true, cache: false, resume: true, handoff: true, unused: true },
   allow_config_updates: false,
   primary_metric: 'tokens',
   dismissed_unpriced: [],
@@ -105,6 +105,7 @@ const settings: Settings = {
   cache_auto: showcase,
   cache_lead: 2 as 1 | 2 | 5,
   limit_resume: scenario.get('resume') === '1',
+  limit_handoff: scenario.get('handoff') === '1',
   window_opener: { enabled: scenario.get('opener') === '1', minute: 360, days: [1, 2, 3, 4, 5] },
   markers: [
     { id: 'm1', at_ms: new Date().setHours(0, 0, 0, 0) - 9 * 86_400_000, label: 'CLAUDE.md kısaltıldı', project_id: 3 as number | null, project_path: null as string | null, tool: 'claude_code' as string | null, days: 7 },
@@ -1101,6 +1102,29 @@ export function installMock() {
         }
         case 'cancel_limit_resume':
           resumeCancelled.add(a.sessionId as string)
+          return null
+        case 'handoff_info':
+        case 'set_limit_handoff': {
+          if (cmd === 'set_limit_handoff') settings.limit_handoff = !!a.on
+          const notes = settings.limit_handoff
+            ? [
+                { key: 'demo-app-1a2b3c4d', project: settings.hide_project_names ? '' : 'demo-app', written_ms: Date.now() - 18 * 60_000 },
+                { key: 'website-5e6f7a8b', project: settings.hide_project_names ? '' : 'website', written_ms: Date.now() - 26 * 3_600_000 },
+              ]
+            : []
+          const mac = platform === 'macos'
+          return {
+            installed: settings.limit_handoff,
+            settings_file: platform === 'windows' ? 'C:\\Users\\you\\.claude\\settings.json' : '/Users/you/.claude/settings.json',
+            folder: platform === 'windows' ? 'C:\\Users\\you\\AppData\\Local\\AIUsageTracker\\handoff\\notes' : mac ? '/Users/you/Library/Application Support/AIUsageTracker/handoff/notes' : '/home/you/.local/share/AIUsageTracker/handoff/notes',
+            codex_found: !codexMissing,
+            notes,
+          }
+        }
+        case 'open_handoff_note':
+          return null
+        case 'continue_handoff_in_codex':
+          if (codexMissing) throw 'codex_not_found'
           return null
         case 'cache_project_choices':
           return ['demo-app', 'website', 'notes', 'data-pipeline', 'client-x'].map((p, i) => ({ id: i + 1, path: `C:\\Projects\\${p}`, name: p === 'client-x' || settings.hide_project_names ? '' : p, hidden: p === 'client-x' || settings.hide_project_names }))

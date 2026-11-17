@@ -173,8 +173,9 @@ pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading], caches:
     for (c, minutes) in cache.into_iter().filter(|_| s.cache_timer && n.cache) {
         let (title, body) = cache_text(c, minutes, f.tr);
         log::info!("cache notification");
-        let button = c.refreshable.then_some(if f.tr { "Tazele" } else { "Refresh" });
-        send_with(app, &format!("cache-{}", c.session_id), &title, &body, button, |_| {});
+        let refresh = [(REFRESH, refresh_label(f.tr))];
+        let buttons: &[(&str, &str)] = if c.refreshable { &refresh } else { &[] };
+        send_with(app, &format!("cache-{}", c.session_id), &title, &body, buttons, |_| {});
     }
 }
 
@@ -355,10 +356,27 @@ pub(crate) fn test(app: &AppHandle, s: &Settings) -> Sent {
 /// The budget is on the Overview and the cache on the Cache page; every other notification is
 /// about the Limits page.
 const REFRESH: &str = "refresh";
+const CODEX: &str = "codex";
+const NOTE: &str = "note";
 
-/// A notification's button: Refresh on a cache's. A click, or a refresh that cannot go, opens the
-/// app on the page the notification is about.
+/// A notification's buttons: Refresh on a cache's; Continue in Codex and Open the note on a handoff
+/// note's. A click, or a button that cannot do its job, opens the app on the page the notification
+/// is about.
 fn act(app: &AppHandle, tag: &str, action: &str) {
+    if let Some(key) = tag.strip_prefix("handoff-")
+        && (action == CODEX || action == NOTE)
+    {
+        // macOS calls this on the main thread, and starting a terminal takes a moment
+        let (app, tag, key, action) = (app.clone(), tag.to_owned(), key.to_owned(), action.to_owned());
+        std::thread::spawn(move || {
+            let done = if action == CODEX { crate::handoff::continue_in_codex(&app, &key) } else { crate::handoff::open_note(&app, &key) };
+            if let Err(e) = done {
+                log::info!("handoff from a notification: {e}");
+                open(&app, &tag);
+            }
+        });
+        return;
+    }
     if action == REFRESH
         && let Some(session) = tag.strip_prefix("cache-")
     {
@@ -376,7 +394,43 @@ fn act(app: &AppHandle, tag: &str, action: &str) {
 }
 
 fn send(app: &AppHandle, tag: &str, title: &str, body: &str, done: impl FnOnce(Sent) + Send + 'static) {
-    send_with(app, tag, title, body, None, done);
+    send_with(app, tag, title, body, &[], done);
+}
+
+fn refresh_label(tr: bool) -> &'static str {
+    if tr { "Tazele" } else { "Refresh" }
+}
+
+fn codex_label(tr: bool) -> &'static str {
+    if tr { "Codex'te devam et" } else { "Continue in Codex" }
+}
+
+fn note_label(tr: bool) -> &'static str {
+    if tr { "Notu aç" } else { "Open the note" }
+}
+
+/// A conversation that wrote its handoff note was stopped by the limit.
+pub(crate) fn handoff_ready(app: &AppHandle, s: &Settings, key: &str, project: &str, resets_ms: i64) {
+    if !s.onboarded || !s.notify.enabled || !s.notify.handoff {
+        return;
+    }
+    let tr = crate::tray::turkish(s);
+    // a weekly reset days away carries its day
+    let at = crate::tray::format(s, &s.tray).clock(resets_ms / 1000).unwrap_or_default();
+    let name = if project.is_empty() { "Claude Code" } else { project };
+    let title = if tr { "Devir notu hazır" } else { "Handoff note ready" };
+    let body = match (tr, s.limit_resume) {
+        (true, true) => format!("{name}: limit {at} sularında sıfırlanınca konuşma kendiliğinden devam eder. Beklemeden Codex'te de sürdürebilirsiniz."),
+        (true, false) => format!("{name}: limit {at} sularında sıfırlanıyor. İşi notla Codex'te sürdürebilirsiniz."),
+        (false, true) => format!("{name}: the conversation goes on by itself when the limit resets around {at}. You can also carry on in Codex now."),
+        (false, false) => format!("{name}: the limit resets around {at}. You can carry on in Codex with the note."),
+    };
+    let codex = (CODEX, codex_label(tr));
+    let note = (NOTE, note_label(tr));
+    let found = crate::capture::codex_binary(s).is_some();
+    let buttons: &[(&str, &str)] = if found { &[codex, note] } else { &[note] };
+    log::info!("handoff notification");
+    send_with(app, &format!("handoff-{key}"), title, &body, buttons, |_| {});
 }
 
 /// A conversation the limit stopped went on by itself after the limit started again.
@@ -552,6 +606,11 @@ pub(crate) fn init(app: &AppHandle) {
     UNUserNotificationCenter::currentNotificationCenter().setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     // the center holds its delegate weakly
     std::mem::forget(delegate);
+    let tr = crate::tray::turkish(&app.state::<crate::state::AppState>().settings.read().unwrap());
+    let own = |set: &[(&str, &str)]| set.iter().map(|(id, label)| ((*id).to_owned(), (*label).to_owned())).collect::<Vec<_>>();
+    for set in [own(&[(REFRESH, refresh_label(tr))]), own(&[(CODEX, codex_label(tr)), (NOTE, note_label(tr))]), own(&[(NOTE, note_label(tr))])] {
+        register_category(set);
+    }
 }
 
 /// The notification center throws outside an app bundle, e.g. in a development build.
@@ -581,6 +640,35 @@ fn budget_text<Tz: TimeZone>(b: &BudgetAlert, f: &Format<'_, Tz>) -> (String, St
     (title, body)
 }
 
+/// A notification's buttons live in a category named by them. Setting the categories replaces
+/// them all, so every one known goes along; the app's own are known from the start, so the buttons
+/// of a notification left from before a relaunch keep working.
+#[cfg(target_os = "macos")]
+type Buttons = Vec<(String, String)>;
+
+#[cfg(target_os = "macos")]
+static CATEGORIES: LazyLock<Mutex<HashMap<String, Buttons>>> = LazyLock::new(Default::default);
+
+/// Adds or updates the category of `buttons` and sets them all; returns its name.
+#[cfg(target_os = "macos")]
+fn register_category(buttons: Buttons) -> String {
+    use objc2_foundation::{NSArray, NSSet, NSString};
+    use objc2_user_notifications::{UNNotificationAction, UNNotificationActionOptions, UNNotificationCategory, UNNotificationCategoryOptions, UNUserNotificationCenter};
+    let name = buttons.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>().join("-");
+    let mut known = CATEGORIES.lock().unwrap();
+    known.insert(name.clone(), buttons);
+    let categories: Vec<_> = known
+        .iter()
+        .map(|(n, set)| {
+            let actions: Vec<_> = set.iter().map(|(id, label)| UNNotificationAction::actionWithIdentifier_title_options(&NSString::from_str(id), &NSString::from_str(label), UNNotificationActionOptions::empty())).collect();
+            UNNotificationCategory::categoryWithIdentifier_actions_intentIdentifiers_options(&NSString::from_str(n), &NSArray::from_retained_slice(&actions), &NSArray::new(), UNNotificationCategoryOptions::empty())
+        })
+        .collect();
+    drop(known);
+    UNUserNotificationCenter::currentNotificationCenter().setNotificationCategories(&NSSet::from_retained_slice(&categories));
+    name
+}
+
 /// macOS answers in callbacks; the first answer counts.
 #[cfg(target_os = "macos")]
 type Done = std::sync::Arc<Mutex<Option<Box<dyn FnOnce(Sent) + Send>>>>;
@@ -594,21 +682,19 @@ fn finish(done: &Done, r: Sent) {
 
 /// A newer notification of the same limit replaces the older one.
 #[cfg(target_os = "macos")]
-fn send_with(_: &AppHandle, tag: &str, title: &str, body: &str, button: Option<&str>, done: impl FnOnce(Sent) + Send + 'static) {
+fn send_with(_: &AppHandle, tag: &str, title: &str, body: &str, buttons: &[(&str, &str)], done: impl FnOnce(Sent) + Send + 'static) {
     use block2::RcBlock;
     use objc2::runtime::Bool;
-    use objc2_foundation::{NSArray, NSError, NSSet, NSString};
-    use objc2_user_notifications::{
-        UNAuthorizationOptions, UNMutableNotificationContent, UNNotificationAction, UNNotificationActionOptions, UNNotificationCategory, UNNotificationCategoryOptions,
-        UNNotificationRequest, UNUserNotificationCenter,
-    };
+    use objc2_foundation::{NSError, NSString};
+    use objc2_user_notifications::{UNAuthorizationOptions, UNMutableNotificationContent, UNNotificationRequest, UNUserNotificationCenter};
 
     let done: Done = std::sync::Arc::new(Mutex::new(Some(Box::new(done))));
     if !in_bundle() {
         log::info!("notifications need the app bundle");
         return finish(&done, Sent::Failed);
     }
-    let (tag, title, body, button) = (tag.to_owned(), title.to_owned(), body.to_owned(), button.map(str::to_owned));
+    let (tag, title, body) = (tag.to_owned(), title.to_owned(), body.to_owned());
+    let buttons: Vec<(String, String)> = buttons.iter().map(|(id, label)| ((*id).to_owned(), (*label).to_owned())).collect();
     // macOS asks once; later calls answer at once
     let then = RcBlock::new(move |granted: Bool, error: *mut NSError| {
         if !granted.as_bool() {
@@ -620,18 +706,9 @@ fn send_with(_: &AppHandle, tag: &str, title: &str, body: &str, button: Option<&
         let content = UNMutableNotificationContent::new();
         content.setTitle(&NSString::from_str(&title));
         content.setBody(&NSString::from_str(&body));
-        if let Some(label) = &button {
-            // the button lives in a category, set again each time so it follows the app's language
-            const CATEGORY: &str = "cache";
-            let action = UNNotificationAction::actionWithIdentifier_title_options(&NSString::from_str(REFRESH), &NSString::from_str(label), UNNotificationActionOptions::empty());
-            let category = UNNotificationCategory::categoryWithIdentifier_actions_intentIdentifiers_options(
-                &NSString::from_str(CATEGORY),
-                &NSArray::from_retained_slice(&[action]),
-                &NSArray::new(),
-                UNNotificationCategoryOptions::empty(),
-            );
-            UNUserNotificationCenter::currentNotificationCenter().setNotificationCategories(&NSSet::from_retained_slice(&[category]));
-            content.setCategoryIdentifier(&NSString::from_str(CATEGORY));
+        if !buttons.is_empty() {
+            // set again each time so the buttons follow the app's language
+            content.setCategoryIdentifier(&NSString::from_str(&register_category(buttons.clone())));
         }
         let request = UNNotificationRequest::requestWithIdentifier_content_trigger(&NSString::from_str(&tag), &content, None);
         let done = done.clone();
@@ -679,7 +756,7 @@ pub(crate) fn init(app: &AppHandle) {
 }
 
 #[cfg(windows)]
-fn send_with(app: &AppHandle, tag: &str, title: &str, body: &str, button: Option<&str>, done: impl FnOnce(Sent) + Send + 'static) {
+fn send_with(app: &AppHandle, tag: &str, title: &str, body: &str, buttons: &[(&str, &str)], done: impl FnOnce(Sent) + Send + 'static) {
     use windows::core::{IInspectable, Interface, HSTRING};
     use windows::Data::Xml::Dom::XmlDocument;
     use windows::Foundation::TypedEventHandler;
@@ -692,7 +769,12 @@ fn send_with(app: &AppHandle, tag: &str, title: &str, body: &str, button: Option
             return Ok(Sent::Denied);
         }
         let xml = XmlDocument::new()?;
-        let actions = button.map_or(String::new(), |label| format!(r#"<actions><action content="{}" arguments="{REFRESH}" activationType="foreground"/></actions>"#, escape(label)));
+        let actions = if buttons.is_empty() {
+            String::new()
+        } else {
+            let each: String = buttons.iter().map(|(id, label)| format!(r#"<action content="{}" arguments="{}" activationType="foreground"/>"#, escape(label), escape(id))).collect();
+            format!("<actions>{each}</actions>")
+        };
         xml.LoadXml(&HSTRING::from(format!(
             r#"<toast><visual><binding template="ToastGeneric"><text>{}</text><text>{}</text></binding></visual>{actions}</toast>"#,
             escape(title),
@@ -774,16 +856,17 @@ fn in_turn(job: impl FnOnce() + Send + 'static) {
 }
 
 #[cfg(target_os = "linux")]
-fn send_with(app: &AppHandle, tag: &str, title: &str, body: &str, button: Option<&str>, done: impl FnOnce(Sent) + Send + 'static) {
+fn send_with(app: &AppHandle, tag: &str, title: &str, body: &str, buttons: &[(&str, &str)], done: impl FnOnce(Sent) + Send + 'static) {
     use zbus::zvariant::Value;
     static LISTENING: std::sync::Once = std::sync::Once::new();
 
-    let (app, tag, title, body, button) = (app.clone(), tag.to_owned(), title.to_owned(), body.to_owned(), button.map(str::to_owned));
+    let (app, tag, title, body) = (app.clone(), tag.to_owned(), title.to_owned(), body.to_owned());
+    let buttons: Vec<String> = buttons.iter().flat_map(|(id, label)| [(*id).to_owned(), (*label).to_owned()]).collect();
     in_turn(move || {
         let replaces = IDS.lock().unwrap().get(&tag).copied().unwrap_or(0);
         let show = || -> zbus::Result<u32> {
             let hints = HashMap::from([("desktop-entry", Value::from("ai-usage-tracker"))]);
-            let actions = button.as_deref().map_or(vec!["default", ""], |label| vec!["default", "", REFRESH, label]);
+            let actions: Vec<&str> = ["default", ""].into_iter().chain(buttons.iter().map(String::as_str)).collect();
             let reply = session()?.call_method(Some(BUS), BUS_PATH, Some(BUS), "Notify", &("AI Usage Tracker", replaces, "ai-usage-tracker", title.as_str(), body.as_str(), actions, hints, -1i32))?;
             reply.body().deserialize::<u32>()
         };
