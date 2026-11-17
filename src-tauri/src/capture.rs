@@ -142,6 +142,20 @@ pub fn handoff_hook_command(exe: &Path) -> String {
     quoted_command(&exe.to_string_lossy(), short_path(exe).as_deref(), !cfg!(windows) || git_bash().is_some(), "--handoff-hook")
 }
 
+/// Codex runs a hook with `cmd /C` on Windows and with the user's shell elsewhere.
+pub fn codex_handoff_hook_command(exe: &Path) -> String {
+    const FLAG: &str = "--codex-handoff-hook";
+    if cfg!(windows) {
+        let plain = |s: &str| s.chars().all(|c| c.is_ascii_alphanumeric() || "\\:._-~".contains(c));
+        match short_path(exe).filter(|s| plain(s)) {
+            Some(short) => format!("{short} {FLAG}"),
+            None => format!("\"{}\" {FLAG}", exe.display()),
+        }
+    } else {
+        quoted_command(&exe.to_string_lossy(), None, true, FLAG)
+    }
+}
+
 /// Single quotes: inside double quotes both shells would still expand `$` and backticks.
 pub(crate) fn quoted_command(full: &str, short: Option<&str>, bash: bool, flag: &str) -> String {
     // only Windows paths are turned into forward slashes; a backslash is an ordinary file name character elsewhere
@@ -305,7 +319,7 @@ pub fn handoff_hook_main() -> i32 {
     let text = match event {
         // a start waits for its hooks, and on Windows reading the command lines takes a second, so
         // there only an SDK run is told apart; the request itself never goes to a scripted run
-        "SessionStart" if !(if cfg!(windows) { sdk_run() } else { scripted() }) => handoff::intro(&note),
+        "SessionStart" if !(if cfg!(windows) { sdk_run() } else { scripted() }) => handoff::intro(&note, handoff::Agent::Claude),
         // a subagent's tool calls are its own task; the request is for the conversation itself
         "PostToolUse" | "UserPromptSubmit" if json.get("agent_id").is_none() => {
             let now = now_ms();
@@ -313,18 +327,72 @@ pub fn handoff_hook_main() -> i32 {
                 return 0;
             }
             // the conversation's own reading tells its account; the app's only stands in without one
-            let reading = handoff::reading(&dir, session).filter(|r| handoff::fresh(r, now)).or_else(|| handoff::shared(&dir));
+            let reading = handoff::reading(&dir, session).filter(|r| handoff::fresh(r, now)).or_else(|| handoff::shared(&dir, handoff::Agent::Claude));
             let Some(full) = reading.and_then(|r| handoff::nearly_full(&r, now)) else { return 0 };
             if !handoff::claim(&dir, session, full.resets_ms) {
                 return 0;
             }
             // a scripted run is noted too, so its next tool calls skip this slow check
             let scripted = scripted();
-            let told = handoff::Told { session: session.to_owned(), window: full.window.clone(), resets_ms: full.resets_ms, told_ms: now, cwd, key, notified: false, scripted, handed: false };
+            let told = handoff::Told { session: session.to_owned(), window: full.window.clone(), resets_ms: full.resets_ms, told_ms: now, cwd, key, scripted, ..Default::default() };
             if handoff::mark_told(&dir, &told).is_err() || scripted {
                 return 0;
             }
             handoff::trigger(&note, &full)
+        }
+        _ => return 0,
+    };
+    let mut stdout = std::io::stdout();
+    let _ = stdout.write_all(handoff::hook_output(event, &text).as_bytes());
+    let _ = stdout.flush();
+    0
+}
+
+/// Run by Codex after each tool call, when a prompt is sent and when a conversation starts: the
+/// same request as Claude's, from the conversation's own log or the app's reading. Codex's sandbox
+/// keeps it out of the app's folder, so it writes to the user's own folder in the temp folder and
+/// the note is moved over after the tool call that wrote it. Every path ends with 0: Codex stops a
+/// prompt whose hook ends with 2.
+pub fn codex_handoff_hook_main() -> i32 {
+    let Some(data_dir) = tracker_core::store::default_data_dir() else { return 0 };
+    if !statusline::read_options(&data_dir).codex_handoff {
+        return 0;
+    }
+    let mut input = Vec::new();
+    let _ = std::io::stdin().take(1024 * 1024).read_to_end(&mut input);
+    let json: serde_json::Value = serde_json::from_slice(&input).unwrap_or(serde_json::Value::Null);
+    let Some(session) = json.get("session_id").and_then(|v| v.as_str()).filter(|s| tracker_core::capture::refresh_hook::valid_session(s)) else { return 0 };
+    let event = json.get("hook_event_name").and_then(|v| v.as_str()).unwrap_or_default();
+    let dir = handoff::dir(&data_dir);
+    let now = now_ms();
+    if matches!(event, "SessionStart" | "UserPromptSubmit") {
+        let _ = handoff::mark_codex_seen(&dir, now);
+    }
+    // the desktop app's chat runs in the root folder before it hands the work to a task of its own
+    let Some(cwd) = json.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from).filter(|p| p.is_absolute() && p.parent().is_some()) else { return 0 };
+    let key = handoff::note_key(&cwd);
+    let text = match event {
+        "SessionStart" => match handoff::codex_drop(&key) {
+            Some(drop) => handoff::intro(&drop, handoff::Agent::Codex),
+            None => return 0,
+        },
+        "PostToolUse" | "UserPromptSubmit" => {
+            if let Some(t) = handoff::told_record(&dir, session).filter(|t| t.resets_ms > now) {
+                handoff::collect(&dir, &t);
+                return 0;
+            }
+            let own = json.get("transcript_path").and_then(|v| v.as_str()).and_then(|p| handoff::codex_reading(Path::new(p))).filter(|r| handoff::fresh(r, now));
+            let reading = own.or_else(|| handoff::shared(&dir, handoff::Agent::Codex));
+            let Some(full) = reading.and_then(|r| handoff::nearly_full(&r, now)) else { return 0 };
+            let Some(drop) = handoff::codex_drop(&key) else { return 0 };
+            if !handoff::claim(&dir, session, full.resets_ms) {
+                return 0;
+            }
+            let told = handoff::Told { session: session.to_owned(), window: full.window.clone(), resets_ms: full.resets_ms, told_ms: now, cwd, key, agent: handoff::Agent::Codex, drop: Some(drop.clone()), ..Default::default() };
+            if handoff::mark_told(&dir, &told).is_err() {
+                return 0;
+            }
+            handoff::trigger(&drop, &full)
         }
         _ => return 0,
     };
@@ -681,12 +749,13 @@ pub fn revert_all_main() -> i32 {
             return 2;
         }
     };
-    let had = (state.statusline.is_some(), state.otel.is_some(), state.refresh.is_some(), state.resume.is_some(), state.handoff.is_some());
+    let had = (state.statusline.is_some(), state.otel.is_some(), state.refresh.is_some(), state.resume.is_some(), state.handoff.is_some(), state.codex_handoff.is_some());
     let statusline = cs::uninstall_statusline(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: status line: {e}"));
     let otel = cs::uninstall_otel(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: telemetry: {e}"));
     let refresh = cs::uninstall_refresh_hook(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: cache refresh: {e}"));
     let resume = cs::uninstall_hook(&mut state, cs::Hook::Resume, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: limit hook: {e}"));
     let handoff = cs::uninstall_hook(&mut state, cs::Hook::Handoff, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: handoff hook: {e}"));
+    let codex_handoff = crate::handoff::uninstall_codex(&data_dir, &mut state).inspect_err(|e| eprintln!("ai-usage-tracker: codex handoff hook: {e}"));
     let (statusline_ok, otel_ok, refresh_ok) = (statusline.is_ok(), otel.is_ok(), refresh.is_ok());
     // only what the uninstaller itself took out is put back; a value the user changed stays theirs
     let restored = |r: &Result<RevertOutcome, _>| matches!(r, Ok(RevertOutcome::Restored));
@@ -699,10 +768,11 @@ pub fn revert_all_main() -> i32 {
         refresh: had.2 && restored(&refresh),
         resume: had.3 && restored(&resume),
         handoff: had.4 && restored(&handoff),
+        codex_handoff: had.5 && codex_handoff.is_ok(),
         auto,
         at_ms: now_ms(),
     };
-    if reverted.statusline || reverted.otel || reverted.refresh || reverted.resume || reverted.handoff {
+    if reverted.statusline || reverted.otel || reverted.refresh || reverted.resume || reverted.handoff || reverted.codex_handoff {
         let _ = std::fs::write(reverted_file(&data_dir), serde_json::to_string(&reverted).unwrap_or_default());
     }
     if let (Some(store), Some(s)) = (&store, settings.as_mut()) {
@@ -714,9 +784,10 @@ pub fn revert_all_main() -> i32 {
         // without its hook nothing is continued, so the switch goes with it
         s.limit_resume &= !resume.is_ok();
         s.limit_handoff &= !handoff.is_ok();
+        s.codex_handoff &= !codex_handoff.is_ok();
         let _ = s.save(store);
     }
-    if statusline_ok && otel_ok && refresh_ok && resume.is_ok() && handoff.is_ok() { 0 } else { 1 }
+    if statusline_ok && otel_ok && refresh_ok && resume.is_ok() && handoff.is_ok() && codex_handoff.is_ok() { 0 } else { 1 }
 }
 
 /// What an uninstaller turned off. A manual upgrade runs the old uninstaller first, so a start
@@ -734,6 +805,8 @@ struct Reverted {
     resume: bool,
     #[serde(default)]
     handoff: bool,
+    #[serde(default)]
+    codex_handoff: bool,
     at_ms: i64,
 }
 
@@ -748,7 +821,7 @@ impl Reverted {
         if !(0..REINSTALL_WINDOW_MS).contains(&(now - self.at_ms)) {
             return Vec::new();
         }
-        [("statusline", self.statusline), ("otel", self.otel), ("refresh", self.refresh), ("resume", self.resume), ("handoff", self.handoff)].into_iter().filter(|k| k.1).map(|k| k.0).collect()
+        [("statusline", self.statusline), ("otel", self.otel), ("refresh", self.refresh), ("resume", self.resume), ("handoff", self.handoff), ("codex_handoff", self.codex_handoff)].into_iter().filter(|k| k.1).map(|k| k.0).collect()
     }
 }
 
@@ -775,6 +848,12 @@ fn restore_after_upgrade(app: &AppHandle) {
             }),
             "handoff" => crate::handoff::install(app).and_then(|()| {
                 let s = app.state::<AppState>().update_settings(|s| s.limit_handoff = true)?;
+                write_statusline_options(&app.state::<AppState>().data_dir, &s);
+                let _ = app.emit("settings-changed", &s);
+                Ok("enabled".into())
+            }),
+            "codex_handoff" => crate::handoff::install_codex(app).and_then(|()| {
+                let s = app.state::<AppState>().update_settings(|s| s.codex_handoff = true)?;
                 write_statusline_options(&app.state::<AppState>().data_dir, &s);
                 let _ = app.emit("settings-changed", &s);
                 Ok("enabled".into())
@@ -1635,6 +1714,7 @@ pub fn write_statusline_options(data_dir: &Path, s: &Settings) {
         turkish: crate::tray::turkish(s),
         resume: s.limit_resume,
         handoff: s.limit_handoff,
+        codex_handoff: s.codex_handoff,
         cost: s.statusline_cost,
         currency: s.currency.clone(),
         fx: s.fx_rate,
@@ -1783,8 +1863,8 @@ mod tests {
 
     #[test]
     fn only_a_recent_uninstall_turns_captures_back_on() {
-        let r = Reverted { statusline: true, otel: false, refresh: true, auto: true, resume: false, handoff: true, at_ms: 1_000_000 };
-        assert_eq!(r.to_restore(1_000_000 + 5 * 60_000), ["statusline", "refresh", "handoff"]);
+        let r = Reverted { statusline: true, otel: false, refresh: true, auto: true, resume: false, handoff: true, codex_handoff: true, at_ms: 1_000_000 };
+        assert_eq!(r.to_restore(1_000_000 + 5 * 60_000), ["statusline", "refresh", "handoff", "codex_handoff"]);
         let older: Reverted = serde_json::from_str(r#"{"statusline": false, "otel": true, "at_ms": 1000000}"#).unwrap();
         assert_eq!(older.to_restore(1_000_000), ["otel"], "a record written before the refresh hook existed");
         assert!(r.to_restore(1_000_000 + REINSTALL_WINDOW_MS).is_empty());
@@ -1797,7 +1877,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut s = Settings { language: "tr".into(), cache_statusline: true, ..Settings::default() };
         write_statusline_options(dir.path(), &s);
-        let usd = |cache, turkish| statusline::Options { cache, turkish, resume: false, handoff: false, cost: false, currency: "USD".into(), fx: 1.0 };
+        let usd = |cache, turkish| statusline::Options { cache, turkish, currency: "USD".into(), fx: 1.0, ..Default::default() };
         assert_eq!(statusline::read_options(dir.path()), usd(true, true));
         s.cache_timer = false;
         s.language = "en".into();

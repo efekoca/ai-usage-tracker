@@ -30,7 +30,7 @@
 
 use super::{f64_at, i64_at, str_at, u64_at, JsonlReader, ParseOutput};
 use crate::accounts::{MAIN_LIMIT, SAME_WINDOW_S};
-use crate::model::{account_digest, parse_ts_ms, window_name, Accuracy, LimitSnapshot, Provider, Tokens, Tool, ToolCall, Turn, UsageEvent, MAX_EPOCH_SECS};
+use crate::model::{account_digest, parse_ts_ms, window_name, Accuracy, LimitSnapshot, LimitStop, Provider, Tokens, Tool, ToolCall, Turn, UsageEvent, MAX_EPOCH_SECS};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -73,6 +73,8 @@ struct State {
     asked: bool,
     /// The open turn ([`Turn::id`]).
     turn: Option<String>,
+    /// The fullest window of the last main reading and its reset, for the turn the limit ends.
+    fullest: Option<(String, i64)>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -266,7 +268,13 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
                 }
                 out.lines_recognised += 1;
             }
-            ("event_msg", Some("task_complete" | "turn_aborted")) => st.turn = None,
+            ("event_msg", Some("task_complete" | "turn_aborted")) => {
+                st.turn = None;
+                let limit = p.get("error").and_then(|e| str_at(e, "codex_error_info")) == Some("usage_limit_exceeded");
+                if let (true, Some(ts_ms), Some((window, resets_at)), false) = (limit, ts_ms, st.fullest.clone(), st.in_copy(path)) {
+                    out.stops.push(LimitStop { session_id: st.who(path).session, ts_ms, window, resets_at });
+                }
+            }
             ("event_msg", Some("thread_settings_applied")) => {
                 if let Some(id) = str_at(p, "thread_id") {
                     st.take_owner(id, path);
@@ -321,6 +329,10 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
                 if let (Some(rl), Some(ts_ms)) = (rl, ts_ms) {
                     if !st.in_copy(path) {
                         rate_limits(rl, ts_ms, &mut out.limits);
+                        // a reading of another limit (`premium`) has no windows and changes nothing
+                        if let Some((w, _, r)) = main_windows(rl, ts_ms).into_iter().max_by(|a, b| a.1.total_cmp(&b.1)) {
+                            st.fullest = Some((w, r));
+                        }
                     } else if replay {
                         rate_limits(rl, ts_ms, &mut out.stale_limits);
                     }
@@ -501,6 +513,18 @@ fn window(rl: &Value, slot: &str, ts_ms: i64) -> Option<(i64, Option<f64>, Optio
     }
 }
 
+/// The main limit's windows in a reading: (name, used %, reset in epoch seconds).
+pub(crate) fn main_windows(rl: &Value, ts_ms: i64) -> Vec<(String, f64, i64)> {
+    if str_at(rl, "limit_id").is_some_and(|l| l != MAIN_LIMIT) {
+        return Vec::new();
+    }
+    ["primary", "secondary"]
+        .iter()
+        .filter_map(|slot| window(rl, slot, ts_ms))
+        .filter_map(|(minutes, pct, reset)| Some((window_name(minutes)?, pct?, reset?)))
+        .collect()
+}
+
 /// When the longest window of the main limit resets: the window a request counted toward.
 fn longest_reset(rl: &Value, ts_ms: i64) -> Option<i64> {
     if str_at(rl, "limit_id").is_some_and(|l| l != MAIN_LIMIT) {
@@ -600,6 +624,33 @@ mod tests {
         let out = parse_file(&p, 0, &Value::Null).unwrap();
         assert_eq!((out.events.len(), out.limits.len(), out.tool_calls.len()), (1, 0, 0));
         assert_eq!((out.warning_count, out.warnings.as_slice()), (2, &["2 lines skipped: their time could not be read".to_owned()][..]));
+    }
+
+    #[test]
+    fn a_turn_the_usage_limit_ends_is_a_stop_of_the_fullest_main_window_even_in_a_later_read() {
+        use serde_json::json;
+        let dir = tempfile::tempdir().unwrap();
+        let id = "0199aaaa-bbbb-7ccc-8ddd-eeeeffff0010";
+        let p = dir.path().join(format!("rollout-2026-11-09T11-36-42-{id}.jsonl"));
+        let main = json!({"limit_id": "codex", "primary": {"used_percent": 100.0, "window_minutes": 300, "resets_at": 1_794_228_269}, "secondary": {"used_percent": 41.0, "window_minutes": 10080, "resets_at": 1_794_650_450}, "rate_limit_reached_type": null});
+        let first = [
+            json!({"timestamp": "2026-11-09T09:50:00.000Z", "type": "session_meta", "payload": {"id": id, "cwd": "/w"}}),
+            json!({"timestamp": "2026-11-09T09:53:16.000Z", "type": "event_msg", "payload": {"type": "token_count", "info": null, "rate_limits": main}}),
+            // another limit's reading right after it has no windows
+            json!({"timestamp": "2026-11-09T09:53:16.100Z", "type": "event_msg", "payload": {"type": "token_count", "info": null, "rate_limits": {"limit_id": "premium", "primary": null, "secondary": null}}}),
+        ];
+        let body = |lines: &[serde_json::Value]| lines.iter().map(|l| format!("{l}\n")).collect::<String>();
+        std::fs::write(&p, body(&first)).unwrap();
+        let out = parse_file(&p, 0, &Value::Null).unwrap();
+        assert!(out.stops.is_empty());
+        let end = [
+            json!({"timestamp": "2026-11-09T09:53:16.655Z", "type": "event_msg", "payload": {"type": "task_complete", "error": {"message": "You've hit your usage limit.", "codex_error_info": "usage_limit_exceeded"}}}),
+            json!({"timestamp": "2026-11-09T09:54:00.000Z", "type": "event_msg", "payload": {"type": "task_complete", "error": null}}),
+        ];
+        let offset = std::fs::metadata(&p).unwrap().len();
+        std::fs::write(&p, body(&first) + &body(&end)).unwrap();
+        let out = parse_file(&p, offset, &out.state).unwrap();
+        assert_eq!(out.stops, [LimitStop { session_id: id.into(), ts_ms: parse_ts_ms("2026-11-09T09:53:16.655Z").unwrap(), window: "five_hour".into(), resets_at: 1_794_228_269 }]);
     }
 
     #[test]

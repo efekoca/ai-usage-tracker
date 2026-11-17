@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, Mutex};
 use tauri::{AppHandle, Manager};
 use tracker_core::analytics::LIVE_READING_MS;
+use tracker_core::capture::handoff::Agent;
 use tracker_core::model::Provider;
 
 /// Readings round their reset time differently; a larger move is a window that started again.
@@ -357,19 +358,24 @@ pub(crate) fn test(app: &AppHandle, s: &Settings) -> Sent {
 /// about the Limits page.
 const REFRESH: &str = "refresh";
 const CODEX: &str = "codex";
+const CLAUDE: &str = "claude";
 const NOTE: &str = "note";
 
-/// A notification's buttons: Refresh on a cache's; Continue in Codex and Open the note on a handoff
-/// note's. A click, or a button that cannot do its job, opens the app on the page the notification
-/// is about.
+/// A notification's buttons: Refresh on a cache's; Continue in Codex or in Claude and Open the note
+/// on a handoff note's. A click, or a button that cannot do its job, opens the app on the page the
+/// notification is about.
 fn act(app: &AppHandle, tag: &str, action: &str) {
     if let Some(key) = tag.strip_prefix("handoff-")
-        && (action == CODEX || action == NOTE)
+        && [CODEX, CLAUDE, NOTE].contains(&action)
     {
         // macOS calls this on the main thread, and starting a terminal takes a moment
         let (app, tag, key, action) = (app.clone(), tag.to_owned(), key.to_owned(), action.to_owned());
         std::thread::spawn(move || {
-            let done = if action == CODEX { crate::handoff::continue_in_codex(&app, &key) } else { crate::handoff::open_note(&app, &key) };
+            let done = match action.as_str() {
+                CODEX => crate::handoff::continue_in_codex(&app, &key),
+                CLAUDE => crate::handoff::continue_in_claude(&app, &key),
+                _ => crate::handoff::open_note(&app, &key),
+            };
             if let Err(e) = done {
                 log::info!("handoff from a notification: {e}");
                 open(&app, &tag);
@@ -405,30 +411,50 @@ fn codex_label(tr: bool) -> &'static str {
     if tr { "Codex'te devam et" } else { "Continue in Codex" }
 }
 
+fn claude_label(tr: bool) -> &'static str {
+    if tr { "Claude'da devam et" } else { "Continue in Claude" }
+}
+
 fn note_label(tr: bool) -> &'static str {
     if tr { "Notu aç" } else { "Open the note" }
 }
 
-/// A conversation that wrote its handoff note was stopped by the limit.
-pub(crate) fn handoff_ready(app: &AppHandle, s: &Settings, key: &str, project: &str, resets_ms: i64) {
+/// A conversation that wrote its handoff note was stopped by the limit; the user can go on in the
+/// other tool.
+pub(crate) fn handoff_ready(app: &AppHandle, s: &Settings, key: &str, project: &str, resets_ms: i64, agent: Agent) {
     if !s.onboarded || !s.notify.enabled || !s.notify.handoff {
         return;
     }
     let tr = crate::tray::turkish(s);
     // a weekly reset days away carries its day
     let at = crate::tray::format(s, &s.tray).clock(resets_ms / 1000).unwrap_or_default();
-    let name = if project.is_empty() { "Claude Code" } else { project };
-    let title = if tr { "Devir notu hazır" } else { "Handoff note ready" };
-    let body = match (tr, s.limit_resume) {
-        (true, true) => format!("{name}: limit {at} sularında sıfırlanınca konuşma kendiliğinden devam eder. Beklemeden Codex'te de sürdürebilirsiniz."),
-        (true, false) => format!("{name}: limit {at} sularında sıfırlanıyor. İşi notla Codex'te sürdürebilirsiniz."),
-        (false, true) => format!("{name}: the conversation goes on by itself when the limit resets around {at}. You can also carry on in Codex now."),
-        (false, false) => format!("{name}: the limit resets around {at}. You can carry on in Codex with the note."),
+    // the other tool's name, in Turkish with its ending
+    let (own, other, other_tr) = match agent {
+        Agent::Claude => ("Claude Code", "Codex", "Codex'te"),
+        Agent::Codex => ("Codex", "Claude", "Claude'da"),
     };
-    let codex = (CODEX, codex_label(tr));
+    let name = if project.is_empty() { own } else { project };
+    let title = if tr { "Devir notu hazır" } else { "Handoff note ready" };
+    // only a Claude Code conversation is continued by itself after the reset
+    let body = match (tr, s.limit_resume && agent == Agent::Claude) {
+        (true, true) => format!("{name}: limit {at} sularında sıfırlanınca konuşma kendiliğinden devam eder. Beklemeden {other_tr} de sürdürebilirsiniz."),
+        (true, false) => format!("{name}: limit {at} sularında sıfırlanıyor. İşi notla {other_tr} sürdürebilirsiniz."),
+        (false, true) => format!("{name}: the conversation goes on by itself when the limit resets around {at}. You can also carry on in {other} now."),
+        (false, false) => format!("{name}: the limit resets around {at}. You can carry on in {other} with the note."),
+    };
+    let go = match agent {
+        Agent::Claude => crate::capture::codex_binary(s).is_some().then_some((CODEX, codex_label(tr))),
+        Agent::Codex => crate::capture::claude_binary(s).is_some().then_some((CLAUDE, claude_label(tr))),
+    };
     let note = (NOTE, note_label(tr));
-    let found = crate::capture::codex_binary(s).is_some();
-    let buttons: &[(&str, &str)] = if found { &[codex, note] } else { &[note] };
+    let both;
+    let buttons: &[(&str, &str)] = match go {
+        Some(go) => {
+            both = [go, note];
+            &both
+        }
+        None => &[note],
+    };
     log::info!("handoff notification");
     send_with(app, &format!("handoff-{key}"), title, &body, buttons, |_| {});
 }
@@ -608,7 +634,7 @@ pub(crate) fn init(app: &AppHandle) {
     std::mem::forget(delegate);
     let tr = crate::tray::turkish(&app.state::<crate::state::AppState>().settings.read().unwrap());
     let own = |set: &[(&str, &str)]| set.iter().map(|(id, label)| ((*id).to_owned(), (*label).to_owned())).collect::<Vec<_>>();
-    for set in [own(&[(REFRESH, refresh_label(tr))]), own(&[(CODEX, codex_label(tr)), (NOTE, note_label(tr))]), own(&[(NOTE, note_label(tr))])] {
+    for set in [own(&[(REFRESH, refresh_label(tr))]), own(&[(CODEX, codex_label(tr)), (NOTE, note_label(tr))]), own(&[(CLAUDE, claude_label(tr)), (NOTE, note_label(tr))]), own(&[(NOTE, note_label(tr))])] {
         register_category(set);
     }
 }

@@ -22,7 +22,7 @@
   ${AndIf} ${FileExists} "$INSTDIR\ai-usage-tracker.exe"
     ExecWait '"$INSTDIR\ai-usage-tracker.exe" --revert-capture' $0
     ${If} $0 <> 0
-      MessageBox MB_OK|MB_ICONEXCLAMATION "AI Usage Tracker could not undo all of its changes to Claude Code's settings.json (the status line, the telemetry export to 127.0.0.1, the cache refresh hook or the limit hook). Please remove them yourself (usually in %USERPROFILE%\.claude\settings.json)." /SD IDOK
+      MessageBox MB_OK|MB_ICONEXCLAMATION "AI Usage Tracker could not undo all of its changes to Claude Code's settings.json (the status line, the telemetry export to 127.0.0.1, the cache refresh hook, the limit hook or the handoff hook) or its handoff hook in Codex's hooks.json. Please remove them yourself (usually in %USERPROFILE%\.claude\settings.json and %USERPROFILE%\.codex\hooks.json)." /SD IDOK
     ${EndIf}
   ${EndIf}
 !macroend

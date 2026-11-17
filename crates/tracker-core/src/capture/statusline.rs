@@ -214,6 +214,8 @@ pub struct Options {
     pub resume: bool,
     /// A conversation near its usage limit is asked for a handoff note.
     pub handoff: bool,
+    /// The same for Codex, through its own hook.
+    pub codex_handoff: bool,
     /// The conversation's cost so far, as Claude Code itself counts it, before the cache time.
     pub cost: bool,
     /// The app's display currency and its rate from US dollars.

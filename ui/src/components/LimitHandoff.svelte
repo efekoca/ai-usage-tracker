@@ -1,12 +1,14 @@
 <script lang="ts">
   import { app } from '../lib/store.svelte'
-  import { api, type HandoffInfo } from '../lib/api'
+  import { api, type HandoffAgent, type HandoffInfo } from '../lib/api'
   import { fmtClock, fmtWhen, has, t } from '../lib/i18n.svelte'
   import AutoCard from './AutoCard.svelte'
   import Icon from './Icon.svelte'
+  import Toggle from './Toggle.svelte'
 
   let info = $state<HandoffInfo | null>(null)
-  let asking = $state(false)
+  // which tools the consent panel is for
+  let asking = $state<HandoffAgent[]>([])
   let how = $state(false)
   let busy = $state(false)
   let error = $state('')
@@ -22,28 +24,39 @@
     load()
   })
 
-  const on = $derived(!!app.settings?.limit_handoff && !!info?.installed)
+  const claudeOn = $derived(!!app.settings?.limit_handoff && !!info?.installed)
+  const codexOn = $derived(!!app.settings?.codex_handoff && !!info?.codex_installed)
+  const on = $derived(claudeOn || codexOn)
+  const needs = (tool: HandoffAgent) => (tool === 'claude' ? !info?.installed : !info?.codex_installed)
 
-  async function set(v: boolean) {
+  async function apply(change: Partial<Record<HandoffAgent, boolean>>) {
     busy = true
     error = ''
     try {
-      info = await api.setLimitHandoff(v)
-      if (app.settings) app.settings.limit_handoff = v
-      asking = false
+      if (change.claude !== undefined) {
+        info = await api.setLimitHandoff(change.claude)
+        if (app.settings) app.settings.limit_handoff = change.claude
+      }
+      if (change.codex !== undefined) {
+        info = await api.setCodexHandoff(change.codex)
+        if (app.settings) app.settings.codex_handoff = change.codex
+      }
+      asking = []
     } catch (e) {
       error = String(e)
     } finally {
       busy = false
     }
   }
-  // the hook and its write rule are added only once the user agrees
-  function toggle(v: boolean) {
-    if (v && !info?.installed) {
+  // the hooks and the write rule are added only once the user agrees
+  function ask(tools: HandoffAgent[]) {
+    if (tools.some(needs)) {
       error = ''
-      asking = true
-    } else set(v)
+      asking = tools
+    } else apply(Object.fromEntries(tools.map((tool) => [tool, true])))
   }
+  const toggleAll = (v: boolean) => (v ? ask(info?.codex_here ? ['claude', 'codex'] : ['claude']) : apply({ claude: false, codex: false }))
+  const toggleTool = (tool: HandoffAgent, v: boolean) => (v ? ask([tool]) : apply({ [tool]: false }))
 
   async function run(key: string, job: (key: string) => Promise<void>) {
     failed = null
@@ -56,9 +69,14 @@
   }
 
   const project = (n: { project: string }) => n.project || t('projects.hidden')
+  const toolName = (a: HandoffAgent) => (a === 'codex' ? 'Codex' : 'Claude')
   // today's times are a clock time; another day's carries its day
   const clock = (ms: number) => (new Date(ms).toDateString() === new Date().toDateString() ? fmtClock(ms) : fmtWhen(ms))
   const tag = $derived(on && info?.notes.length ? t('limits.handoff.count', { n: info.notes.length }) : '')
+  const codexState = $derived(!info?.codex_here ? 'missing' : codexOn ? (info.codex_seen ? 'on' : 'waiting') : 'off')
+  // the user goes on in the other tool than the one that wrote the note
+  const go = (a: HandoffAgent) =>
+    a === 'codex' ? { label: t('limits.handoff.claude'), found: !!info?.claude_found, missing: 'claude_not_found' } : { label: t('limits.handoff.codex'), found: !!info?.codex_found, missing: 'codex_not_found' }
 </script>
 
 {#snippet icon()}
@@ -87,48 +105,85 @@
   {/if}
 {/snippet}
 
+{#snippet head(title: string, file: string)}
+  <div class="ask-head">
+    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5M12 12v5M9.5 14.5h5" /></svg>
+    <div>
+      <b>{title}</b>
+      <code>{file}</code>
+    </div>
+  </div>
+{/snippet}
+
 {#if info}
-  <AutoCard title={t('limits.handoff.title')} help={t('limits.handoff.help')} {tag} {on} disabled={busy} onchange={toggle} {icon} {about}>
-    {#if asking}
-      <div class="inset ask" role="group" aria-label={t('limits.handoff.ask.title')}>
-        <div class="ask-head">
-          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5M12 12v5M9.5 14.5h5" /></svg>
-          <div>
-            <b>{t('limits.handoff.ask.title')}</b>
-            <code>{info.settings_file}</code>
-          </div>
-        </div>
-        <ul>
-          <li>{t('limits.handoff.ask.runs')}</li>
-          <li>{t('limits.handoff.ask.intro')}</li>
-          <li>
-            <span class="folder">{t('limits.handoff.ask.folder')}<code>{info.folder}</code></span>
-          </li>
+  <AutoCard title={t('limits.handoff.title')} help={t('limits.handoff.help')} {tag} {on} disabled={busy} onchange={toggleAll} {icon} {about}>
+    {#if asking.length}
+      <div class="inset ask" role="group" aria-label={t('limits.handoff.title')}>
+        {#if asking.includes('claude')}
+          <section class="part claude">
+            {@render head(t('limits.handoff.ask.title'), info.settings_file)}
+            <ul>
+              <li>{t('limits.handoff.ask.runs')}</li>
+              <li>{t('limits.handoff.ask.intro')}</li>
+              <li>
+                <span class="folder">{t('limits.handoff.ask.folder')}<code>{info.folder}</code></span>
+              </li>
+            </ul>
+          </section>
+        {/if}
+        {#if asking.includes('codex')}
+          <section class="part codex">
+            {@render head(t('limits.handoff.ask.codex.title'), info.codex_hooks_file)}
+            <ul>
+              <li>{t('limits.handoff.ask.codex.runs')}</li>
+              <li>{t('limits.handoff.ask.codex.intro')}</li>
+              <li>{t('limits.handoff.ask.codex.trust')}</li>
+              <li>
+                <span class="folder">{t('limits.handoff.ask.codex.folder')}<code>{info.codex_folder}</code></span>
+              </li>
+              <li>{t('limits.handoff.ask.codex.same')}</li>
+            </ul>
+          </section>
+        {/if}
+        <ul class="common">
           <li>{t('limits.handoff.ask.only')}</li>
           <li>{t('limits.handoff.ask.off')}</li>
         </ul>
         {#if error}<p class="error small" role="alert">{t('refresh.consent.failed', { why: error })}</p>{/if}
         <div class="actions">
-          <button class="btn" disabled={busy} onclick={() => (asking = false)}>{t('common.cancel')}</button>
-          <button class="btn primary" disabled={busy} onclick={() => set(true)}>{t('limits.handoff.ok')}</button>
+          <button class="btn" disabled={busy} onclick={() => (asking = [])}>{t('common.cancel')}</button>
+          <button class="btn primary" disabled={busy} onclick={() => apply(Object.fromEntries(asking.map((tool) => [tool, true])))}>{t('limits.handoff.ok')}</button>
         </div>
       </div>
     {:else if error}
       <p class="error small" role="alert">{t('common.error', { e: error })}</p>
     {/if}
     {#if on}
+      <div class="inset tools" role="group" aria-label={t('limits.handoff.tools')}>
+        <div class="row tool">
+          <b>Claude Code</b>
+          <span class="subtle small">{t(claudeOn ? 'limits.handoff.tool.on' : 'limits.handoff.tool.off')}</span>
+          <Toggle small checked={claudeOn} disabled={busy} label="Claude Code" onchange={(v) => toggleTool('claude', v)} />
+        </div>
+        <div class="row tool">
+          <b>Codex</b>
+          <span class="subtle small">{t(`limits.handoff.tool.${codexState}`)}</span>
+          <Toggle small checked={codexOn} disabled={busy || !info.codex_here} label="Codex" onchange={(v) => toggleTool('codex', v)} />
+        </div>
+      </div>
       <div class="inset">
         {#each info.notes as n (n.key)}
+          {@const next = go(n.agent)}
           <div class="row note">
             <svg class="state" role="img" aria-label={t('limits.handoff.state')} width="22" height="22" viewBox="0 0 22 22"><rect x="4" y="2.5" width="14" height="17" rx="2.5" fill="none" stroke="var(--accent)" stroke-width="2" /><path d="M7.5 8h7M7.5 11.5h7M7.5 15h4" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" /></svg>
             <div class="who">
               <span class="name"><b>{project(n)}</b></span>
-              <span class="subtle small">{t('limits.handoff.written', { when: clock(n.written_ms) })}</span>
+              <span class="subtle small">{toolName(n.agent)} · {t('limits.handoff.written', { when: clock(n.written_ms) })}</span>
               {#if failed?.key === n.key}<span class="error small" role="alert">{failed.why}</span>{/if}
             </div>
             <div class="buttons">
               <button class="btn small" aria-label="{t('limits.handoff.open')}: {project(n)}" onclick={() => run(n.key, api.openHandoffNote)}>{t('limits.handoff.open')}</button>
-              <button class="btn small primary" disabled={!info.codex_found} title={info.codex_found ? undefined : t('limits.handoff.failed.codex_not_found')} aria-label="{t('limits.handoff.codex')}: {project(n)}" onclick={() => run(n.key, api.continueHandoffInCodex)}>{t('limits.handoff.codex')}</button>
+              <button class="btn small primary" disabled={!next.found} title={next.found ? undefined : t(`limits.handoff.failed.${next.missing}`)} aria-label="{next.label}: {project(n)}" onclick={() => run(n.key, api.continueHandoff)}>{next.label}</button>
             </div>
           </div>
         {:else}
@@ -145,6 +200,14 @@
 <style>
   .row.note {
     grid-template-columns: 22px minmax(0, 1fr) auto;
+  }
+  .row.tool {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    padding: 10px 16px;
+    font-size: 13.5px;
+  }
+  .row.tool b {
+    font-weight: 600;
   }
   .who {
     display: grid;
@@ -225,6 +288,14 @@
     gap: 14px;
     padding: 18px 20px;
     border-color: var(--hairline-strong);
+  }
+  .part {
+    display: grid;
+    gap: 12px;
+  }
+  .part + .part {
+    padding-top: 14px;
+    border-top: 1px solid var(--hairline);
   }
   .ask-head {
     display: flex;

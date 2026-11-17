@@ -404,6 +404,8 @@ export interface ResumeInfo {
   resumed: { session_id: string; project: string; branch: string | null; at_ms: number }[]
 }
 
+export type HandoffAgent = 'claude' | 'codex'
+
 export interface HandoffInfo {
   /** Our hook and its write rule are in Claude Code's settings. */
   installed: boolean
@@ -411,8 +413,18 @@ export interface HandoffInfo {
   /** The folder Claude may write the notes to. */
   folder: string
   codex_found: boolean
-  /** The notes Claude wrote, the latest first; never their contents. */
-  notes: { key: string; project: string; written_ms: number }[]
+  claude_found: boolean
+  /** Codex's folder or program is on this computer. */
+  codex_here: boolean
+  /** Our hook is in Codex's `hooks.json`. */
+  codex_installed: boolean
+  codex_hooks_file: string
+  /** The hook ran in a Codex conversation since it was added, so the user trusted it. */
+  codex_seen: boolean
+  /** Where Codex writes before the note is moved over. */
+  codex_folder: string
+  /** The notes written, the latest first; never their contents. The user goes on in the other tool. */
+  notes: { key: string; project: string; written_ms: number; agent: HandoffAgent }[]
 }
 
 export interface RefreshInfo {
@@ -661,6 +673,7 @@ export interface Settings {
   /** Continues a Claude Code conversation the usage limit stopped, once the limit starts again. */
   limit_resume: boolean
   limit_handoff: boolean
+  codex_handoff: boolean
   /** Opens Claude's five-hour window at a time of day: minutes after local midnight, on weekdays 1 (Monday) to 7. */
   window_opener: { enabled: boolean; minute: number; days: number[] }
   /** Days the user marked a change on, the latest first. */
@@ -1324,7 +1337,8 @@ export const api = {
   handoffInfo: () => invoke<HandoffInfo>('handoff_info'),
   setLimitHandoff: (on: boolean) => invoke<HandoffInfo>('set_limit_handoff', { on }),
   openHandoffNote: (key: string) => invoke<void>('open_handoff_note', { key }),
-  continueHandoffInCodex: (key: string) => invoke<void>('continue_handoff_in_codex', { key }),
+  setCodexHandoff: (on: boolean) => invoke<HandoffInfo>('set_codex_handoff', { on }),
+  continueHandoff: (key: string) => invoke<void>('continue_handoff', { key }),
   windowOpenerInfo: () => invoke<OpenerInfo>('window_opener_info'),
   openWindowNow: () => invoke<OpenerInfo>('open_window_now'),
   trayPreview: (tray: TraySettings) => invoke<TrayPreview>('tray_preview', { tray }),

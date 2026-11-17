@@ -667,6 +667,8 @@ pub struct Settings {
     /// Asks a Claude Code conversation near its usage limit to write a handoff note; needs the
     /// handoff hook and its write rule in Claude Code's settings, so off by default.
     pub limit_handoff: bool,
+    /// The same for Codex; needs our hook in Codex's `hooks.json`, so off by default.
+    pub codex_handoff: bool,
     /// Provider → `#rrggbb` for its limit bars and mark; a missing one uses the accent color.
     pub provider_colors: std::collections::BTreeMap<String, String>,
     /// Marks take the tool's color too; off keeps them in the text color.
@@ -862,6 +864,7 @@ impl Default for Settings {
             cache_lead: 2,
             limit_resume: false,
             limit_handoff: false,
+            codex_handoff: false,
             provider_colors: Default::default(),
             tint_icons: false,
             show_icons: true,
