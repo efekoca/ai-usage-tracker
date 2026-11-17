@@ -18,8 +18,9 @@
     busy = true
     result = null
     try {
-      await api.setCapture(kind, true)
-      result = { ok: true, text: t('signin.ok') }
+      // too soon to ask Claude: nothing is read yet, and the next cycle reads the limits
+      const done = await api.setCapture(kind, true)
+      result = { ok: true, text: t(done === 'claude_wait' ? 'signin.wait' : 'signin.ok') }
       await refresh()
     } catch {
       result = { ok: false, text: t('signin.stillOut') }

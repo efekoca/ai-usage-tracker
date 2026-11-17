@@ -440,9 +440,16 @@
       radial-gradient(120% 100% at 50% 100%, #3d4f7a 0%, #1c2236 70%);
   }
   .panels {
+    container-type: inline-size;
     display: flex;
     flex-direction: column;
     gap: 16px;
+  }
+  /* this column is narrow even in a wide window, so its segments size to their labels here too */
+  @container (max-width: 520px) {
+    .panels :global(.seg) {
+      grid-template-columns: repeat(var(--n), auto);
+    }
   }
   .group h2 {
     margin-bottom: 6px;
@@ -456,6 +463,11 @@
     padding: 10px 0;
     border-bottom: 0.5px solid var(--hairline);
     min-height: 44px;
+  }
+  /* the words give way first, so a long help line no longer pushes the control below it */
+  .item:not(.stack) > :first-child {
+    flex: 1 1 0;
+    min-width: 5rem;
   }
   .item:last-child {
     border-bottom: 0;

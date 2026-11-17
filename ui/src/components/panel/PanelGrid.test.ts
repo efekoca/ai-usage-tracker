@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from 'svelte'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { LiveCache, PanelData, PanelModule, Settings } from '../../lib/api'
 import PanelGrid from './PanelGrid.svelte'
+import { tileWindows } from '../../lib/panelLimits'
 
 let done: (() => void)[] = []
 afterEach(() => {
@@ -40,5 +41,16 @@ describe('the tall Live caches tile', () => {
 
   it('takes one row while cache time left is off', () => {
     expect(render(4, false)).toEqual({ span: 'span 1', tall: false, rows: 0 })
+  })
+})
+
+describe('a provider tile', () => {
+  const limit = (provider: string, window: string) => ({ provider, limit_id: '', window, used_pct: 10, state: 'fresh', resets_at: null, forecast: null, account: null, active: true, blocked: false })
+  const data = (...l: ReturnType<typeof limit>[]) => ({ limits: l }) as unknown as PanelData
+
+  it("shows the plan's own window when it has no 5-hour or weekly one", () => {
+    expect(tileWindows(data(limit('openai', 'thirty_day')), 'openai', '')).toEqual(['thirty_day'])
+    expect(tileWindows(data(limit('anthropic', 'five_hour'), limit('anthropic', 'seven_day')), 'anthropic', '')).toEqual(['five_hour', 'seven_day'])
+    expect(tileWindows(data(), 'openai', ''), 'nothing read yet').toEqual(['five_hour', 'seven_day'])
   })
 })

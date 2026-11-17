@@ -128,7 +128,11 @@ pub(crate) fn app_page(url: &tauri::Url) -> bool {
     ours
 }
 
+/// Two requests at once would both find no window and build one each.
+static BUILDING_MAIN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn build_main(app: &AppHandle, view: Option<&str>) {
+    let _one_at_a_time = BUILDING_MAIN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if app.get_webview_window(MAIN).is_some() {
         return; // a concurrent request already built it
     }
@@ -392,7 +396,7 @@ pub fn popup_widget_menu(app: &AppHandle) {
     let tr = s.language == "tr" || (s.language == "system" && system_is_turkish());
     let t = |en: &'static str, tr_: &'static str| if tr { tr_ } else { en };
     let build = || -> tauri::Result<Menu<tauri::Wry>> {
-        let open = MenuItem::with_id(app, "w:open", t("Open dashboard", "Paneli aç"), true, None::<&str>)?;
+        let open = MenuItem::with_id(app, "w:open", t("Open dashboard", "Uygulamayı aç"), true, None::<&str>)?;
         let op = |v: f64, label: &str| CheckMenuItem::with_id(app, format!("w:opacity:{v}"), label, true, (s.widget.opacity - v).abs() < 0.01, None::<&str>);
         let opacity = Submenu::with_items(app, t("Opacity", "Saydamlık"), true, &[&op(1.0, "100%")?, &op(0.85, "85%")?, &op(0.7, "70%")?, &op(0.55, "55%")?])?;
         let sz = |v: &str, label: &str| CheckMenuItem::with_id(app, format!("w:size:{v}"), label, true, s.widget.size == v, None::<&str>);

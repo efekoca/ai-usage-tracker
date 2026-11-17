@@ -7,6 +7,7 @@ use crate::windows::{handle_menu, show_main_at, supports_mica, window_theme};
 use serde::Serialize;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Mutex;
+use tauri::webview::PageLoadEvent;
 use tauri::window::{Effect, EffectState, EffectsBuilder};
 use tauri::{AppHandle, LogicalPosition, Manager, PhysicalPosition, Rect, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tracker_core::analytics::{self, LimitState};
@@ -34,6 +35,8 @@ enum Anchor {
 
 static ANCHOR: Mutex<Option<Anchor>> = Mutex::new(None);
 static HIDDEN_MS: AtomicI64 = AtomicI64::new(0);
+/// When the panel was asked for while its window was still being made; 0 when it was not.
+static SHOW_ON_LOAD_MS: AtomicI64 = AtomicI64::new(0);
 
 fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
@@ -61,8 +64,24 @@ pub fn toggle(app: &AppHandle, rect: Option<Rect>) {
             Anchor::Pixels((p.x, p.y, s.width, s.height))
         })
     });
-    let Some(w) = ensure(app) else { return };
-    place(&w);
+    // a panel just made shows once its page has loaded (see `build`), unless the page never does
+    let asked = SHOW_ON_LOAD_MS.load(Ordering::SeqCst);
+    if asked != 0 && now_ms() - asked < 10_000 {
+        return;
+    }
+    match app.get_webview_window(PANEL) {
+        Some(w) => show(&w),
+        None => {
+            SHOW_ON_LOAD_MS.store(now_ms(), Ordering::SeqCst);
+            if !build(app) {
+                SHOW_ON_LOAD_MS.store(0, Ordering::SeqCst);
+            }
+        }
+    }
+}
+
+fn show(w: &WebviewWindow) {
+    place(w);
     let _ = w.show();
     let _ = w.set_focus();
 }
@@ -91,10 +110,8 @@ fn hide(w: &WebviewWindow) {
     let _ = w.hide();
 }
 
-fn ensure(app: &AppHandle) -> Option<WebviewWindow> {
-    if let Some(w) = app.get_webview_window(PANEL) {
-        return Some(w);
-    }
+/// Makes the panel's window, hidden; whether it was made.
+fn build(app: &AppHandle) -> bool {
     let s = app.state::<AppState>().settings.read().unwrap().clone();
     let native = cfg!(target_os = "macos") || supports_mica();
     let mut b = WebviewWindowBuilder::new(app, PANEL, WebviewUrl::App("panel.html".into()))
@@ -111,6 +128,12 @@ fn ensure(app: &AppHandle) -> Option<WebviewWindow> {
         .visible_on_all_workspaces(true)
         .accept_first_mouse(true)
         .theme(window_theme(&s))
+        // shown before its webview exists, Windows reports the webview taking the focus as a blur
+        .on_page_load(|w, p| {
+            if p.event() == PageLoadEvent::Finished && SHOW_ON_LOAD_MS.swap(0, Ordering::SeqCst) != 0 {
+                show(&w);
+            }
+        })
         .visible(false);
     if cfg!(target_os = "macos") {
         b = b.effects(EffectsBuilder::new().effect(Effect::Popover).state(EffectState::Active).radius(18.0).build());
@@ -126,11 +149,11 @@ fn ensure(app: &AppHandle) -> Option<WebviewWindow> {
                 tauri::WindowEvent::Resized(_) => place(&win),
                 _ => {}
             });
-            Some(w)
+            true
         }
         Err(e) => {
             log::error!("cannot create the panel: {e}");
-            None
+            false
         }
     }
 }

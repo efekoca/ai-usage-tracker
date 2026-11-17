@@ -2,7 +2,7 @@ use crate::caches::Cache;
 use crate::settings::{Settings, TraySettings};
 use crate::tray_text::{needs_usage, shown_value, Data, Format, Reading, Usage};
 use crate::state::AppState;
-use crate::windows::{handle_menu, system_is_turkish};
+use crate::windows::system_is_turkish;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -47,7 +47,7 @@ pub(crate) fn turkish(s: &Settings) -> bool {
 
 fn menu(app: &AppHandle, tr: bool, update: Option<&str>, hotkey: &str) -> tauri::Result<Menu<tauri::Wry>> {
     let t = |en: &str, tr_: &str| if tr { tr_.to_owned() } else { en.to_owned() };
-    let open = MenuItem::with_id(app, "tray:open", t("Open dashboard", "Paneli aç"), true, None::<&str>)?;
+    let open = MenuItem::with_id(app, "tray:open", t("Open dashboard", "Uygulamayı aç"), true, None::<&str>)?;
     let widget_text = t("Show/hide widget", "Widget'ı göster/gizle");
     // macOS draws the shortcut (⌃⌥⇧W) in the menu's key column; a combination the menu cannot
     // parse just goes without it, so it can never break the menu
@@ -124,13 +124,13 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     if let Some(icon) = plain_icon(app) {
         b = b.icon(icon).icon_as_template(cfg!(target_os = "macos"));
     }
-    b.on_menu_event(|app, e| handle_menu(app, e.id().as_ref()))
-        .on_tray_icon_event(|tray, e| {
-            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, rect, .. } = e {
-                crate::panel::toggle(tray.app_handle(), Some(rect));
-            }
-        })
-        .build(app)?;
+    // menu events reach the app's own handler (lib.rs); one here as well would run each item twice
+    b.on_tray_icon_event(|tray, e| {
+        if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, rect, .. } = e {
+            crate::panel::toggle(tray.app_handle(), Some(rect));
+        }
+    })
+    .build(app)?;
     Ok(())
 }
 
