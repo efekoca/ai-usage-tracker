@@ -404,6 +404,17 @@ export interface ResumeInfo {
   resumed: { session_id: string; project: string; branch: string | null; at_ms: number }[]
 }
 
+export interface HandoffInfo {
+  /** Our hook and its write rule are in Claude Code's settings. */
+  installed: boolean
+  settings_file: string
+  /** The folder Claude may write the notes to. */
+  folder: string
+  codex_found: boolean
+  /** The notes Claude wrote, the latest first; never their contents. */
+  notes: { key: string; project: string; written_ms: number }[]
+}
+
 export interface RefreshInfo {
   /** Our hook is in Claude Code's settings. */
   installed: boolean
@@ -590,6 +601,7 @@ export interface NotifySettings {
   cache: boolean
   /** When a conversation the limit stopped is continued after the limit's reset. */
   resume: boolean
+  handoff: boolean
   /** Shortly before a weekly limit resets with much of it unused. */
   unused: boolean
 }
@@ -648,6 +660,7 @@ export interface Settings {
   cache_lead: 1 | 2 | 5
   /** Continues a Claude Code conversation the usage limit stopped, once the limit starts again. */
   limit_resume: boolean
+  limit_handoff: boolean
   /** Opens Claude's five-hour window at a time of day: minutes after local midnight, on weekdays 1 (Monday) to 7. */
   window_opener: { enabled: boolean; minute: number; days: number[] }
   /** Days the user marked a change on, the latest first. */
@@ -1308,6 +1321,10 @@ export const api = {
   limitResumeInfo: () => invoke<ResumeInfo>('limit_resume_info'),
   setLimitResume: (on: boolean) => invoke<ResumeInfo>('set_limit_resume', { on }),
   cancelLimitResume: (sessionId: string) => invoke<void>('cancel_limit_resume', { sessionId }),
+  handoffInfo: () => invoke<HandoffInfo>('handoff_info'),
+  setLimitHandoff: (on: boolean) => invoke<HandoffInfo>('set_limit_handoff', { on }),
+  openHandoffNote: (key: string) => invoke<void>('open_handoff_note', { key }),
+  continueHandoffInCodex: (key: string) => invoke<void>('continue_handoff_in_codex', { key }),
   windowOpenerInfo: () => invoke<OpenerInfo>('window_opener_info'),
   openWindowNow: () => invoke<OpenerInfo>('open_window_now'),
   trayPreview: (tray: TraySettings) => invoke<TrayPreview>('tray_preview', { tray }),

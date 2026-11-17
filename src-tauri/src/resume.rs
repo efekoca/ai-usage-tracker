@@ -333,13 +333,17 @@ pub async fn cancel_limit_resume(window: WebviewWindow, app: AppHandle, session_
     if !rh::valid_session(&session_id) {
         return Err("not_waiting".into());
     }
-    let state = app.state::<AppState>();
-    for dir in crate::refresh::hook_dirs(&state) {
-        rh::retire_limit(&dir, &session_id);
-    }
-    BOOK.lock().unwrap().signaled.remove(&session_id);
+    call_off(&app.state::<AppState>(), &session_id);
     let _ = app.emit("data-changed", ());
     Ok(())
+}
+
+/// The conversation's hook goes, and it stays where the limit stopped it.
+pub fn call_off(state: &AppState, session_id: &str) {
+    for dir in crate::refresh::hook_dirs(state) {
+        rh::retire_limit(&dir, session_id);
+    }
+    BOOK.lock().unwrap().signaled.remove(session_id);
 }
 
 /// "Delete all data" takes the record of continued conversations too, and sends away the hooks
