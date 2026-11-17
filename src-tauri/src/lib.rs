@@ -120,6 +120,9 @@ pub fn cli_mode() -> Option<i32> {
     if args.iter().any(|a| a == "--handoff-hook") {
         return Some(capture::handoff_hook_main());
     }
+    if args.iter().any(|a| a == "--codex-handoff-hook") {
+        return Some(capture::codex_handoff_hook_main());
+    }
     if args.iter().any(|a| a == "--revert-capture") {
         return Some(capture::revert_all_main());
     }
@@ -492,8 +495,9 @@ pub fn run() {
             resume::cancel_limit_resume,
             handoff::handoff_info,
             handoff::set_limit_handoff,
+            handoff::set_codex_handoff,
             handoff::open_handoff_note,
-            handoff::continue_handoff_in_codex,
+            handoff::continue_handoff,
             opener::window_opener_info,
             opener::open_window_now,
             commands::list_projects,

@@ -34,7 +34,7 @@ getent passwd | while IFS=: read -r user _ uid _ _ home _; do
   done
   [ -n "$dir" ] || continue
   runuser -u "$user" -- env -i HOME="$home" XDG_DATA_HOME="$dir" PATH=/usr/bin:/bin timeout 30 /usr/bin/ai-usage-tracker --revert-capture </dev/null \
-    || echo "ai-usage-tracker: could not undo the Claude Code settings changes for $user; see $home/.claude/settings.json" >&2
+    || echo "ai-usage-tracker: could not undo the Claude Code and Codex settings changes for $user; see $home/.claude/settings.json and $home/.codex/hooks.json" >&2
   runuser -u "$user" -- rm -f "$home/.config/autostart/ai-usage-tracker.desktop" ${config:+"$config/autostart/ai-usage-tracker.desktop"} || true
 done
 exit 0

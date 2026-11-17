@@ -131,6 +131,9 @@ pub struct CaptureState {
     pub resume: Option<RefreshHookChange>,
     #[serde(default)]
     pub handoff: Option<RefreshHookChange>,
+    /// Our hook in Codex's `hooks.json`.
+    #[serde(default)]
+    pub codex_handoff: Option<super::codex_hooks::CodexHookChange>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -233,7 +236,7 @@ fn keep_mode(_path: &Path, _tmp: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {
+pub(crate) fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let tmp = path.with_file_name(format!("{name}.{}-{}.aiut-tmp", std::process::id(), TMP_SEQ.fetch_add(1, Ordering::Relaxed)));
     let r = create_private(&tmp, content.as_bytes()).and_then(|_| keep_mode(path, &tmp)).and_then(|_| fs::rename(&tmp, path));
@@ -1137,7 +1140,7 @@ mod tests {
     #[test]
     fn state_round_trips_and_an_unreadable_record_is_an_error() {
         let dir = tempfile::tempdir().unwrap();
-        let st = CaptureState { statusline: None, otel: None, refresh: None, resume: None, handoff: None };
+        let st = CaptureState::default();
         save_state(dir.path(), &st).unwrap();
         assert_eq!(load_state(dir.path()), st);
         assert_eq!(load_state(&dir.path().join("missing")), CaptureState::default());

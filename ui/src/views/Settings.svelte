@@ -593,7 +593,7 @@
         <Toggle checked={s.notify.resume} label={t('settings.notify.resume')} onchange={(v) => saveNotify({ resume: v })} />
       </div>
     {/if}
-    {#if s.limit_handoff}
+    {#if s.limit_handoff || s.codex_handoff}
       <div class="item">
         <span>{t('settings.notify.handoff')}</span>
         <Toggle checked={s.notify.handoff} label={t('settings.notify.handoff')} onchange={(v) => saveNotify({ handoff: v })} />
