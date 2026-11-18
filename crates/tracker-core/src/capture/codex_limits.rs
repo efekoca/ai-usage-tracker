@@ -78,21 +78,31 @@ pub fn find_codex(env: &Env, configured: Option<&Path>) -> Option<PathBuf> {
 type Version = (u64, u64, u64);
 /// A file by path, size and change time.
 type FileKey = (PathBuf, u64, Option<std::time::SystemTime>);
+type Seen<T> = std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<FileKey, T>>>;
 
-/// `codex --version` → `codex-cli 0.164.0-alpha.11.1`. Remembered per file, so a poll does not
-/// start every install again.
-fn version(bin: &Path) -> Option<Version> {
-    use std::collections::HashMap;
-    use std::sync::{LazyLock, Mutex};
-    static SEEN: LazyLock<Mutex<HashMap<FileKey, Option<Version>>>> = LazyLock::new(Default::default);
+/// What a CLI answered, remembered per file, so a poll does not start every install again.
+fn remembered<T: Copy>(seen: &Seen<T>, bin: &Path, ask: impl FnOnce() -> T) -> Option<T> {
     let meta = std::fs::metadata(bin).ok()?;
     let key = (bin.to_owned(), meta.len(), meta.modified().ok());
-    if let Some(v) = SEEN.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
-        return *v;
+    if let Some(v) = seen.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        return Some(*v);
     }
-    let v = run_version(bin).as_deref().and_then(parse_version);
-    SEEN.lock().unwrap_or_else(|e| e.into_inner()).insert(key, v);
-    v
+    let v = ask();
+    seen.lock().unwrap_or_else(|e| e.into_inner()).insert(key, v);
+    Some(v)
+}
+
+/// `codex --version` → `codex-cli 0.164.0-alpha.11.1`.
+fn version(bin: &Path) -> Option<Version> {
+    static SEEN: Seen<Option<Version>> = Seen::new(Default::default);
+    remembered(&SEEN, bin, || run_cli(bin, "--version").as_deref().and_then(parse_version)).flatten()
+}
+
+/// A recent Codex runs a conversation through a shared background server, which only a full
+/// install can start: the Codex desktop app's copy stops at once unless told `--no-daemon`.
+pub fn has_no_daemon(bin: &Path) -> bool {
+    static SEEN: Seen<bool> = Seen::new(Default::default);
+    remembered(&SEEN, bin, || run_cli(bin, "--help").is_some_and(|h| h.contains("--no-daemon"))).unwrap_or(false)
 }
 
 fn parse_version(out: &str) -> Option<Version> {
@@ -101,9 +111,9 @@ fn parse_version(out: &str) -> Option<Version> {
     Some((parts.next()??, parts.next()??, parts.next().flatten().unwrap_or(0)))
 }
 
-fn run_version(bin: &Path) -> Option<String> {
+fn run_cli(bin: &Path, arg: &str) -> Option<String> {
     let mut cmd = Command::new(bin);
-    cmd.arg("--version").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    cmd.arg(arg).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -344,6 +354,22 @@ mod tests {
         let new = make(home.path().join(".codex/.sandbox-bin"), "999.0.0");
         assert_eq!(find_codex(&env, None), Some(new));
         assert_eq!(find_codex(&env, Some(&old)), Some(old.clone()), "a path the user set always wins");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn only_a_codex_that_has_a_background_server_is_told_to_skip_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let make = |name: &str, help: &str| {
+            let bin = dir.path().join(name);
+            std::fs::write(&bin, format!("#!/bin/sh\nprintf '%s\\n' 'Usage: codex [OPTIONS] [PROMPT]' '{help}'\n")).unwrap();
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+            bin
+        };
+        assert!(has_no_daemon(&make("new", "      --no-daemon")));
+        assert!(!has_no_daemon(&make("old", "  -m, --model <MODEL>")));
+        assert!(!has_no_daemon(&dir.path().join("missing")));
     }
 
     #[test]

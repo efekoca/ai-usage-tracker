@@ -567,15 +567,19 @@ pub fn revert_refresh_hook(change: &RefreshHookChange) -> Result<RevertOutcome, 
     Ok(RevertOutcome::Restored)
 }
 
-/// Points our hook at `command` when it changed (the app moved), and adds the groups an older
-/// install lacks. A hook the user removed meanwhile is not put back. Returns whether it rewrote.
+/// Points our hook at `command` when it changed (the app moved), adds the groups an older install
+/// lacks and takes out the rules it added that are no longer ours. A hook the user removed
+/// meanwhile is not put back. Returns whether it rewrote.
 pub fn refresh_refresh_hook(st: &mut CaptureState, data_dir: &Path, command: &str) -> Result<bool, SettingsError> {
     refresh_hook(st, Hook::Refresh, data_dir, command)
 }
 
 pub fn refresh_hook(st: &mut CaptureState, hook: Hook, data_dir: &Path, command: &str) -> Result<bool, SettingsError> {
     let Some(old) = hook.slot()(st).clone() else { return Ok(false) };
-    let wanted = RefreshHookChange { installed: hook.value(command), also: hook.others(command), ..old.clone() };
+    // a rule an older version added and this one no longer does goes (the handoff's Write rule)
+    let current = hook.allow(data_dir);
+    let (allow, stale): (Vec<String>, Vec<String>) = old.allow.iter().cloned().partition(|r| current.contains(r));
+    let wanted = RefreshHookChange { installed: hook.value(command), also: hook.others(command), allow, ..old.clone() };
     if old == wanted {
         return Ok(false);
     }
@@ -595,6 +599,7 @@ pub fn refresh_hook(st: &mut CaptureState, hook: Hook, data_dir: &Path, command:
             groups.push(group.clone());
         }
     }
+    drop_rules(&mut doc, &stale);
     *hook.slot()(st) = Some(wanted);
     // the record goes first, so a revert never meets a value it does not know
     let result = save_state(data_dir, st).map_err(SettingsError::from).and_then(|_| write_doc(&old.settings_file, &doc, &original));
@@ -1235,7 +1240,7 @@ mod tests {
     }
 
     #[test]
-    fn the_handoff_hook_brings_its_write_rule_and_takes_only_its_own_away() {
+    fn the_handoff_hook_brings_its_edit_rule_and_takes_only_its_own_away() {
         let (_d, file, data) = setup(Some(r#"{"model": "opus", "permissions": {"allow": ["Bash(ls)"]}}"#));
         let mut st = CaptureState::default();
         let ch = install_hook(&mut st, Hook::Handoff, &data, &file, "aiut --handoff-hook", 1).unwrap();
@@ -1261,7 +1266,7 @@ mod tests {
     }
 
     #[test]
-    fn a_write_rule_the_user_already_had_stays_after_the_handoff_hook_goes() {
+    fn a_rule_the_user_already_had_stays_after_the_handoff_hook_goes() {
         let rules = super::super::handoff::permission_rules(&super::super::handoff::dir(Path::new("/d/data")));
         let (_d, file, data) = setup(None);
         let rules_here = super::super::handoff::permission_rules(&super::super::handoff::dir(&data));
@@ -1269,9 +1274,29 @@ mod tests {
         fs::write(&file, json!({"permissions": {"allow": [rules_here[0]]}}).to_string()).unwrap();
         let mut st = CaptureState::default();
         let ch = install_hook(&mut st, Hook::Handoff, &data, &file, "aiut --handoff-hook", 1).unwrap();
-        assert_eq!(ch.allow, rules_here[1..].to_vec());
+        assert!(ch.allow.is_empty());
         uninstall_hook(&mut st, Hook::Handoff, &data).unwrap();
         assert_eq!(read(&file), json!({"permissions": {"allow": [rules_here[0]]}}));
+    }
+
+    #[test]
+    fn an_older_handoff_install_loses_the_write_rule_claude_code_never_matched() {
+        let (_d, file, data) = setup(Some(r#"{"model": "opus"}"#));
+        let mut st = CaptureState::default();
+        let ch = install_hook(&mut st, Hook::Handoff, &data, &file, "aiut --handoff-hook", 1).unwrap();
+        // as an older version recorded and wrote it
+        let write = ch.allow[0].replacen("Edit(", "Write(", 1);
+        st.handoff = Some(RefreshHookChange { allow: vec![write.clone(), ch.allow[0].clone()], ..ch.clone() });
+        let mut doc = read(&file);
+        doc["permissions"]["allow"] = json!([write, ch.allow[0]]);
+        fs::write(&file, doc.to_string()).unwrap();
+
+        assert!(refresh_hook(&mut st, Hook::Handoff, &data, "aiut --handoff-hook").unwrap());
+        assert_eq!(read(&file)["permissions"]["allow"], json!([ch.allow[0]]));
+        assert_eq!(st.handoff.as_ref().unwrap().allow, ch.allow);
+        assert!(!refresh_hook(&mut st, Hook::Handoff, &data, "aiut --handoff-hook").unwrap());
+        assert_eq!(uninstall_hook(&mut st, Hook::Handoff, &data).unwrap(), RevertOutcome::Restored);
+        assert_eq!(read(&file), json!({"model": "opus"}));
     }
 
     #[test]

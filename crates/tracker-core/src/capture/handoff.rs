@@ -68,11 +68,11 @@ fn seen_file(dir: &Path) -> PathBuf {
     dir.join("codex-seen")
 }
 
-/// Write and edit rights for the notes folder only. Claude Code reads `//` as the root of the file
-/// system and matches Windows paths in POSIX form, `C:\x` as `/c/x`.
+/// The right to write the notes folder only. An Edit rule covers every tool that writes a file;
+/// Claude Code matches no Write rule and warns about one at every start. It reads `//` as the root
+/// of the file system and matches Windows paths in POSIX form, `C:\x` as `/c/x`.
 pub fn permission_rules(dir: &Path) -> Vec<String> {
-    let path = rule_path(&notes_dir(dir));
-    vec![format!("Write({path}/**)"), format!("Edit({path}/**)")]
+    vec![format!("Edit({}/**)", rule_path(&notes_dir(dir)))]
 }
 
 fn rule_path(p: &Path) -> String {
@@ -550,7 +550,6 @@ mod tests {
     #[test]
     fn the_rule_names_the_notes_folder_from_the_root() {
         assert_eq!(permission_rules(Path::new("/Users/a b/Library/Application Support/x/handoff")), vec![
-            "Write(//Users/a b/Library/Application Support/x/handoff/notes/**)".to_owned(),
             "Edit(//Users/a b/Library/Application Support/x/handoff/notes/**)".to_owned(),
         ]);
         assert_eq!(rule_path(Path::new(r"C:\Users\A\AppData\Local\x\handoff")), "//c/Users/A/AppData/Local/x/handoff");
