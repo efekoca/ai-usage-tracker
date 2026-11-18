@@ -114,7 +114,7 @@ jobs:
           TRACKER_TEST_ROUND: "1"
 
   # known advisories fail the run; the few that cannot be fixed here are listed with their reason
-  # in .cargo/audit.toml
+  # in .cargo/audit.toml and ui/scripts/audit.mjs
   audit:
     runs-on: ubuntu-22.04
     steps:
@@ -133,4 +133,4 @@ jobs:
           cargo audit --deny unsound --deny yanked
 
       - name: npm advisories
-        run: npm --prefix ui audit --audit-level=high
+        run: node ui/scripts/audit.mjs
