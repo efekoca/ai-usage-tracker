@@ -125,16 +125,24 @@ pub fn statusline_command(exe: &Path) -> String {
 
 /// The cache refresh hook runs the same way: Claude Code picks the shell by the same rule.
 pub fn cache_hook_command(exe: &Path) -> String {
-    let cmd = quoted_command(&exe.to_string_lossy(), short_path(exe).as_deref(), !cfg!(windows) || git_bash().is_some(), "--cache-hook");
-    // PowerShell would report a program's exit code 2, which wakes the conversation, as 1; in Git
-    // Bash the unset variable leaves a bare `exit`, which keeps the code as it is
-    if cfg!(windows) { format!("{cmd}; exit $LASTEXITCODE") } else { cmd }
+    waking_command(exe, git_bash().is_some(), "--cache-hook")
 }
 
 /// The hook that waits for a limit's reset wakes the conversation the same way.
 pub fn limit_hook_command(exe: &Path) -> String {
-    let cmd = quoted_command(&exe.to_string_lossy(), short_path(exe).as_deref(), !cfg!(windows) || git_bash().is_some(), "--limit-hook");
-    if cfg!(windows) { format!("{cmd}; exit $LASTEXITCODE") } else { cmd }
+    waking_command(exe, git_bash().is_some(), "--limit-hook")
+}
+
+/// Exit code 2 wakes the conversation. PowerShell sets `$LASTEXITCODE` for a windowed program only
+/// while it reads its output (the hooks write to stderr); in Git Bash a bare `exit` keeps the code.
+fn waking_command(exe: &Path, git_bash: bool, flag: &str) -> String {
+    let bash = !cfg!(windows) || git_bash;
+    let cmd = quoted_command(&exe.to_string_lossy(), short_path(exe).as_deref(), bash, flag);
+    match (cfg!(windows), bash) {
+        (false, _) => cmd,
+        (true, true) => format!("{cmd}; exit $LASTEXITCODE"),
+        (true, false) => format!("{cmd} | Out-Null; exit $LASTEXITCODE"),
+    }
 }
 
 /// The handoff hook runs after every tool call, so it answers at once and never waits.
@@ -1919,7 +1927,9 @@ mod tests {
     fn status_line_paths_are_quoted_literally_for_each_shell() {
         assert_eq!(quoted_command(r"C:\Users\A\x.exe", Some(r"C:\Users\A\x.exe"), true, "--statusline"), "C:/Users/A/x.exe --statusline");
         assert_eq!(quoted_command(r"C:\Users\A\x.exe", Some(r"C:\Users\A\x.exe"), true, "--cache-hook"), "C:/Users/A/x.exe --cache-hook");
-        assert!(cache_hook_command(Path::new(r"C:\Missing\app.exe")).ends_with("--cache-hook; exit $LASTEXITCODE"), "the wake's exit code survives PowerShell");
+        let app = Path::new(r"C:\Missing\app.exe");
+        assert!(waking_command(app, true, "--cache-hook").ends_with("--cache-hook; exit $LASTEXITCODE"), "Git Bash keeps the wake's exit code");
+        assert!(waking_command(app, false, "--limit-hook").ends_with("--limit-hook | Out-Null; exit $LASTEXITCODE"), "the wake's exit code survives PowerShell");
         let odd = r"C:\Users\O'Neil $HOME `x`\app.exe";
         assert_eq!(quoted_command(odd, None, true, "--statusline"), r"'C:/Users/O'\''Neil $HOME `x`/app.exe' --statusline");
         assert_eq!(quoted_command(odd, Some(r"C:\Users\ONEIL$~1\app.exe"), false, "--statusline"), "& 'C:/Users/O''Neil $HOME `x`/app.exe' --statusline");

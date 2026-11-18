@@ -1,11 +1,11 @@
 <script lang="ts" module>
   import type { PanelData, PanelLimit, PanelModule, Provider } from '../../lib/api'
 
-  /** The module's limit window; Antigravity's other pool is any pool that is not Gemini. */
-  /** A module without an account follows the account in use. */
+  import { ofModule, tileWindows } from '../../lib/panelLimits'
+
+  /** The module's limit window. */
   export function findLimit(data: PanelData | null, provider: string, pool: string, window: string, account = ''): PanelLimit | null {
-    const mine = (l: PanelLimit) => (account ? l.account === account : l.active)
-    const all = (data?.limits ?? []).filter((l) => l.provider === provider && l.window === window && mine(l) && (provider !== 'google' || (pool === 'gemini') === (l.limit_id === 'gemini')))
+    const all = (data?.limits ?? []).filter((l) => l.window === window && ofModule(provider, pool, account)(l))
     return all.sort((a, b) => (b.used_pct ?? -1) - (a.used_pct ?? -1))[0] ?? null
   }
 
@@ -101,7 +101,7 @@
   }
 
   const one = $derived(m.kind === 'limit' || m.kind === 'forecast' ? findLimit(data, m.provider, m.pool, m.window, m.account) : null)
-  const both = $derived(m.kind === 'provider' ? (['five_hour', 'seven_day'] as const).map((w) => ({ w, l: findLimit(data, m.provider, m.pool, w, m.account) })) : [])
+  const both = $derived(m.kind === 'provider' ? tileWindows(data, m.provider, m.pool, m.account).map((w) => ({ w, l: findLimit(data, m.provider, m.pool, w, m.account) })) : [])
   const oc = $derived(m.kind === 'usage' && m.provider === 'opencode')
   const usage = $derived.by(() => {
     const set = m.kind !== 'usage' ? null : oc ? data?.opencode : data?.usage

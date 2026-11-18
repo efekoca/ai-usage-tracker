@@ -20,6 +20,8 @@ const SINCE_KEY: &str = "cache_refresh_since";
 const KEEP_MS: i64 = 7 * 86_400_000;
 /// A refresh the cache's time has not moved on from by then did not happen.
 const PENDING_MS: i64 = 5 * 60_000;
+/// Past a waiter's heartbeat: a refresh no waiter took by then never will, as its conversation closed.
+const GONE_MS: i64 = 60_000;
 /// A signal no hook took within this long is cleared.
 const SIGNAL_MS: u64 = 90_000;
 /// How long a failed refresh is shown on its row.
@@ -121,7 +123,7 @@ fn settle(b: &mut Book, caches: &[Cache], dirs: &[PathBuf], now: i64) -> bool {
             b.failed.remove(&session);
         } else if moved {
             b.log.retain(|r| !this(r));
-        } else if now - at > PENDING_MS {
+        } else if now - at > PENDING_MS || (!took && now - at > GONE_MS && waiter_dir(dirs, &session).is_none()) {
             b.log.retain(|r| !this(r));
             b.failed.insert(session.clone(), now);
         } else {
@@ -434,6 +436,17 @@ mod tests {
         assert!(b.log.iter().all(|r| r.session_id != "b") && !b.failed.contains_key("b"), "the user's own request moved it; the hook took only an older signal");
         assert!(settle(&mut b, &[cache("c", 50_000)], &dirs, 1_000 + PENDING_MS + 1));
         assert!(b.log.iter().all(|r| r.session_id != "c"), "a refresh that came to nothing is not counted");
+        assert!(b.failed.contains_key("c") && !on_its_way(&b, "c"));
+    }
+
+    #[test]
+    fn a_refresh_whose_conversation_closed_comes_to_nothing_soon() {
+        let d = tempfile::tempdir().unwrap();
+        let dirs = [d.path().to_owned()];
+        let mut b = Book::default();
+        b.log.push(Refresh { at_ms: 1_000, session_id: "c".into(), usd: Some(0.2), auto: false, done: false, before_ms: 50_000 });
+        assert!(!settle(&mut b, &[cache("c", 50_000)], &dirs, 1_000 + GONE_MS), "a waiter may still take it");
+        assert!(settle(&mut b, &[cache("c", 50_000)], &dirs, 1_000 + GONE_MS + 1), "no waiter is left to take it");
         assert!(b.failed.contains_key("c") && !on_its_way(&b, "c"));
     }
 }
