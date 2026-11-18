@@ -353,7 +353,8 @@ pub fn continue_in_codex(app: &AppHandle, key: &str) -> Result<(), String> {
     let (note_dir, note) = note_of(&state, key)?;
     let codex = crate::capture::codex_binary(&s).ok_or("codex_not_found")?;
     let prompt = ho::continue_prompt(&ho::note_path(&note_dir, key));
-    start(app, key, "codex", &codex, &note, &[prompt])
+    let args = if tracker_core::capture::codex_limits::has_no_daemon(&codex) { vec!["--no-daemon".into(), prompt] } else { vec![prompt] };
+    start(app, key, "codex", &codex, &note, &args)
 }
 
 /// Starts Claude Code on the note in the project's folder; the notes folder is added to the folders
