@@ -6,7 +6,7 @@ export function ofModule(provider: string, pool: string, account: string) {
 }
 
 const USUAL = ['five_hour', 'seven_day']
-const ORDER = [...USUAL, 'thirty_day']
+const ORDER = ['five_hour', 'one_day', 'seven_day', 'thirty_day']
 
 /** A provider tile's two windows: 5-hour and weekly, or the plan's own when it has neither (Codex's free plan has one of 30 days). */
 export function tileWindows(data: PanelData | null, provider: string, pool: string, account = ''): string[] {

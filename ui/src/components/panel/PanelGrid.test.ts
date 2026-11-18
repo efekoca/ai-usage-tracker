@@ -50,6 +50,7 @@ describe('a provider tile', () => {
 
   it("shows the plan's own window when it has no 5-hour or weekly one", () => {
     expect(tileWindows(data(limit('openai', 'thirty_day')), 'openai', '')).toEqual(['thirty_day'])
+    expect(tileWindows(data(limit('openai', 'thirty_day'), limit('openai', 'one_day')), 'openai', ''), 'shortest first').toEqual(['one_day', 'thirty_day'])
     expect(tileWindows(data(limit('anthropic', 'five_hour'), limit('anthropic', 'seven_day')), 'anthropic', '')).toEqual(['five_hour', 'seven_day'])
     expect(tileWindows(data(), 'openai', ''), 'nothing read yet').toEqual(['five_hour', 'seven_day'])
   })
