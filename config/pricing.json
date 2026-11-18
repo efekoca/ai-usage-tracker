@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-12",
+  "updated_at": "2026-11-18",
   "currency": "USD",
   "unit": "per_million_tokens",
   "sources": {
@@ -106,6 +106,12 @@
     { "id": "gpt-5", "provider": "openai", "input": 1.25, "cache_read": 0.125, "output": 10, "verified_at": "2026-10-09" },
     { "id": "gpt-5-mini", "provider": "openai", "input": 0.25, "cache_read": 0.025, "output": 2, "verified_at": "2026-10-09" },
     { "id": "gpt-5-nano", "provider": "openai", "input": 0.05, "cache_read": 0.005, "output": 0.4, "verified_at": "2026-10-09" },
+    { "id": "gpt-6.2-astra", "provider": "openai", "input": 8, "cache_read": 0.4, "cache_write_5m": 10, "output": 40,
+      "long_context": { "threshold": 272000, "input": 16, "cache_read": 0.8, "cache_write_5m": 20, "output": 60 },
+      "speed_multipliers": { "fast": 2, "ultrafast": 3 }, "verified_at": "2026-11-18", "notes": "Ultrafast is 3 times the Standard rate through 2027-02-28 and 6 times from 2027-03-01 (Pacific time)." },
+    { "id": "gpt-6.2-sol", "provider": "openai", "input": 2, "cache_read": 0.1, "cache_write_5m": 2.5, "output": 10,
+      "long_context": { "threshold": 272000, "input": 4, "cache_read": 0.2, "cache_write_5m": 5, "output": 15 },
+      "speed_multipliers": { "fast": 2, "ultrafast": 3 }, "verified_at": "2026-11-18", "notes": "Ultrafast is 3 times the Standard rate through 2027-02-28 and 6 times from 2027-03-01 (Pacific time)." },
     { "id": "gpt-6-astra", "provider": "openai", "input": 10, "cache_read": 1, "cache_write_5m": 12.5, "output": 50,
       "long_context": { "threshold": 272000, "input": 20, "cache_read": 2, "cache_write_5m": 25, "output": 75 },
       "speed_multipliers": { "fast": 2, "ultrafast": 6 }, "verified_at": "2026-10-03" },
