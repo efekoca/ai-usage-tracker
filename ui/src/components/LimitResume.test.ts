@@ -15,7 +15,7 @@ const { default: LimitResume } = await import('./LimitResume.svelte')
 
 const now = Date.now()
 const file = '/Users/you/.claude/settings.json'
-const info = (over: Partial<ResumeInfo> = {}): ResumeInfo => ({ installed: true, settings_file: file, waiting: [], resumed: [], ...over })
+const info = (over: Partial<ResumeInfo> = {}): ResumeInfo => ({ installed: true, settings_file: file, hooks_off: null, waiting: [], resumed: [], ...over })
 const waiting = (over: Partial<ResumeInfo['waiting'][number]> = {}): ResumeInfo['waiting'][number] => ({ session_id: 's', project: 'notes', branch: 'main', client: 'cli', stopped_ms: now - 60_000, window: 'five_hour', resumes_ms: now + 3_600_000, held: false, ...over })
 
 let done: (() => void)[] = []
@@ -135,9 +135,10 @@ describe('continuing after a limit resets', () => {
     await settle()
     expect(target.querySelector('[role=alert]')).not.toBeNull()
     target.querySelector<HTMLButtonElement>('.ask .actions .btn:not(.primary)')!.click()
-    flushSync()
+    await settle()
     expect(target.querySelector('.ask')).toBeNull()
     expect(target.querySelector('[role=alert]')).toBeNull()
+    expect(document.activeElement).toBe(toggle(target))
   })
 
   it('turns off without asking, and is off while the hook is gone', async () => {

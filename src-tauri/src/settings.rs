@@ -593,9 +593,15 @@ pub struct Settings {
     pub accent: String,
     #[serde(deserialize_with = "known")]
     pub enabled_sources: Vec<SourceId>,
-    /// Sources this install has offered; one added by a later version starts enabled.
+    /// Sources this install has offered; one added by a later version starts enabled. Kept as
+    /// ids, those of a newer version too, so a source switched off there stays off after going
+    /// back to this version and on again.
     #[serde(default = "sources_before_antigravity", deserialize_with = "known")]
-    pub known_sources: Vec<SourceId>,
+    pub known_sources: Vec<String>,
+    /// Sources of a newer version that were switched on there, which this one cannot name in
+    /// `enabled_sources`: they are on again once a version that knows them reads the settings.
+    #[serde(default, skip_serializing_if = "Vec::is_empty", deserialize_with = "known")]
+    pub enabled_later: Vec<String>,
     pub extra_paths: ExtraPaths,
     /// Provider ("anthropic" / "openai") → plan id from plans.json.
     pub plans: std::collections::BTreeMap<String, String>,
@@ -827,7 +833,8 @@ impl Default for Settings {
             theme: "system".into(),
             accent: "app".into(),
             enabled_sources: SourceId::ALL.into_iter().filter(|s| s.supported()).collect(),
-            known_sources: SourceId::ALL.to_vec(),
+            known_sources: SourceId::ALL.map(|s| s.as_str().to_owned()).to_vec(),
+            enabled_later: Vec::new(),
             extra_paths: ExtraPaths::default(),
             plans: Default::default(),
             thresholds: Vec::new(),
@@ -945,8 +952,12 @@ fn put_if_readable(kept: &mut serde_json::Value, path: &[&str], value: serde_jso
     true
 }
 
-fn sources_before_antigravity() -> Vec<SourceId> {
-    vec![SourceId::ClaudeCode, SourceId::Cowork, SourceId::ClaudeDesktop, SourceId::Codex, SourceId::ChatgptDesktop]
+fn source_id(id: &str) -> Option<SourceId> {
+    serde_json::from_value(serde_json::Value::String(id.to_owned())).ok()
+}
+
+fn sources_before_antigravity() -> Vec<String> {
+    [SourceId::ClaudeCode, SourceId::Cowork, SourceId::ClaudeDesktop, SourceId::Codex, SourceId::ChatgptDesktop].map(|s| s.as_str().to_owned()).to_vec()
 }
 
 impl Settings {
@@ -969,18 +980,43 @@ impl Settings {
         s.tray.normalize();
         s.panel.normalize();
         s.cards.normalize();
+        s.keep_later_sources(&text);
         s.adopt_new_sources();
         s
     }
 
+    /// The ids in the stored `enabled_sources` this version does not know.
+    fn keep_later_sources(&mut self, text: &str) {
+        let Ok(stored) = serde_json::from_str::<serde_json::Value>(text) else { return };
+        for id in stored.get("enabled_sources").and_then(serde_json::Value::as_array).into_iter().flatten().filter_map(serde_json::Value::as_str) {
+            if source_id(id).is_none() && !self.enabled_later.iter().any(|x| x == id) {
+                self.enabled_later.push(id.to_owned());
+            }
+        }
+    }
+
     /// A source the user switched off stays off; one they were never offered is switched on.
     fn adopt_new_sources(&mut self) {
-        for id in SourceId::ALL {
-            if !self.known_sources.contains(&id) {
+        // on in a newer version and known to this one now
+        let mut later = std::mem::take(&mut self.enabled_later);
+        later.retain(|k| match source_id(k) {
+            Some(id) => {
                 if id.supported() && !self.enabled_sources.contains(&id) {
                     self.enabled_sources.push(id);
                 }
-                self.known_sources.push(id);
+                false
+            }
+            None => true,
+        });
+        self.enabled_later = later;
+        // an id an older version saved under another name (`open_code`) is the same source
+        let known: Vec<SourceId> = self.known_sources.iter().filter_map(|k| source_id(k)).collect();
+        for id in SourceId::ALL {
+            if !known.contains(&id) {
+                if id.supported() && !self.enabled_sources.contains(&id) {
+                    self.enabled_sources.push(id);
+                }
+                self.known_sources.push(id.as_str().to_owned());
             }
         }
     }
@@ -1195,7 +1231,7 @@ mod tests {
         store.set_setting(KEY, &format!(r#"{{"onboarded":true,"enabled_sources":["claude_code","codex"],"known_sources":{known}}}"#)).unwrap();
         let s = Settings::load(&store);
         assert_eq!(s.enabled_sources, [SourceId::ClaudeCode, SourceId::Codex]);
-        assert!(s.known_sources.contains(&SourceId::OpenCode));
+        assert!(s.known_sources.iter().any(|k| k == "open_code"));
         store.set_setting(KEY, r#"{"onboarded":true,"enabled_sources":["open_code"],"known_sources":[]}"#).unwrap();
         assert!(Settings::load(&store).enabled_sources.contains(&SourceId::OpenCode));
     }
@@ -1249,12 +1285,35 @@ mod tests {
     }
 
     #[test]
+    fn a_source_of_a_newer_version_is_still_known_after_a_downgrade_and_back() {
+        let store = Store::open_in_memory().unwrap();
+        // the newer version offered grok_cli and the user switched it off
+        store.set_setting(KEY, r#"{"onboarded":true,"enabled_sources":["claude_code"],"known_sources":["claude_code","cowork","claude_desktop","codex","chatgpt_desktop","antigravity","opencode","grok_cli"]}"#).unwrap();
+        let mut s = Settings::load(&store);
+        s.save(&store).unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&store.setting(KEY).unwrap().unwrap()).unwrap();
+        assert!(saved["known_sources"].as_array().unwrap().iter().any(|k| k == "grok_cli"), "{saved}");
+
+        // one the newer version had on stays on, though this one cannot name it among the enabled
+        store.set_setting(KEY, r#"{"onboarded":true,"enabled_sources":["claude_code","grok_cli"],"known_sources":["claude_code","cowork","claude_desktop","codex","chatgpt_desktop","antigravity","opencode","grok_cli"]}"#).unwrap();
+        let mut s = Settings::load(&store);
+        assert_eq!(s.enabled_sources, [SourceId::ClaudeCode]);
+        s.save(&store).unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&store.setting(KEY).unwrap().unwrap()).unwrap();
+        assert_eq!(saved["enabled_later"], serde_json::json!(["grok_cli"]));
+        // as a version that knows it (here: opencode) reads it back
+        store.set_setting(KEY, r#"{"onboarded":true,"enabled_sources":["claude_code"],"enabled_later":["opencode"],"known_sources":["claude_code","cowork","claude_desktop","codex","chatgpt_desktop","antigravity","opencode"]}"#).unwrap();
+        let s = Settings::load(&store);
+        assert_eq!((s.enabled_sources.as_slice(), s.enabled_later.len()), ([SourceId::ClaudeCode, SourceId::OpenCode].as_slice(), 0));
+    }
+
+    #[test]
     fn a_source_added_by_an_update_starts_on_without_reviving_switched_off_ones() {
         let store = Store::open_in_memory().unwrap();
         store.set_setting(KEY, r#"{"onboarded":true,"enabled_sources":["claude_code","cowork"]}"#).unwrap();
         let mut s = Settings::load(&store);
         assert_eq!(s.enabled_sources, [SourceId::ClaudeCode, SourceId::Cowork, SourceId::Antigravity, SourceId::OpenCode]);
-        assert!(SourceId::ALL.iter().all(|x| s.known_sources.contains(x)) && s.known_sources.len() == SourceId::ALL.len());
+        assert!(SourceId::ALL.iter().all(|x| s.known_sources.iter().any(|k| k == x.as_str())) && s.known_sources.len() == SourceId::ALL.len());
 
         s.enabled_sources.retain(|x| *x != SourceId::Antigravity);
         s.save(&store).unwrap();
@@ -1296,7 +1355,7 @@ mod tests {
         assert!(s.onboarded, "the user's settings are kept");
         assert_eq!(s.plans.get("anthropic").map(String::as_str), Some("max5x"));
         assert_eq!(s.enabled_sources, [SourceId::ClaudeCode]);
-        assert_eq!(s.known_sources, [SourceId::ClaudeCode]);
+        assert_eq!(s.known_sources, ["claude_code", "grok_cli"], "a source a newer version offered stays known");
         assert_eq!(s.thresholds.len(), 1);
     }
 

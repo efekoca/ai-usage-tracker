@@ -224,6 +224,8 @@ pub struct ResumeInfo {
     /// Our hook is in Claude Code's settings.
     installed: bool,
     settings_file: String,
+    /// The Claude Code setting that keeps the hook from running, if one does.
+    hooks_off: Option<String>,
     /// Conversations the limit stopped whose hook waits for the reset, the soonest first.
     waiting: Vec<Waiting>,
     /// Those continued in the last day, the latest first.
@@ -266,7 +268,13 @@ fn info(state: &AppState) -> ResumeInfo {
             Resumed { session_id: d.session_id, project: c.project, branch: c.branch, at_ms: d.at_ms }
         })
         .collect();
-    ResumeInfo { installed: installed(state), settings_file: crate::capture::claude_settings_file(&s).to_string_lossy().into_owned(), waiting, resumed }
+    ResumeInfo {
+        installed: installed(state),
+        settings_file: crate::capture::claude_settings_file(&s).to_string_lossy().into_owned(),
+        hooks_off: crate::capture::hooks_blocked(&s),
+        waiting,
+        resumed,
+    }
 }
 
 #[tauri::command]

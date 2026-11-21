@@ -20,6 +20,7 @@ const drop = '/var/folders/x/T/ai-usage-tracker-handoff-501'
 const info = (over: Partial<HandoffInfo> = {}): HandoffInfo => ({
   installed: true,
   settings_file: '/Users/you/.claude/settings.json',
+  hooks_off: null,
   folder,
   codex_found: true,
   claude_found: true,
@@ -97,9 +98,10 @@ describe('the handoff note', () => {
     await settle()
     expect(target.querySelector('[role=alert]')).not.toBeNull()
     ;[...target.querySelectorAll<HTMLButtonElement>('.ask .actions button')][0].click()
-    flushSync()
+    await settle()
     expect(target.querySelector('.ask')).toBeNull()
     expect(target.querySelector('[role=alert]')).toBeNull()
+    expect(document.activeElement).toBe(header(target))
   })
 
   it('keeps what turning it on returned over an older read that comes back later', async () => {
@@ -134,6 +136,7 @@ describe('the handoff note', () => {
     app.settings = { limit_handoff: true, codex_handoff: false } as unknown as Settings
     const target = await render(info({ codex_installed: false, codex_seen: false }))
     expect(target.querySelector('.tools')?.textContent).toContain('Off')
+    button(target, 'Codex').focus()
     button(target, 'Codex').click()
     flushSync()
     expect(target.querySelector('.ask .claude')).toBeNull()
@@ -144,6 +147,7 @@ describe('the handoff note', () => {
     expect(mocks.setLimitHandoff).not.toHaveBeenCalled()
     expect(mocks.setCodexHandoff).toHaveBeenCalledWith(true)
     expect(target.querySelector('.tools')?.textContent).toContain('Trust the hook when Codex asks')
+    expect(document.activeElement, "the keyboard is back on Codex's own switch").toBe(button(target, 'Codex'))
   })
 
   it('goes on in the other tool than the one that wrote the note', async () => {
@@ -169,6 +173,13 @@ describe('the handoff note', () => {
     expect(button(target, 'Continue in Codex: site').disabled).toBe(true)
     expect(button(target, 'Continue in Claude: api').disabled).toBe(true)
     expect(button(target, 'Continue in Claude: api').title).toBe('Claude Code was not found.')
+  })
+
+  it('says so when Claude Code runs no hooks', async () => {
+    const target = await render(info({ hooks_off: 'disableAllHooks' }))
+    expect(target.querySelector('[role=note]')?.textContent).toContain('disableAllHooks is on')
+    const fine = await render(info())
+    expect(fine.querySelector('[role=note]')).toBeNull()
   })
 
   it('says so when no note was written yet', async () => {

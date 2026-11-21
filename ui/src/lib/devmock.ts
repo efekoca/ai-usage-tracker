@@ -1078,7 +1078,7 @@ export function installMock() {
         case 'set_cache_refresh': {
           if (cmd === 'set_cache_refresh') refreshHook = !!a.on
           const today = refreshLog.filter((r) => new Date(r.at).toDateString() === new Date().toDateString())
-          return { installed: refreshHook, settings_file: platform === 'windows' ? 'C:\\Users\\you\\.claude\\settings.json' : '/Users/you/.claude/settings.json', today: today.length, today_usd: today.reduce((n, r) => n + r.usd, 0) }
+          return { installed: refreshHook, hooks_off: null, settings_file: platform === 'windows' ? 'C:\\Users\\you\\.claude\\settings.json' : '/Users/you/.claude/settings.json', today: today.length, today_usd: today.reduce((n, r) => n + r.usd, 0) }
         }
         case 'window_opener_info':
         case 'open_window_now': {
@@ -1099,7 +1099,7 @@ export function installMock() {
             { session_id: 'c-notes', project: settings.hide_project_names ? '' : 'notes', branch: null, client: 'cli', stopped_ms: Date.now() - 5 * 60_000, window: null, resumes_ms: null, held: false },
           ].filter((w) => resumeHook && !resumeCancelled.has(w.session_id))
           const resumed = resumeHook ? [{ session_id: 'c-web', project: settings.hide_project_names ? '' : 'website', branch: settings.hide_project_names ? null : 'main', at_ms: Date.now() - 5 * 3_600_000 }] : []
-          return { installed: resumeHook, settings_file: platform === 'windows' ? 'C:\\Users\\you\\.claude\\settings.json' : '/Users/you/.claude/settings.json', waiting, resumed }
+          return { installed: resumeHook, hooks_off: null, settings_file: platform === 'windows' ? 'C:\\Users\\you\\.claude\\settings.json' : '/Users/you/.claude/settings.json', waiting, resumed }
         }
         case 'cancel_limit_resume':
           resumeCancelled.add(a.sessionId as string)
@@ -1119,6 +1119,7 @@ export function installMock() {
           const win = platform === 'windows'
           return {
             installed: settings.limit_handoff,
+            hooks_off: null,
             settings_file: win ? 'C:\\Users\\you\\.claude\\settings.json' : '/Users/you/.claude/settings.json',
             folder: win ? 'C:\\Users\\you\\AppData\\Local\\AIUsageTracker\\handoff\\notes' : mac ? '/Users/you/Library/Application Support/AIUsageTracker/handoff/notes' : '/home/you/.local/share/AIUsageTracker/handoff/notes',
             codex_found: !codexMissing,

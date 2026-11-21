@@ -359,7 +359,10 @@ pub fn run() {
     drop_unusable_session_bus();
     // a desktop shortcut that starts the app with --toggle-widget brings up just the widget
     let data_dir = tracker_core::store::default_data_dir().unwrap_or_else(|| std::env::temp_dir().join("AIUsageTracker"));
-    let started_hidden = std::env::args().chain(relaunch_flags(&data_dir)).any(|a| a == "--autostart" || a == TOGGLE_WIDGET);
+    // read once: the relaunch flags are taken out of their file as they are read
+    let flags: Vec<String> = std::env::args().chain(relaunch_flags(&data_dir)).collect();
+    let started_hidden = flags.iter().any(|a| a == "--autostart" || a == TOGGLE_WIDGET);
+    let toggled = flags.iter().any(|a| a == TOGGLE_WIDGET);
     let _ = std::fs::create_dir_all(&data_dir);
     // the database and the settings backups are the user's alone
     #[cfg(unix)]
@@ -454,6 +457,10 @@ pub fn run() {
                 windows::show_main(app.handle());
             }
             windows::apply_widget_settings(app.handle(), &settings);
+            // the press that started the app finds the widget off: like a press while it runs, it turns it on
+            if toggled && settings.onboarded && !settings.widget.visible {
+                windows::handle_menu(app.handle(), "tray:widget");
+            }
             if settings.autostart {
                 // rewrites an entry made by an older version (unquoted path) and follows a moved exe
                 let _ = windows::apply_autostart(true, false);
