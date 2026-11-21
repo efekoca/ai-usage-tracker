@@ -122,6 +122,29 @@ describe('before and after a marker', () => {
     expect(full.querySelector('.under')?.textContent?.trim()).toBe('Only 50 can be kept. Remove a marker to add another.')
   })
 
+  it('moves on to the new day when the page stays open past midnight', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date(2026, 10, 20, 23, 30))
+      app.today = '2026-11-20'
+      const target = await render([])
+      vi.setSystemTime(new Date(2026, 10, 21, 9, 0))
+      app.today = '2026-11-21'
+      flushSync()
+      expect(target.querySelector('.chip.day')?.textContent?.trim()).toBe('Today')
+      expect(target.querySelector<HTMLInputElement>('input[type=date]')?.max).toBe('2026-11-21')
+      const label = target.querySelector<HTMLInputElement>('form input')!
+      label.value = 'Next morning'
+      label.dispatchEvent(new Event('input', { bubbles: true }))
+      flushSync()
+      target.querySelector<HTMLButtonElement>('button[type=submit]')!.click()
+      await settle()
+      expect((mocks.saveSettings.mock.lastCall?.[0] as Settings).markers[0].at_ms).toBe(new Date(2026, 10, 21).getTime())
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('adds a marker with its day, scope and days, and removes one', async () => {
     const target = await render([])
     expect(target.querySelector('.none')?.textContent).toContain('No marker yet')

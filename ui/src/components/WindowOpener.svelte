@@ -31,7 +31,14 @@
     if (Number.isInteger(h) && Number.isInteger(m)) save({ minute: h * 60 + m })
   }
   // the last day stays on: a scheduler with no day would never run
-  const setDay = (day: number, on: boolean) => o && (on || o.days.length > 1) && save({ days: on ? [...o.days, day].sort() : o.days.filter((d) => d !== day) })
+  // the list is taken when the save runs, so a quick second click builds on the first
+  const setDay = (day: number, on: boolean) =>
+    o &&
+    saveSettings((c) => {
+      const days = c.window_opener.days
+      if (!on && days.length <= 1) return {}
+      return { window_opener: { ...c.window_opener, days: on ? [...new Set([...days, day])].sort((a, b) => a - b) : days.filter((d) => d !== day) } }
+    })
 
   async function now() {
     busy = true

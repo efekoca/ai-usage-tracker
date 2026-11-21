@@ -1,7 +1,7 @@
 <script lang="ts">
   import { app, latest, saveSettings } from '../lib/store.svelte'
   import { api, type ExperimentSide, type MarkerView, type ProjectRow } from '../lib/api'
-  import { fmtCompact, fmtDate, fmtInt, fmtMoney, fmtPct, localDate, t, toolLabel } from '../lib/i18n.svelte'
+  import { fmtCompact, fmtDate, fmtInt, fmtMoney, fmtPct, t, toolLabel } from '../lib/i18n.svelte'
   import Icon from './Icon.svelte'
   import Select from './Select.svelte'
 
@@ -14,7 +14,9 @@
   let rows = $state<MarkerView[]>([])
   let projects = $state<ProjectRow[]>([])
   let label = $state('')
-  let date = $state(localDate())
+  // until a day is picked it is today, and moves on at midnight with the app
+  let picked = $state<string | null>(null)
+  const date = $derived(picked ?? app.today)
   let project = $state('')
   let tool = $state('')
   let days = $state('7')
@@ -44,7 +46,7 @@
       /* already open, or not allowed here: the field still takes the keyboard */
     }
   }
-  const dayLabel = $derived(date === localDate() ? t('experiment.today') : Number.isFinite(dayStart) ? fmtDate(dayStart, 'short') : t('experiment.day'))
+  const dayLabel = $derived(date === app.today ? t('experiment.today') : Number.isFinite(dayStart) ? fmtDate(dayStart, 'short') : t('experiment.day'))
   const full = $derived((app.settings?.markers.length ?? 0) >= MOST)
   let adding = $state(false)
   // a day that has begun, with a few words for it, while there is room for one more
@@ -141,7 +143,7 @@
       <label class="chip day">
         <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5" /><path d="M3.5 10h17M8 3v4M16 3v4" /></svg>
         <span>{dayLabel}</span>
-        <input class="picker" type="date" bind:value={date} max={localDate()} aria-label={t('experiment.day')} onclick={openPicker} />
+        <input class="picker" type="date" value={date} oninput={(e) => (picked = e.currentTarget.value)} max={app.today} aria-label={t('experiment.day')} onclick={openPicker} />
       </label>
       <Select label={t('common.project')} value={project} options={[{ value: '', label: t('experiment.allProjects') }, ...projects.map((p) => ({ value: String(p.id), label: projectName(p) }))]} onchange={(v) => (project = v)} />
       <Select label={t('experiment.tool')} value={tool} options={[{ value: '', label: t('experiment.allTools') }, ...tools.map((k) => ({ value: k, label: toolLabel(k) }))]} onchange={(v) => (tool = v)} />

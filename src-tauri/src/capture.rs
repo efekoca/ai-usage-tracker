@@ -1306,7 +1306,7 @@ pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
         ("statusline", true) => {
             let mut cstate = read_state()?;
             if cstate.statusline.is_some() {
-                refresh_statusline(&data_dir);
+                refresh_statusline_locked(&data_dir);
                 cstate = read_state()?;
                 // replaced since (by the user or Claude Code's `/statusline`): install again below,
                 // chaining the new command
@@ -1702,11 +1702,16 @@ fn wake_codex(app: &AppHandle) {
 /// Points Claude Code at this copy of the app when it was moved or reinstalled elsewhere. Debug
 /// builds leave it alone, so switching between a dev and a release build does not rewrite it each time.
 fn refresh_statusline(data_dir: &Path) {
+    let _one_at_a_time = state_lock();
+    refresh_statusline_locked(data_dir);
+}
+
+/// [`refresh_statusline`] for a caller that holds [`state_lock`] already: the lock is not re-entrant.
+fn refresh_statusline_locked(data_dir: &Path) {
     if cfg!(debug_assertions) {
         return;
     }
     let Ok(exe) = crate::app_path() else { return };
-    let _one_at_a_time = state_lock();
     let mut cstate = cs::load_state(data_dir);
     match cs::refresh_statusline(&mut cstate, data_dir, &statusline_command(&exe)) {
         Ok(true) => log::info!("status line now points at this copy of the app"),

@@ -151,7 +151,7 @@
         </ul>
         {#if error}<p class="error small" role="alert">{t('refresh.consent.failed', { why: error })}</p>{/if}
         <div class="actions">
-          <button class="btn" disabled={busy} onclick={() => (asking = [])}>{t('common.cancel')}</button>
+          <button class="btn" disabled={busy} onclick={() => ((asking = []), (error = ''))}>{t('common.cancel')}</button>
           <button class="btn primary" disabled={busy} onclick={() => apply(Object.fromEntries(asking.map((tool) => [tool, true])))}>{t('limits.handoff.ok')}</button>
         </div>
       </div>

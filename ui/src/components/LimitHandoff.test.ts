@@ -87,6 +87,21 @@ describe('the handoff note', () => {
     expect(target.querySelector('.ask')).toBeNull()
   })
 
+  it('takes the error away with the question when the user cancels', async () => {
+    app.settings = { limit_handoff: false, codex_handoff: false } as unknown as Settings
+    const target = await render(info({ installed: false, codex_installed: false, notes: [] }))
+    header(target).click()
+    flushSync()
+    mocks.setLimitHandoff.mockRejectedValueOnce('settings file is not valid JSON')
+    confirm(target).click()
+    await settle()
+    expect(target.querySelector('[role=alert]')).not.toBeNull()
+    ;[...target.querySelectorAll<HTMLButtonElement>('.ask .actions button')][0].click()
+    flushSync()
+    expect(target.querySelector('.ask')).toBeNull()
+    expect(target.querySelector('[role=alert]')).toBeNull()
+  })
+
   it('asks only about Claude when Codex is not on this computer', async () => {
     app.settings = { limit_handoff: false, codex_handoff: false } as unknown as Settings
     const target = await render(info({ installed: false, codex_installed: false, codex_here: false, notes: [] }))

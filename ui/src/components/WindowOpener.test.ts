@@ -116,11 +116,25 @@ describe('the window scheduler', () => {
       await settle()
     }
     expect(pressed(target)).toBe('0000001')
-    const calls = mocks.saveSettings.mock.calls.length
     days(target)[6].click()
     await settle()
-    expect(mocks.saveSettings.mock.calls.length).toBe(calls)
+    expect(saved().days).toEqual([7])
     expect(pressed(target)).toBe('0000001')
+  })
+
+  it('keeps both days of two quick clicks', async () => {
+    const target = await render(info())
+    days(target)[5].click()
+    days(target)[6].click()
+    await settle()
+    expect(saved().days).toEqual([1, 2, 3, 4, 5, 6, 7])
+    // one day on: a second day turned on lets the first go off before the first save is back
+    app.settings = settings({ days: [1] })
+    flushSync()
+    days(target)[1].click()
+    days(target)[0].click()
+    await settle()
+    expect(saved().days).toEqual([2])
   })
 
   it('tells what each run did', async () => {
