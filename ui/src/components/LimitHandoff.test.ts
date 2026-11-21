@@ -28,6 +28,7 @@ const info = (over: Partial<HandoffInfo> = {}): HandoffInfo => ({
   codex_installed: true,
   codex_hooks_file: '/Users/you/.codex/hooks.json',
   codex_seen: true,
+  codex_moved: 0,
   codex_folder: drop,
   notes: [
     { key: 'site-1a2b3c4d', project: 'site', written_ms: Date.now() - 60_000, agent: 'claude' },
@@ -173,6 +174,21 @@ describe('the handoff note', () => {
     expect(button(target, 'Continue in Codex: site').disabled).toBe(true)
     expect(button(target, 'Continue in Claude: api').disabled).toBe(true)
     expect(button(target, 'Continue in Claude: api').title).toBe('Claude Code was not found.')
+  })
+
+  it("says that Codex asks again about the user's hooks that moved up when it is turned off", async () => {
+    const target = await render(info())
+    mocks.setCodexHandoff.mockResolvedValue(info({ codex_installed: false, codex_moved: 2 }))
+    button(target, 'Codex').click()
+    await settle()
+    expect(mocks.setCodexHandoff).toHaveBeenCalledWith(false)
+    expect(target.querySelector('[role=status]')?.textContent).toContain('2 of your own hooks')
+    // the next change takes it away
+    mocks.setLimitHandoff.mockResolvedValue(info({ installed: false, codex_installed: false }))
+    mocks.setCodexHandoff.mockResolvedValue(info({ installed: false, codex_installed: false, codex_moved: 0 }))
+    header(target).click()
+    await settle()
+    expect(target.querySelector('[role=status]')).toBeNull()
   })
 
   it('says so when Claude Code runs no hooks', async () => {

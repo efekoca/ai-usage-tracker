@@ -111,8 +111,9 @@ fn codex_here(s: &Settings) -> bool {
 }
 
 /// Adds our hook to Codex's `hooks.json`, or brings it up to date. Codex runs it only once the user
-/// trusted it there.
-pub fn install_codex(app: &AppHandle) -> Result<(), String> {
+/// trusted it there. Returns how many of the user's own hooks moved up in a file it left, as
+/// [`uninstall_codex`] does.
+pub fn install_codex(app: &AppHandle) -> Result<usize, String> {
     let _one_at_a_time = crate::capture::state_lock();
     let state = app.state::<AppState>();
     let s = state.settings.read().unwrap().clone();
@@ -120,12 +121,14 @@ pub fn install_codex(app: &AppHandle) -> Result<(), String> {
     let command = crate::capture::codex_handoff_hook_command(&crate::app_path()?);
     let mut st = cs::read_state(&state.data_dir).map_err(|e| e.to_string())?;
     // a hook in another file goes first; one of another copy of the app is changed where it is
-    if let Some(old) = st.codex_handoff.clone().filter(|c| c.file != file) {
-        ch::uninstall(&old).map_err(codex_error)?;
-    }
+    let moved = match st.codex_handoff.clone().filter(|c| c.file != file) {
+        Some(old) => ch::uninstall(&old).map_err(codex_error)?,
+        None => 0,
+    };
     let previous = st.codex_handoff.clone().filter(|c| c.file == file);
     st.codex_handoff = Some(ch::install(&file, &command, previous.as_ref(), now_ms()).map_err(codex_error)?);
-    cs::save_state(&state.data_dir, &st).map_err(|e| e.to_string())
+    cs::save_state(&state.data_dir, &st).map_err(|e| e.to_string())?;
+    Ok(moved)
 }
 
 fn codex_error(e: cs::SettingsError) -> String {
@@ -135,12 +138,14 @@ fn codex_error(e: cs::SettingsError) -> String {
     }
 }
 
-/// Takes our hook out of Codex's `hooks.json`; the record goes once it is out.
-pub(crate) fn uninstall_codex(data_dir: &Path, st: &mut cs::CaptureState) -> Result<(), String> {
-    let Some(c) = st.codex_handoff.clone() else { return Ok(()) };
-    ch::uninstall(&c).map_err(codex_error)?;
+/// Takes our hook out of Codex's `hooks.json`; the record goes once it is out. Returns how many
+/// of the user's own hooks moved up, which Codex asks about again.
+pub(crate) fn uninstall_codex(data_dir: &Path, st: &mut cs::CaptureState) -> Result<usize, String> {
+    let Some(c) = st.codex_handoff.clone() else { return Ok(0) };
+    let moved = ch::uninstall(&c).map_err(codex_error)?;
     st.codex_handoff = None;
-    cs::save_state(data_dir, st).map_err(|e| e.to_string())
+    cs::save_state(data_dir, st).map_err(|e| e.to_string())?;
+    Ok(moved)
 }
 
 /// The app's reading of the tool's main limit, while one account of it is known: a conversation
@@ -254,6 +259,9 @@ pub struct HandoffInfo {
     codex_hooks_file: String,
     /// The hook ran in a Codex conversation since it was added, so the user trusted it.
     codex_seen: bool,
+    /// Turning Codex off just now moved this many of the user's own hooks up in `hooks.json`, so
+    /// Codex asks to trust them again; 0 in every other answer.
+    codex_moved: usize,
     /// Where Codex writes before the note is moved over.
     codex_folder: String,
     notes: Vec<NoteView>,
@@ -276,6 +284,7 @@ fn info(state: &AppState) -> HandoffInfo {
         codex_installed: codex.as_ref().is_some_and(ch::in_place),
         codex_hooks_file: codex_home(&s).map(|h| ch::hooks_file(&h).to_string_lossy().into_owned()).unwrap_or_default(),
         codex_seen: codex.as_ref().zip(seen).is_some_and(|(c, at)| at >= c.installed_at_ms),
+        codex_moved: 0,
         codex_folder: ho::drop_dir().to_string_lossy().into_owned(),
         notes,
     }
@@ -315,17 +324,17 @@ pub async fn set_codex_handoff(window: WebviewWindow, app: AppHandle, on: bool) 
         return Err("not_allowed".into());
     }
     let state = app.state::<AppState>();
-    if on {
-        install_codex(&app)?;
+    let moved = if on {
+        install_codex(&app)?
     } else {
         let _one_at_a_time = crate::capture::state_lock();
         let mut st = cs::read_state(&state.data_dir).map_err(|e| e.to_string())?;
-        uninstall_codex(&state.data_dir, &mut st)?;
-    }
+        uninstall_codex(&state.data_dir, &mut st)?
+    };
     let s = state.update_settings(|s| s.codex_handoff = on)?;
     crate::capture::write_statusline_options(&state.data_dir, &s);
     let _ = app.emit("settings-changed", &s);
-    Ok(info(&state))
+    Ok(HandoffInfo { codex_moved: moved, ..info(&state) })
 }
 
 /// The note and the folder it really is in.

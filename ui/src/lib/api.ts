@@ -425,6 +425,8 @@ export interface HandoffInfo {
   codex_hooks_file: string
   /** The hook ran in a Codex conversation since it was added, so the user trusted it. */
   codex_seen: boolean
+  /** Turning Codex off just now moved this many of the user's own hooks up in hooks.json, so Codex asks to trust them again; 0 otherwise. */
+  codex_moved: number
   /** Where Codex writes before the note is moved over. */
   codex_folder: string
   /** The notes written, the latest first; never their contents. The user goes on in the other tool. */
