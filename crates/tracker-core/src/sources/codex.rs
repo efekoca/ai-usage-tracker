@@ -276,8 +276,9 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
                 let root = str_at(p, "root_turn_id").filter(|t| !t.is_empty()).or(own.filter(|_| who.agent.is_none()));
                 st.turn = root.map(|r| format!("cx:{r}"));
                 let began = i64_at(p, "started_at").filter(|s| (1..=MAX_EPOCH_SECS).contains(s)).map(|s| s * 1000).or(ts_ms);
-                // the main thread's own log records the turn
-                if let (Some(id), Some(ts_ms), true) = (st.turn.clone(), began, root == own && who.agent.is_none()) {
+                // the log of the thread whose own turn is the root records it: the main thread's, or
+                // a subagent's that Codex groups as a turn of its own (a guardian resumed by itself)
+                if let (Some(id), Some(ts_ms), true) = (st.turn.clone(), began, root == own) {
                     let trigger = p.get("turn_attribution").and_then(|a| str_at(a, "turn_trigger"));
                     let origin = if matches!(trigger, None | Some("composer" | "edit_user_message")) { "human" } else { "other" };
                     out.turns.push(Turn { id, tool: Tool::Codex, session_id: Some(who.session), ts_ms, origin: origin.to_owned(), own: true });

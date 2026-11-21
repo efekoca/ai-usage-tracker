@@ -491,6 +491,7 @@ fn fit_tooltip(text: String) -> String {
 }
 
 fn update(app: &AppHandle) {
+    let epoch = crate::alerts::epoch();
     let s = app.state::<AppState>().settings.read().unwrap().clone();
     let Some(readings) = readings(app, &s) else { return };
     let now = chrono::Utc::now().timestamp_millis();
@@ -499,7 +500,7 @@ fn update(app: &AppHandle) {
     guarded("resume", || crate::resume::tick(app, &s, now));
     guarded("handoff", || crate::handoff::tick(app, &s, now));
     guarded("opener", || crate::opener::tick(app, &s, now));
-    guarded("alerts", || crate::alerts::check(app, &s, &readings, &caches));
+    guarded("alerts", || crate::alerts::check(app, &s, &readings, &caches, epoch));
     let Some(tray) = app.tray_by_id(ID) else { return };
     let limits = current_limits(&readings);
     let update = app.state::<AppState>().updates.lock().unwrap().available.as_ref().map(|a| a.version.clone());

@@ -106,16 +106,26 @@ impl Alert {
     }
 }
 
+/// Moves on with each [`forget`], so a check that read its readings before it changes nothing.
+static FORGOTTEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Taken before the readings are read and handed to [`check`].
+pub(crate) fn epoch() -> u64 {
+    FORGOTTEN.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// After "Delete all data" nothing seen before is told about later.
 pub(crate) fn forget() {
+    FORGOTTEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     SEEN.lock().unwrap().clear();
     *BUDGET.lock().unwrap() = None;
     CACHE_TOLD.lock().unwrap().clear();
     UNUSED_TOLD.lock().unwrap().clear();
 }
 
-pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading], caches: &[Cache]) {
-    if !s.onboarded {
+pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading], caches: &[Cache], epoch: u64) {
+    // readings from before "Delete all data" would fill what it emptied again
+    if !s.onboarded || epoch != self::epoch() {
         return;
     }
     let n = &s.notify;
@@ -128,19 +138,35 @@ pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading], caches:
     // reports what happened before
     let now_ms = chrono::Utc::now().timestamp_millis();
     let providers = crate::commands::enabled_providers(s);
+    // checked again under each lock: a wipe that lands meanwhile empties it after this check
     let alerts = {
         let mut seen = SEEN.lock().unwrap();
+        if epoch != self::epoch() {
+            return;
+        }
         // a source switched off is no longer followed: turned on again, its limits only record first
         seen.retain(|l, _| providers.contains(&l.provider));
         changes(&mut seen, readings, early_at, now_ms / 1000)
     };
-    let budget = budget(app, s, now_ms);
+    let budget = budget(app, s, now_ms, epoch);
     let live = |p| readings.iter().any(|r| r.active && r.provider == p && r.observed_ms.is_some_and(|t| now_ms - t < LIVE_READING_MS));
     let signed_out = newly_out(&mut SIGNED_OUT.lock().unwrap(), &crate::capture::sign_ins(app, s), live);
     // a cache refreshed by itself, or on its way to it, is not told about
     let caches: Vec<Cache> = caches.iter().filter(|c| !(c.auto && !c.auto_capped && (c.refreshable || c.refreshing))).cloned().collect();
-    let cache = cache_due(&mut CACHE_TOLD.lock().unwrap(), &caches, now_ms);
-    let unused = unused_due(&mut UNUSED_TOLD.lock().unwrap(), readings, now_ms);
+    let cache = {
+        let mut told = CACHE_TOLD.lock().unwrap();
+        if epoch != self::epoch() {
+            return;
+        }
+        cache_due(&mut told, &caches, now_ms)
+    };
+    let unused = {
+        let mut told = UNUSED_TOLD.lock().unwrap();
+        if epoch != self::epoch() {
+            return;
+        }
+        unused_due(&mut told, readings, now_ms)
+    };
     if !n.enabled {
         return;
     }
@@ -299,8 +325,11 @@ fn sign_in_text(p: Provider, tr: bool) -> (String, String) {
     (title.into(), body.into())
 }
 
-fn budget(app: &AppHandle, s: &Settings, now_ms: i64) -> Option<BudgetAlert> {
+fn budget(app: &AppHandle, s: &Settings, now_ms: i64, epoch: u64) -> Option<BudgetAlert> {
     let mut seen = BUDGET.lock().unwrap();
+    if epoch != self::epoch() {
+        return None;
+    }
     if s.monthly_budget_usd <= 0.0 {
         // a budget set later starts from where the month stands then
         *seen = None;
