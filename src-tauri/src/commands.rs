@@ -637,6 +637,7 @@ pub async fn wipe_all_data(window: WebviewWindow, app: AppHandle) -> Res<()> {
     crate::resume::forget(&state);
     crate::handoff::forget(&state);
     crate::opener::forget(&state);
+    crate::alerts::forget();
     state.worker.send(Msg::Reconfigure);
     // onboarding starts over: the widget hides and the tray drops the old limits
     crate::windows::apply_widget_settings(&app, &s);

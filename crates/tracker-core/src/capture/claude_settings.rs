@@ -592,7 +592,7 @@ pub fn refresh_hook(st: &mut CaptureState, hook: Hook, data_dir: &Path, command:
         let groups = event_groups(&mut doc, event)?;
         let mut found = false;
         for g in groups.iter_mut().filter(|g| before.get(event).is_some_and(|b| same_group(g, b))) {
-            *g = group.clone();
+            *g = merge_ours(g, before[event], group);
             found = true;
         }
         if !found && !groups.iter().any(|g| same_group(g, group)) {
@@ -609,6 +609,38 @@ pub fn refresh_hook(st: &mut CaptureState, hook: Hook, data_dir: &Path, command:
         return Err(e);
     }
     Ok(true)
+}
+
+/// Our group `new` in place of `old`, keeping what the user changed in `current` since (a raised
+/// timeout, a matcher, a key of their own): only what is still as we wrote it takes the new value,
+/// and the command always does.
+fn merge_ours(current: &Value, old: &Value, new: &Value) -> Value {
+    match (current, old, new) {
+        (Value::Object(c), Value::Object(o), Value::Object(n)) => {
+            let mut out = Map::new();
+            for (k, nv) in n {
+                let v = match (c.get(k), o.get(k)) {
+                    _ if k == "command" => nv.clone(),
+                    (Some(cv), Some(ov)) => merge_ours(cv, ov, nv),
+                    (Some(cv), None) => cv.clone(),
+                    // taken out by the user
+                    (None, Some(_)) => continue,
+                    (None, None) => nv.clone(),
+                };
+                out.insert(k.clone(), v);
+            }
+            for (k, cv) in c.iter().filter(|(k, cv)| !n.contains_key(*k) && o.get(*k) != Some(*cv)) {
+                out.insert(k.clone(), cv.clone());
+            }
+            Value::Object(out)
+        }
+        (Value::Array(c), Value::Array(o), Value::Array(n)) if c.len() == o.len() && o.len() == n.len() => {
+            Value::Array(c.iter().zip(o).zip(n).map(|((c, o), n)| merge_ours(c, o, n)).collect())
+        }
+        // reshaped (an entry of ours added twice): ours whole again, so no old command stays behind
+        (Value::Array(_), _, n) | (Value::Object(_), _, n) => n.clone(),
+        (c, o, n) => if c == o { n } else { c }.clone(),
+    }
 }
 
 /// The record is dropped only once the revert worked, so a failed undo can be retried.
@@ -1348,6 +1380,36 @@ mod tests {
         let after = read(&file);
         assert_eq!(after["hooks"]["UserPromptSubmit"][0]["hooks"][1]["command"], "~/mine.sh");
         assert!(after["hooks"].get("Stop").is_none() && after["hooks"].get("SessionEnd").is_none());
+    }
+
+    #[test]
+    fn a_moved_app_keeps_the_timeout_and_matcher_the_user_gave_its_hook() {
+        let (_d, file, data) = setup(Some(r#"{"model": "opus"}"#));
+        let mut st = CaptureState::default();
+        install_refresh_hook(&mut st, &data, &file, "aiut --cache-hook", 1).unwrap();
+        let mut doc = read(&file);
+        doc["hooks"]["Stop"][0]["hooks"][0]["timeout"] = json!(7200);
+        doc["hooks"]["SessionEnd"][0]["matcher"] = json!("mine");
+        fs::write(&file, doc.to_string()).unwrap();
+        assert!(refresh_refresh_hook(&mut st, &data, "aiut2 --cache-hook").unwrap());
+        let after = read(&file);
+        assert_eq!(after["hooks"]["Stop"][0]["hooks"][0]["command"], "aiut2 --cache-hook");
+        assert_eq!(after["hooks"]["Stop"][0]["hooks"][0]["timeout"], 7200);
+        assert_eq!(after["hooks"]["SessionEnd"][0]["matcher"], "mine");
+
+        // a timeout taken out stays out; an entry of ours added twice gets the new command in both
+        let mut doc = read(&file);
+        doc["hooks"]["Stop"][0]["hooks"][0].as_object_mut().unwrap().remove("timeout");
+        let twice = doc["hooks"]["SessionEnd"][0]["hooks"][0].clone();
+        doc["hooks"]["SessionEnd"][0]["hooks"].as_array_mut().unwrap().push(twice);
+        fs::write(&file, doc.to_string()).unwrap();
+        assert!(refresh_refresh_hook(&mut st, &data, "aiut3 --cache-hook").unwrap());
+        let after = read(&file);
+        assert!(after["hooks"]["Stop"][0]["hooks"][0].get("timeout").is_none());
+        let commands: Vec<&str> = after["hooks"]["SessionEnd"][0]["hooks"].as_array().unwrap().iter().map(|h| h["command"].as_str().unwrap()).collect();
+        assert!(commands.iter().all(|c| c.starts_with("aiut3")), "{commands:?}");
+        assert_eq!(uninstall_refresh_hook(&mut st, &data).unwrap(), RevertOutcome::Restored);
+        assert!(read(&file).get("hooks").is_none());
     }
 
     #[test]

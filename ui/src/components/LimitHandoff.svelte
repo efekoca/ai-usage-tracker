@@ -14,11 +14,19 @@
   let error = $state('')
   let failed = $state<{ key: string; why: string } | null>(null)
 
-  const load = () =>
+  // a read that comes back after a newer read or a change is dropped
+  let seq = 0
+  const load = () => {
+    const mine = ++seq
     api
       .handoffInfo()
-      .then((i) => (info = i))
+      .then((i) => mine === seq && (info = i))
       .catch(() => {})
+  }
+  const took = (i: HandoffInfo) => {
+    seq++
+    info = i
+  }
   $effect(() => {
     void app.tick
     load()
@@ -34,11 +42,11 @@
     error = ''
     try {
       if (change.claude !== undefined) {
-        info = await api.setLimitHandoff(change.claude)
+        took(await api.setLimitHandoff(change.claude))
         if (app.settings) app.settings.limit_handoff = change.claude
       }
       if (change.codex !== undefined) {
-        info = await api.setCodexHandoff(change.codex)
+        took(await api.setCodexHandoff(change.codex))
         if (app.settings) app.settings.codex_handoff = change.codex
       }
       asking = []

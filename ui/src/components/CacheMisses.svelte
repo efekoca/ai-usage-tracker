@@ -3,6 +3,7 @@
   import { app, latest } from '../lib/store.svelte'
   import { fmtCompact, fmtDate, fmtDateTime, fmtInt, fmtMoney, fmtPct, has, localDate, t } from '../lib/i18n.svelte'
   import { shortModel } from '../lib/caches'
+  import { rowToggles } from '../lib/scroll'
   import StatTile from './StatTile.svelte'
   import BarValue from './BarValue.svelte'
   import Icon from './Icon.svelte'
@@ -163,10 +164,9 @@
                   {@const isOpen = opened === keyOf(g)}
                   {@const cause = mainCause(g)}
                   <!-- the whole row opens with a click; the arrow button carries it for the keyboard and screen readers -->
-                  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-                  <tr class="group" class:open={isOpen} onclick={() => (opened = isOpen ? null : keyOf(g))}>
+                  <tr class="group" class:open={isOpen} onclick={(e) => rowToggles(e) && (opened = isOpen ? null : keyOf(g))}>
                     <td class="toggle-col">
-                      <button class="btn ghost icon" aria-expanded={isOpen} aria-label="{t('sessions.detail')}: {name(g)}">
+                      <button class="btn ghost icon" aria-expanded={isOpen} aria-label="{t('sessions.detail')}: {name(g)}" onclick={() => (opened = isOpen ? null : keyOf(g))}>
                         <span class="chev" class:down={isOpen}><Icon name="chevron" size={13} /></span>
                       </button>
                     </td>

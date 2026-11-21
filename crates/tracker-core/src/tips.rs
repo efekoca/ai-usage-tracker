@@ -11,6 +11,7 @@ use serde::Serialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 const MIN_MS: i64 = 60_000;
+const DAY_MS: i64 = 24 * 60 * MIN_MS;
 
 /// A cache write this large after a pause is a rebuilt context, not new conversation.
 pub const REBUILD_MIN_PROMPT: u64 = 20_000;
@@ -95,6 +96,13 @@ pub struct Rebuilds {
 /// (the shared system prompt usually stays cached, the conversation after it does not). Captured
 /// telemetry is left out, as in `insights::live_caches`: it names no subagent or cache lifetime.
 pub fn cache_rebuilds(events: &[EventRow], book: &PriceBook) -> Rebuilds {
+    cache_rebuilds_since(events, i64::MIN, book)
+}
+
+/// [`cache_rebuilds`] counting only requests from `from_ms` on; `events` may hold earlier
+/// requests of the same conversations, so one that rebuilt the cache first thing in the period
+/// is still found.
+pub fn cache_rebuilds_since(events: &[EventRow], from_ms: i64, book: &PriceBook) -> Rebuilds {
     // the cache is per model and account, so each one's requests in a conversation are a sequence
     // of their own: a switch to another account writes its cache anew after any pause
     let mut threads: HashMap<(&str, &str, &str, Option<&str>), Vec<&EventRow>> = HashMap::new();
@@ -109,6 +117,9 @@ pub fn cache_rebuilds(events: &[EventRow], book: &PriceBook) -> Rebuilds {
         evs.sort_by_key(|e| e.ts_ms);
         for w in evs.windows(2) {
             let (prev, cur) = (w[0], w[1]);
+            if cur.ts_ms < from_ms {
+                continue;
+            }
             let Some(rewritten) = rewritten_after_pause(prev, cur) else { continue };
             let Some(extra) = rewrite_extra_usd(book, cur, rewritten) else { continue };
             r.requests += 1;
@@ -147,7 +158,16 @@ pub fn tips(store: &Store, book: &PriceBook, range: Range, filter: &Filter) -> R
 
     // Claude caches explicitly, so its cache writes are logged
     {
-        let r = cache_rebuilds(&events, book);
+        // the requests of the same conversations in the week before, so the first one after a
+        // night's pause is measured against the one before it
+        let sessions: HashSet<&str> = events.iter().filter_map(|e| e.session_id.as_deref()).collect();
+        let mut with_before: Vec<EventRow> = store
+            .events_between(range.from_ms.saturating_sub(7 * DAY_MS), range.from_ms)?
+            .into_iter()
+            .filter(|e| e.session_id.as_deref().is_some_and(|s| sessions.contains(s)))
+            .collect();
+        with_before.extend(events.iter().cloned());
+        let r = cache_rebuilds_since(&with_before, range.from_ms, book);
         if r.requests >= 3 && material(r.extra_usd, total) {
             out.push(Tip::CacheRebuild { requests: r.requests, sessions: r.sessions, tokens: r.tokens, extra_usd: r.extra_usd, cost_share_pct: pct(r.extra_usd, total) });
         }

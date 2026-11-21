@@ -21,12 +21,17 @@
   let tool = $state('')
   let days = $state('7')
 
+  let error = $state('')
+  let unread = $state('')
   $effect(() => {
     void [app.tick, app.settings?.markers.length]
     return latest(
       () => api.experiments(),
-      (d) => (rows = d),
-      () => (rows = []),
+      (d) => {
+        rows = d
+        unread = ''
+      },
+      (e) => (unread = String(e)),
     )
   })
   $effect(() => {
@@ -64,11 +69,18 @@
       const marker = { id, at_ms: dayStart, label: label.trim(), project_id, project_path, tool: tool || null, days: Number(days) }
       await saveSettings((c) => ({ markers: [...c.markers, marker] }))
       label = ''
+      error = ''
+    } catch (e) {
+      error = String(e)
     } finally {
       adding = false
     }
   }
-  const remove = (id: string) => saveSettings((c) => ({ markers: c.markers.filter((m) => m.id !== id) }))
+  const remove = (id: string) =>
+    saveSettings((c) => ({ markers: c.markers.filter((m) => m.id !== id) })).then(
+      () => (error = ''),
+      (e) => (error = String(e)),
+    )
 
   type Metric = { key: string; before: string; after: string; change: string; tone: '' | 'good' | 'bad'; bars: [number, number] | null }
   /** One figure before and after: `lower` says a smaller one is the better; `points` that it is a percentage. */
@@ -158,8 +170,10 @@
       {t('experiment.compares', { before: beforeDays(dayStart, Number(days)), after: afterDays(dayStart, Number(days)) })} · {t('experiment.enter')}
     {/if}
   </p>
+  {#if error}<p class="error small" role="alert">{t('common.error', { e: error })}</p>{/if}
 </form>
 
+{#if unread}<p class="error small" role="alert">{t('common.error', { e: unread })}</p>{/if}
 {#each rows as m (m.id)}
   <article class="card marker">
     <div class="head">
@@ -197,11 +211,13 @@
     {#if muchUnpriced(m)}<p class="subtle small thin"><Icon name="info" size={13} />{t('experiment.unpriced', { n: fmtInt(unpriced(m)) })}</p>{/if}
   </article>
 {:else}
-  <div class="none">
-    <span class="tile" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4M5 4h11l-2 4 2 4H5" /></svg></span>
-    <b>{t('experiment.none')}</b>
-    <p class="subtle small">{t('experiment.none.hint')}</p>
-  </div>
+  {#if !unread}
+    <div class="none">
+      <span class="tile" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4M5 4h11l-2 4 2 4H5" /></svg></span>
+      <b>{t('experiment.none')}</b>
+      <p class="subtle small">{t('experiment.none.hint')}</p>
+    </div>
+  {/if}
 {/each}
 
 <style>
@@ -331,6 +347,11 @@
     margin: 0;
     padding-left: 16px;
     min-height: 1.45em;
+  }
+  .error {
+    margin: 0;
+    padding-left: 16px;
+    color: var(--bad-ink);
   }
   .marker {
     display: grid;

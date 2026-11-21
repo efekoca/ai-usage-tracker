@@ -301,8 +301,8 @@ pub struct SessionTimeline {
 /// over the whole session, since the cache and the context are shared by all of it.
 pub fn session_timeline(store: &Store, book: &PriceBook, tool: Tool, session_id: &str, from_ms: i64, to_ms: i64, filter: &Filter) -> Result<SessionTimeline> {
     let ours = |t: Tool, s: Option<&str>| t == tool && s == Some(session_id);
-    let mut events: Vec<EventRow> = store.events_between(from_ms, to_ms + 1)?.into_iter().filter(|e| ours(e.tool, e.session_id.as_deref())).collect();
-    events.sort_by_key(|e| e.ts_ms);
+    // the whole session, so a rewrite or compaction at the start of the span is found from the request before it
+    let events: Vec<EventRow> = store.session_events(session_id)?.into_iter().filter(|e| e.tool == tool).collect();
     let prompt = |e: &EventRow| if e.request_input > 0 { e.request_input } else { e.tokens.input + e.tokens.cache_read + e.tokens.cache_write };
 
     // captured telemetry also holds helper requests and names no subagent or cache lifetime
@@ -332,7 +332,7 @@ pub fn session_timeline(store: &Store, book: &PriceBook, tool: Tool, session_id:
     let requests = events
         .iter()
         .enumerate()
-        .filter(|(_, e)| filter.matches(e))
+        .filter(|(_, e)| (from_ms..=to_ms).contains(&e.ts_ms) && filter.matches(e))
         .map(|(i, e)| TimelineRequest {
             ts_ms: e.ts_ms,
             model: e.model.clone(),
@@ -359,7 +359,7 @@ pub fn session_timeline(store: &Store, book: &PriceBook, tool: Tool, session_id:
         .collect();
     // decided over the whole session, not the row's span: a request that began before the row's
     // first one can still send a tool call inside it
-    let calls_hidden = !calls.is_empty() && !filter.is_empty() && store.session_events(session_id)?.iter().any(|e| e.tool == tool && !filter.matches(e));
+    let calls_hidden = !calls.is_empty() && !filter.is_empty() && events.iter().any(|e| !filter.matches(e));
     if calls_hidden {
         calls.clear();
     }
