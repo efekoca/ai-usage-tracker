@@ -1128,6 +1128,7 @@ export function installMock() {
             codex_installed: settings.codex_handoff,
             codex_hooks_file: win ? 'C:\\Users\\you\\.codex\\hooks.json' : mac ? '/Users/you/.codex/hooks.json' : '/home/you/.codex/hooks.json',
             codex_seen: scenario.get('codexseen') !== '0',
+            codex_moved: 0,
             codex_folder: win ? 'C:\\Users\\you\\AppData\\Local\\Temp\\ai-usage-tracker-handoff' : mac ? '/var/folders/7n/xx/T/ai-usage-tracker-handoff-501' : '/tmp/ai-usage-tracker-handoff-1000',
             notes,
           }

@@ -860,7 +860,7 @@ fn restore_after_upgrade(app: &AppHandle) {
                 let _ = app.emit("settings-changed", &s);
                 Ok("enabled".into())
             }),
-            "codex_handoff" => crate::handoff::install_codex(app).and_then(|()| {
+            "codex_handoff" => crate::handoff::install_codex(app).and_then(|_| {
                 let s = app.state::<AppState>().update_settings(|s| s.codex_handoff = true)?;
                 write_statusline_options(&app.state::<AppState>().data_dir, &s);
                 let _ = app.emit("settings-changed", &s);

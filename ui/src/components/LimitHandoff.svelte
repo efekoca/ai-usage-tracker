@@ -39,16 +39,21 @@
   const on = $derived(claudeOn || codexOn)
   const needs = (tool: HandoffAgent) => (tool === 'claude' ? !info?.installed : !info?.codex_installed)
 
+  // the user's own Codex hooks that moved up when ours went: Codex asks about them again
+  let moved = $state(0)
   async function apply(change: Partial<Record<HandoffAgent, boolean>>) {
     busy = true
     error = ''
+    moved = 0
     try {
       if (change.claude !== undefined) {
         took(await api.setLimitHandoff(change.claude))
         if (app.settings) app.settings.limit_handoff = change.claude
       }
       if (change.codex !== undefined) {
-        took(await api.setCodexHandoff(change.codex))
+        const changed = await api.setCodexHandoff(change.codex)
+        took(changed)
+        moved = changed.codex_moved
         if (app.settings) app.settings.codex_handoff = change.codex
       }
       asking = []
@@ -171,6 +176,7 @@
     {:else if error}
       <p class="error small" role="alert">{t('common.error', { e: error })}</p>
     {/if}
+    {#if moved}<p class="moved subtle small" role="status">{t('limits.handoff.codexMoved', { n: moved })}</p>{/if}
     {#if claudeOn}<HooksOff setting={info.hooks_off} />{/if}
     {#if on}
       <div class="inset tools" role="group" aria-label={t('limits.handoff.tools')}>
@@ -373,6 +379,9 @@
   }
   .actions .btn {
     justify-content: center;
+  }
+  .moved {
+    margin: 0;
   }
   .error {
     margin: 0;

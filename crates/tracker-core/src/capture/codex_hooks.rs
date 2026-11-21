@@ -103,10 +103,12 @@ pub fn in_place(c: &CodexHookChange) -> bool {
 }
 
 /// Takes out our entries only: a group or a list left empty by that goes too, and the file when
-/// we made it and nothing else is in it.
-pub fn uninstall(c: &CodexHookChange) -> Result<(), SettingsError> {
-    let Some(mut doc) = read(&c.file)? else { return Ok(()) };
-    let Some(hooks) = doc.get_mut("hooks").and_then(Value::as_object_mut) else { return Ok(()) };
+/// we made it and nothing else is in it. Returns how many of the user's hooks move up by it: Codex
+/// keeps trust by place, so it asks about each of them again.
+pub fn uninstall(c: &CodexHookChange) -> Result<usize, SettingsError> {
+    let Some(mut doc) = read(&c.file)? else { return Ok(0) };
+    let Some(hooks) = doc.get_mut("hooks").and_then(Value::as_object_mut) else { return Ok(0) };
+    let moved = hooks.values().filter_map(Value::as_array).map(|list| moved_up(list, &c.command)).sum();
     let mut changed = false;
     let mut emptied = Vec::new();
     for (event, list) in hooks.iter_mut().filter_map(|(k, v)| Some((k.clone(), v.as_array_mut()?))) {
@@ -124,7 +126,7 @@ pub fn uninstall(c: &CodexHookChange) -> Result<(), SettingsError> {
         changed |= took;
     }
     if !changed {
-        return Ok(());
+        return Ok(0);
     }
     for event in emptied {
         hooks.shift_remove(&event);
@@ -135,10 +137,31 @@ pub fn uninstall(c: &CodexHookChange) -> Result<(), SettingsError> {
     if c.created && doc.is_empty() {
         return match fs::remove_file(&c.file) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(SettingsError::Io(e)),
-            _ => Ok(()),
+            _ => Ok(moved),
         };
     }
-    write(&c.file, &doc)
+    write(&c.file, &doc).map(|_| moved)
+}
+
+/// The user's hooks in one event's list that sit after an entry of ours, in its group or in a
+/// later one once a group of ours alone goes.
+fn moved_up(list: &[Value], command: &str) -> usize {
+    let mine = |h: &Value| h.get("command").and_then(Value::as_str) == Some(command);
+    let mut group_gone = false;
+    let mut moved = 0;
+    for group in list {
+        let Some(h) = group.get("hooks").and_then(Value::as_array) else { continue };
+        let mut ours_before = false;
+        for x in h {
+            if mine(x) {
+                ours_before = true;
+            } else if group_gone || ours_before {
+                moved += 1;
+            }
+        }
+        group_gone |= !h.is_empty() && h.iter().all(mine);
+    }
+    moved
 }
 
 #[cfg(test)]
@@ -172,6 +195,23 @@ mod tests {
         let after: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
         assert_eq!(after, other());
         assert!(!in_place(&c));
+    }
+
+    #[test]
+    fn taking_ours_out_tells_how_many_of_the_users_hooks_move_up() {
+        let d = tempfile::tempdir().unwrap();
+        let file = hooks_file(d.path());
+        fs::write(&file, serde_json::to_string_pretty(&other()).unwrap()).unwrap();
+        let c = install(&file, CMD, None, 1).unwrap();
+        assert_eq!(uninstall(&c).unwrap(), 0, "the user's group comes before ours");
+        let c = install(&file, CMD, None, 1).unwrap();
+        // two hooks of the user's own added after ours, in a group of their own
+        let mut doc: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
+        doc["hooks"]["PostToolUse"].as_array_mut().unwrap().push(json!({"hooks": [{"type": "command", "command": "lint"}, {"type": "command", "command": "log"}]}));
+        fs::write(&file, doc.to_string()).unwrap();
+        assert_eq!(uninstall(&c).unwrap(), 2);
+        let after: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(after["hooks"]["PostToolUse"], json!([{"hooks": [{"type": "command", "command": "lint"}, {"type": "command", "command": "log"}]}]));
     }
 
     #[test]
