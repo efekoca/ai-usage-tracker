@@ -102,6 +102,25 @@ describe('the handoff note', () => {
     expect(target.querySelector('[role=alert]')).toBeNull()
   })
 
+  it('keeps what turning it on returned over an older read that comes back later', async () => {
+    app.settings = { limit_handoff: false, codex_handoff: false } as unknown as Settings
+    const off = info({ installed: false, codex_installed: false, codex_here: false, notes: [] })
+    const target = await render(off)
+    let late: (i: HandoffInfo) => void = () => {}
+    mocks.handoffInfo.mockImplementationOnce(() => new Promise<HandoffInfo>((r) => (late = r)))
+    app.tick++
+    flushSync()
+    header(target).click()
+    flushSync()
+    mocks.setLimitHandoff.mockResolvedValue(info({ codex_installed: false, codex_here: false, notes: [] }))
+    confirm(target).click()
+    await settle()
+    expect(header(target).getAttribute('aria-checked')).toBe('true')
+    late(off)
+    await settle()
+    expect(header(target).getAttribute('aria-checked')).toBe('true')
+  })
+
   it('asks only about Claude when Codex is not on this computer', async () => {
     app.settings = { limit_handoff: false, codex_handoff: false } as unknown as Settings
     const target = await render(info({ installed: false, codex_installed: false, codex_here: false, notes: [] }))

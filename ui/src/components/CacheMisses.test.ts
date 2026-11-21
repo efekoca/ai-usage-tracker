@@ -94,6 +94,14 @@ describe('the cache misses card', () => {
     first.querySelector<HTMLButtonElement>('.toggle-col button')!.click()
     flushSync()
     expect(t.querySelector('tr.detail')).toBeNull()
+    // selecting a project's name to copy it leaves the row as it is
+    const range = document.createRange()
+    range.selectNodeContents(first.querySelector('.pname')!)
+    getSelection()?.addRange(range)
+    first.querySelector<HTMLElement>('.pname')!.click()
+    flushSync()
+    getSelection()?.removeAllRanges()
+    expect(t.querySelector('tr.detail')).toBeNull()
   })
 
   it('leaves the share of cost unknown while a model of the rewrites has no price', async () => {

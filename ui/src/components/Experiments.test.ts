@@ -122,6 +122,30 @@ describe('before and after a marker', () => {
     expect(full.querySelector('.under')?.textContent?.trim()).toBe('Only 50 can be kept. Remove a marker to add another.')
   })
 
+  it('says so when a marker cannot be saved or the markers cannot be read', async () => {
+    const target = await render([])
+    const label = target.querySelector<HTMLInputElement>('form input')!
+    label.value = 'Shorter prompt'
+    label.dispatchEvent(new Event('input', { bubbles: true }))
+    flushSync()
+    mocks.saveSettings.mockRejectedValueOnce('disk full')
+    target.querySelector<HTMLButtonElement>('button[type=submit]')!.click()
+    await settle()
+    expect(target.querySelector('[role=alert]')?.textContent).toContain('disk full')
+    expect(label.value).toBe('Shorter prompt')
+
+    mocks.experiments.mockRejectedValueOnce('database is locked')
+    const unread = document.body.appendChild(document.createElement('div'))
+    const c = mount(Experiments, { target: unread })
+    await settle()
+    done.push(() => {
+      unmount(c)
+      unread.remove()
+    })
+    expect(unread.querySelector('.none')).toBeNull()
+    expect(unread.querySelector('[role=alert]')?.textContent).toContain('database is locked')
+  })
+
   it('moves on to the new day when the page stays open past midnight', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     try {

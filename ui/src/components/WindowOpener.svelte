@@ -12,11 +12,15 @@
   let error = $state('')
 
   const o = $derived(app.settings?.window_opener)
-  const load = () =>
+  // a read that comes back after a newer read or a run is dropped
+  let seq = 0
+  const load = () => {
+    const mine = ++seq
     api
       .windowOpenerInfo()
-      .then((i) => (info = i))
+      .then((i) => mine === seq && (info = i))
       .catch(() => {})
+  }
   $effect(() => {
     // the next run follows the time and the days
     void [app.tick, o?.enabled, o?.minute, o?.days.length]
@@ -44,7 +48,9 @@
     busy = true
     error = ''
     try {
-      info = await api.openWindowNow()
+      const ran = await api.openWindowNow()
+      seq++
+      info = ran
     } catch (e) {
       error = String(e)
     } finally {

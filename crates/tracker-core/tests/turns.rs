@@ -237,6 +237,50 @@ fn cx_started(time: &str, turn: &str, root: &str, secs: i64, trigger: &str) -> V
 }
 
 #[test]
+fn a_guardian_thread_that_goes_on_from_an_earlier_one_does_not_count_its_last_request_again() {
+    let m = machine();
+    let (main_id, g1, g2) = ("0199dddd-0000-7000-8000-000000000001", "0199dddd-0000-7000-8000-000000000002", "0199dddd-0000-7000-8000-000000000003");
+    let dir = m.home.join(".codex/sessions/2026/09/04");
+    let began = DAY.from_ms / 1000 + 9 * 3600;
+    let guardian = |time: &str, id: &str| {
+        json!({"timestamp": at(time), "type": "session_meta", "payload": {"id": id, "session_id": main_id, "cwd": "C:\\Work\\Turns", "originator": "codex_cli_rs",
+               "source": {"subagent": {"other": "guardian"}}, "parent_thread_id": main_id}})
+    };
+    let item = |time: &str| json!({"timestamp": at(time), "type": "response_item", "payload": {"type": "message", "role": "assistant"}});
+    write(
+        &dir.join(format!("rollout-2026-09-04T09-00-00-{g1}.jsonl")),
+        &[
+            guardian("09:00:00", g1),
+            json!({"timestamp": at("09:00:00"), "type": "turn_context", "payload": {"model": "gpt-5.3-codex"}}),
+            cx_started("09:00:01", "t1", "r1", began + 1, "guardian_review"),
+            item("09:00:02"),
+            cx_tokens("09:00:03", 1000),
+            item("09:00:04"),
+            cx_tokens("09:00:05", 2000),
+            cx("09:00:06", json!({"type": "task_complete", "turn_id": "t1"})),
+        ],
+    );
+    // the next review starts from the earlier one's history and repeats its last count before its own first turn
+    write(
+        &dir.join(format!("rollout-2026-09-04T09-30-00-{g2}.jsonl")),
+        &[
+            guardian("09:30:00", g2),
+            json!({"timestamp": at("09:30:00"), "type": "compacted", "payload": {"message": ""}}),
+            json!({"timestamp": at("09:30:00"), "type": "turn_context", "payload": {"model": "gpt-5.3-codex"}}),
+            cx_tokens("09:30:00", 2000),
+            cx_started("09:30:01", "t2", "r2", began + 1801, "guardian_review"),
+            item("09:30:02"),
+            cx_tokens("09:30:03", 3000),
+            cx("09:30:04", json!({"type": "task_complete", "turn_id": "t2"})),
+        ],
+    );
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &m.env);
+    let requests = store.events_between(DAY.from_ms, DAY.to_ms).unwrap().into_iter().filter(|e| e.tool == Tool::Codex).count();
+    assert_eq!(requests, 3);
+}
+
+#[test]
 fn a_codex_subagent_counts_toward_the_turn_that_started_it() {
     let m = machine();
     let (main_id, sub_id) = ("0199cccc-0000-7000-8000-000000000001", "0199cccc-0000-7000-8000-000000000002");

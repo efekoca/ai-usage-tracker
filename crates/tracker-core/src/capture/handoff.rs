@@ -277,7 +277,21 @@ pub fn told(dir: &Path, session: &str, now_ms: i64) -> bool {
 pub fn claim(dir: &Path, session: &str, resets_ms: i64) -> bool {
     let d = told_dir(dir);
     let _ = fs::create_dir_all(&d);
-    fs::OpenOptions::new().write(true).create_new(true).open(d.join(format!("{session}.{resets_ms}.claim"))).is_ok()
+    let path = d.join(format!("{session}.{resets_ms}.claim"));
+    let take = || fs::OpenOptions::new().write(true).create_new(true).open(&path).is_ok();
+    if take() {
+        return true;
+    }
+    // a hook stopped between its claim and its record (Claude Code ends one at its timeout) would
+    // hold the window for good: the record, not the claim, says the conversation was asked
+    let Some(written) = fs::metadata(&path).and_then(|m| m.modified()).ok() else { return false };
+    if written.elapsed().is_ok_and(|age| age <= std::time::Duration::from_secs(60)) || told_record(dir, session).is_some_and(|t| t.resets_ms == resets_ms) {
+        return false;
+    }
+    // of two hooks that both find it stale only the one that marks this very claim takes it over
+    let stamp = written.duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or_default();
+    let mark = d.join(format!("{session}.{resets_ms}.claim.{stamp}.take"));
+    fs::OpenOptions::new().write(true).create_new(true).open(mark).is_ok() && fs::remove_file(&path).is_ok() && take()
 }
 
 /// The project's record names the conversation told last and, while its note is not written yet,
@@ -601,6 +615,17 @@ mod tests {
         assert!(!claim(d.path(), "s1", 2_000));
         assert!(claim(d.path(), "s1", 9_000), "the next window");
         assert!(claim(d.path(), "s2", 2_000), "another conversation");
+        let left = told_dir(d.path()).join("s1.2000.claim");
+        fs::File::options().write(true).open(&left).unwrap().set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(120)).unwrap();
+        assert!(claim(d.path(), "s1", 2_000), "a claim a stopped hook left without its record");
+        assert!(!claim(d.path(), "s1", 2_000), "taken again just now");
+        // another hook is taking over the same stale claim
+        let left = told_dir(d.path()).join("s2.2000.claim");
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(120);
+        fs::File::options().write(true).open(&left).unwrap().set_modified(old).unwrap();
+        let stamp = fs::metadata(&left).unwrap().modified().unwrap().duration_since(UNIX_EPOCH).unwrap().as_millis();
+        fs::write(told_dir(d.path()).join(format!("s2.2000.claim.{stamp}.take")), "").unwrap();
+        assert!(!claim(d.path(), "s2", 2_000), "only one of two takes it over");
     }
 
     #[test]

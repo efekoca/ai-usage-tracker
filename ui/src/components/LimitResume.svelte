@@ -16,11 +16,17 @@
   // the time left is told to the minute
   let now = $state(Date.now())
 
-  const load = () =>
-    api
+  // a read that comes back after a newer read or a change is dropped
+  let seq = 0
+  const load = () => {
+    const mine = ++seq
+    return api
       .limitResumeInfo()
-      .then((i) => (info = i))
+      .then((i) => {
+        if (mine === seq) info = i
+      })
       .catch(() => {})
+  }
   $effect(() => {
     void app.tick
     load()
@@ -36,7 +42,9 @@
     busy = true
     error = ''
     try {
-      info = await api.setLimitResume(v)
+      const changed = await api.setLimitResume(v)
+      seq++
+      info = changed
       // the app sends the saved settings too; this keeps the switch from waiting for them
       if (app.settings) app.settings.limit_resume = v
       asking = false

@@ -75,6 +75,11 @@ struct State {
     turn: Option<String>,
     /// The fullest window of the last main reading and its reset, for the turn the limit ends.
     fullest: Option<(String, i64)>,
+    /// A response or a turn was seen in the file.
+    began: bool,
+    /// The file starts from a compacted history (a guardian review going on from the one before):
+    /// until its first response or turn, a count repeats the last request of that history.
+    carried: bool,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -252,7 +257,18 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
                 }
                 out.lines_recognised += 1;
             }
+            ("compacted", _) => {
+                if !st.began {
+                    st.carried = true;
+                }
+            }
+            ("response_item", _) => {
+                st.began = true;
+                st.carried = false;
+            }
             ("event_msg", Some("task_started")) => {
+                st.began = true;
+                st.carried = false;
                 let own = str_at(p, "turn_id").filter(|t| !t.is_empty());
                 let who = st.who(path);
                 // a subagent's task is part of the turn that set it off; a version that does not
@@ -306,7 +322,7 @@ pub fn parse_file(path: &Path, offset: u64, state: &Value) -> std::io::Result<Pa
                         recognised = true;
                     } else if let Some(last) = info.get("last_token_usage") {
                         st.last_total = total.clone();
-                        if u64_at(last, "input_tokens").saturating_add(u64_at(last, "output_tokens")) > 0 {
+                        if !st.carried && u64_at(last, "input_tokens").saturating_add(u64_at(last, "output_tokens")) > 0 {
                             let who = st.who(path);
                             let key = match total {
                                 Some(t) => format!("cx:{}:t{t}", st.key_thread(&who.thread)),

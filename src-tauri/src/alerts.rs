@@ -106,6 +106,14 @@ impl Alert {
     }
 }
 
+/// After "Delete all data" nothing seen before is told about later.
+pub(crate) fn forget() {
+    SEEN.lock().unwrap().clear();
+    *BUDGET.lock().unwrap() = None;
+    CACHE_TOLD.lock().unwrap().clear();
+    UNUSED_TOLD.lock().unwrap().clear();
+}
+
 pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading], caches: &[Cache]) {
     if !s.onboarded {
         return;
@@ -119,7 +127,13 @@ pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading], caches:
     // every limit is followed even while its notifications are off, so turning them on never
     // reports what happened before
     let now_ms = chrono::Utc::now().timestamp_millis();
-    let alerts = changes(&mut SEEN.lock().unwrap(), readings, early_at, now_ms / 1000);
+    let providers = crate::commands::enabled_providers(s);
+    let alerts = {
+        let mut seen = SEEN.lock().unwrap();
+        // a source switched off is no longer followed: turned on again, its limits only record first
+        seen.retain(|l, _| providers.contains(&l.provider));
+        changes(&mut seen, readings, early_at, now_ms / 1000)
+    };
     let budget = budget(app, s, now_ms);
     let live = |p| readings.iter().any(|r| r.active && r.provider == p && r.observed_ms.is_some_and(|t| now_ms - t < LIVE_READING_MS));
     let signed_out = newly_out(&mut SIGNED_OUT.lock().unwrap(), &crate::capture::sign_ins(app, s), live);

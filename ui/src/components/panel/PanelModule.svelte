@@ -89,7 +89,8 @@
   function forecast(l: PanelLimit | null): { text: string; at?: string; short: string; tone: 'bad' | 'ok' | 'none' } {
     if (live(l) && l.blocked) return { text: t('limits.status.locked'), short: '', tone: 'bad' }
     const f = live(l) ? l.forecast : null
-    if (f?.kind === 'fills' && f.fills_at_ms) {
+    // a fill time that passed before the next reading says nothing until that reading comes
+    if (f?.kind === 'fills' && f.fills_at_ms && until(f.fills_at_ms)) {
       const at = f.fills_at_ms - now < 86_400_000 ? fmtClock(f.fills_at_ms) : fmtTime(f.fills_at_ms)
       return { text: t('panel.forecast.fills', { t: until(f.fills_at_ms) }), at: t('panel.forecast.fillsAt', { t: at }), short: `⇡ ${until(f.fills_at_ms)}`, tone: 'bad' }
     }

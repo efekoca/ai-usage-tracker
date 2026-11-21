@@ -793,8 +793,11 @@ fn a_context_rewritten_after_the_cache_expired_is_priced_against_a_warm_read() {
     let r = cache_rebuilds(&evs, &book);
     assert_eq!((r.requests, r.sessions, r.tokens), (3, 1, 240_000));
     assert!(close(r.extra_usd, 3.0 * 80_000.0 * (8.0 - 0.2) / 1e6), "{}", r.extra_usd);
+    // a period that begins with a rebuild still measures it against the request before the period
+    let later = Range { from_ms: t + 2 * HOUR, to_ms: t + 7 * HOUR };
     let t = tips(&s, &book, all(), &Filter::default()).unwrap();
     assert_eq!(tip_kinds(&t), vec!["cache_rebuild"]);
+    assert_eq!(tip_kinds(&tips(&s, &book, later, &Filter::default()).unwrap()), vec!["cache_rebuild"]);
 }
 
 #[test]
@@ -986,6 +989,10 @@ fn a_session_timeline_marks_rebuilt_caches_compactions_subagents_and_failed_call
     assert!(t.requests.iter().all(|r| r.cost_usd.is_some()));
     let calls: Vec<(&str, Option<bool>)> = t.calls.iter().map(|c| (c.name.as_str(), c.failed)).collect();
     assert_eq!(calls, [("Bash", Some(true)), ("Read", Some(false))]);
+
+    // a period that begins with the rebuild still finds it from the request before the period
+    let later = session_timeline(&store, &PriceBook::default_book(), Tool::ClaudeCode, "s1", m(20), m(21), &Filter::default()).unwrap();
+    assert_eq!(later.requests.iter().map(|r| (r.rewritten, r.pause_ms)).collect::<Vec<_>>(), [(55_000, Some(19 * MIN)), (0, None)]);
 }
 
 #[test]
