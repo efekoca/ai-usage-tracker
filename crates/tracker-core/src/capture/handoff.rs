@@ -303,12 +303,13 @@ pub fn claim(dir: &Path, session: &str, resets_ms: i64) -> bool {
 /// The project's record names the conversation told last and, while its note is not written yet,
 /// the one before it, whose note the project still has.
 pub fn mark_told(dir: &Path, t: &Told) -> std::io::Result<()> {
+    // whoever wrote the note there now, not whoever was asked last: that one may never have written.
+    // Read before this request's own record replaces the conversation's earlier one.
+    let before = (!t.scripted).then(|| note(dir, &t.key).map(|n| json!({ "session": n.session, "agent": n.agent }))).flatten();
     write_json(&told_file(dir, &t.session), t)?;
     if t.scripted {
         return Ok(());
     }
-    // whoever wrote the note there now, not whoever was asked last: that one may never have written
-    let before = note(dir, &t.key).map(|n| json!({ "session": n.session, "agent": n.agent }));
     write_json(&meta_path(dir, &t.key), &json!({ "cwd": t.cwd, "session": t.session, "told_ms": t.told_ms, "agent": t.agent, "before": before }))
 }
 
@@ -361,13 +362,18 @@ pub fn note(dir: &Path, key: &str) -> Option<Note> {
     let meta: Value = read_json(&meta_path(dir, key))?;
     let written_ms = modified_ms(&note_path(dir, key))?;
     // a note moved over from Codex names its writer while it is still that note
-    let writer = read_json::<Value>(&writer_path(dir, key)).filter(|w| w.get("written_ms").and_then(Value::as_i64) == Some(written_ms));
+    let named = read_json::<Value>(&writer_path(dir, key));
+    let writer = named.clone().filter(|w| w.get("written_ms").and_then(Value::as_i64) == Some(written_ms));
     // a note older than the last request is still the one the conversation before wrote
     let told = meta.get("told_ms").and_then(Value::as_i64).unwrap_or(0);
-    let who = match (writer.as_ref(), meta.get("before").filter(|b| b.is_object())) {
+    let codex_asked_last = meta.get("agent").and_then(|a| serde_json::from_value::<Agent>(a.clone()).ok()) == Some(Agent::Codex);
+    let who = match (writer, meta.get("before").filter(|b| b.is_object())) {
         (Some(w), _) => w,
-        (None, Some(before)) if written_ms + 2_000 < told => before,
-        _ => &meta,
+        (None, Some(before)) if written_ms + 2_000 < told => before.clone(),
+        // Codex writes only through its drop and a moved note names its writer: one changed in
+        // place since is a Claude conversation's, also when Codex was asked last
+        _ if named.is_some() && codex_asked_last => claude_asked_before(dir, key, written_ms).map_or_else(|| meta.clone(), |c| json!({ "session": c.session, "agent": c.agent })),
+        _ => meta.clone(),
     };
     Some(Note {
         key: key.to_owned(),
@@ -495,6 +501,22 @@ pub fn collect(dir: &Path, t: &Told) -> bool {
     if !m.is_file() || !single || written.is_none_or(|w| w + 2_000 < t.told_ms) || m.len() > 1024 * 1024 {
         return false;
     }
+    // a note an asked Claude conversation wrote in place after Codex wrote this one is the newer:
+    // the project keeps one note, and Codex's is left for the temp folder's own clearing. A time
+    // ahead of the clock tells nothing.
+    let now_ms = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
+    if let (Some(w), Some(here)) = (written, modified_ms(&note_path(dir, &t.key)))
+        && here > w
+        && here <= now_ms + 60_000
+        && let Some(c) = claude_asked_before(dir, &t.key, here)
+    {
+        // named once: a later request of another conversation must not change who wrote it
+        let named = read_json::<Value>(&writer_path(dir, &t.key)).is_some_and(|n| n.get("written_ms").and_then(Value::as_i64) == Some(here));
+        if !named {
+            let _ = write_json(&writer_path(dir, &t.key), &json!({ "session": c.session, "agent": c.agent, "written_ms": here }));
+        }
+        return false;
+    }
     let mut text = Vec::new();
     if file.read_to_end(&mut text).is_err() || write_note(dir, &t.key, &text).is_err() {
         return false;
@@ -510,6 +532,11 @@ pub fn collect(dir: &Path, t: &Told) -> bool {
         let _ = write_json(&writer_path(dir, &t.key), &json!({ "session": t.session, "agent": t.agent, "written_ms": at }));
     }
     true
+}
+
+/// The Claude conversation asked for this project's note last before `written_ms`.
+fn claude_asked_before(dir: &Path, key: &str, written_ms: i64) -> Option<Told> {
+    all_told(dir).into_iter().find(|t| t.key == key && t.agent == Agent::Claude && !t.scripted && t.told_ms <= written_ms + 2_000)
 }
 
 fn modified_ms(path: &Path) -> Option<i64> {
@@ -786,6 +813,116 @@ mod tests {
         fs::write(note_path(&dir, "site-1"), "claude's again").unwrap();
         let n = note(&dir, "site-1").unwrap();
         assert_eq!((n.agent, n.session.as_str()), (Agent::Claude, "c2"));
+    }
+
+    #[test]
+    fn a_note_written_after_codexs_is_not_replaced_by_it() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("handoff");
+        let now = std::time::SystemTime::now();
+        let ms = now.duration_since(UNIX_EPOCH).unwrap().as_millis() as i64;
+        let ago = |s: u64| now - std::time::Duration::from_secs(s);
+        let drop = d.path().join("site-1.md");
+        let codex = Told { session: "x1".into(), told_ms: ms - 200_000, cwd: "/w/site".into(), key: "site-1".into(), agent: Agent::Codex, drop: Some(drop.clone()), ..Default::default() };
+        mark_told(&dir, &codex).unwrap();
+        fs::write(&drop, "codex's").unwrap();
+        fs::File::options().write(true).open(&drop).unwrap().set_modified(ago(60)).unwrap();
+        // Claude is asked and writes its note in place before the app moves Codex's over
+        mark_told(&dir, &Told { session: "c2".into(), told_ms: ms - 50_000, cwd: "/w/site".into(), key: "site-1".into(), ..Default::default() }).unwrap();
+        fs::write(note_path(&dir, "site-1"), "claude's, newer").unwrap();
+        assert!(!collect(&dir, &codex));
+        assert_eq!(fs::read_to_string(note_path(&dir, "site-1")).unwrap(), "claude's, newer");
+        assert!(drop.exists(), "left for the temp folder's own clearing, not deleted");
+        let n = note(&dir, "site-1").unwrap();
+        assert_eq!((n.agent, n.session.as_str()), (Agent::Claude, "c2"));
+    }
+
+    #[test]
+    fn a_note_claude_writes_after_codex_was_asked_is_claudes() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("handoff");
+        let now = std::time::SystemTime::now();
+        let ms = now.duration_since(UNIX_EPOCH).unwrap().as_millis() as i64;
+        let ago = |s: u64| now - std::time::Duration::from_secs(s);
+        let claude = Told { session: "c1".into(), told_ms: ms - 300_000, cwd: "/w/site".into(), key: "site-1".into(), ..Default::default() };
+        mark_told(&dir, &claude).unwrap();
+        let drop = d.path().join("site-1.md");
+        let codex = Told { session: "x1".into(), told_ms: ms - 200_000, cwd: "/w/site".into(), key: "site-1".into(), agent: Agent::Codex, drop: Some(drop.clone()), ..Default::default() };
+        mark_told(&dir, &codex).unwrap();
+        fs::write(&drop, "codex's").unwrap();
+        fs::File::options().write(true).open(&drop).unwrap().set_modified(ago(150)).unwrap();
+        // the app is closed: Claude, asked first, writes in place before Codex's note is moved
+        fs::write(note_path(&dir, "site-1"), "claude's").unwrap();
+        fs::File::options().write(true).open(note_path(&dir, "site-1")).unwrap().set_modified(ago(100)).unwrap();
+        assert!(!collect(&dir, &codex));
+        let n = note(&dir, "site-1").unwrap();
+        assert_eq!((n.agent, n.session.as_str()), (Agent::Claude, "c1"));
+
+        // the app is running: Codex's note is moved first, then Claude writes in place
+        fs::remove_file(note_path(&dir, "site-1")).unwrap();
+        assert!(collect(&dir, &codex));
+        assert_eq!(note(&dir, "site-1").map(|n| n.agent), Some(Agent::Codex));
+        fs::write(note_path(&dir, "site-1"), "claude's after").unwrap();
+        let n = note(&dir, "site-1").unwrap();
+        assert_eq!((n.agent, n.session.as_str()), (Agent::Claude, "c1"));
+    }
+
+    #[test]
+    fn claudes_credit_holds_when_it_is_asked_again_and_while_codexs_drop_waits() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("handoff");
+        let now = std::time::SystemTime::now();
+        let ms = now.duration_since(UNIX_EPOCH).unwrap().as_millis() as i64;
+        let ago = |s: u64| now - std::time::Duration::from_secs(s);
+        let at = |path: &Path, s: u64| fs::File::options().write(true).open(path).unwrap().set_modified(ago(s)).unwrap();
+        let told = |session: &str, s: i64, agent: Agent, drop: Option<PathBuf>| Told { session: session.into(), told_ms: ms - s * 1000, cwd: "/w/site".into(), key: "site-1".into(), agent, drop, ..Default::default() };
+        mark_told(&dir, &told("c0", 900, Agent::Claude, None)).unwrap();
+        mark_told(&dir, &told("c1", 600, Agent::Claude, None)).unwrap();
+        let drop = d.path().join("site-1.md");
+        let codex = told("x1", 500, Agent::Codex, Some(drop.clone()));
+        mark_told(&dir, &codex).unwrap();
+        fs::write(&drop, "codex's").unwrap();
+        at(&drop, 450);
+        fs::write(note_path(&dir, "site-1"), "claude's").unwrap();
+        at(&note_path(&dir, "site-1"), 400);
+        assert!(!collect(&dir, &codex), "held back for c1's newer note");
+        // c1 is asked again in its next window while Codex's drop still waits
+        mark_told(&dir, &told("c1", 100, Agent::Claude, None)).unwrap();
+        assert!(!collect(&dir, &codex));
+        let n = note(&dir, "site-1").unwrap();
+        assert_eq!((n.agent, n.session.as_str()), (Agent::Claude, "c1"));
+    }
+
+    #[test]
+    fn a_note_changed_in_place_by_no_asked_claude_does_not_hold_codexs_back() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("handoff");
+        let now = std::time::SystemTime::now();
+        let ms = now.duration_since(UNIX_EPOCH).unwrap().as_millis() as i64;
+        let drop = d.path().join("site-1.md");
+        let codex = Told { session: "x1".into(), told_ms: ms - 200_000, cwd: "/w/site".into(), key: "site-1".into(), agent: Agent::Codex, drop: Some(drop.clone()), ..Default::default() };
+        mark_told(&dir, &codex).unwrap();
+        fs::write(&drop, "codex's").unwrap();
+        fs::File::options().write(true).open(&drop).unwrap().set_modified(now - std::time::Duration::from_secs(150)).unwrap();
+        fs::write(note_path(&dir, "site-1"), "edited by hand").unwrap();
+        assert!(collect(&dir, &codex), "no Claude conversation was asked, so Codex's note is the one asked for");
+        assert_eq!(fs::read_to_string(note_path(&dir, "site-1")).unwrap(), "codex's");
+    }
+
+    #[test]
+    fn a_note_dated_in_the_future_does_not_hold_codexs_back() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("handoff");
+        let now = std::time::SystemTime::now();
+        let ms = now.duration_since(UNIX_EPOCH).unwrap().as_millis() as i64;
+        let drop = d.path().join("site-1.md");
+        let codex = Told { session: "x1".into(), told_ms: ms - 200_000, cwd: "/w/site".into(), key: "site-1".into(), agent: Agent::Codex, drop: Some(drop.clone()), ..Default::default() };
+        mark_told(&dir, &codex).unwrap();
+        fs::write(note_path(&dir, "site-1"), "from a clock set ahead").unwrap();
+        fs::File::options().write(true).open(note_path(&dir, "site-1")).unwrap().set_modified(now + std::time::Duration::from_secs(86_400)).unwrap();
+        fs::write(&drop, "codex's").unwrap();
+        assert!(collect(&dir, &codex));
+        assert_eq!(fs::read_to_string(note_path(&dir, "site-1")).unwrap(), "codex's");
     }
 
     #[test]

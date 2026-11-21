@@ -281,6 +281,34 @@ fn a_guardian_thread_that_goes_on_from_an_earlier_one_does_not_count_its_last_re
 }
 
 #[test]
+fn a_codex_guardian_whose_turn_is_its_own_root_is_a_turn_of_the_conversation() {
+    let m = machine();
+    let (main_id, g) = ("0199eeee-0000-7000-8000-000000000001", "0199eeee-0000-7000-8000-000000000002");
+    let dir = m.home.join(".codex/sessions/2026/09/04");
+    let began = DAY.from_ms / 1000 + 14 * 3600;
+    write(
+        &dir.join(format!("rollout-2026-09-04T14-00-00-{g}.jsonl")),
+        &[
+            json!({"timestamp": at("14:00:00"), "type": "session_meta", "payload": {"id": g, "session_id": main_id, "cwd": "C:\\Work\\Turns", "originator": "codex_cli_rs",
+                   "source": {"subagent": {"other": "guardian"}}, "parent_thread_id": main_id}}),
+            json!({"timestamp": at("14:00:00"), "type": "turn_context", "payload": {"model": "gpt-5.3-codex"}}),
+            // Codex names the review's own turn as the root: it groups the review as a turn of its own
+            cx_started("14:00:01", "t7", "t7", began + 1, "guardian_review"),
+            cx_tokens("14:00:02", 1000),
+            cx("14:00:03", json!({"type": "task_complete", "turn_id": "t7"})),
+        ],
+    );
+    let mut store = Store::open_in_memory().unwrap();
+    run(&mut store, &m.env);
+    let codex = Filter { tools: vec![Tool::Codex], ..Default::default() };
+    let all = turns(&store, &PriceBook::default_book(), DAY, &codex).unwrap();
+    assert_eq!(all.requests_outside, 0);
+    let got = of(&store, main_id);
+    assert_eq!(got.len(), 1);
+    assert_eq!((got[0].origin.as_str(), got[0].requests, got[0].ordinal), ("other", 1, 1));
+}
+
+#[test]
 fn a_codex_subagent_counts_toward_the_turn_that_started_it() {
     let m = machine();
     let (main_id, sub_id) = ("0199cccc-0000-7000-8000-000000000001", "0199cccc-0000-7000-8000-000000000002");
