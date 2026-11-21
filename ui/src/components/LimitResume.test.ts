@@ -125,6 +125,21 @@ describe('continuing after a limit resets', () => {
     expect(toggle(target).getAttribute('aria-checked')).toBe('true')
   })
 
+  it('takes the error away with the question when the user cancels', async () => {
+    app.settings = { limit_resume: false } as unknown as Settings
+    const target = await render(info({ installed: false }))
+    toggle(target).click()
+    flushSync()
+    mocks.setLimitResume.mockRejectedValueOnce('settings file is not valid JSON')
+    target.querySelector<HTMLButtonElement>('.ask .primary')!.click()
+    await settle()
+    expect(target.querySelector('[role=alert]')).not.toBeNull()
+    target.querySelector<HTMLButtonElement>('.ask .actions .btn:not(.primary)')!.click()
+    flushSync()
+    expect(target.querySelector('.ask')).toBeNull()
+    expect(target.querySelector('[role=alert]')).toBeNull()
+  })
+
   it('turns off without asking, and is off while the hook is gone', async () => {
     const target = await render(info({ installed: false, waiting: [waiting()] }))
     expect(toggle(target).getAttribute('aria-checked')).toBe('false')

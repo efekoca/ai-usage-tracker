@@ -155,7 +155,10 @@ pub fn fresh(r: &Reading, now_ms: i64) -> bool {
 fn write_json(path: &Path, value: &impl Serialize) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or(Path::new("."));
     fs::create_dir_all(parent)?;
-    let tmp = parent.join(format!(".{}.{}", path.file_name().unwrap_or_default().to_string_lossy(), std::process::id()));
+    // two threads of the app may write the same record at once
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = parent.join(format!(".{}.{}.{n}", path.file_name().unwrap_or_default().to_string_lossy(), std::process::id()));
     // written whole first, so the hook never reads half of it
     fs::write(&tmp, serde_json::to_vec(value)?)?;
     fs::rename(&tmp, path).inspect_err(|_| {
@@ -284,7 +287,8 @@ pub fn mark_told(dir: &Path, t: &Told) -> std::io::Result<()> {
     if t.scripted {
         return Ok(());
     }
-    let before = read_json::<Value>(&meta_path(dir, &t.key)).map(|m| json!({ "session": m.get("session"), "agent": m.get("agent") }));
+    // whoever wrote the note there now, not whoever was asked last: that one may never have written
+    let before = note(dir, &t.key).map(|n| json!({ "session": n.session, "agent": n.agent }));
     write_json(&meta_path(dir, &t.key), &json!({ "cwd": t.cwd, "session": t.session, "told_ms": t.told_ms, "agent": t.agent, "before": before }))
 }
 
@@ -301,8 +305,13 @@ pub fn all_told(dir: &Path) -> Vec<Told> {
     out
 }
 
+/// Read again first: the user may have gone on in the other tool since `t` was read, and a record
+/// of a later request is not this one's to mark.
 pub fn set_notified(dir: &Path, t: &Told) -> std::io::Result<()> {
-    write_json(&told_file(dir, &t.session), &Told { notified: true, ..t.clone() })
+    match told_record(dir, &t.session) {
+        Some(now) if now.told_ms == t.told_ms => write_json(&told_file(dir, &t.session), &Told { notified: true, ..now }),
+        _ => Ok(()),
+    }
 }
 
 /// Marks the conversations asked for this project's note as gone on in the other tool.
@@ -686,6 +695,34 @@ mod tests {
         assert!(collect(&dir, &codex));
         let n = note(&dir, "site-1").unwrap();
         assert_eq!((n.agent, n.session.as_str()), (Agent::Codex, "x1"));
+    }
+
+    #[test]
+    fn a_note_stays_with_its_writer_when_a_conversation_asked_after_it_never_wrote() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("handoff");
+        let now = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64;
+        let told = |session: &str, ago: i64, agent: Agent| Told { session: session.into(), told_ms: now - ago, cwd: "/w/site".into(), key: "site-1".into(), agent, ..Default::default() };
+        mark_told(&dir, &told("c1", 120_000, Agent::Claude)).unwrap();
+        fs::write(note_path(&dir, "site-1"), "claude's").unwrap();
+        fs::File::options().write(true).open(note_path(&dir, "site-1")).unwrap().set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(90)).unwrap();
+        mark_told(&dir, &told("x1", 60_000, Agent::Codex)).unwrap();
+        mark_told(&dir, &told("c2", 30_000, Agent::Claude)).unwrap();
+        let n = note(&dir, "site-1").unwrap();
+        assert_eq!((n.agent, n.session.as_str()), (Agent::Claude, "c1"), "Codex was asked but never wrote it");
+    }
+
+    #[test]
+    fn sending_the_notification_keeps_a_handoff_made_meanwhile() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("handoff");
+        let t = Told { session: "c1".into(), told_ms: 1, cwd: "/w/site".into(), key: "site-1".into(), ..Default::default() };
+        mark_told(&dir, &t).unwrap();
+        let read_before = told_record(&dir, "c1").unwrap();
+        assert_eq!(set_handed(&dir, "site-1"), vec!["c1".to_string()]);
+        set_notified(&dir, &read_before).unwrap();
+        let now = told_record(&dir, "c1").unwrap();
+        assert!(now.notified && now.handed);
     }
 
     #[cfg(unix)]

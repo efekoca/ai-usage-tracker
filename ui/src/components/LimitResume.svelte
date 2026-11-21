@@ -124,7 +124,7 @@
         </ul>
         {#if error}<p class="error small" role="alert">{t('refresh.consent.failed', { why: error })}</p>{/if}
         <div class="actions">
-          <button class="btn" disabled={busy} onclick={() => (asking = false)}>{t('common.cancel')}</button>
+          <button class="btn" disabled={busy} onclick={() => ((asking = false), (error = ''))}>{t('common.cancel')}</button>
           <button class="btn primary" disabled={busy} onclick={() => set(true)}>{t('limits.resume.ok')}</button>
         </div>
       </div>
