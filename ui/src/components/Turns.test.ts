@@ -101,6 +101,40 @@ describe('what each prompt cost', () => {
     expect([app.view, app.openSession]).toEqual(['sessions', 'claude_codes1'])
   })
 
+  it('opens and closes a turn from anywhere on its row, but not when a click ends a text selection or double-clicks a word', async () => {
+    const target = await render({ turns: [turn({})] })
+    const toggle = () => target.querySelector<HTMLButtonElement>('button[aria-expanded]')!
+    const when = target.querySelector<HTMLElement>('tbody tr th')!
+    when.click()
+    flushSync()
+    expect([toggle().getAttribute('aria-expanded'), target.querySelectorAll('tr.detail').length]).toEqual(['true', 1])
+    when.click()
+    flushSync()
+    expect(toggle().getAttribute('aria-expanded')).toBe('false')
+    toggle().click()
+    flushSync()
+    expect(toggle().getAttribute('aria-expanded')).toBe('true')
+    toggle().click()
+    flushSync()
+    const select = () => {
+      const range = document.createRange()
+      range.selectNodeContents(when)
+      getSelection()?.addRange(range)
+    }
+    select()
+    when.click()
+    flushSync()
+    getSelection()?.removeAllRanges()
+    expect(toggle().getAttribute('aria-expanded')).toBe('false')
+    // the first click of a double-click finds nothing selected yet; the second comes with the word selected
+    when.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }))
+    select()
+    when.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 }))
+    flushSync()
+    getSelection()?.removeAllRanges()
+    expect(toggle().getAttribute('aria-expanded')).toBe('false')
+  })
+
   const facts = (t: HTMLElement) => [...t.querySelectorAll('.facts div')].map((d) => [...d.children].map(text).join(' '))
 
   it('shows no cost for a turn whose every request lacks a price, in its row or in the summary', async () => {
