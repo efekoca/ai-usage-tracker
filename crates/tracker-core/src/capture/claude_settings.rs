@@ -706,6 +706,23 @@ pub fn managed_conflicts(docs: &[Value]) -> Vec<String> {
     v
 }
 
+/// The setting that keeps Claude Code from running the hooks in the user's settings file, if one
+/// does: `disableAllHooks` (managed settings decide it when they set it, as they come first), or
+/// a managed `allowManagedHooksOnly`.
+pub fn hooks_blocked(settings_file: &Path, managed: &[Value]) -> Option<&'static str> {
+    let flag = |d: &Value, key: &str| d.get(key).and_then(Value::as_bool);
+    match managed.iter().find_map(|d| flag(d, "disableAllHooks")) {
+        Some(true) => return Some("managedDisableAllHooks"),
+        Some(false) => {}
+        None => {
+            if read_doc(settings_file).ok().and_then(|(doc, _)| doc.get("disableAllHooks").and_then(Value::as_bool)) == Some(true) {
+                return Some("disableAllHooks");
+            }
+        }
+    }
+    managed.iter().any(|d| flag(d, "allowManagedHooksOnly") == Some(true)).then_some("allowManagedHooksOnly")
+}
+
 /// Claude Code's system folder for managed settings on this platform.
 pub fn managed_dir() -> Option<PathBuf> {
     if cfg!(windows) {
@@ -1380,6 +1397,21 @@ mod tests {
         let after = read(&file);
         assert_eq!(after["hooks"]["UserPromptSubmit"][0]["hooks"][1]["command"], "~/mine.sh");
         assert!(after["hooks"].get("Stop").is_none() && after["hooks"].get("SessionEnd").is_none());
+    }
+
+    #[test]
+    fn hooks_turned_off_in_the_users_or_managed_settings_are_told() {
+        let (_d, file, _data) = setup(Some(r#"{"model": "opus"}"#));
+        assert_eq!(hooks_blocked(&file, &[]), None);
+        assert_eq!(hooks_blocked(&file, &[json!({"allowManagedHooksOnly": true})]), Some("allowManagedHooksOnly"));
+        assert_eq!(hooks_blocked(&file, &[json!({"disableAllHooks": true})]), Some("managedDisableAllHooks"));
+        fs::write(&file, r#"{"disableAllHooks": true}"#).unwrap();
+        assert_eq!(hooks_blocked(&file, &[json!({"allowManagedHooksOnly": true})]), Some("disableAllHooks"));
+        assert_eq!(hooks_blocked(&file, &[json!({"disableAllHooks": false})]), None, "managed settings win");
+        fs::write(&file, r#"{"disableAllHooks": false}"#).unwrap();
+        assert_eq!(hooks_blocked(&file, &[]), None);
+        fs::remove_file(&file).unwrap();
+        assert_eq!(hooks_blocked(&file, &[]), None, "no settings file");
     }
 
     #[test]

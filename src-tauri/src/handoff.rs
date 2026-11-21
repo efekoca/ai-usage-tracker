@@ -203,7 +203,8 @@ pub fn tick(app: &AppHandle, s: &Settings, now: i64) {
             if t.notified {
                 continue;
             }
-            let written = ho::note(d, &t.key).is_some_and(|n| n.written_ms >= t.told_ms);
+            // a note moved over from Codex keeps when Codex wrote it, which can be a moment before the request
+            let written = ho::note(d, &t.key).is_some_and(|n| n.written_ms >= t.told_ms || (n.session == t.session && n.agent == t.agent));
             // the limit that stopped it may be the other window, with its own reset
             let stop = state.db().limit_stops(&t.session, t.told_ms, now).ok().and_then(|v| v.into_iter().max_by_key(|x| x.resets_at));
             let (true, Some(stop)) = (written, stop) else { continue };
@@ -241,6 +242,8 @@ pub struct NoteView {
 pub struct HandoffInfo {
     installed: bool,
     settings_file: String,
+    /// The Claude Code setting that keeps the hook from running, if one does.
+    hooks_off: Option<String>,
     /// The folder Claude may write to.
     folder: String,
     codex_found: bool,
@@ -265,6 +268,7 @@ fn info(state: &AppState) -> HandoffInfo {
     HandoffInfo {
         installed: installed(state),
         settings_file: crate::capture::claude_settings_file(&s).to_string_lossy().into_owned(),
+        hooks_off: crate::capture::hooks_blocked(&s),
         folder: ho::note_path(&dir(state), "x").parent().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
         codex_found: crate::capture::codex_binary(&s).is_some(),
         claude_found: crate::capture::claude_binary(&s).is_some(),

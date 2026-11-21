@@ -30,7 +30,7 @@ const cache = (over: Partial<LiveCache>): LiveCache => ({ session_id: 's', proje
 let done: (() => void)[] = []
 beforeEach(() => {
   app.settings = { cache_timer: true, cache_lead: 2 } as unknown as Settings
-  mocks.cacheRefreshInfo.mockResolvedValue({ installed: true, settings_file: '', today: 0, today_usd: 0 } satisfies RefreshInfo)
+  mocks.cacheRefreshInfo.mockResolvedValue({ installed: true, settings_file: '', hooks_off: null, today: 0, today_usd: 0 } satisfies RefreshInfo)
   mocks.droppedCaches.mockResolvedValue([])
 })
 afterEach(() => {
@@ -127,6 +127,8 @@ describe('the Live caches list', () => {
     expect(target.querySelector('li')).toBeNull()
     expect(target.querySelector('.empty')).toBeNull()
     const toggle = target.querySelector<HTMLButtonElement>('.dropped .toggle')!
+    await settle()
+    expect(document.activeElement, 'the keyboard stays with the rows it left').toBe(toggle)
     expect(toggle.textContent).toContain('2 conversations you stopped following')
     toggle.click()
     flushSync()
@@ -137,6 +139,7 @@ describe('the Live caches list', () => {
     await settle()
     expect(mocks.restoreCache).toHaveBeenCalledWith('b')
     expect(row('site')).toBeDefined()
+    expect(document.activeElement).toBe(row('site').querySelector('.menu-wrap > button'))
     expect([...target.querySelectorAll('.gone-row .name')].map((n) => n.textContent)).toEqual(['notes'])
   })
 })

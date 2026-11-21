@@ -2,9 +2,11 @@
   import { app } from '../lib/store.svelte'
   import { api, type ResumeInfo } from '../lib/api'
   import { cacheClient } from '../lib/caches'
+  import { backToSwitch } from '../lib/focus'
   import { fmtClock, fmtDuration, fmtWhen, has, t, windowLabel } from '../lib/i18n.svelte'
   import AutoCard from './AutoCard.svelte'
   import Icon from './Icon.svelte'
+  import HooksOff from './HooksOff.svelte'
 
   type Waiting = ResumeInfo['waiting'][number]
 
@@ -132,13 +134,14 @@
         </ul>
         {#if error}<p class="error small" role="alert">{t('refresh.consent.failed', { why: error })}</p>{/if}
         <div class="actions">
-          <button class="btn" disabled={busy} onclick={() => ((asking = false), (error = ''))}>{t('common.cancel')}</button>
-          <button class="btn primary" disabled={busy} onclick={() => set(true)}>{t('limits.resume.ok')}</button>
+          <button class="btn" disabled={busy} onclick={(e) => backToSwitch(e, () => ((asking = false), (error = '')), () => !asking)}>{t('common.cancel')}</button>
+          <button class="btn primary" disabled={busy} onclick={(e) => backToSwitch(e, () => set(true), () => !asking)}>{t('limits.resume.ok')}</button>
         </div>
       </div>
     {:else if error}
       <p class="error small" role="alert">{t('common.error', { e: error })}</p>
     {/if}
+    {#if on}<HooksOff setting={info.hooks_off} />{/if}
     {#if on}
       {@const empty = !info.waiting.length && !info.resumed.length}
       <div class="inset">

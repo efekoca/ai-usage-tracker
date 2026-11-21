@@ -1153,6 +1153,11 @@ fn outcome_text(o: RevertOutcome) -> &'static str {
     }
 }
 
+/// The Claude Code setting that keeps our hooks from running, if one does.
+pub(crate) fn hooks_blocked(s: &Settings) -> Option<String> {
+    cs::hooks_blocked(&claude_settings_file(s), &managed_settings()).map(str::to_owned)
+}
+
 fn managed_settings() -> Vec<serde_json::Value> {
     let mut docs = cs::managed_dir().map(|d| cs::managed_files(&d)).unwrap_or_default();
     docs.extend(policy_values().iter().filter_map(|s| serde_json::from_str(s).ok()));

@@ -41,9 +41,11 @@ pub fn json_main() -> i32 {
         Ok(s) => s,
         Err(e) => return fail(&e.to_string()),
     };
-    match store.is_current() {
-        Ok(true) => {}
-        Ok(false) => return fail(if tr { "Veriler bu sürüme göre güncel değil. AI Usage Tracker'ı bir kez açıp yeniden deneyin." } else { "The data is not up to date for this version. Open AI Usage Tracker once and try again." }),
+    match store.schema_age() {
+        Ok(std::cmp::Ordering::Equal) => {}
+        Ok(std::cmp::Ordering::Less) => return fail(if tr { "Veriler bu sürüme göre güncel değil. AI Usage Tracker'ı bir kez açıp yeniden deneyin." } else { "The data is not up to date for this version. Open AI Usage Tracker once and try again." }),
+        // opening this older app never lowers it, so only an update helps
+        Ok(std::cmp::Ordering::Greater) => return fail(if tr { "Veriler AI Usage Tracker'ın daha yeni bir sürümüyle kaydedilmiş. Uygulamayı güncelleyip yeniden deneyin." } else { "The data was saved by a newer version of AI Usage Tracker. Update the app and try again." }),
         Err(e) => return fail(&e.to_string()),
     }
     let settings = Settings::load(&store);
@@ -261,12 +263,14 @@ mod tests {
         drop(store);
 
         let ro = Store::open_read_only(&path).unwrap();
-        assert!(ro.is_current().unwrap());
+        assert_eq!(ro.schema_age().unwrap(), std::cmp::Ordering::Equal);
         let v = build(&ro, &PriceBook::default_book(), &Settings::load(&ro), PERIODS[0], now_ms(), &chrono::Utc).unwrap();
         assert_eq!(v["usage"]["requests"], 1);
         assert!(ro.conn().execute("DELETE FROM usage_event", []).is_err(), "nothing can be written");
 
+        Store::open(&path).unwrap().conn().pragma_update(None, "user_version", 999).unwrap();
+        assert_eq!(Store::open_read_only(&path).unwrap().schema_age().unwrap(), std::cmp::Ordering::Greater, "an archive a newer build left");
         Store::open(&path).unwrap().conn().pragma_update(None, "user_version", 1).unwrap();
-        assert!(!Store::open_read_only(&path).unwrap().is_current().unwrap(), "an archive an older build left");
+        assert_eq!(Store::open_read_only(&path).unwrap().schema_age().unwrap(), std::cmp::Ordering::Less, "an archive an older build left");
     }
 }

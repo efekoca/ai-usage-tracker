@@ -1,9 +1,11 @@
 <script lang="ts">
   import { app } from '../lib/store.svelte'
   import { api, type HandoffAgent, type HandoffInfo } from '../lib/api'
+  import { backToSwitch } from '../lib/focus'
   import { fmtClock, fmtWhen, has, t } from '../lib/i18n.svelte'
   import AutoCard from './AutoCard.svelte'
   import Icon from './Icon.svelte'
+  import HooksOff from './HooksOff.svelte'
   import Toggle from './Toggle.svelte'
 
   let info = $state<HandoffInfo | null>(null)
@@ -57,9 +59,12 @@
     }
   }
   // the hooks and the write rule are added only once the user agrees
+  // the switch the question came from gets the keyboard back
+  let opener: HTMLElement | null = null
   function ask(tools: HandoffAgent[]) {
     if (tools.some(needs)) {
       error = ''
+      opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
       asking = tools
     } else apply(Object.fromEntries(tools.map((tool) => [tool, true])))
   }
@@ -159,13 +164,14 @@
         </ul>
         {#if error}<p class="error small" role="alert">{t('refresh.consent.failed', { why: error })}</p>{/if}
         <div class="actions">
-          <button class="btn" disabled={busy} onclick={() => ((asking = []), (error = ''))}>{t('common.cancel')}</button>
-          <button class="btn primary" disabled={busy} onclick={() => apply(Object.fromEntries(asking.map((tool) => [tool, true])))}>{t('limits.handoff.ok')}</button>
+          <button class="btn" disabled={busy} onclick={(e) => backToSwitch(e, () => ((asking = []), (error = '')), () => !asking.length, opener)}>{t('common.cancel')}</button>
+          <button class="btn primary" disabled={busy} onclick={(e) => backToSwitch(e, () => apply(Object.fromEntries(asking.map((tool) => [tool, true]))), () => !asking.length, opener)}>{t('limits.handoff.ok')}</button>
         </div>
       </div>
     {:else if error}
       <p class="error small" role="alert">{t('common.error', { e: error })}</p>
     {/if}
+    {#if claudeOn}<HooksOff setting={info.hooks_off} />{/if}
     {#if on}
       <div class="inset tools" role="group" aria-label={t('limits.handoff.tools')}>
         <div class="row tool">

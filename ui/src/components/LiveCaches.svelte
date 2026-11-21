@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, tick } from 'svelte'
   import { api, on, type LiveCache } from '../lib/api'
   import { app } from '../lib/store.svelte'
   import { clockCase, fmtCompact, fmtMoney, t } from '../lib/i18n.svelte'
@@ -14,6 +14,7 @@
   let menu = $state<string | null>(null)
   let dropped = $state<LiveCache[]>([])
   let showDropped = $state(false)
+  let droppedToggle = $state<HTMLButtonElement>()
 
   let gen = 0
   async function load() {
@@ -113,6 +114,8 @@
     gen++
     caches = caches.filter((x) => x.session_id !== c.session_id)
     dropped = [...dropped, c]
+    // the row and its menu are gone: the keyboard goes to the list it joined
+    tick().then(() => droppedToggle?.focus())
     api.dropCache(c.session_id).catch((e) => {
       showError(c.session_id, e)
       load()
@@ -122,7 +125,9 @@
     gen++
     dropped = dropped.filter((x) => x.session_id !== c.session_id)
     await api.restoreCache(c.session_id).catch(() => {})
-    load()
+    await load()
+    await tick()
+    ;(triggers[c.session_id] ?? droppedToggle)?.focus()
   }
 
   const meta = (c: LiveCache) =>
@@ -225,7 +230,7 @@
     {/if}
     {#if gone.length}
       <div class="dropped">
-        <button class="toggle" aria-expanded={showDropped} onclick={() => (showDropped = !showDropped)}>
+        <button class="toggle" aria-expanded={showDropped} bind:this={droppedToggle} onclick={() => (showDropped = !showDropped)}>
           <Icon name="eyeOff" size={13} />{t('cache.live.dropped', { n: gone.length })}
           <span class="chev" class:open={showDropped}><Icon name="chevron" size={11} /></span>
         </button>

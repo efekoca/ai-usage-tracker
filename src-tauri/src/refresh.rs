@@ -273,6 +273,8 @@ pub struct RefreshInfo {
     /// Our hook is in Claude Code's settings.
     installed: bool,
     settings_file: String,
+    /// The Claude Code setting that keeps the hook from running, if one does.
+    hooks_off: Option<String>,
     /// Refreshes made today and their API-equivalent cost.
     today: u32,
     today_usd: f64,
@@ -280,6 +282,8 @@ pub struct RefreshInfo {
 
 fn info(state: &AppState) -> RefreshInfo {
     let s = state.settings.read().unwrap().clone();
+    // read before the lock: it can run a program on a Mac with managed settings
+    let hooks_off = crate::capture::hooks_blocked(&s);
     let mut b = BOOK.lock().unwrap();
     load(state, &mut b);
     let midnight = chrono::Local::now().date_naive().and_hms_opt(0, 0, 0).and_then(|t| t.and_local_timezone(chrono::Local).earliest()).map_or(0, |t| t.timestamp_millis());
@@ -287,6 +291,7 @@ fn info(state: &AppState) -> RefreshInfo {
     RefreshInfo {
         installed: installed(state),
         settings_file: crate::capture::claude_settings_file(&s).to_string_lossy().into_owned(),
+        hooks_off,
         today: today.len() as u32,
         today_usd: today.iter().filter_map(|r| r.usd).sum(),
     }

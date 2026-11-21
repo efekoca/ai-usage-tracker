@@ -110,8 +110,24 @@ fn qt_key(hotkey: &str) -> Option<i32> {
         "PageDown" => 0x0100_0017,
         "Insert" => 0x0100_0006,
         "Delete" => 0x0100_0007,
-        _ => match k.strip_prefix('F').and_then(|n| n.parse::<i32>().ok()) {
-            Some(n @ 1..=24) => 0x0100_0030 + n - 1,
+        "Pause" => 0x0100_0008,
+        "PrintScreen" => 0x0100_0009,
+        // the character the key gives on a US layout, as the letters and digits above
+        "Backquote" => 0x60,
+        "Minus" => 0x2d,
+        "Equal" => 0x3d,
+        "BracketLeft" => 0x5b,
+        "BracketRight" => 0x5d,
+        "Backslash" => 0x5c,
+        "Semicolon" => 0x3b,
+        "Quote" => 0x27,
+        "Comma" => 0x2c,
+        "Period" => 0x2e,
+        "Slash" => 0x2f,
+        _ => match (k.strip_prefix("Numpad").and_then(|n| n.parse::<i32>().ok()), k.strip_prefix('F').and_then(|n| n.parse::<i32>().ok())) {
+            // Qt::KeypadModifier with the digit
+            (Some(n @ 0..=9), _) => 0x2000_0000 | (0x30 + n),
+            (_, Some(n @ 1..=24)) => 0x0100_0030 + n - 1,
             _ => return None,
         },
     };
@@ -130,5 +146,16 @@ mod tests {
         assert_eq!(super::qt_key("Super+F9"), Some(0x1000_0000 | 0x0100_0038));
         assert_eq!(super::qt_key("Ctrl+Digit1"), None);
         assert_eq!(super::qt_key("Ctrl+1"), Some(0x0400_0031));
+    }
+
+    #[test]
+    fn every_key_the_recorder_offers_has_a_qt_code() {
+        let named = ["Backquote", "Minus", "Equal", "BracketLeft", "BracketRight", "Backslash", "Semicolon", "Quote", "Comma", "Period", "Slash", "Pause", "PrintScreen"];
+        for k in named.iter().copied().chain(["Numpad0", "Numpad9", "Space", "F24"]) {
+            assert!(super::qt_key(&format!("Ctrl+Alt+{k}")).is_some(), "{k}");
+        }
+        assert_eq!(super::qt_key("Ctrl+Alt+Minus"), Some(0x0C00_002D));
+        assert_eq!(super::qt_key("Ctrl+Numpad5"), Some(0x0400_0000 | 0x2000_0000 | 0x35));
+        assert_eq!(super::qt_key("Ctrl+Numpad10"), None);
     }
 }

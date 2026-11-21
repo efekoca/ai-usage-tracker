@@ -399,6 +399,8 @@ export interface ResumeInfo {
   /** Our hook is in Claude Code's settings. */
   installed: boolean
   settings_file: string
+  /** The Claude Code setting that keeps the hook from running (`disableAllHooks`, `allowManagedHooksOnly`), if one does. */
+  hooks_off: string | null
   waiting: ResumeWaiting[]
   /** Those continued in the last day, the latest first. */
   resumed: { session_id: string; project: string; branch: string | null; at_ms: number }[]
@@ -410,6 +412,8 @@ export interface HandoffInfo {
   /** Our hook and its write rule are in Claude Code's settings. */
   installed: boolean
   settings_file: string
+  /** The Claude Code setting that keeps the hook from running (`disableAllHooks`, `allowManagedHooksOnly`), if one does. */
+  hooks_off: string | null
   /** The folder Claude may write the notes to. */
   folder: string
   codex_found: boolean
@@ -431,6 +435,8 @@ export interface RefreshInfo {
   /** Our hook is in Claude Code's settings. */
   installed: boolean
   settings_file: string
+  /** The Claude Code setting that keeps the hook from running (`disableAllHooks`, `allowManagedHooksOnly`), if one does. */
+  hooks_off: string | null
   /** Refreshes made today and their API-equivalent cost. */
   today: number
   today_usd: number
@@ -624,7 +630,7 @@ export interface Settings {
   theme: 'system' | 'light' | 'dark'
   accent: 'app' | 'system'
   enabled_sources: SourceId[]
-  known_sources: SourceId[]
+  known_sources: string[]
   extra_paths: { claude_config_dirs: string[]; codex_homes: string[] }
   plans: Record<string, string>
   thresholds: Threshold[]

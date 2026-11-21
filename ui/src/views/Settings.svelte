@@ -10,6 +10,7 @@
   import Toggle from '../components/Toggle.svelte'
   import CliScripts from '../components/CliScripts.svelte'
   import Icon from '../components/Icon.svelte'
+  import HooksOff from '../components/HooksOff.svelte'
   import BrandIcon from '../components/BrandIcon.svelte'
   import ColorPick, { type Swatch } from '../components/ColorPick.svelte'
   import ReportCard from '../components/ReportCard.svelte'
@@ -499,6 +500,7 @@
           {/if}
         </span>
       </p>
+      {#if hook.info?.installed}<HooksOff setting={hook.info.hooks_off} />{/if}
     {/if}
   </div>
   <div class="item">

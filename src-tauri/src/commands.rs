@@ -86,6 +86,7 @@ fn save_settings_inner(app: &AppHandle, state: &AppState, make: impl FnOnce(&Set
     // via set_hotkey (it must register first); a page's widget position can predate the last drag
     settings.capture = old.capture.clone();
     settings.known_sources = old.known_sources.clone();
+    settings.enabled_later = old.enabled_later.clone();
     settings.widget.hotkey = old.widget.hotkey.clone();
     settings.widget.x = old.widget.x;
     settings.widget.y = old.widget.y;
