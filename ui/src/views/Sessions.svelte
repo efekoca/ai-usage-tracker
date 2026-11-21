@@ -3,6 +3,7 @@
   import { app, latest, toolColor } from '../lib/store.svelte'
   import { api, type SessionRow, type Sessions } from '../lib/api'
   import { clientLabel, fmtCompact, fmtDateTime, fmtInt, fmtSpan, fmtMoney, fmtPct, searchKey, t, toolLabel } from '../lib/i18n.svelte'
+  import { rowToggles, scrollPageTo } from '../lib/scroll'
   import StatTile from '../components/StatTile.svelte'
   import Icon from '../components/Icon.svelte'
   import SessionTimeline from '../components/SessionTimeline.svelte'
@@ -71,7 +72,7 @@
       query = s.session_id
       open = key
       // the list lies below the turns, out of view on a short window
-      void tick().then(() => list?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }))
+      void tick().then(() => requestAnimationFrame(() => scrollPageTo(() => list)))
     }
     app.openSession = null
   })
@@ -168,7 +169,7 @@
           <tbody>
             {#each rows.slice(0, shown) as s (s.tool + s.session_id)}
               {@const isOpen = open === s.tool + s.session_id}
-              <tr class:open={isOpen}>
+              <tr class="toggles" class:open={isOpen} onclick={(e) => rowToggles(e) && (open = isOpen ? null : s.tool + s.session_id)}>
                 <td class="toggle-col">
                   <button class="btn ghost icon" aria-expanded={isOpen} aria-label="{t('sessions.detail')}: {fmtDateTime(s.started_ms)}" onclick={() => (open = isOpen ? null : s.tool + s.session_id)}>
                     <span class="chev" class:down={isOpen}><Icon name="chevron" size={13} /></span>
@@ -372,6 +373,9 @@
     background: var(--surface-press);
     margin-right: 4px;
     white-space: nowrap;
+  }
+  tr.toggles {
+    cursor: pointer;
   }
   tr.open td {
     border-bottom-color: transparent;

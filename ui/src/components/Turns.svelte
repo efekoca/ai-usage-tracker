@@ -2,6 +2,7 @@
   import { app, latest, toolColor } from '../lib/store.svelte'
   import { api, type TurnCost, type TurnPart, type Turns } from '../lib/api'
   import { agentLabel, clientLabel, fmtCompact, fmtDateTime, fmtInt, fmtMoney, fmtPct, fmtSpan, has, t, toolLabel } from '../lib/i18n.svelte'
+  import { rowToggles } from '../lib/scroll'
   import Icon from './Icon.svelte'
   import Segmented from './Segmented.svelte'
 
@@ -101,7 +102,7 @@
           <tbody>
             {#each rows.slice(0, shown) as x (x.id)}
               {@const isOpen = open === x.id}
-              <tr class:open={isOpen}>
+              <tr class="toggles" class:open={isOpen} onclick={(e) => rowToggles(e) && (open = isOpen ? null : x.id)}>
                 <td class="toggle-col">
                   <button class="btn ghost icon" aria-expanded={isOpen} aria-label="{t('sessions.detail')}: {fmtDateTime(x.started_ms)}" onclick={() => (open = isOpen ? null : x.id)}>
                     <span class="chev" class:down={isOpen}><Icon name="chevron" size={13} /></span>
@@ -341,6 +342,9 @@
   }
   .chev.down {
     transform: rotate(90deg);
+  }
+  tr.toggles {
+    cursor: pointer;
   }
   tr.open td,
   tr.open th {

@@ -4,6 +4,7 @@
   import { api, type ProjectRow, type SessionRow } from '../lib/api'
   import { NAV } from '../lib/nav'
   import { fmtDateTime, searchKey, t, toolLabel } from '../lib/i18n.svelte'
+  import { scrollPageTo } from '../lib/scroll'
   import Icon from './Icon.svelte'
 
   let { open = $bindable(false) }: { open?: boolean } = $props()
@@ -32,35 +33,8 @@
     app.view = view
     if (section) {
       // after the page has rendered and scrolled to its top
-      tick().then(() => requestAnimationFrame(() => scrollToSection(section)))
+      tick().then(() => requestAnimationFrame(() => scrollPageTo(() => document.getElementById(`settings-${section}`))))
     }
-  }
-
-  // scrollIntoView would also scroll the frames around the page and shift the whole window; parts
-  // that load later can still move the section, so it is followed briefly unless the user scrolls
-  function scrollToSection(section: string) {
-    const page = document.querySelector<HTMLElement>('main.content > .page')
-    const offset = () => {
-      const el = document.getElementById(`settings-${section}`)
-      return el && page ? el.getBoundingClientRect().top - page.getBoundingClientRect().top + page.scrollTop : null
-    }
-    const start = offset()
-    if (!page || start === null) return
-    let target = start
-    page.scrollTo({ top: target, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
-    const follow = setInterval(() => {
-      const now = offset()
-      if (now !== null && Math.abs(now - target) > 1) {
-        target = now
-        page.scrollTo({ top: now })
-      }
-    }, 100)
-    const stop = () => {
-      clearInterval(follow)
-      for (const e of ['wheel', 'pointerdown', 'keydown']) window.removeEventListener(e, stop, true)
-    }
-    for (const e of ['wheel', 'pointerdown', 'keydown']) window.addEventListener(e, stop, { capture: true, once: true })
-    setTimeout(stop, 1500)
   }
 
   const SETTINGS: [string, string][] = [
