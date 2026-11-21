@@ -19,7 +19,7 @@ dependencies = [
 
 [[package]]
 name = "ai-usage-tracker"
-version = "1.7.1"
+version = "1.7.2"
 dependencies = [
  "arboard",
  "block2",
@@ -4781,7 +4781,7 @@ dependencies = [
 
 [[package]]
 name = "tracker-core"
-version = "1.7.1"
+version = "1.7.2"
 dependencies = [
  "chrono",
  "dirs",
