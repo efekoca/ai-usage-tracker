@@ -429,8 +429,8 @@ export interface HandoffInfo {
   codex_moved: number
   /** Where Codex writes before the note is moved over. */
   codex_folder: string
-  /** The notes written, the latest first; never their contents. The user goes on in the other tool. */
-  notes: { key: string; project: string; written_ms: number; agent: HandoffAgent }[]
+  /** Each project's latest note, the latest first; never their contents. `id` is the conversation that wrote it. The user goes on in the other tool. */
+  notes: { id: string; project: string; written_ms: number; agent: HandoffAgent }[]
 }
 
 export interface RefreshInfo {
@@ -1279,7 +1279,7 @@ export interface DayDetail {
   first_ms: number | null
   last_ms: number | null
   /** `account` is set while a provider has more than one; then each has its own peak. */
-  limit_peaks: { provider: Provider; account: string | null; window: string; peak_pct: number; at_ms: number }[]
+  limit_peaks: { provider: Provider; account: string | null; limit_id: string; window: string; peak_pct: number; at_ms: number }[]
 }
 
 export interface HotkeyStatus {
@@ -1344,9 +1344,9 @@ export const api = {
   cancelLimitResume: (sessionId: string) => invoke<void>('cancel_limit_resume', { sessionId }),
   handoffInfo: () => invoke<HandoffInfo>('handoff_info'),
   setLimitHandoff: (on: boolean) => invoke<HandoffInfo>('set_limit_handoff', { on }),
-  openHandoffNote: (key: string) => invoke<void>('open_handoff_note', { key }),
+  openHandoffNote: (id: string) => invoke<void>('open_handoff_note', { id }),
   setCodexHandoff: (on: boolean) => invoke<HandoffInfo>('set_codex_handoff', { on }),
-  continueHandoff: (key: string) => invoke<void>('continue_handoff', { key }),
+  continueHandoff: (id: string) => invoke<void>('continue_handoff', { id }),
   windowOpenerInfo: () => invoke<OpenerInfo>('window_opener_info'),
   openWindowNow: () => invoke<OpenerInfo>('open_window_now'),
   trayPreview: (tray: TraySettings) => invoke<TrayPreview>('tray_preview', { tray }),

@@ -14,7 +14,7 @@
   let how = $state(false)
   let busy = $state(false)
   let error = $state('')
-  let failed = $state<{ key: string; why: string } | null>(null)
+  let failed = $state<{ id: string; why: string } | null>(null)
 
   // a read that comes back after a newer read or a change is dropped
   let seq = 0
@@ -76,13 +76,13 @@
   const toggleAll = (v: boolean) => (v ? ask(info?.codex_here ? ['claude', 'codex'] : ['claude']) : apply({ claude: false, codex: false }))
   const toggleTool = (tool: HandoffAgent, v: boolean) => (v ? ask([tool]) : apply({ [tool]: false }))
 
-  async function run(key: string, job: (key: string) => Promise<void>) {
+  async function run(id: string, job: (id: string) => Promise<void>) {
     failed = null
     try {
-      await job(key)
+      await job(id)
     } catch (e) {
       const why = String(e)
-      failed = { key, why: has(`limits.handoff.failed.${why}`) ? t(`limits.handoff.failed.${why}`) : t('common.error', { e: why }) }
+      failed = { id, why: has(`limits.handoff.failed.${why}`) ? t(`limits.handoff.failed.${why}`) : t('common.error', { e: why }) }
     }
   }
 
@@ -192,18 +192,18 @@
         </div>
       </div>
       <div class="inset">
-        {#each info.notes as n (n.key)}
+        {#each info.notes as n (n.id)}
           {@const next = go(n.agent)}
           <div class="row note">
             <svg class="state" role="img" aria-label={t('limits.handoff.state')} width="22" height="22" viewBox="0 0 22 22"><rect x="4" y="2.5" width="14" height="17" rx="2.5" fill="none" stroke="var(--accent)" stroke-width="2" /><path d="M7.5 8h7M7.5 11.5h7M7.5 15h4" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" /></svg>
             <div class="who">
               <span class="name"><b>{project(n)}</b></span>
               <span class="subtle small">{toolName(n.agent)} · {t('limits.handoff.written', { when: clock(n.written_ms) })}</span>
-              {#if failed?.key === n.key}<span class="error small" role="alert">{failed.why}</span>{/if}
+              {#if failed?.id === n.id}<span class="error small" role="alert">{failed.why}</span>{/if}
             </div>
             <div class="buttons">
-              <button class="btn small" aria-label="{t('limits.handoff.open')}: {project(n)}" onclick={() => run(n.key, api.openHandoffNote)}>{t('limits.handoff.open')}</button>
-              <button class="btn small primary" disabled={!next.found} title={next.found ? undefined : t(`limits.handoff.failed.${next.missing}`)} aria-label="{next.label}: {project(n)}" onclick={() => run(n.key, api.continueHandoff)}>{next.label}</button>
+              <button class="btn small" aria-label="{t('limits.handoff.open')}: {project(n)}" onclick={() => run(n.id, api.openHandoffNote)}>{t('limits.handoff.open')}</button>
+              <button class="btn small primary" disabled={!next.found} title={next.found ? undefined : t(`limits.handoff.failed.${next.missing}`)} aria-label="{next.label}: {project(n)}" onclick={() => run(n.id, api.continueHandoff)}>{next.label}</button>
             </div>
           </div>
         {:else}

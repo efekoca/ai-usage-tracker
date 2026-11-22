@@ -3,7 +3,7 @@
   import Icon from './Icon.svelte'
   import AccuracyBadge from './AccuracyBadge.svelte'
   import BrandIcon from './BrandIcon.svelte'
-  import { fmtCompact, fmtDec, fmtDuration, fmtLimit, fmtTime, fmtWhen, limitShown, t, windowLabel } from '../lib/i18n.svelte'
+  import { fmtCompact, fmtDec, fmtDuration, fmtLimit, fmtTime, fmtWhen, has, limitShown, t, windowLabel } from '../lib/i18n.svelte'
   import type { Accuracy, Forecast, LimitState, Provider } from '../lib/api'
   import { app, markTint, tint } from '../lib/store.svelte'
 
@@ -129,7 +129,7 @@
       {sinceTokens > 0 ? t('limits.state.behind.since', { n: fmtCompact(sinceTokens) }) + ' ' : ''}{provider === 'anthropic' ? t('limits.state.behind.claudeHint') : t('limits.state.behind.hint')}
     </p>
   {/if}
-  {#if source && !compact}
+  {#if source && !compact && has(`limits.source.${source}`)}
     <div class="src subtle">{t(`limits.source.${source}`)}</div>
   {/if}
 </div>

@@ -822,6 +822,12 @@ pub fn live_caches(store: &Store, book: &PriceBook, now_ms: i64) -> Result<Vec<L
     for (session_id, evs) in sessions {
         // a failed request logs no tokens and leaves the cache as it was
         let Some(last) = evs.iter().filter(|e| e.tokens.cache_read + e.tokens.cache_write > 0).max_by_key(|e| e.ts_ms) else { continue };
+        // a later answer without the cache may be another account's or model's, whose next request
+        // could not read it; one not known to be the same leaves nothing to refresh
+        let latest = evs.iter().filter(|e| e.tokens.input + e.tokens.output + e.tokens.cache_read + e.tokens.cache_write > 0).max_by_key(|e| e.ts_ms);
+        if latest.is_some_and(|e| e.ts_ms > last.ts_ms && (e.account != last.account || e.model != last.model)) {
+            continue;
+        }
         // the lifetime is the one the cache was last written with, however long reads kept it since
         let Some((written, written_1h)) = store.last_cache_write(session_id, &last.model, last.account.as_deref(), last.ts_ms)? else { continue };
         let ttl_ms = cache_ttl_ms(written, written_1h);
@@ -1205,7 +1211,7 @@ pub fn plan_value<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range, t
     let mut by_account: BTreeMap<(Provider, Option<String>), (Totals, Vec<f64>)> = BTreeMap::new();
     for e in store.events_between(range.from_ms, range.to_ms)? {
         // a plan's value counts only usage known to go through that plan
-        let Some(p) = e.tool.provider() else { continue };
+        let Some(p) = e.tool.provider().filter(|_| crate::analytics::on_plan(e.tool, &e.model)) else { continue };
         let date = local_date(tz, e.ts_ms);
         let i = idx.get(&date).copied().or_else(|| (date < first && !dates.is_empty()).then_some(0));
         let cost = book.cost(&input_of(&e)).map(|c| c.total());
@@ -1592,6 +1598,8 @@ pub struct DayLimitPeak {
     /// The account, while the provider has more than one (as in [`crate::analytics::LimitView`]);
     /// `None` there for readings no evidence ties to one.
     pub account: Option<String>,
+    /// The pool, for a provider with more than one (Codex's `limit_id`, Antigravity's).
+    pub limit_id: String,
     pub window: String,
     pub peak_pct: f64,
     pub at_ms: i64,
@@ -1659,10 +1667,15 @@ pub fn day_detail<Tz: TimeZone>(store: &Store, book: &PriceBook, date: NaiveDate
     }
     // each account has its own windows; a provider with one account keeps one peak per window
     let several = crate::accounts::several(store)?;
-    let mut peaks: BTreeMap<(Provider, Option<String>, String), (f64, i64)> = BTreeMap::new();
+    // (provider, account, pool, window) → (peak, when)
+    type Pool = (Provider, Option<String>, String, String);
+    let mut peaks: BTreeMap<Pool, (f64, i64)> = BTreeMap::new();
     for (s, owner) in store.owned_limits_between(from, to)? {
         let (Some(u), true) = (s.used_pct, s.window == "five_hour" || s.window == "seven_day") else { continue };
-        if !filter.accounts.is_empty() && !filter.accounts.contains(&crate::analytics::account_key(s.provider, owner.as_deref())) {
+        if s.shown_after_reset() || (!filter.accounts.is_empty() && !filter.accounts.contains(&crate::analytics::account_key(s.provider, owner.as_deref()))) {
+            continue;
+        }
+        if !filter.tools.is_empty() && !filter.tools.iter().any(|t| t.provider() == Some(s.provider)) {
             continue;
         }
         let account = match several.contains(&s.provider) {
@@ -1670,7 +1683,7 @@ pub fn day_detail<Tz: TimeZone>(store: &Store, book: &PriceBook, date: NaiveDate
             true => owner,
             false => None,
         };
-        let p = peaks.entry((s.provider, account, s.window.clone())).or_insert((u, s.ts_ms));
+        let p = peaks.entry((s.provider, account, s.limit_id.clone(), s.window.clone())).or_insert((u, s.ts_ms));
         if u > p.0 {
             *p = (u, s.ts_ms);
         }
@@ -1685,7 +1698,7 @@ pub fn day_detail<Tz: TimeZone>(store: &Store, book: &PriceBook, date: NaiveDate
         sessions: sessions.len() as u64,
         first_ms: first,
         last_ms: last,
-        limit_peaks: peaks.into_iter().map(|((provider, account, window), (peak_pct, at_ms))| DayLimitPeak { provider, account, window, peak_pct, at_ms }).collect(),
+        limit_peaks: peaks.into_iter().map(|((provider, account, limit_id, window), (peak_pct, at_ms))| DayLimitPeak { provider, account, limit_id, window, peak_pct, at_ms }).collect(),
     })
 }
 
@@ -1732,8 +1745,8 @@ pub struct WorkingDay {
     pub days: u32,
     /// When to open a window so that the day spans the most windows, with at least an hour of it in
     /// the first and the last and the same in both: never later than the first request, which would
-    /// open one anyway. `None` when that falls on the day before, or when the day is too short to
-    /// give two windows an hour each.
+    /// open one anyway. `None` when no such time falls on the same day, or when the day is too
+    /// short to give two windows an hour each.
     pub open_minute: Option<u32>,
     /// How many windows the day then spans: one for a day that short.
     pub windows: u32,
@@ -1754,7 +1767,7 @@ pub fn working_day<Tz: TimeZone>(store: &Store, now_ms: i64, tz: &Tz, weekdays: 
     let today = local_date(tz, now_ms);
     let (from, to) = (crate::analytics::start_of_day(tz, today - Days::new(WORKING_DAYS_BACK)), crate::analytics::start_of_day(tz, today));
     let mut by_day: BTreeMap<NaiveDate, (i64, i64, usize)> = BTreeMap::new();
-    for e in store.events_between(from, to)?.iter().filter(|e| e.tool.provider() == Some(Provider::Anthropic)) {
+    for e in store.events_between(from, to)?.iter().filter(|e| e.tool.provider() == Some(Provider::Anthropic) && crate::analytics::on_plan(e.tool, &e.model)) {
         let day = local_date(tz, e.ts_ms);
         if !weekdays.contains(&(day.weekday().number_from_monday() as u8)) {
             continue;
@@ -1770,13 +1783,29 @@ pub fn working_day<Tz: TimeZone>(store: &Store, now_ms: i64, tz: &Tz, weekdays: 
     firsts.sort_unstable();
     lasts.sort_unstable();
     let (first, last) = (firsts[firsts.len() / 2], lasts[lasts.len() / 2].max(firsts[firsts.len() / 2]));
-    if i64::from(last - first) < 2 * EDGE_MIN {
-        return Ok(Some(WorkingDay { first_minute: first, last_minute: last, days: firsts.len() as u32, open_minute: None, windows: 1 }));
+    let (open_minute, windows) = opening(first, last);
+    Ok(Some(WorkingDay { first_minute: first, last_minute: last, days: firsts.len() as u32, open_minute, windows }))
+}
+
+/// [`WorkingDay::open_minute`] and [`WorkingDay::windows`] for a day from `first` to `last`.
+fn opening(first: u32, last: u32) -> (Option<u32>, u32) {
+    let (first, last) = (i64::from(first), i64::from(last));
+    if last - first < 2 * EDGE_MIN {
+        return (None, 1);
     }
-    // whole windows in between, the rest shared by the two ends; to the nearest quarter hour
-    let windows = 2 + (i64::from(last - first) - 2 * EDGE_MIN).max(0) / FIVE_HOURS_MIN;
-    let open = ((i64::from(first + last) / 2 - windows * FIVE_HOURS_MIN / 2 + 7).div_euclid(15) * 15).min(i64::from(first - first % 15));
-    Ok(Some(WorkingDay { first_minute: first, last_minute: last, days: firsts.len() as u32, open_minute: u32::try_from(open).ok(), windows: windows as u32 }))
+    // whole windows in between, the rest shared by the two ends
+    let windows = 2 + (last - first - 2 * EDGE_MIN) / FIVE_HOURS_MIN;
+    let latest = (last - EDGE_MIN - (windows - 1) * FIVE_HOURS_MIN).min(first);
+    if latest < 0 {
+        return (None, windows as u32);
+    }
+    // on the same day
+    let earliest = (first + EDGE_MIN - FIVE_HOURS_MIN).max(0);
+    let middle = (first + last) / 2 - windows * FIVE_HOURS_MIN / 2;
+    // the nearest quarter hour that still leaves each end its hour, else the minute itself
+    let quarter = (middle + 7).div_euclid(15) * 15;
+    let open = [quarter, quarter - 15, quarter + 15].into_iter().filter(|q| (earliest..=latest).contains(q)).min_by_key(|q| (q - middle).abs()).unwrap_or(middle.clamp(earliest, latest));
+    (u32::try_from(open).ok(), windows as u32)
 }
 
 /// Each time use started again from zero inside a window: the provider granted a reset without
@@ -1827,5 +1856,37 @@ pub fn forecast(now_ms: i64, current: f64, resets_at_ms: i64, window_ms: i64, re
         Forecast { kind: ForecastKind::Fills, fills_at_ms: Some(now_ms.saturating_add(to_full_ms)), ..base }
     } else {
         Forecast { kind: ForecastKind::Safe, at_reset_pct: Some((current + per_ms * left_ms as f64).min(100.0)), ..base }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_day_long_enough_opens_with_an_hour_at_each_end_and_never_after_it_starts() {
+        for first in 0..24 * 60 {
+            for last in first..24 * 60 {
+                let (open, windows) = opening(first, last);
+                let (f, l, w) = (i64::from(first), i64::from(last), i64::from(windows));
+                if l - f < 2 * EDGE_MIN {
+                    assert_eq!((open, windows), (None, 1));
+                    continue;
+                }
+                assert_eq!(w, 2 + (l - f - 2 * EDGE_MIN) / FIVE_HOURS_MIN, "{first}..{last}: the most windows");
+                let Some(open) = open.map(i64::from) else {
+                    assert!((l - EDGE_MIN - (w - 1) * FIVE_HOURS_MIN).min(f) < 0, "{first}..{last}: a time on the same day fits");
+                    continue;
+                };
+                assert!(open <= f, "{first}..{last}: opens at {open}, after the first request");
+                assert!(open + FIVE_HOURS_MIN - f >= EDGE_MIN, "{first}..{last}: opens at {open}, the first window gets under an hour");
+                assert!(l - (open + (w - 1) * FIVE_HOURS_MIN) >= EDGE_MIN, "{first}..{last}: opens at {open}, the last window gets under an hour");
+                assert!(l <= open + w * FIVE_HOURS_MIN, "{first}..{last}: the day runs past its windows");
+            }
+        }
+        assert_eq!(opening(9 * 60 + 1, 11 * 60 + 1), (Some(5 * 60 + 1), 2), "no quarter hour leaves both ends an hour");
+        assert_eq!(opening(9 * 60 + 1, 16 * 60 + 1), (Some(5 * 60 + 1), 3));
+        assert_eq!(opening(9 * 60 + 7, 11 * 60 + 30), (Some(5 * 60 + 15), 2), "a quarter hour when one fits");
+        assert_eq!(opening(3 * 60, 6 * 60 + 20), (Some(0), 2), "midnight rather than the day before");
     }
 }

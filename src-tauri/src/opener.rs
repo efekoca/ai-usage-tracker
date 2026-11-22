@@ -83,31 +83,38 @@ fn scheduled<Tz: TimeZone>(o: &OpenerSettings, now: &DateTime<Tz>, days: i64) ->
     date.and_time(time).and_local_timezone(now.timezone()).earliest()
 }
 
-/// The day to run for now: today's time has come, not more than the grace ago, and today's run
-/// is not done yet. One that failed (no network right after the computer woke, say) is tried
-/// again a few minutes later, three times in all.
-fn due<Tz: TimeZone>(o: &OpenerSettings, runs: &[Run], now: &DateTime<Tz>) -> Option<String> {
-    let at = scheduled(o, now, 0)?.timestamp_millis();
-    let day = day_of(now);
-    let now = now.timestamp_millis();
-    let today: Vec<&Run> = runs.iter().filter(|r| r.day.as_deref() == Some(&day)).collect();
-    let again = today.len() < TRIES && today.iter().all(|r| r.outcome == "failed" && now - r.at_ms >= RETRY_MS);
-    ((0..GRACE_MS).contains(&(now - at)) && again).then_some(day)
+/// The tries already made for the run of the day of `at`.
+fn tries_of<'a, Tz: TimeZone>(runs: &'a [Run], at: &DateTime<Tz>) -> Vec<&'a Run> {
+    let day = day_of(at);
+    runs.iter().filter(|r| r.day.as_deref() == Some(&day)).collect()
 }
 
-/// The next time it runs, looking a week ahead, by the rule [`due`] goes by: today's run is
-/// over once one went out or found a window open, or after the last try; a try that failed is
-/// made again a little later, while the time is not missed.
-fn next_ms<Tz: TimeZone>(o: &OpenerSettings, runs: &[Run], now: &DateTime<Tz>) -> Option<i64> {
-    let day = day_of(now);
-    let today: Vec<&Run> = runs.iter().filter(|r| r.day.as_deref() == Some(&day)).collect();
-    let over = today.len() >= TRIES || today.iter().any(|r| r.outcome != "failed");
+/// The day to run for now: its time has come, not more than the grace ago, and its run is not
+/// done yet. One that failed (no network right after the computer woke, say) is tried again a
+/// few minutes later, three times in all. A time just before midnight keeps both into the next day.
+fn due<Tz: TimeZone>(o: &OpenerSettings, runs: &[Run], now: &DateTime<Tz>) -> Option<String> {
     let now_ms = now.timestamp_millis();
-    (0..=7).filter_map(|d| Some((d, scheduled(o, now, d)?.timestamp_millis()))).find_map(|(d, t)| {
+    [0, -1].into_iter().find_map(|d| {
+        let at = scheduled(o, now, d)?;
+        let tries = tries_of(runs, &at);
+        let again = tries.len() < TRIES && tries.iter().all(|r| r.outcome == "failed" && now_ms - r.at_ms >= RETRY_MS);
+        ((0..GRACE_MS).contains(&(now_ms - at.timestamp_millis())) && again).then(|| day_of(&at))
+    })
+}
+
+/// The next time it runs, looking a week ahead, by the rule [`due`] goes by: a day's run is over
+/// once one went out or found a window open, or after the last try; a try that failed is made
+/// again a little later, while the time is not missed.
+fn next_ms<Tz: TimeZone>(o: &OpenerSettings, runs: &[Run], now: &DateTime<Tz>) -> Option<i64> {
+    let now_ms = now.timestamp_millis();
+    (-1..=7).filter_map(|d| Some((d, scheduled(o, now, d)?))).find_map(|(d, at)| {
+        let t = at.timestamp_millis();
         if d > 0 {
             return Some(t);
         }
-        let again = today.iter().map(|r| r.at_ms + RETRY_MS).max().map_or(t, |a| a.max(t));
+        let tries = tries_of(runs, &at);
+        let over = tries.len() >= TRIES || tries.iter().any(|r| r.outcome != "failed");
+        let again = tries.iter().map(|r| r.at_ms + RETRY_MS).max().map_or(t, |a| a.max(t));
         (!over && now_ms - t < GRACE_MS && again - t < GRACE_MS).then_some(again)
     })
 }
@@ -329,6 +336,19 @@ mod tests {
         assert_eq!(next_ms(&o, &[failed("2026-11-13T06:30:20+03:00")], &at("2026-11-13T06:31:00+03:00")), ms("2026-11-13T06:33:20+03:00"));
         let thrice = [failed("2026-11-13T06:30:20+03:00"), failed("2026-11-13T06:33:30+03:00"), failed("2026-11-13T06:36:40+03:00")];
         assert_eq!(next_ms(&o, &thrice, &at("2026-11-13T06:40:00+03:00")), ms("2026-11-16T06:30:00+03:00"), "out of tries");
+    }
+
+    #[test]
+    fn a_time_just_before_midnight_keeps_its_grace_and_its_tries_into_the_next_day() {
+        let o = OpenerSettings { enabled: true, minute: 23 * 60 + 55, days: vec![1, 2, 3, 4, 5, 6, 7], ..Default::default() };
+        let ms = |t: &str| Some(at(t).timestamp_millis());
+        assert_eq!(due(&o, &[], &at("2026-11-14T00:05:00+03:00")).as_deref(), Some("2026-11-13"), "the computer woke ten minutes late");
+        let failed = Run { at_ms: at("2026-11-13T23:57:00+03:00").timestamp_millis(), outcome: "failed".into(), ..ran("2026-11-13") };
+        assert_eq!(next_ms(&o, std::slice::from_ref(&failed), &at("2026-11-13T23:58:00+03:00")), ms("2026-11-14T00:00:00+03:00"));
+        assert_eq!(due(&o, std::slice::from_ref(&failed), &at("2026-11-14T00:00:10+03:00")).as_deref(), Some("2026-11-13"), "the try the card promised");
+        assert_eq!(due(&o, &[ran("2026-11-13")], &at("2026-11-14T00:05:00+03:00")), None, "yesterday's went out");
+        assert_eq!(due(&o, &[], &at("2026-11-14T00:10:00+03:00")), None, "too late for yesterday's");
+        assert_eq!(next_ms(&o, &[ran("2026-11-13")], &at("2026-11-14T00:05:00+03:00")), ms("2026-11-14T23:55:00+03:00"));
     }
 
     #[test]

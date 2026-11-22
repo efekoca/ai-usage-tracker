@@ -13,7 +13,6 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use tracker_core::capture::claude_settings as cs;
 use tracker_core::capture::codex_hooks as ch;
 use tracker_core::capture::handoff as ho;
-use tracker_core::capture::refresh_hook as rh;
 use tracker_core::discovery::Env;
 use tracker_core::model::Provider;
 
@@ -31,7 +30,7 @@ fn dirs(state: &AppState) -> Vec<PathBuf> {
     std::iter::once(state.data_dir.clone()).chain(crate::capture::package_data_dirs(&state.data_dir)).map(|d| ho::dir(&d)).collect()
 }
 
-/// Every note with the folder it is in, one per project: the latest written.
+/// Every project's latest note with the folder it is in.
 fn all_notes(state: &AppState) -> Vec<(PathBuf, ho::Note)> {
     let mut out: Vec<(PathBuf, ho::Note)> = Vec::new();
     for d in dirs(state) {
@@ -182,6 +181,7 @@ pub fn tick(app: &AppHandle, s: &Settings, now: i64) {
     let all = dirs(&state);
     for d in &all {
         ho::expire(d, SystemTime::now());
+        ho::adopt_project_notes(d);
     }
     ho::clear_drops(SystemTime::now(), false);
     if !s.limit_handoff && !s.codex_handoff {
@@ -195,11 +195,13 @@ pub fn tick(app: &AppHandle, s: &Settings, now: i64) {
         }
     }
     for d in &all {
-        for t in ho::all_told(d).into_iter().filter(|t| !t.scripted && t.resets_ms > now) {
-            // no hook may run after the tool call that wrote it, once the limit stops the turn
-            if t.agent == ho::Agent::Codex {
-                ho::collect(d, &t);
-            }
+        let told: Vec<ho::Told> = ho::all_told(d).into_iter().filter(|t| !t.scripted).collect();
+        // no hook may run after the tool call that wrote it, once the limit stops the turn or the
+        // window resets
+        for t in told.iter().filter(|t| t.agent == ho::Agent::Codex) {
+            ho::collect(d, t);
+        }
+        for t in told.into_iter().filter(|t| t.resets_ms > now) {
             // a conversation stopped after the user went on in the other tool waits for no reset
             if t.handed {
                 crate::resume::call_off(&state, &t.session);
@@ -208,13 +210,11 @@ pub fn tick(app: &AppHandle, s: &Settings, now: i64) {
             if t.notified {
                 continue;
             }
-            // a note moved over from Codex keeps when Codex wrote it, which can be a moment before the request
-            let written = ho::note(d, &t.key).is_some_and(|n| n.written_ms >= t.told_ms || (n.session == t.session && n.agent == t.agent));
             // the limit that stopped it may be the other window, with its own reset
             let stop = state.db().limit_stops(&t.session, t.told_ms, now).ok().and_then(|v| v.into_iter().max_by_key(|x| x.resets_at));
-            let (true, Some(stop)) = (written, stop) else { continue };
+            let (true, Some(stop)) = (ho::answered(d, &t), stop) else { continue };
             let _ = ho::set_notified(d, &t);
-            crate::alerts::handoff_ready(app, s, &t.key, &project_name(&state, s, &t.cwd), stop.resets_at.saturating_mul(1000), t.agent);
+            crate::alerts::handoff_ready(app, s, &t.session, &project_name(&state, s, &t.cwd), stop.resets_at.saturating_mul(1000), t.agent);
         }
     }
 }
@@ -235,7 +235,8 @@ fn project_name(state: &AppState, s: &Settings, cwd: &Path) -> String {
 
 #[derive(Debug, Serialize)]
 pub struct NoteView {
-    key: String,
+    /// The conversation that wrote it.
+    id: String,
     /// Empty while project names are hidden.
     project: String,
     written_ms: i64,
@@ -269,7 +270,7 @@ pub struct HandoffInfo {
 
 fn info(state: &AppState) -> HandoffInfo {
     let s = state.settings.read().unwrap().clone();
-    let notes = all_notes(state).into_iter().map(|(_, n)| NoteView { project: project_name(state, &s, &n.cwd), key: n.key, written_ms: n.written_ms, agent: n.agent }).collect();
+    let notes = all_notes(state).into_iter().map(|(_, n)| NoteView { project: project_name(state, &s, &n.cwd), id: n.session, written_ms: n.written_ms, agent: n.agent }).collect();
     let codex = cs::load_state(&state.data_dir).codex_handoff;
     // a packaged Codex on Windows leaves it in its own copy of the folder
     let seen = dirs(state).iter().filter_map(|d| ho::codex_seen(d)).max();
@@ -337,91 +338,86 @@ pub async fn set_codex_handoff(window: WebviewWindow, app: AppHandle, on: bool) 
     Ok(HandoffInfo { codex_moved: moved, ..info(&state) })
 }
 
-/// The note and the folder it really is in.
-fn note_of(state: &AppState, key: &str) -> Result<(PathBuf, ho::Note), String> {
-    if !ho::valid_key(key) {
-        return Err("no_note".into());
-    }
-    all_notes(state).into_iter().find(|(_, n)| n.key == key).ok_or_else(|| "no_note".into())
+/// The note a conversation wrote and the folder it really is in.
+fn note_of(state: &AppState, id: &str) -> Result<(PathBuf, ho::Note), String> {
+    dirs(state).into_iter().filter_map(|d| ho::note(&d, id).map(|n| (d, n))).max_by_key(|(_, n)| n.written_ms).ok_or_else(|| "no_note".into())
 }
 
-pub fn open_note(app: &AppHandle, key: &str) -> Result<(), String> {
+pub fn open_note(app: &AppHandle, id: &str) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let (dir, _) = note_of(&state, key)?;
-    crate::open_path(&ho::note_path(&dir, key)).map_err(|e| e.to_string())
+    let (dir, _) = note_of(&state, id)?;
+    crate::open_path(&ho::note_path(&dir, id)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn open_handoff_note(window: WebviewWindow, app: AppHandle, key: String) -> Result<(), String> {
+pub async fn open_handoff_note(window: WebviewWindow, app: AppHandle, id: String) -> Result<(), String> {
     if window.label() != crate::windows::MAIN {
         return Err("not_allowed".into());
     }
-    open_note(&app, &key)
+    open_note(&app, &id)
 }
 
 /// Starts Codex on the note in the project's folder.
-pub fn continue_in_codex(app: &AppHandle, key: &str) -> Result<(), String> {
+pub fn continue_in_codex(app: &AppHandle, id: &str) -> Result<(), String> {
     let state = app.state::<AppState>();
     let s = state.settings.read().unwrap().clone();
-    let (note_dir, note) = note_of(&state, key)?;
+    let (note_dir, note) = note_of(&state, id)?;
     let codex = crate::capture::codex_binary(&s).ok_or("codex_not_found")?;
-    let prompt = ho::continue_prompt(&ho::note_path(&note_dir, key));
+    let prompt = ho::continue_prompt(&ho::note_path(&note_dir, id));
     let args = if tracker_core::capture::codex_limits::has_no_daemon(&codex) { vec!["--no-daemon".into(), prompt] } else { vec![prompt] };
-    start(app, key, "codex", &codex, &note, &args)
+    start(app, "codex", &codex, &note, &args)
 }
 
 /// Starts Claude Code on the note in the project's folder; the notes folder is added to the folders
 /// it may read, so it does not ask first.
-pub fn continue_in_claude(app: &AppHandle, key: &str) -> Result<(), String> {
+pub fn continue_in_claude(app: &AppHandle, id: &str) -> Result<(), String> {
     let state = app.state::<AppState>();
     let s = state.settings.read().unwrap().clone();
-    let (note_dir, note) = note_of(&state, key)?;
+    let (note_dir, note) = note_of(&state, id)?;
     let claude = crate::capture::claude_binary(&s).ok_or("claude_not_found")?;
-    let path = ho::note_path(&note_dir, key);
+    let path = ho::note_path(&note_dir, id);
     let folder = path.parent().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
     // `--add-dir` takes every word after it, so the prompt goes first
-    start(app, key, "claude", &claude, &note, &[ho::continue_prompt(&path), "--add-dir".into(), folder])
+    start(app, "claude", &claude, &note, &[ho::continue_prompt(&path), "--add-dir".into(), folder])
 }
 
 /// The other tool than the one that wrote the note.
-pub fn continue_in_other(app: &AppHandle, key: &str) -> Result<(), String> {
+pub fn continue_in_other(app: &AppHandle, id: &str) -> Result<(), String> {
     let state = app.state::<AppState>();
-    match note_of(&state, key)?.1.agent {
-        ho::Agent::Claude => continue_in_codex(app, key),
-        ho::Agent::Codex => continue_in_claude(app, key),
+    match note_of(&state, id)?.1.agent {
+        ho::Agent::Claude => continue_in_codex(app, id),
+        ho::Agent::Codex => continue_in_claude(app, id),
     }
 }
 
-/// Opens the terminal; a conversation that wrote the note no longer goes on by itself at the reset,
-/// so two agents never work on the same files.
-fn start(app: &AppHandle, key: &str, tool: &str, bin: &Path, note: &ho::Note, args: &[String]) -> Result<(), String> {
+/// Opens the terminal; the conversations asked for the project's notes no longer go on by
+/// themselves at the reset, so two agents never work on the same files.
+fn start(app: &AppHandle, tool: &str, bin: &Path, note: &ho::Note, args: &[String]) -> Result<(), String> {
     let state = app.state::<AppState>();
     if !note.cwd.is_dir() {
         return Err("folder_missing".into());
     }
-    launch(&dir(&state), &format!("{tool}-{key}"), bin, &note.cwd, args).map_err(|e| {
+    launch(&dir(&state), &format!("{tool}-{}", note.session), bin, &note.cwd, args).map_err(|e| {
         log::warn!("{tool} terminal: {e}");
         "terminal_failed".to_owned()
     })?;
-    // every conversation asked for this project's note, also one the limit stops only later
+    // every conversation asked in this project, also one the limit stops only later
     for d in dirs(&state) {
-        for session in ho::set_handed(&d, key) {
+        for session in ho::set_handed(&d, &note.key) {
             crate::resume::call_off(&state, &session);
         }
     }
-    if rh::valid_session(&note.session) {
-        crate::resume::call_off(&state, &note.session);
-    }
+    crate::resume::call_off(&state, &note.session);
     let _ = app.emit("data-changed", ());
     Ok(())
 }
 
 #[tauri::command]
-pub async fn continue_handoff(window: WebviewWindow, app: AppHandle, key: String) -> Result<(), String> {
+pub async fn continue_handoff(window: WebviewWindow, app: AppHandle, id: String) -> Result<(), String> {
     if window.label() != crate::windows::MAIN {
         return Err("not_allowed".into());
     }
-    continue_in_other(&app, &key)
+    continue_in_other(&app, &id)
 }
 
 /// "Delete all data" takes the notes and the records with it, and what Codex left in the temp folder.

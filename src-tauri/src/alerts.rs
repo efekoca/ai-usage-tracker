@@ -408,16 +408,16 @@ const NOTE: &str = "note";
 /// on a handoff note's. A click, or a button that cannot do its job, opens the app on the page the
 /// notification is about.
 fn act(app: &AppHandle, tag: &str, action: &str) {
-    if let Some(key) = tag.strip_prefix("handoff-")
+    if let Some(id) = tag.strip_prefix("handoff-")
         && [CODEX, CLAUDE, NOTE].contains(&action)
     {
         // macOS calls this on the main thread, and starting a terminal takes a moment
-        let (app, tag, key, action) = (app.clone(), tag.to_owned(), key.to_owned(), action.to_owned());
+        let (app, tag, id, action) = (app.clone(), tag.to_owned(), id.to_owned(), action.to_owned());
         std::thread::spawn(move || {
             let done = match action.as_str() {
-                CODEX => crate::handoff::continue_in_codex(&app, &key),
-                CLAUDE => crate::handoff::continue_in_claude(&app, &key),
-                _ => crate::handoff::open_note(&app, &key),
+                CODEX => crate::handoff::continue_in_codex(&app, &id),
+                CLAUDE => crate::handoff::continue_in_claude(&app, &id),
+                _ => crate::handoff::open_note(&app, &id),
             };
             if let Err(e) = done {
                 log::info!("handoff from a notification: {e}");
@@ -463,8 +463,8 @@ fn note_label(tr: bool) -> &'static str {
 }
 
 /// A conversation that wrote its handoff note was stopped by the limit; the user can go on in the
-/// other tool.
-pub(crate) fn handoff_ready(app: &AppHandle, s: &Settings, key: &str, project: &str, resets_ms: i64, agent: Agent) {
+/// other tool with that very note. `id` is the conversation.
+pub(crate) fn handoff_ready(app: &AppHandle, s: &Settings, id: &str, project: &str, resets_ms: i64, agent: Agent) {
     if !s.onboarded || !s.notify.enabled || !s.notify.handoff {
         return;
     }
@@ -499,7 +499,7 @@ pub(crate) fn handoff_ready(app: &AppHandle, s: &Settings, key: &str, project: &
         None => &[note],
     };
     log::info!("handoff notification");
-    send_with(app, &format!("handoff-{key}"), title, &body, buttons, |_| {});
+    send_with(app, &format!("handoff-{id}"), title, &body, buttons, |_| {});
 }
 
 /// A conversation the limit stopped went on by itself after the limit started again.

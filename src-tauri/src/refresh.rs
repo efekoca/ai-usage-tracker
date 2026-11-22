@@ -39,6 +39,10 @@ struct Refresh {
     /// The cache's expiry when it was asked for, which the refresh is to move on.
     #[serde(default)]
     before_ms: i64,
+    /// Its turn ended with no new wait in time, as one an error ends does: shown as failed, while
+    /// its cost still counts and a turn that went through after all is still counted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    stalled: bool,
 }
 
 fn made() -> bool {
@@ -110,21 +114,29 @@ fn auto_for(b: &Book, s: &Settings, session: &str) -> bool {
 
 /// A refresh counts once the hook took its signal and the cache's time then moved on. When the
 /// time moved on without the hook taking it, the user's own request did that and the refresh is
-/// dropped; one that moved nothing within PENDING_MS came to nothing. Returns whether the log changed.
+/// dropped; one no waiter took by GONE_MS, or that moved nothing within PENDING_MS, came to
+/// nothing. One taken whose turn ended with no new wait by GONE_MS stalled: an error ends a turn
+/// without the wait a finished turn starts again. Returns whether the log changed.
 fn settle(b: &mut Book, caches: &[Cache], dirs: &[PathBuf], now: i64) -> bool {
-    let waiting: Vec<(String, i64, i64)> = b.log.iter().filter(|r| !r.done).map(|r| (r.session_id.clone(), r.at_ms, r.before_ms)).collect();
+    let waiting: Vec<(String, i64, i64, bool)> = b.log.iter().filter(|r| !r.done).map(|r| (r.session_id.clone(), r.at_ms, r.before_ms, r.stalled)).collect();
     let mut changed = false;
-    for (session, at, before) in waiting {
+    for (session, at, before, stalled) in waiting {
         let moved = caches.iter().any(|c| c.session_id == session && c.expires_ms > before);
-        let took = dirs.iter().filter_map(|d| rh::took(d, &session)).any(|t| t >= at);
+        let took = dirs.iter().filter_map(|d| rh::took(d, &session)).filter(|&t| t >= at).max();
         let this = |r: &Refresh| r.session_id == session && r.at_ms == at;
-        if moved && took {
-            b.log.iter_mut().filter(|r| this(r)).for_each(|r| r.done = true);
+        let gone = now - took.unwrap_or(at) > GONE_MS && waiter_dir(dirs, &session).is_none();
+        if moved && took.is_some() {
+            b.log.iter_mut().filter(|r| this(r)).for_each(|r| (r.done, r.stalled) = (true, false));
             b.failed.remove(&session);
         } else if moved {
             b.log.retain(|r| !this(r));
-        } else if now - at > PENDING_MS || (!took && now - at > GONE_MS && waiter_dir(dirs, &session).is_none()) {
+        } else if now - at > PENDING_MS || (took.is_none() && gone) {
             b.log.retain(|r| !this(r));
+            if !stalled {
+                b.failed.insert(session.clone(), now);
+            }
+        } else if !stalled && gone {
+            b.log.iter_mut().filter(|r| this(r)).for_each(|r| r.stalled = true);
             b.failed.insert(session.clone(), now);
         } else {
             continue;
@@ -135,7 +147,7 @@ fn settle(b: &mut Book, caches: &[Cache], dirs: &[PathBuf], now: i64) -> bool {
 }
 
 fn on_its_way(b: &Book, session: &str) -> bool {
-    b.log.iter().any(|r| !r.done && r.session_id == session)
+    b.log.iter().any(|r| !r.done && !r.stalled && r.session_id == session)
 }
 
 /// Adds what the refresh side knows to each cache: whether it can be refreshed now, whether a
@@ -148,7 +160,8 @@ pub fn annotate(state: &AppState, s: &Settings, caches: &mut [Cache], now: i64) 
     let mut changed = settle(&mut b, caches, &dirs, now);
     for c in caches.iter_mut() {
         c.refreshing = on_its_way(&b, &c.session_id);
-        c.refresh_failed = !c.refreshing && b.failed.get(&c.session_id).is_some_and(|&at| now - at < FAILED_SHOWN_MS);
+        // the user's own request may have renewed the cache since
+        c.refresh_failed = !c.refreshing && b.failed.get(&c.session_id).is_some_and(|&at| now - at < FAILED_SHOWN_MS && c.expires_ms - c.ttl_ms < at);
         c.refreshable = ready && !c.refreshing && waiter_dir(&dirs, &c.session_id).is_some();
         c.unasked = ready && !c.refreshable && dirs.iter().any(|d| rh::runs_unasked(d, &c.session_id));
         c.auto = ready && auto_for(&b, s, &c.session_id);
@@ -205,7 +218,7 @@ fn signal(app: &AppHandle, s: &Settings, c: &Cache, auto: bool) -> Result<(), St
     let mut b = BOOK.lock().unwrap();
     load(&state, &mut b);
     b.failed.remove(&c.session_id);
-    b.log.push(Refresh { at_ms: now, session_id: c.session_id.clone(), usd: c.refresh_usd, auto, done: false, before_ms: c.expires_ms });
+    b.log.push(Refresh { at_ms: now, session_id: c.session_id.clone(), usd: c.refresh_usd, auto, done: false, before_ms: c.expires_ms, stalled: false });
     save(&state, &mut b);
     drop(b);
     crate::tray::refresh_soon();
@@ -286,7 +299,8 @@ fn info(state: &AppState) -> RefreshInfo {
     let hooks_off = crate::capture::hooks_blocked(&s);
     let mut b = BOOK.lock().unwrap();
     load(state, &mut b);
-    let midnight = chrono::Local::now().date_naive().and_hms_opt(0, 0, 0).and_then(|t| t.and_local_timezone(chrono::Local).earliest()).map_or(0, |t| t.timestamp_millis());
+    // a day whose clocks go forward at midnight starts at 01:00
+    let midnight = tracker_core::analytics::start_of_day(&chrono::Local, chrono::Local::now().date_naive());
     let today: Vec<&Refresh> = b.log.iter().filter(|r| r.done && r.at_ms >= midnight).collect();
     RefreshInfo {
         installed: installed(state),
@@ -386,10 +400,35 @@ mod tests {
     }
 
     fn auto_at(b: &mut Book, session: &str, at_ms: i64) {
-        b.log.push(Refresh { at_ms, session_id: session.into(), usd: Some(0.25), auto: true, done: true, before_ms: 0 });
+        b.log.push(Refresh { at_ms, session_id: session.into(), usd: Some(0.25), auto: true, done: true, before_ms: 0, stalled: false });
     }
 
     const NOW: i64 = 10_000_000;
+
+    #[test]
+    fn a_refresh_whose_turn_failed_comes_to_nothing_a_minute_after_it_was_taken() {
+        let d = tempfile::tempdir().unwrap();
+        let dirs = vec![d.path().to_path_buf()];
+        let pending = |b: &mut Book| b.log.push(Refresh { at_ms: NOW - 40_000, session_id: "s".into(), usd: Some(0.25), auto: true, done: false, before_ms: NOW + 120_000, stalled: false });
+        let caches = [cache("s", NOW + 120_000)];
+        let mut b = Book::default();
+        pending(&mut b);
+        rh::woke(d.path(), "s", NOW - 30_000);
+        assert!(!settle(&mut b, &caches, &dirs, NOW), "its turn may still be running");
+        // an error ends a turn without the wait a finished turn starts again
+        assert!(settle(&mut b, &caches, &dirs, NOW + 31_000));
+        assert!(!on_its_way(&b, "s") && b.failed.contains_key("s"));
+        assert!(b.log.iter().any(|r| r.stalled && !r.done), "kept, so its cost still counts toward the cap");
+        // the turn went through after all, late
+        assert!(settle(&mut b, &[cache("s", NOW + 3_700_000)], &dirs, NOW + 90_000));
+        assert!(b.log.iter().any(|r| r.done && !r.stalled) && !b.failed.contains_key("s"));
+        // a turn that ended waits again: a transcript read late is waited for
+        let mut b = Book::default();
+        pending(&mut b);
+        std::fs::write(d.path().join("waiter-s"), "").unwrap();
+        assert!(!settle(&mut b, &caches, &dirs, NOW + 31_000));
+        assert!(on_its_way(&b, "s"));
+    }
 
     #[test]
     fn automatic_refreshes_stop_at_a_rewrites_cost_and_start_again_after_a_prompt() {
@@ -407,7 +446,7 @@ mod tests {
         auto_at(&mut restarted, "s", 9_000_000);
         assert!(!capped(&mut restarted, &c, None, NOW, &mut changed), "three and the next make exactly a rewrite");
         // one still on its way when the app closed counts too
-        restarted.log.push(Refresh { at_ms: 9_500_000, session_id: "s".into(), usd: Some(0.25), auto: true, done: false, before_ms: NOW });
+        restarted.log.push(Refresh { at_ms: 9_500_000, session_id: "s".into(), usd: Some(0.25), auto: true, done: false, before_ms: NOW, stalled: false });
         assert!(capped(&mut restarted, &c, None, NOW, &mut changed), "four and the next cost more, across the restart");
         assert!(!capped(&mut restarted, &c, Some(9_600_000), NOW, &mut changed), "the user wrote again");
         assert!(capped(&mut restarted, &c, Some(6_500_000), NOW, &mut changed), "an older prompt does not start the count again");
@@ -429,7 +468,7 @@ mod tests {
         let dirs = [d.path().to_owned()];
         let mut b = Book::default();
         for s in ["a", "b", "c"] {
-            b.log.push(Refresh { at_ms: 1_000, session_id: s.into(), usd: Some(0.2), auto: true, done: false, before_ms: 50_000 });
+            b.log.push(Refresh { at_ms: 1_000, session_id: s.into(), usd: Some(0.2), auto: true, done: false, before_ms: 50_000, stalled: false });
         }
         rh::woke(d.path(), "a", 1_500);
         rh::woke(d.path(), "b", 500);
@@ -449,7 +488,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let dirs = [d.path().to_owned()];
         let mut b = Book::default();
-        b.log.push(Refresh { at_ms: 1_000, session_id: "c".into(), usd: Some(0.2), auto: false, done: false, before_ms: 50_000 });
+        b.log.push(Refresh { at_ms: 1_000, session_id: "c".into(), usd: Some(0.2), auto: false, done: false, before_ms: 50_000, stalled: false });
         assert!(!settle(&mut b, &[cache("c", 50_000)], &dirs, 1_000 + GONE_MS), "a waiter may still take it");
         assert!(settle(&mut b, &[cache("c", 50_000)], &dirs, 1_000 + GONE_MS + 1), "no waiter is left to take it");
         assert!(b.failed.contains_key("c") && !on_its_way(&b, "c"));

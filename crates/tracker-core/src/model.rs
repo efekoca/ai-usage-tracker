@@ -338,7 +338,16 @@ impl LimitSnapshot {
     pub fn resets_at_ms(&self) -> Option<i64> {
         self.resets_at.filter(|r| (0..=MAX_EPOCH_SECS).contains(r)).map(|r| r * 1000)
     }
+
+    /// A window shown again after it reset, which says nothing about the time it was taken.
+    pub fn shown_after_reset(&self) -> bool {
+        self.resets_at_ms().is_some_and(|r| r + SHOWN_AFTER_RESET_MS < self.ts_ms)
+    }
 }
+
+/// A Claude Code status line can show a window's last values again after it reset, stamped with
+/// the time they were shown; a reading taken this long after its own reset is one of those.
+pub(crate) const SHOWN_AFTER_RESET_MS: i64 = 2 * 60_000;
 
 /// The longest limit window accepted: a year. Anything else is a damaged reading.
 pub const MAX_WINDOW_MINUTES: i64 = 366 * 1440;

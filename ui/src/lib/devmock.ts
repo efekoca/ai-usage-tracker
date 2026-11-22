@@ -700,9 +700,9 @@ function mockDay(date: string) {
     first_ms: new Date(date + 'T09:12:00').getTime(),
     last_ms: new Date(date + 'T23:41:00').getTime(),
     limit_peaks: [
-      { provider: 'anthropic', account: null, window: 'five_hour', peak_pct: seedDay % 4 === 0 ? 100 : 71, at_ms: new Date(date + 'T16:20:00').getTime() },
-      { provider: 'anthropic', account: null, window: 'seven_day', peak_pct: 44, at_ms: new Date(date + 'T23:30:00').getTime() },
-      { provider: 'openai', account: null, window: 'five_hour', peak_pct: 18, at_ms: new Date(date + 'T15:05:00').getTime() },
+      { provider: 'anthropic', account: null, limit_id: '', window: 'five_hour', peak_pct: seedDay % 4 === 0 ? 100 : 71, at_ms: new Date(date + 'T16:20:00').getTime() },
+      { provider: 'anthropic', account: null, limit_id: '', window: 'seven_day', peak_pct: 44, at_ms: new Date(date + 'T23:30:00').getTime() },
+      { provider: 'openai', account: null, limit_id: 'codex', window: 'five_hour', peak_pct: 18, at_ms: new Date(date + 'T15:05:00').getTime() },
     ],
   }
 }
@@ -1111,9 +1111,9 @@ export function installMock() {
           if (cmd === 'set_codex_handoff') settings.codex_handoff = !!a.on
           const hidden = settings.hide_project_names
           const notes = [
-            ...(settings.limit_handoff ? [{ key: 'demo-app-1a2b3c4d', project: hidden ? '' : 'demo-app', written_ms: Date.now() - 18 * 60_000, agent: 'claude' }] : []),
-            ...(settings.codex_handoff ? [{ key: 'api-9c0d1e2f', project: hidden ? '' : 'api', written_ms: Date.now() - 3 * 3_600_000, agent: 'codex' }] : []),
-            ...(settings.limit_handoff ? [{ key: 'website-5e6f7a8b', project: hidden ? '' : 'website', written_ms: Date.now() - 26 * 3_600_000, agent: 'claude' }] : []),
+            ...(settings.limit_handoff ? [{ id: '0c2a1f3e-5b7d-4c9e-8a1b-2d3e4f5a6b7c', project: hidden ? '' : 'demo-app', written_ms: Date.now() - 18 * 60_000, agent: 'claude' }] : []),
+            ...(settings.codex_handoff ? [{ id: '0199c4d2-7e8f-7a1b-9c2d-3e4f5a6b7c8d', project: hidden ? '' : 'api', written_ms: Date.now() - 3 * 3_600_000, agent: 'codex' }] : []),
+            ...(settings.limit_handoff ? [{ id: '9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b', project: hidden ? '' : 'website', written_ms: Date.now() - 26 * 3_600_000, agent: 'claude' }] : []),
           ]
           const mac = platform === 'macos'
           const win = platform === 'windows'
@@ -1136,7 +1136,7 @@ export function installMock() {
         case 'open_handoff_note':
           return null
         case 'continue_handoff':
-          if (codexMissing && a.key !== 'api-9c0d1e2f') throw 'codex_not_found'
+          if (codexMissing && a.id !== '0199c4d2-7e8f-7a1b-9c2d-3e4f5a6b7c8d') throw 'codex_not_found'
           return null
         case 'cache_project_choices':
           return ['demo-app', 'website', 'notes', 'data-pipeline', 'client-x'].map((p, i) => ({ id: i + 1, path: `C:\\Projects\\${p}`, name: p === 'client-x' || settings.hide_project_names ? '' : p, hidden: p === 'client-x' || settings.hide_project_names }))

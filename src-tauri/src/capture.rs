@@ -323,7 +323,7 @@ pub fn handoff_hook_main() -> i32 {
     let event = json.get("hook_event_name").and_then(|v| v.as_str()).unwrap_or_default();
     let dir = handoff::dir(&data_dir);
     let key = handoff::note_key(&cwd);
-    let note = handoff::note_path(&dir, &key);
+    let note = handoff::note_path(&dir, session);
     let text = match event {
         // a start waits for its hooks, and on Windows reading the command lines takes a second, so
         // there only an SDK run is told apart; the request itself never goes to a scripted run
@@ -380,19 +380,23 @@ pub fn codex_handoff_hook_main() -> i32 {
     let Some(cwd) = json.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from).filter(|p| p.is_absolute() && p.parent().is_some()) else { return 0 };
     let key = handoff::note_key(&cwd);
     let text = match event {
-        "SessionStart" => match handoff::codex_drop(&key) {
+        "SessionStart" => match handoff::codex_drop(session) {
             Some(drop) => handoff::intro(&drop, handoff::Agent::Codex),
             None => return 0,
         },
         "PostToolUse" | "UserPromptSubmit" => {
-            if let Some(t) = handoff::told_record(&dir, session).filter(|t| t.resets_ms > now) {
-                handoff::collect(&dir, &t);
+            // the note of the last request is moved over also once its window reset
+            let last = handoff::told_record(&dir, session);
+            if let Some(t) = &last {
+                handoff::collect(&dir, t);
+            }
+            if last.is_some_and(|t| t.resets_ms > now) {
                 return 0;
             }
             let own = json.get("transcript_path").and_then(|v| v.as_str()).and_then(|p| handoff::codex_reading(Path::new(p))).filter(|r| handoff::fresh(r, now));
             let reading = own.or_else(|| handoff::shared(&dir, handoff::Agent::Codex));
             let Some(full) = reading.and_then(|r| handoff::nearly_full(&r, now)) else { return 0 };
-            let Some(drop) = handoff::codex_drop(&key) else { return 0 };
+            let Some(drop) = handoff::codex_drop(session) else { return 0 };
             if !handoff::claim(&dir, session, full.resets_ms) {
                 return 0;
             }
@@ -434,7 +438,7 @@ fn scripted() -> bool {
         }
     }
     #[cfg(windows)]
-    if ancestor_command_lines().iter().any(|l| print_run(&l.split_whitespace().map(|w| w.trim_matches('"').to_owned()).collect::<Vec<_>>())) {
+    if ancestor_command_lines().iter().any(|l| print_run(&command_line_args(l))) {
         return true;
     }
     false
@@ -458,6 +462,45 @@ fn ancestor_command_lines() -> Vec<String> {
     run_command(c, Vec::new(), Duration::from_secs(10)).map(|o| o.lines().map(str::to_owned).collect()).unwrap_or_default()
 }
 
+/// A Windows command line as the program sees its arguments: split at spaces outside double quotes,
+/// with `\"` a quote of its own.
+#[cfg(any(windows, test))]
+fn command_line_args(line: &str) -> Vec<String> {
+    let (mut out, mut cur, mut quoted, mut started, mut slashes) = (Vec::new(), String::new(), false, false, 0);
+    for c in line.chars() {
+        if c == '\\' {
+            slashes += 1;
+            continue;
+        }
+        if c == '"' {
+            cur.extend(std::iter::repeat_n('\\', slashes / 2));
+            if slashes % 2 == 1 {
+                cur.push('"');
+            } else {
+                quoted = !quoted;
+            }
+            started = true;
+        } else {
+            cur.extend(std::iter::repeat_n('\\', slashes));
+            if (c == ' ' || c == '\t') && !quoted {
+                if started || !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
+                started = false;
+            } else {
+                cur.push(c);
+                started = true;
+            }
+        }
+        slashes = 0;
+    }
+    cur.extend(std::iter::repeat_n('\\', slashes));
+    if started || !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
 fn print_run(args: &[String]) -> bool {
     args.iter().skip(1).any(|a| a == "-p" || a == "--print" || a.starts_with("--print="))
 }
@@ -479,7 +522,48 @@ fn process_args(pid: u32) -> Option<(Vec<String>, u32)> {
     let text = String::from_utf8_lossy(&out.stdout);
     let mut words = text.split_whitespace();
     let parent = words.next()?.parse().ok()?;
-    Some((words.map(str::to_owned).collect(), parent))
+    // `ps` joins the arguments with spaces, so a quoted `mkdir -p` would read as `-p`
+    #[cfg(target_os = "macos")]
+    let args = kernel_args(pid);
+    #[cfg(not(target_os = "macos"))]
+    let args: Option<Vec<String>> = None;
+    Some((args.unwrap_or_else(|| words.map(str::to_owned).collect()), parent))
+}
+
+/// A process's arguments as the kernel keeps them. A process that is starting another one at that
+/// moment cannot be read (EIO), so it is asked again a few times.
+#[cfg(target_os = "macos")]
+fn kernel_args(pid: u32) -> Option<Vec<String>> {
+    (0..10).find_map(|i| {
+        if i > 0 {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        kernel_args_once(pid)
+    })
+}
+
+/// The count, the program's path, padding, then the arguments one after another, each ended by a
+/// zero.
+#[cfg(target_os = "macos")]
+fn kernel_args_once(pid: u32) -> Option<Vec<String>> {
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, libc::c_int::try_from(pid).ok()?];
+    let mut size: libc::size_t = 0;
+    // SAFETY: asks only for the size; `mib` names three levels
+    if unsafe { libc::sysctl(mib.as_mut_ptr(), 3, std::ptr::null_mut(), &mut size, std::ptr::null_mut(), 0) } != 0 {
+        return None;
+    }
+    let mut buf = vec![0u8; size];
+    // SAFETY: `buf` holds `size` bytes, and the kernel writes no more and says how many it wrote
+    if unsafe { libc::sysctl(mib.as_mut_ptr(), 3, buf.as_mut_ptr().cast(), &mut size, std::ptr::null_mut(), 0) } != 0 {
+        return None;
+    }
+    buf.truncate(size);
+    let argc = usize::try_from(i32::from_ne_bytes(buf.get(..4)?.try_into().ok()?)).ok()?;
+    let rest = &buf[4..];
+    let path_end = rest.iter().position(|b| *b == 0)?;
+    let start = path_end + rest[path_end..].iter().position(|b| *b != 0)?;
+    let args: Vec<String> = rest[start..].split(|b| *b == 0).take(argc).map(|a| String::from_utf8_lossy(a).into_owned()).collect();
+    (args.len() == argc).then_some(args)
 }
 
 /// Whether the Claude Code that started the hook still runs: an orphan gets a new parent.
@@ -1820,6 +1904,37 @@ pub fn start(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_quoted_argument_holding_dash_p_makes_no_print_run_but_dash_p_itself_does() {
+        let args = |extra: &str| {
+            let mut child = std::process::Command::new("/bin/sh").args(["-c", "sleep 5; true", "sh", extra]).spawn().unwrap();
+            // Linux shows a new process's arguments only once its exec has set them up, a moment
+            // after the spawn returns
+            let got = (0..200).find_map(|_| {
+                let a = super::process_args(child.id()).map(|(a, _)| a).filter(|a| a.len() > 1);
+                if a.is_none() {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                a
+            });
+            let _ = child.kill();
+            let _ = child.wait();
+            got.unwrap()
+        };
+        let quoted = args("mkdir -p x");
+        assert!(quoted.iter().any(|a| a == "mkdir -p x") && !super::print_run(&quoted), "{quoted:?}");
+        assert!(super::print_run(&args("-p")));
+    }
+
+    #[test]
+    fn a_windows_command_line_splits_at_spaces_outside_quotes() {
+        let args = super::command_line_args(r#""C:\Program Files\nodejs\node.exe" cli.js --allowedTools "Bash(mkdir -p *)" -p "say \"hi\"" C:\dir\ """#);
+        assert_eq!(args, [r"C:\Program Files\nodejs\node.exe", "cli.js", "--allowedTools", "Bash(mkdir -p *)", "-p", r#"say "hi""#, r"C:\dir\", ""]);
+        assert!(super::print_run(&args));
+        assert!(!super::print_run(&super::command_line_args(r#"claude --allowedTools "Bash(mkdir -p *)""#)));
+    }
 
     #[test]
     fn a_chained_command_that_runs_too_long_is_ended_with_what_it_started() {
