@@ -33,11 +33,12 @@ export const cacheShown = (place: Place) => !!app.settings?.cache_timer && !!app
 
 /** Turned on from the Widget or Menu bar page while the feature is off, it shows the time there alone. */
 export function setCacheShown(place: Place, on: boolean) {
-  const s = app.settings
-  if (!s) return
-  if (!on) return saveSettings({ [place]: false })
-  if (s.cache_timer) return saveSettings({ [place]: true })
-  return saveSettings({ cache_timer: true, cache_widget: place === 'cache_widget', cache_menubar: place === 'cache_menubar', notify: { ...s.notify, cache: false } })
+  if (!app.settings) return
+  return saveSettings((c) => {
+    if (!on) return { [place]: false }
+    if (c.cache_timer) return { [place]: true }
+    return { cache_timer: true, cache_widget: place === 'cache_widget', cache_menubar: place === 'cache_menubar', notify: { ...c.notify, cache: false } }
+  })
 }
 
 /** Where a conversation runs: "Terminal", "Claude desktop" and so on. */

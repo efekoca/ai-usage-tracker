@@ -343,6 +343,41 @@ fn each_account_keeps_its_own_cache_in_one_conversation() {
 }
 
 #[test]
+fn a_cache_is_followed_only_while_the_conversation_is_on_the_account_that_wrote_it() {
+    let t = ms(2026, 11, 10, 12, 0);
+    let book = PriceBook::default_book();
+    let opus = "claude-opus-5-5";
+    let hour = |e: Ev| e.cache_write(60_000, 60_000);
+    let store = store_with(&[
+        // A writes an hour's cache, then B answers without one: the next request is B's
+        hour(ev("a1", t, Tool::ClaudeCode, opus, Some("switched"), "/p", 10, 0, 5)),
+        ev("b1", t + MIN, Tool::ClaudeCode, opus, Some("switched"), "/p", 10, 0, 5),
+        // B's first request writes a cache of its own
+        hour(ev("a2", t, Tool::ClaudeCode, opus, Some("own"), "/p", 10, 0, 5)),
+        ev("b2", t + MIN, Tool::ClaudeCode, opus, Some("own"), "/p", 10, 0, 5).cache_write(1_000, 1_000),
+        // a failed request logs nothing and leaves the cache as it was
+        hour(ev("a3", t, Tool::ClaudeCode, opus, Some("failed"), "/p", 10, 0, 5)),
+        ev("b3", t + MIN, Tool::ClaudeCode, opus, Some("failed"), "/p", 0, 0, 0),
+        // back on A, which reads its own cache again
+        hour(ev("a4", t, Tool::ClaudeCode, opus, Some("back"), "/p", 10, 0, 5)),
+        ev("b4", t + MIN, Tool::ClaudeCode, opus, Some("back"), "/p", 10, 0, 5),
+        ev("a5", t + 2 * MIN, Tool::ClaudeCode, opus, Some("back"), "/p", 10, 60_000, 5),
+        // a newer request no evidence ties to an account may be another's
+        hour(ev("a6", t, Tool::ClaudeCode, opus, Some("unsure"), "/p", 10, 0, 5)),
+        ev("u6", t + MIN, Tool::ClaudeCode, opus, Some("unsure"), "/p", 10, 0, 5),
+        // no account is known at all: nothing to tell apart
+        hour(ev("n1", t, Tool::ClaudeCode, opus, Some("single"), "/p", 10, 0, 5)),
+        ev("n2", t + MIN, Tool::ClaudeCode, opus, Some("single"), "/p", 10, 0, 5),
+    ]);
+    store
+        .conn()
+        .execute_batch("UPDATE usage_event SET owner = 'A' WHERE key IN ('a1', 'a2', 'a3', 'a4', 'a5', 'a6'); UPDATE usage_event SET owner = 'B' WHERE key IN ('b1', 'b2', 'b3', 'b4');")
+        .unwrap();
+    let live: Vec<(String, i64, u64)> = live_caches(&store, &book, t + 59 * MIN).unwrap().into_iter().map(|c| (c.session_id, c.expires_ms, c.tokens)).collect();
+    assert_eq!(live, [("failed".to_owned(), t + HOUR, 60_000), ("single".to_owned(), t + HOUR, 60_000), ("own".to_owned(), t + MIN + HOUR, 1_000), ("back".to_owned(), t + 2 * MIN + HOUR, 60_000)]);
+}
+
+#[test]
 fn a_cache_rewrite_is_priced_at_its_own_accounts_lifetime() {
     let t = ms(2026, 11, 10, 12, 0);
     let book = PriceBook::default_book();
@@ -439,6 +474,13 @@ fn a_working_day_is_the_middle_of_the_days_first_and_last_requests() {
         assert_eq!(of((9, 0), to), (None, 1), "09:00 to {to:?}");
     }
     assert_eq!(of((9, 0), (11, 0)), (Some(5 * 60), 2));
+    // a minute off the quarter hour still gives each end an hour
+    for (from, to) in [((9, 1), (11, 1)), ((9, 1), (16, 1)), ((9, 7), (11, 7))] {
+        let (open, windows) = of(from, to);
+        let (first, last) = (i64::from(from.0 * 60 + from.1), i64::from(to.0 * 60 + to.1));
+        let open = i64::from(open.unwrap());
+        assert!(open + 300 - first >= 60 && last - (open + (i64::from(windows) - 1) * 300) >= 60, "{from:?} to {to:?}: opens at {open}");
+    }
 }
 
 fn all() -> Range {
@@ -620,6 +662,8 @@ fn plan_value_runs_a_daily_total_per_provider() {
         ev("v2", d3, Tool::ClaudeCode, "claude-sonnet-5", Some("s"), "C:/w/app", 500_000, 0, 0),
         // under the 272K long-context threshold: 200K × $2
         ev("v3", d3, Tool::Codex, "gpt-5.6-terra", Some("x"), "C:/w/app", 200_000, 0, 0),
+        // Claude Code sent to another vendor's model goes through no Claude plan
+        ev("v4", d1, Tool::ClaudeCode, "glm-5.1", Some("g"), "C:/w/app", 1_000_000, 0, 0),
     ]);
     let from = tz.with_ymd_and_hms(2026, 9, 10, 0, 0, 0).unwrap().timestamp_millis();
     let to = tz.with_ymd_and_hms(2026, 9, 13, 0, 0, 0).unwrap().timestamp_millis();
@@ -922,6 +966,11 @@ fn a_day_is_split_by_local_hour_with_its_sessions_and_limit_peaks() {
     };
     let mut tx = s.transaction().unwrap();
     tx.insert_limits(&[snap(at(10, 1, 0), "five_hour", 30.0), snap(at(10, 3, 0), "five_hour", 72.0), snap(at(10, 3, 0), "seven_day", 41.0), snap(at(11, 9, 0), "five_hour", 99.0)]).unwrap();
+    // a status line showing the night before's window again after it reset
+    tx.insert_limits(&[LimitSnapshot { resets_at: Some(at(10, 0, 30) / 1000), ..snap(at(10, 0, 50), "five_hour", 85.0) }]).unwrap();
+    // Antigravity's two pools fill apart
+    let pool = |ts: i64, limit_id: &str, used: f64| LimitSnapshot { provider: Provider::Google, tool: Tool::Antigravity, limit_id: limit_id.into(), ..snap(ts, "five_hour", used) };
+    tx.insert_limits(&[pool(at(10, 10, 0), "gemini", 20.0), pool(at(10, 15, 0), "3p", 100.0)]).unwrap();
     tx.commit().unwrap();
 
     let date = chrono::NaiveDate::from_ymd_opt(2026, 9, 10).unwrap();
@@ -935,11 +984,20 @@ fn a_day_is_split_by_local_hour_with_its_sessions_and_limit_peaks() {
     assert_eq!((d.first_ms, d.last_ms), (Some(at(10, 0, 10)), Some(at(10, 14, 5))));
     assert_eq!(d.by_model[0].key, "claude-sonnet-5", "most expensive first");
     assert_eq!(d.by_project.len(), 2);
-    let peaks: Vec<(String, f64)> = d.limit_peaks.iter().map(|p| (p.window.clone(), p.peak_pct)).collect();
-    assert_eq!(peaks, vec![("five_hour".to_string(), 72.0), ("seven_day".to_string(), 41.0)]);
-    // a filter narrows the day like every other view
+    let peaks = |d: &tracker_core::insights::DayDetail| d.limit_peaks.iter().map(|p| (p.provider, p.limit_id.clone(), p.window.clone(), p.peak_pct)).collect::<Vec<_>>();
+    let all = [
+        (Provider::Anthropic, String::new(), "five_hour".to_owned(), 72.0),
+        (Provider::Anthropic, String::new(), "seven_day".to_owned(), 41.0),
+        (Provider::Google, "3p".to_owned(), "five_hour".to_owned(), 100.0),
+        (Provider::Google, "gemini".to_owned(), "five_hour".to_owned(), 20.0),
+    ];
+    assert_eq!(peaks(&d), all);
+    // a filter narrows the day like every other view, its limits too
     let only_codex = Filter { tools: vec![Tool::Codex], ..Default::default() };
-    assert_eq!(day_detail(&s, &PriceBook::default_book(), date, &only_codex, &tz).unwrap().totals.events, 1);
+    let codex = day_detail(&s, &PriceBook::default_book(), date, &only_codex, &tz).unwrap();
+    assert_eq!((codex.totals.events, peaks(&codex)), (1, vec![]));
+    let desktop = Filter { tools: vec![Tool::ClaudeDesktop], ..Default::default() };
+    assert_eq!(peaks(&day_detail(&s, &PriceBook::default_book(), date, &desktop, &tz).unwrap()), all[..2], "Claude's plan limits cover the desktop app too");
 }
 
 #[test]

@@ -847,19 +847,22 @@ impl Store {
 
     /// Latest snapshot per (provider, tool, account, owner, limit_id, window), with its owner (see
     /// [`EventRow::account`]). A row dated before 1970 or ahead of the clock, stored by an older
-    /// version, is passed over so it cannot stand in for a real reading.
+    /// version, is passed over so it cannot stand in for a real reading, and so is one of a window
+    /// that had reset before it was taken.
     pub fn latest_owned_limits(&self) -> Result<Vec<(LimitSnapshot, Option<String>)>> {
         let mut st = self.conn.prepare(
             "SELECT s.ts_ms, s.provider, s.tool, s.account, s.limit_id, s.window, s.used_pct, s.resets_at,
                     s.status, s.plan, s.source, s.accuracy, s.owner
              FROM limit_snapshot s
              JOIN (SELECT provider, tool, account, owner, limit_id, window, MAX(ts_ms) AS m
-                   FROM limit_snapshot WHERE ts_ms BETWEEN 0 AND ?1 GROUP BY provider, tool, account, owner, limit_id, window) g
+                   FROM limit_snapshot WHERE ts_ms BETWEEN 0 AND ?1 AND NOT (resets_at IS NOT NULL AND resets_at * 1000 + ?2 < ts_ms)
+                   GROUP BY provider, tool, account, owner, limit_id, window) g
                ON s.provider = g.provider AND s.tool = g.tool AND s.account = g.account AND s.owner IS g.owner
               AND s.limit_id = g.limit_id AND s.window = g.window AND s.ts_ms = g.m
+             WHERE NOT (s.resets_at IS NOT NULL AND s.resets_at * 1000 + ?2 < s.ts_ms)
              ORDER BY s.provider, s.window",
         )?;
-        let rows = st.query_map([latest_accepted_ms()], owned_limit)?;
+        let rows = st.query_map(params![latest_accepted_ms(), crate::model::SHOWN_AFTER_RESET_MS], owned_limit)?;
         rows.filter_map(Result::transpose).collect()
     }
 
@@ -911,15 +914,16 @@ impl Store {
         Ok(changed)
     }
 
-    /// One pool's percentages between two times, oldest first; `owner` keeps one account's.
+    /// One pool's percentages between two times, oldest first; `owner` keeps one account's. A
+    /// window shown again after its reset is not part of the one that followed.
     pub fn pool_readings(&self, provider: Provider, limit_id: &str, window: &str, owner: Option<Option<&str>>, from_ms: i64, to_ms: i64) -> Result<Vec<(i64, f64)>> {
         let mut st = self.conn.prepare_cached(
             "SELECT ts_ms, used_pct FROM limit_snapshot
              WHERE provider = ?1 AND limit_id = ?2 AND window = ?3 AND ts_ms BETWEEN ?4 AND ?5 AND used_pct IS NOT NULL
-               AND (?6 = 0 OR owner IS ?7)
+               AND (?6 = 0 OR owner IS ?7) AND NOT (resets_at IS NOT NULL AND resets_at * 1000 + ?8 < ts_ms)
              ORDER BY ts_ms",
         )?;
-        let rows = st.query_map(params![provider.as_str(), limit_id, window, from_ms, to_ms, owner.is_some(), owner.flatten()], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let rows = st.query_map(params![provider.as_str(), limit_id, window, from_ms, to_ms, owner.is_some(), owner.flatten(), crate::model::SHOWN_AFTER_RESET_MS], |r| Ok((r.get(0)?, r.get(1)?)))?;
         rows.collect()
     }
 

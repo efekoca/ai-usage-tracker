@@ -85,7 +85,8 @@
   $effect(() => {
     if (s.cache_timer && s.cache_projects === 'picked' && !cacheChoices) api.cacheProjectChoices().then((c) => (cacheChoices = c)).catch(() => (cacheChoices = []))
   })
-  const follow = (path: string, on: boolean) => saveSettings({ cache_picked: on ? [...s.cache_picked, path] : s.cache_picked.filter((p) => p !== path) })
+  // the list is taken when the save runs, so a quick second switch builds on the first
+  const follow = (path: string, on: boolean) => saveSettings((c) => ({ cache_picked: on ? [...new Set([...c.cache_picked, path])] : c.cache_picked.filter((p) => p !== path) }))
   $effect(() => {
     if (s.cache_timer) loadRefreshInfo()
   })

@@ -44,8 +44,9 @@
     if (!daily.length) return { dates: [] as string[], values: [] as Record<string, number>[] }
     const by = new Map(daily.map((d) => [d.date, d]))
     const dates: string[] = []
-    const end = new Date(daily[daily.length - 1].date + 'T00:00:00')
-    for (let d = new Date(daily[0].date + 'T00:00:00'); d <= end; d.setDate(d.getDate() + 1)) dates.push(localDate(d))
+    // noon, as a day whose clocks go forward at midnight has no midnight
+    const end = new Date(daily[daily.length - 1].date + 'T12:00:00')
+    for (let d = new Date(daily[0].date + 'T12:00:00'); d <= end; d.setDate(d.getDate() + 1)) dates.push(localDate(d))
     return { dates, values: dates.map((k) => ({ avg: by.get(k)?.avg ?? NaN, p90: by.get(k)?.p90 ?? NaN })) }
   })
 </script>

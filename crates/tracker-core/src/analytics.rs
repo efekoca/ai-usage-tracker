@@ -545,6 +545,13 @@ fn provider_tools(p: Provider) -> &'static [Tool] {
     }
 }
 
+/// A Claude Code request to another vendor's model behind an Anthropic-style endpoint goes through
+/// no Claude plan. A request whose model was not logged is taken as Claude's.
+pub(crate) fn on_plan(tool: Tool, model: &str) -> bool {
+    let m = model.to_ascii_lowercase();
+    tool.provider() != Some(Provider::Anthropic) || m.contains("claude") || m == "unknown"
+}
+
 pub(crate) fn counts_toward(provider: Provider, limit_id: &str, window: &str, e: &EventRow) -> bool {
     let model = e.model.to_ascii_lowercase();
     let family = match window {
@@ -559,7 +566,7 @@ pub(crate) fn counts_toward(provider: Provider, limit_id: &str, window: &str, e:
         (Provider::Google, _) => !model.starts_with("gemini"),
         _ => logs_pool(provider, limit_id),
     };
-    provider_tools(provider).contains(&e.tool) && pool && family.is_none_or(|f| model.contains(f))
+    provider_tools(provider).contains(&e.tool) && on_plan(e.tool, &e.model) && pool && family.is_none_or(|f| model.contains(f))
 }
 
 /// Whether the local logs tell which requests a pool counted: a Codex request does not name the
@@ -681,9 +688,11 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
                 state = LimitState::Behind;
             }
         }
+        // a window that reset began again no earlier than its reset
         let start = dur_ms.map(|d| match reset_ms {
             Some(r) if r > now_ms => r - d,
-            _ => now_ms - d,
+            Some(r) => r.max(now_ms - d),
+            None => now_ms - d,
         });
         // project shares of a limit only make sense against a current reading
         let used = if state == LimitState::Fresh { s.used_pct } else { None };

@@ -530,6 +530,24 @@ fn window(rl: &Value, slot: &str, ts_ms: i64) -> Option<(i64, Option<f64>, Optio
     }
 }
 
+/// The readings of the file's own thread from `offset`, a line's start, by the rules of a whole
+/// read: `own` is that thread, and `copying` starts the read inside history copied from another
+/// one, which then lasts until the log hands the lines back as a whole read would.
+pub(crate) fn own_limits(path: &Path, offset: u64, own: Option<&str>, copying: bool) -> std::io::Result<Vec<LimitSnapshot>> {
+    // no thread has this id, so the lines are another's until the log says otherwise
+    let st = State { own: own.map(str::to_owned), owner: copying.then(|| "?".to_owned()), ..Default::default() };
+    let (mut state, mut offset, mut out) = (serde_json::to_value(&st).unwrap_or(Value::Null), offset, Vec::new());
+    loop {
+        let round = parse_file(path, offset, &state)?;
+        let more = round.round_full() && round.next_offset > offset;
+        out.extend(round.limits);
+        if !more {
+            return Ok(out);
+        }
+        (state, offset) = (round.state, round.next_offset);
+    }
+}
+
 /// The main limit's windows in a reading: (name, used %, reset in epoch seconds).
 pub(crate) fn main_windows(rl: &Value, ts_ms: i64) -> Vec<(String, f64, i64)> {
     if str_at(rl, "limit_id").is_some_and(|l| l != MAIN_LIMIT) {

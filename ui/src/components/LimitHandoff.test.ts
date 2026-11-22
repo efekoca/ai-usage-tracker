@@ -31,8 +31,8 @@ const info = (over: Partial<HandoffInfo> = {}): HandoffInfo => ({
   codex_moved: 0,
   codex_folder: drop,
   notes: [
-    { key: 'site-1a2b3c4d', project: 'site', written_ms: Date.now() - 60_000, agent: 'claude' },
-    { key: 'api-5e6f7a8b', project: 'api', written_ms: Date.now() - 120_000, agent: 'codex' },
+    { id: '0c2a1f3e-5b7d-4c9e-8a1b-2d3e4f5a6b7c', project: 'site', written_ms: Date.now() - 60_000, agent: 'claude' },
+    { id: '0199c4d2-7e8f-7a1b-9c2d-3e4f5a6b7c8d', project: 'api', written_ms: Date.now() - 120_000, agent: 'codex' },
   ],
   ...over,
 })
@@ -158,14 +158,14 @@ describe('the handoff note', () => {
     expect(rows[1].textContent).toContain('Codex ·')
     button(target, 'Open the note: site').click()
     await settle()
-    expect(mocks.openHandoffNote).toHaveBeenCalledWith('site-1a2b3c4d')
+    expect(mocks.openHandoffNote).toHaveBeenCalledWith('0c2a1f3e-5b7d-4c9e-8a1b-2d3e4f5a6b7c')
     button(target, 'Continue in Codex: site').click()
     await settle()
-    expect(mocks.continueHandoff).toHaveBeenCalledWith('site-1a2b3c4d')
+    expect(mocks.continueHandoff).toHaveBeenCalledWith('0c2a1f3e-5b7d-4c9e-8a1b-2d3e4f5a6b7c')
     mocks.continueHandoff.mockRejectedValue('terminal_failed')
     button(target, 'Continue in Claude: api').click()
     await settle()
-    expect(mocks.continueHandoff).toHaveBeenCalledWith('api-5e6f7a8b')
+    expect(mocks.continueHandoff).toHaveBeenCalledWith('0199c4d2-7e8f-7a1b-9c2d-3e4f5a6b7c8d')
     expect(target.querySelector('[role=alert]')?.textContent).toBe('The terminal could not be opened.')
   })
 

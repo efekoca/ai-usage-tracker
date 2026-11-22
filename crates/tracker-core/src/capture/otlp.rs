@@ -521,11 +521,14 @@ mod tests {
         assert_eq!(parse_logs(&body)[0].ts_ms, 1_790_961_951_000);
     }
 
+    /// In one write, and a write the receiver cut short is not a failure: a busy receiver answers
+    /// and closes before it reads the request.
     fn post(port: u16, headers: &str, body: &str) -> String {
         use std::io::Write;
         let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
         s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
-        write!(s, "POST /v1/logs HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Type: application/json\r\n{headers}Content-Length: {}\r\n\r\n{body}", body.len()).unwrap();
+        let request = format!("POST /v1/logs HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Type: application/json\r\n{headers}Content-Length: {}\r\n\r\n{body}", body.len());
+        let _ = s.write_all(request.as_bytes());
         let mut out = String::new();
         let _ = s.read_to_string(&mut out);
         out

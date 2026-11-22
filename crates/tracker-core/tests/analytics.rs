@@ -258,6 +258,78 @@ fn limit_views_pick_the_newest_reading_and_split_it_across_projects() {
 }
 
 #[test]
+fn a_window_that_reset_counts_no_request_from_before_its_reset() {
+    let mut store = Store::open_in_memory().unwrap();
+    let now = ms(2026, 10, 2, 13, 0);
+    let h = 3_600_000;
+    {
+        let mut tx = store.transaction().unwrap();
+        tx.upsert_events(&[
+            ev("before", now - 210 * 60_000, Tool::ClaudeCode, "claude-sonnet-5", r"C:\p\a", 9_000, 0),
+            ev("after", now - 30 * 60_000, Tool::ClaudeCode, "claude-sonnet-5", r"C:\p\a", 1_000, 0),
+            // in the week before the last weekly reset
+            ev("last week", now - 2 * 86_400_000, Tool::ClaudeCode, "claude-sonnet-5", r"C:\p\a", 5_000, 0),
+        ])
+        .unwrap();
+        tx.insert_limits(&[
+            snap(now - 2 * h, Provider::Anthropic, Tool::ClaudeCode, "five_hour", 70.0, Some((now - h) / 1000), None, "claude_usage"),
+            // a week that reset a day ago
+            snap(now - 2 * 86_400_000, Provider::Anthropic, Tool::ClaudeCode, "seven_day", 50.0, Some((now - 86_400_000) / 1000), None, "claude_usage"),
+        ])
+        .unwrap();
+        tx.commit().unwrap();
+    }
+    let views = limits_view(&store, &PriceBook::default_book(), now, &[]).unwrap();
+    let at = |w: &str| views.iter().find(|v| v.window == w).map(|v| (v.state, v.window_start_ms, v.window_usage.events)).unwrap();
+    assert_eq!(at("five_hour"), (LimitState::Reset, Some(now - h), 1));
+    assert_eq!(at("seven_day"), (LimitState::Reset, Some(now - 86_400_000), 2), "not the six days before");
+}
+
+#[test]
+fn a_status_line_showing_a_window_that_already_reset_does_not_stand_for_the_current_one() {
+    let mut store = Store::open_in_memory().unwrap();
+    let now = ms(2026, 10, 2, 12, 50);
+    let (noon, five) = (ms(2026, 10, 2, 12, 0) / 1000, ms(2026, 10, 2, 17, 0) / 1000);
+    let read = |h: u32, m: u32, used: f64, resets: i64, source: &str| LimitSnapshot { accuracy: Accuracy::Captured, ..snap(ms(2026, 10, 2, h, m), Provider::Anthropic, Tool::ClaudeCode, "five_hour", used, Some(resets), None, source) };
+    {
+        let mut tx = store.transaction().unwrap();
+        // an idle conversation's status line shows the window before noon's reset again at 12:10
+        tx.insert_limits(&[read(12, 5, 6.0, five, "claude_code_usage"), read(12, 10, 85.0, noon, "claude_statusline")]).unwrap();
+        tx.commit().unwrap();
+    }
+    let view = || limits_view(&store, &PriceBook::default_book(), ms(2026, 10, 2, 12, 15), &[]).unwrap().into_iter().find(|v| v.window == "five_hour").unwrap();
+    let v = view();
+    assert_eq!((v.state, v.used_pct, v.source.as_str()), (LimitState::Fresh, Some(6.0), "claude_code_usage"));
+    {
+        let mut tx = store.transaction().unwrap();
+        tx.insert_limits(&[read(12, 30, 8.0, five, "claude_code_usage"), read(12, 45, 9.0, five, "claude_code_usage")]).unwrap();
+        tx.commit().unwrap();
+    }
+    let v = limits_view(&store, &PriceBook::default_book(), now, &[]).unwrap().into_iter().find(|v| v.window == "five_hour").unwrap();
+    assert_eq!(v.forecast.unwrap().basis_minutes, 50, "no reset was granted at 12:10");
+}
+
+#[test]
+fn claude_code_sent_to_another_vendors_model_does_not_count_toward_the_claude_plan() {
+    let mut store = Store::open_in_memory().unwrap();
+    let now = ms(2026, 10, 2, 12, 20);
+    {
+        let mut tx = store.transaction().unwrap();
+        tx.upsert_events(&[ev("glm", now - 10 * 60_000, Tool::ClaudeCode, "glm-5.1", r"C:\p\a", 50_000, 500)]).unwrap();
+        tx.insert_limits(&[snap(now - 25 * 60_000, Provider::Anthropic, Tool::ClaudeCode, "five_hour", 30.0, Some((now + 3_600_000) / 1000), None, "claude_usage")]).unwrap();
+        tx.commit().unwrap();
+    }
+    let view = |store: &Store| limits_view(store, &PriceBook::default_book(), now, &[]).unwrap().into_iter().find(|v| v.window == "five_hour").map(|v| (v.state, v.window_usage.events)).unwrap();
+    assert_eq!(view(&store), (LimitState::Fresh, 0));
+    {
+        let mut tx = store.transaction().unwrap();
+        tx.upsert_events(&[ev("claude", now - 5 * 60_000, Tool::ClaudeCode, "claude-sonnet-5", r"C:\p\a", 50_000, 500)]).unwrap();
+        tx.commit().unwrap();
+    }
+    assert_eq!(view(&store), (LimitState::Behind, 1), "a Claude request after the reading does");
+}
+
+#[test]
 fn a_full_week_blocks_the_five_hours_but_a_model_week_does_not() {
     let mut store = Store::open_in_memory().unwrap();
     let now = ms(2026, 11, 10, 12, 0);

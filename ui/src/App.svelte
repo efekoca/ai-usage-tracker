@@ -63,12 +63,15 @@ import Cards from './views/Cards.svelte'
   // dismissed for this run only (not persisted)
   let updateDismissed = $state('')
   const update = $derived(app.update?.available && app.update.available.version !== updateDismissed ? app.update.available : null)
+  // a message of its own: a data reload clears the shared error, and this one stays until it is read
+  let updateFailed = $state('')
   async function installUpdate(v: string) {
     if (!(await ask(t('settings.updates.confirm', { v }), { title: t('settings.updates'), kind: 'info' }))) return
+    updateFailed = ''
     try {
       await api.installUpdate()
     } catch (e) {
-      app.error = String(e) === 'update_install_manual' ? t('settings.updates.manual') : String(e)
+      updateFailed = String(e) === 'update_install_manual' ? t('settings.updates.manual') : t('common.error', { e: String(e) })
     }
   }
 
@@ -154,6 +157,12 @@ import Cards from './views/Cards.svelte'
       <div class="page" class:titled={!withToolbar.includes(app.view)} bind:this={page} aria-busy={app.loading}>
         {#if app.error}
           <div class="banner" role="alert"><Icon name="warning" size={16} />{t('common.error', { e: app.error })}</div>
+        {/if}
+        {#if updateFailed}
+          <div class="banner update" role="alert">
+            <span class="icon-text"><Icon name="warning" size={16} /><span>{updateFailed}</span></span>
+            <button class="btn ghost small" aria-label={t('common.close')} onclick={() => (updateFailed = '')}><Icon name="close" size={14} /></button>
+          </div>
         {/if}
         {#if update && app.view !== 'settings'}
           <div class="banner center update" role="status">
