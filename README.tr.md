@@ -4,7 +4,7 @@
 
 **Claude Code, Codex, Antigravity ve OpenCode kullanımınızı, API eşdeğeri maliyetinizi ve plan limitlerinizi tek yerden izleyin.**
 
-AI Usage Tracker, Windows, macOS ve Linux'ta çalışan bir uygulamadır. Yapay zekâ araçlarınızın bilgisayarınıza zaten yazdığı kullanım kayıtlarını okur ve size anlaşılır bir panelde sunar. Ne kadar token harcadığınızı, bu kullanımın API fiyatlarıyla ne tutacağını ve limitlerinizin ne zaman dolacağını görürsünüz. Hesap açmanız gerekmez; verileriniz bulutta değil, kendi bilgisayarınızda kalır.
+Windows, macOS ve Linux için, verilerinizi bilgisayarınızda tutan bir uygulama. Yapay zekâ araçlarınızın bilgisayarınıza zaten yazdığı kullanım kayıtlarını okur, kendi arşivini tutar ve token sayınızı, API eşdeğeri maliyetinizi ve canlı limit yüzdelerinizi gösterir. Hesap, bulut ya da telemetri yok.
 
 [![Windows, macOS ve Linux için indir](https://img.shields.io/badge/%C4%B0ndir-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-2563eb?style=for-the-badge)](../../releases/latest)
 
@@ -12,32 +12,11 @@ AI Usage Tracker, Windows, macOS ve Linux'ta çalışan bir uygulamadır. Yapay 
 
 [Özellikler](#özellikler) · [Kurulum](#kurulum) · [Gizlilik](#gizlilik) · [Nasıl çalışır](#nasıl-çalışır) · [Kaynaktan derleme](#kaynaktan-derleme) · [English](README.md)
 
-![Genel bakış ekranı: Claude Code, Codex, Antigravity ve OpenCode için 30 günlük trend ve abonelik değeri; yanında bugünkü token sayısını, önbelleği ilk dolacak konuşmayı, limit halkalarını ve OpenCode kullanımını gösteren masaüstü widget'ı](assets/readme/hero-tr.webp)
+![Genel bakış ekranı: Claude Code, Codex, Antigravity ve OpenCode için 30 günlük trend ve abonelik değeri. Yanında bugünkü token sayısını, önbelleği ilk dolacak konuşmayı, limit halkalarını ve OpenCode kullanımını gösteren masaüstü widget'ı](assets/readme/hero-tr.webp)
 
-- **Verileriniz sizde kalır.** Prompt ve yanıtlarınız uygulamanın arşivine hiçbir zaman kaydedilmez. Uygulama yalnızca sayıları ve meta verileri bilgisayarınızdaki bir dosyada tutar ve hiçbir yere göndermez.
-- **Her sayının nereden geldiğini bilirsiniz.** Araçtan doğrudan okunan değerler **Kesin**, uygulamanın hesapladıkları **Tahmini**, canlı okunanlar **Yakalanan** etiketiyle gösterilir. Hiçbir değer sessizce tahmin edilmez.
-- **Limitinize takılmadan çalışın.** Claude, Codex ve Antigravity'nin 5 saatlik ve haftalık limitlerini birkaç dakikada bir güncel olarak görür, ne zaman dolacaklarını önceden öğrenir, dolmadan bildirim alırsınız.
-
-## Öne çıkan özellikler
-
-- **Limitlerinizi kotanızdan harcamadan izleyin.** Limit yüzdeleri Claude Code'un, Codex'in ve Antigravity CLI'ın kendi resmi arayüzlerinden okunur. Bunun için modele tek bir istek bile gönderilmez.
-- **Gereken aracı tek tıkla kurun.** Limit okumak için Claude Code, Codex CLI ya da Antigravity CLI gerekiyorsa uygulama onu üreticinin resmi kurulumuyla kurar. Giriş yapmanız gerekiyorsa ne yapacağınızı adım adım gösterir.
-- **Limitinizin ne zaman dolabileceğini görün.** Tahmin, pencerenin başından bu yana ortalama hızınıza dayanır. Kısa süreli bir yoğunluk, bütün hafta öyle geçecekmiş gibi hesaplanmaz.
-- **Limit pencerenizin tahmini API eşdeğerini görün.** Uygulama, sonuna kadar izlediği pencerelerden yola çıkarak 5 saatlik ya da haftalık bir pencerenin API fiyatlarıyla ne kadar kullanıma denk geldiğini hesaplar.
-- **Size uygun planı öğrenin.** Limitleriniz sık doluyorsa bir üst plan önerilir. Daha küçük bir plan ise yalnızca sağlayıcının yayımladığı oranlar bunu destekliyorsa önerilir.
-- **Aynı işin başka bir modelle ne tutacağını karşılaştırın.** İstekleriniz aynı token sayıları ve bağlam boyutlarıyla fiyat listesindeki her modele göre yeniden fiyatlanır.
-- **Alt ajanların ve araçların payını görün.** Maliyetin ne kadarının alt ajanlardan geldiğini ve hangi araçların ne sıklıkla hata verdiğini görürsünüz.
-- **Önbelleğin size ne kazandırdığını ölçün.** İsabet oranını, net tasarrufu, uzun bir aradan sonra önbelleğin yeniden yazılmasının maliyetini ve Claude Code'a göre neden yeniden yazılması gerektiğini görürsünüz.
-- **Konuşmanızın önbelleğini süresi dolmadan tazeleyin.** Her Claude Code konuşmasının önbelleğinin kalan süresini **Önbellek** sayfasında, widget'ta, menü çubuğunda ve kontrol panelinde görürsünüz; Claude Code'un kendi durum satırı da önbelleğin ne zaman silineceğini gösterebilir. Tek tıkla tazeleyin ya da süre dolmadan kısa süre önce uygulama kendisi tazelesin; önbelleği yeniden yazmak yerine yalnızca bir okuma bedeli ödersiniz.
-- **Limitin kestiği işi kaldığı yerden sürdürün.** Kullanım limiti bir Claude Code konuşmasını yarıda keserse, limit sıfırlanınca uygulama konuşmayı kendisi devam ettirir; gece yarıda kalan iş siz yokken sürer.
-- **Limit dolmadan not bırakın.** Kullanım limiti dolmak üzereyken Claude ya da Codex ne yaptığını ve sırada ne olduğunu bir nota yazar; işi tek tıkla diğerinde ya da limit sıfırlanınca sürdürürsünüz.
-- **Sıfırlanmayı ihtiyacınız olan saate getirin.** Claude'un 5 saatlik penceresi ilk isteğinizle başlar. Uygulama, seçtiğiniz saatte (örneğin 06:00) tek küçük bir istekle pencereyi açar; pencere 11:00'de sıfırlanır ve bir iş gününde iki tam pencere kullanırsınız.
-- **Daha yazmadan her konuşmanın neye mal olduğunu görün.** Sistem istemi, araç tanımları, bellek dosyaları ve MCP sunucuları her konuşmanın ilk isteğiyle gönderilir. Bu başlangıç yükünü proje proje ve arttığı günle birlikte görürsünüz.
-- **Bir değişikliğin işe yarayıp yaramadığını görün.** MCP sunucusu eklediğiniz, `CLAUDE.md` dosyasını kısalttığınız ya da model değiştirdiğiniz günü işaretleyin; öncesindeki ve sonrasındaki kullanımınızı yan yana görün: oturum başına maliyet, başlangıç yükü, araç hata oranı ve önbellek isabeti.
-- **Tek bir isteminizin neye mal olduğunu görün.** Bir isteminizin tetiklediği bütün istekler, alt ajanlar ve araç çağrıları tek satırda toplanır: "14:32'deki tur: 84 istek, 3 alt ajan, 11,40 $". İstem metni okunmaz ve saklanmaz.
-- **Geçmişinizi kaybetmeyin.** Devam ettirdiğiniz ya da kopyasından yeni oturum açtığınız sohbetler iki kez sayılmaz. Claude Code kayıtlarını 30 gün sonra silse bile geçmişiniz uygulamanın veri tabanında kalır.
-- **Rakamlarınızı kendi araçlarınızda kullanın.** `ai-usage-tracker --json` kullanımınızı ve limitlerinizi JSON olarak yazar; betiklerinize ya da Raycast, tmux gibi araçlara bağlayabilirsiniz.
-- **İşinizi değil, kullanımınızı paylaşın.** Bir gününüzü, haftanızı, ayınızı ya da yılınızı dört boyutta karta dönüştürün. Kartta yalnızca toplamlar, araç adları ve model adları bulunur.
+- **Verileriniz sizde kalır.** Prompt ve yanıtlarınız uygulamanın arşivine hiçbir zaman girmez. Uygulama yalnızca sayıları ve meta verileri bilgisayarınızdaki bir SQLite dosyasında tutar ve hiçbir yere göndermez.
+- **Her sayının nereden geldiğini bilirsiniz.** Her değer bir etiket taşır: **Kesin** (aracın kendi kaydından), **Tahmini** (uygulamanın hesabı) ya da **Yakalanan** (canlı okunan). Hiçbir değer sessizce tahmin edilmez.
+- **Limitinize takılmadan çalışın.** Claude, Codex ve Antigravity'nin 5 saatlik ve haftalık limitleri birkaç dakikada bir okunur. Her pencerenin ne zaman dolacağını önceden görür, dolmadan bildirim alırsınız.
 
 ![Kısa bir tur: grafik ipucu ve abonelik değeriyle genel bakış, hesap filtresi, her Claude hesabı için ayrı limitler, limit geçmişi, öneriler, günlük görünüm, model karşılaştırması, bir oturumun ayrıntıları ve zaman çizelgesi, bir özet kartı, Menü çubuğu sayfası ve widget'ın yerleşimini değiştiren Widget stüdyosu](assets/readme/demo-tr.webp)
 
@@ -45,404 +24,162 @@ AI Usage Tracker, Windows, macOS ve Linux'ta çalışan bir uygulamadır. Yapay 
 
 ### Limitlerinizi anlık izleyin
 
-5 saatlik ve haftalık limit yüzdeleriniz Claude Code'un, Codex'in ve Antigravity CLI'ın kendi arayüzlerinden okunur; gördüğünüz sayılar araçların gösterdiğiyle aynıdır. Her pencerenin ne zaman dolacağını ve her projenin limitin ne kadarını kullandığını görürsünüz.
+5 saatlik ve haftalık limitleriniz Claude Code'un, Codex'in ve Antigravity CLI'ın resmi arayüzlerinden okunur, bu yüzden gördüğünüz sayılar araçların gösterdiğiyle aynıdır. Her pencere için, pencerenin başından bu yana ortalama hızınıza dayanan bir dolma tahmini görürsünüz. Kısa bir yoğunluk, bütün pencere öyle geçecekmiş gibi hesaplanmaz.
 
 ![Limitler sayfası: kullanımdaki Ekip ve Kişisel adlı iki Claude hesabının 5 saatlik ve haftalık pencereleri, dolma tahminleri, proje payları ve kayıtlarda görünmeyen kullanım](assets/readme/limits-tr.webp)
 
-Sağlayıcılar limitlerin sayısal karşılığını yayımlamıyor, yalnızca nasıl işlediklerini açıklıyor. Bu yüzden uygulama şu kurallara uyar:
+- Son okumadan sonra aracı kullandıysanız güncel değer bilinemez. Uygulama o zaman "?" ile son okumayı gösterir, panel ve menü çubuğu da bu okumayı "~" ile işaretler.
+- Yüzdeleri **kullanılan** ya da **kalan** olarak görebilirsiniz. Uyarı renkleri **Widget stüdyosu**'ndaki **Dikkat** ve **Kritik** seviyelerine göre değişir (varsayılan %70 ve %90).
+- Okuma yoksa her pencere için kendi bütçenizi belirleyebilirsiniz. Yüzde o zaman **Tahmini** olarak gösterilir.
+- Her projenin limitten aldığı pay tahmin edilir. Web ya da telefon gibi başka yerlerdeki kullanımınız **Kayıtlarda görünmeyen kullanım** satırında ayrı görünür.
 
-- Gerçek yüzde yalnızca araç bunu kendi kaydına yazdığında ya da uygulama canlı okuduğunda gösterilir (bkz. [Canlı yakalama](#canlı-yakalama)).
-- Son okumadan sonra aracı kullandıysanız güncel değer bilinemez. Bu durumda "?" görürsünüz; yanında son okuma ve ne kadar önce yapıldığı yazar. Eski bir değer hiçbir zaman güncelmiş gibi gösterilmez. Panelde ve menü çubuğu metninde bu son okuma "~" ile işaretlenir: güncel değer genellikle daha yüksektir, ama sağlayıcı arada limitinizi sıfırladıysa daha düşük olabilir.
-- Haftalık limit doluyken 5 saatlik limitte yüzde yerine kilit ve **hafta dolu** görünür, çünkü hafta yenilenene kadar ondan hiç yararlanamazsınız. Menü çubuğu simgesi de bu limiti dolu gösterir. Claude'un Opus ve Sonnet haftaları bir şeyi kilitlemez, çünkü diğer modeller kullanılabilir kalır.
-- Yüzdeleri **kullanılan** ("%15 kullanıldı", Claude'daki gibi) ya da **kalan** ("%85 kaldı", Codex'teki gibi) olarak görebilirsiniz. Bu tercihi **Ayarlar**'dan, **Limitler** sayfasından ya da **Widget stüdyosu**'ndan değiştirirsiniz. Uyarı renkleri her iki durumda da kullanıma göre, **Widget stüdyosu**'nda belirlediğiniz **Dikkat** ve **Kritik** seviyelerinde değişir (varsayılan %70 ve %90); widget'ta, panelde ve menü çubuğunda olduğu gibi uygulamanın içinde de.
-- Okuma yoksa her pencere için kendi bütçenizi belirleyebilirsiniz, örneğin "5 saatte 50 $ API eşdeğeri". Bu bütçeye göre hesaplanan yüzde **Tahmini** olarak gösterilir.
-- Limitler hesabınızın tamamı için geçerlidir. Yüzde her arttığında artış, o arada istek gönderen projelere API eşdeğeri maliyetleri oranında bölünür. Başka yerde yaptığınız kullanım (web, telefon, bulut görevleri, başka bir bilgisayar) projelerinize yazılmaz, **Kayıtlarda görünmeyen kullanım** satırında ayrı görünür. Birden çok Claude ya da Codex hesabınız varsa hangi hesaba ait olduğu bilinmeyen istekler **Tanımlanmamış hesap** adlı ayrı bir pay alır; bu isteklerden önce alınmış bir okuma güncel diye gösterilmez. Bu paylar **Tahmini** olarak gösterilir.
-- Her araç kendi tek renkli ikonuyla gösterilir. **Ayarlar → Genel → Araç renkleri** bölümünden Claude, Codex ve Antigravity'ye limit çubuklarında ve widget halkalarında kullanılacak kendi rengini verebilir, isterseniz ikonları da renklendirebilirsiniz. Limit dolmaya yaklaştığında uyarı renkleri yine gösterilir. Yalnızca adları görmek isterseniz ikonları **Ayarlar → Genel → Araç ikonlarını göster** ile kapatın.
-
-**Birden fazla Codex hesabı.** Codex hesapları arasında geçiş yapıyorsanız her hesabın limiti, geçmişi ve dolma tahmini ayrı görünür. Codex her isteğin hangi hesaptan gittiğini kaydetmez. Bu yüzden uygulama her isteği, bildirdiği limit penceresine bakarak hesabına bağlar. Hesabın kim olduğunu Codex'in verdiği bilgilerden öğrenir: oturumu açan hesap (oturumun ilk istekleri için) ve Codex limit okumasındaki giriş yapılmış hesap (Codex 0.163 ve sonrası). Erken sıfırlamalar, şirketin verdiği sıfırlama hakları dahil, hesap değişimiyle karıştırılmaz. Herkese verilen bir sıfırlama iki hesabın penceresini aynı anda başlatırsa o pencere hiçbir hesaba yazılmaz. Kanıtı olmayan istekler tahmin edilmez; **Tanımlanmamış hesap** altında kalır. Widget, panel ve menü çubuğu kullanımdaki hesabı gösterir. Diğer hesaplarınızı da yanına ekleyebilirsiniz: **Widget stüdyosu**'ndan ya da **Menü çubuğu** sayfasındaki listelerden. **Limitler** sayfasında tüm hesapları görür, her birine ad verip planını seçebilirsiniz. Kullanımı hesaba göre de filtreleyebilirsiniz. Tek hesap kullanıyorsanız hiçbir şey değişmez.
-
-**Birden fazla Claude hesabı.** Claude'un limitleri planınızın bağlı olduğu kuruluşa aittir. Bu yüzden her Claude hesabının limiti, geçmişi ve dolma tahmini ayrı görünür; aynı girişle kullandığınız bir ekip planı da ayrı hesap sayılır. Claude Code her isteğin hangi hesaptan gittiğini kaydetmez. Uygulama hesabı yalnızca bunu kesin gösteren bilgilerden öğrenir: yerel telemetri alıcısı açıksa isteğin kendi telemetri kaydından, Claude masaüstünün Code sekmesindeki oturumlarda ise masaüstünün hesabından. Telemetri kapalıyken terminaldeki bir oturum, ancak çalıştığı Claude ayar klasörü uygulamanın izlediği süre boyunca hep aynı hesapta kaldıysa o hesaba yazılır; örneğin her hesap için ayrı bir `CLAUDE_CONFIG_DIR` kullanıyorsanız. Uygulama açık hesabı, çalıştığı sürece 30 saniyede bir kontrol eder. Çalışan bir Claude Code, başka yerde `/login` yaptıktan sonra da bir süre eski girişle devam eder ve kayıtlar oturumun ne zaman açıldığını yazmaz. Bu yüzden aynı klasörde hesap değiştiriyorsanız yerel telemetri alıcısını açın. Açmazsanız bu istekler tahmin edilmez; **Tanımlanmamış hesap** altında kalır. Uygulamanın açık hesabı izlemeye başlamasından önceki istekler de öyle. Uygulamanın kendi limit okuması, Claude Code'da açık olan hesaba; masaüstü uygulamasının kullanım geçmişi masaüstünün hesabına yazılır. Klasörleriniz aynı anda farklı hesaplarda açıksa kullanımdaki hesap, uygulamanın limitleri okuduğu hesaptır. Uygulama tek bir Claude hesabı biliyorken haftalık pencereniz bitmesine günler kala yeniden başlarsa, **Limitler** sayfası bunu söyler ve diğer hesabı nasıl ayrı görebileceğinizi gösterir. **Limitler** sayfası, kullanım filtresi, widget, panel ve menü çubuğu Codex'teki gibi çalışır. Tek hesap kullanıyorsanız hiçbir şey değişmez.
-
-**Hesap önerisi.** Birden fazla Claude ya da Codex hesabınız varsa, kullandığınız hesap dolduğunda ya da başka bir hesapta en az 25 puan daha fazla yer olduğunda **Limitler** sayfası hangi hesapla devam edebileceğinizi söyler. Bir hesabın yeri, daha dolu olan penceresinden (5 saatlik ya da haftalık) kalan kısımdır; son okumadan sonra yeniden başlayan bir hafta boş sayılır. Yalnızca gerçek okumalar dikkate alınır: güncel okuması olmayan bir hesap önerilmez, kullandığınız hesabın güncel okuması yoksa da öneri yapılmaz. Bir limit dolduğunda bildirim de bu hesabı söyler. **Ayarlar → Genel → Hesap önerisi** ile açıp kapatabilir, altındaki seçeneklerle **Limitler** sayfasında mı, bildirimde mi, yoksa ikisinde de mi görüneceğini seçebilirsiniz.
+**Birden fazla hesap.** Her Claude ve Codex hesabının limiti, geçmişi ve dolma tahmini ayrı görünür. **Limitler** sayfasında her hesaba ad verip planını seçebilirsiniz. Bir istek, yalnızca kayıtlar bunu kesin gösteriyorsa bir hesaba yazılır. Gerisi **Tanımlanmamış hesap** altında kalır. Aynı Claude ayar klasöründe hesap değiştiriyorsanız [Canlı yakalama](#canlı-yakalama) altındaki yerel telemetri alıcısını açın. Kullandığınız hesap dolunca **Limitler** sayfası hangi hesapla devam edebileceğinizi söyler (**Ayarlar → Genel → Hesap önerisi**).
 
 ![Limitler sayfasında Claude ve Codex hesapları: her birinin adı, kullanımdaki hesap, planı ve aylık ücreti, görüldüğü tarihler, istek sayısı ve hesabı belirlenemeyen istekler](assets/readme/accounts-tr.webp)
 
-**Dolma tahmini.** Uygulama her güncel okumada, pencerenin **başından bu yana ortalama hızınıza** göre bir tahmin yapar (şu anki yüzde ÷ pencere başladığından bu yana geçen süre). Her pencere %0'dan başladığı için bu hız kesin olarak bilinir ve boşta geçen saatleri de içerir; kısa bir yoğunluk hiç bitmeyecekmiş gibi ileriye taşınmaz. Sonuçta pencerenin ne zaman dolacağını ("Paz 21:12 civarında dolacak, sıfırlanmadan 9 sa önce") ya da sıfırlandığında hangi seviyede olacağını görürsünüz. Sağlayıcı bir pencereyi bitiş zamanını değiştirmeden erkenden sıfırlarsa hız o sıfırlamadan itibaren ölçülür. Pencerenin ilk onda birinde tahmin yapılmaz. Tahminler **Tahmini** etiketi taşır.
+**Bildirimler.** Bir limit uyarı eşiğini geçince, dolunca ve yeniden başlayınca bildirim alırsınız. Haftalık limitinizin en az %30'u kullanılmadan sıfırlanmak üzereyse ya da bir aracın oturumu kapandığı için limitleri okunamıyorsa da haber alırsınız. Bildirimleri **Ayarlar → Bildirimler** bölümünden seçin. Windows'ta bildirimler uygulamanın Başlat menüsü kısayolu üzerinden gelir, bu yüzden kısayolu silmeyin.
 
-**Bildirimler.** Kullandığınız bir limit uyarı eşiğini geçince, dolunca ve dolan limit yenilenince sistem bildirimi alırsınız. Bildirimde limitin yenilenme saati ve bu hızla yaklaşık ne zaman dolacağı yazar. **Ayarlar → Bildirimler** bölümünden erken uyarının **Dikkat** ya da **Kritik** eşiğinde gelmesini veya hiç gelmemesini, limit dolunca ve yenilenince haber alıp almayacağınızı ve hangi limitler (5 saatlik, haftalık) için bildirim alacağınızı seçin. macOS, uygulamanın bildirim gönderip gönderemeyeceğini bir kez sorar. Uygulamayı açtığınızda, kapalıyken olanlar için bildirim gelmez. Haftalık bir limit, en az %30'u kullanılmadan sıfırlanacaksa 12 saat önce haber alırsınız; kullanılmayan kısım sonraki haftaya geçmediği için onu değerlendirecek vakit kalır. Bunun için son bir gün içinde alınmış ve sonrasında kullanım olmamış bir okuma gerekir; **Haftalık limit uyarısı** ile kapatabilirsiniz. Bildirime tıklayınca **Limitler** sayfası açılır. Bildirimlerin bu bilgisayarda görünüp görünmediğini **Ayarlar → Bildirimler → Deneme bildirimi** ile kontrol edin. Windows'ta bildirimler uygulamanın Başlat menüsü kısayolu üzerinden gelir, bu yüzden kısayolu silmeyin.
+**Limit sıfırlanınca devam et.** Kullanım limiti bir Claude Code konuşmasını işin ortasında keserse, uygulama limit sıfırlanınca konuşmayı devam ettirebilir. **Limitler** sayfasındaki **Limit sıfırlanınca devam et** anahtarını açın. Uygulama, Claude Code ayarlarınıza bir hook eklemeden önce size sorar (bkz. [Uygulamanın bilgisayarınızda değiştirdikleri](#uygulamanın-bilgisayarınızda-değiştirdikleri)). Limit sıfırlanınca konuşmaya, kaldığı yerden devam etmesini söyleyen tek bir mesaj gider. Konuşma açık, bilgisayar uyanık kalmalı. Yapılan iş de diğer kullanımlar gibi plan limitinizden düşer.
 
-**Oturum açma bildirimi.** Claude Code, Codex CLI ya da Antigravity CLI'da oturum kapalı olduğu için limitleriniz okunamıyorsa bir kez bildirim alırsınız; bu, uygulamayı açtıktan hemen sonra da olabilir. Bildirime tıklayınca nasıl giriş yapacağınızı görürsünüz. İnternet olmaması ya da API anahtarı gibi diğer okuma sorunları oturum kapanışı sayılmaz, **Kaynaklar → Canlı yakalama** bölümünde görünür. Bu bildirimi **Ayarlar → Bildirimler → Oturum açmanız gerekince** ile kapatabilirsiniz.
+**Limit dolmadan devir notu.** Bir Claude Code ya da Codex konuşması 5 saatlik ya da haftalık limitinin %95'ine gelince uygulama, ondan bir kez ne yaptığını ve sırada ne olduğunu yazmasını ister. **Limitler** sayfasındaki **Limit dolmadan devir notu** anahtarını açın ve her aracı kartta ayrıca açıp kapatın. Uygulama bunun için gereken hook'ları eklemeden önce size sorar. Limit konuşmayı durdurunca gelen bildirimdeki **Codex'te devam et** (ya da **Claude'da devam et**) düğmesi, diğer aracı projenin klasöründe bu notla başlatır. Orada devam ederseniz durmuş konuşma, limit sıfırlanınca kendiliğinden devam etmez. Böylece iki ajan aynı dosyalar üzerinde çalışmaz. Notlar 14 gün sonra silinir.
 
-**Limit sıfırlanınca devam et.** Kullanım limiti bir Claude Code konuşmasını işin ortasında keserse, limit sıfırlanınca uygulama konuşmayı kendisi devam ettirebilir: **Limitler** sayfasındaki **Limit sıfırlanınca devam et** anahtarını açın. Uygulama, Claude Code ayarlarınıza (`~/.claude/settings.json`) küçük bir hook eklemeden önce size sorar; bu hook kullanım limiti bir yanıtı durdurduğunda, istem gönderdiğinizde ve konuşma bittiğinde çalışır, anahtarı kapattığınızda da kaldırılır. Bundan sonra hook, limitin durdurduğu konuşmada bekler. Uygulama sıfırlanma saatini, limit isteği geri çevirdiğinde Claude Code'un kendi kaydettiği bilgiden alır; sıfırlanmadan bir dakika sonra konuşmaya, kaldığı yerden devam etmesini söyleyen tek bir otomatik mesaj gider. Kartta bekleyen konuşmaları, her birini durduran limiti ve devam edeceği saati, ayrıca son bir günde devam ettirilenleri görürsünüz; **Devam ettirme** ile birinden vazgeçebilirsiniz.
-
-- Konuşma açık kalmalı ve bilgisayar uyanık olmalı. Bilgisayar sıfırlanma sırasında uyuyorsa konuşma, bilgisayar uyandığında devam eder.
-- Devam eden konuşma kendi izin ayarıyla çalışır; araç kullanmadan önce soran bir konuşma ilk soruda bekler. Yaptığı iş, diğer kullanımlar gibi plan limitinizden düşer.
-- Konuşmaya kendiniz yazarsanız ya da konuşmayı kapatırsanız bekleme biter.
-- Limitin geri çevirdiği bir önbellek tazelemesi yarıda iş bırakmaz, bu yüzden devam ettirilmez.
-- Windows'ta uygulamayı güncellemek beklemeleri sonlandırabilir; güncellemeden önce limitin durdurduğu konuşma o zaman devam ettirilmez.
-- Konuşmayı yeniden bir limit durdurursa (örneğin 5 saatlik limitten sonra haftalık limit) o limitin sıfırlanmasını bekler. Bir konuşma en çok 15 dakikada bir ve günde altı kez devam ettirilir.
-- Sıfırlanma saati hiçbir zaman tahmin edilmez. Bu saat, limit konuşmayı durdurduğunda Claude Code'un o konuşmanın kendi günlüğüne yazdığı saattir; başka bir hesaptaki ya da aynı anda duran başka bir konuşma bu saati belirlemez. Bu kayıt yoksa (bunun için Claude Code kaynaklarınız arasında olmalı) konuşma olduğu gibi kalır ve kart saatin bilinmediğini söyler.
-- Bir konuşma devam ettirildiğinde bildirim alırsınız; **Ayarlar → Bildirimler → Limitin durdurduğu konuşma devam ettirilince** ile kapatabilirsiniz.
-- Limit bir yanıtı durdurduğunda hook çalıştıran bir Claude Code sürümü gerekir (2.1.322 ile denendi).
-
-**Limit dolmadan devir notu.** Kullanım limiti bir Claude Code ya da Codex konuşmasını durdurmak üzereyken uygulama önce bir devir notu bırakılmasını isteyebilir: **Limitler** sayfasındaki **Limit dolmadan devir notu** anahtarını açın; her aracı kartta ayrıca açıp kapatabilirsiniz. Uygulama, Claude Code ayarlarınıza (`~/.claude/settings.json`) bir hook ve bir yazma izni eklemeden önce size sorar. İzin yalnızca uygulamanın not klasörü içindir; böylece Claude notu yazarken durup izin istemez. Her konuşmanın başına, Claude'a böyle bir istek gelebileceğini söyleyen kısa bir cümle eklenir. Bir konuşmanın 5 saatlik ya da haftalık limiti %95'e gelince hook, o pencerede bir kez, Claude'dan ne yaptığını, yarım kalanı, sıradaki adımları ve ilgili dosyaları yazmasını ister. Her konuşma kendi notunu yazar; konuşmadan yeniden not istenince not yenilenir. Limit konuşmayı durdurunca gelen bildirimde iki düğme vardır: **Codex'te devam et** projenin klasöründe bir terminal açar ve Codex'i o konuşmanın notuyla başlatır; **Notu aç** notu açar. Codex'te devam ettiğinizde o konuşma için **Limit sıfırlanınca devam et** de iptal edilir; böylece iki ajan aynı dosyalar üzerinde çalışmaz. Kart her projenin son notunu listeler; notlar 14 gün sonra silinir.
-
-- Terminaldeki konuşmalarda limit her yanıtla okunur. Claude masaüstünde uygulama limiti birkaç dakikada bir okur; orada not geç kalabilir. Birden fazla Claude hesabı varsa bu konuşmalar not almaz.
-- Codex olarak, uygulamanın limitleri okurken bulduğu Codex kullanılır; Codex uygulamasının içindeki de olur.
-- Ters yönde Codex de aynı şekilde çalışır. Uygulama, Codex'in hook dosyasına (`~/.codex/hooks.json`) bir hook eklemeden önce size sorar; Codex de yeni hook'u bir kez onaylamanızı ister, onaylayana kadar hook çalışmaz. Codex olağan sandbox'ında proje dışına yalnızca geçici klasöre yazabildiği için Codex notu orada size ait bir klasöre yazar, uygulama da onu hemen not klasörüne taşır; Codex'in başka bir ayarı değişmez. Codex limiti her yanıtla bildirir, Codex uygulamasında da. Limit Codex'i durdurunca bildirimdeki **Claude'da devam et** düğmesi projenin klasöründe bir terminal açar ve Claude Code'u notla başlatır.
-- Bildirimi **Ayarlar → Bildirimler → Limit, devir notunu yazmış bir konuşmayı durdurunca** ile kapatabilirsiniz.
-
-**Pencere zamanlayıcı.** Claude'un 5 saatlik penceresi ilk isteğinizle başlar ve beş saat sonra sıfırlanır; 09:00'da başlayan bir günde sıfırlanma 14:00'e kalır. **Limitler** sayfasındaki **Pencere zamanlayıcı** anahtarını açın, saati ve günleri seçin; uygulama pencereyi o saatte sizin yerinize açar. 06:00'yı seçerseniz pencere 11:00'de sıfırlanır ve öğleden sonrayı ikinci bir pencereyle geçirirsiniz. Son dört haftada seçtiğiniz günlerin en az beşinde Claude'u kullandıysanız kart, ilk ve son isteklerinizden kendi gününüzü çizer ve bir saat önerir: gününüze en çok pencereyi sığdıran, ilk ve son pencerede en az bir saat bırakan saati. 09:00–18:00 süren bir gün için öneri 06:00'dır ve gününüze üç pencere sığar. Her çalışma bir istek gönderdiği için başlangıçta kapalıdır.
-
-- İstek, Claude Code'un gönderebileceği en küçük istektir: Haiku modeli, araç yok, tek satırlık sistem istemi ve tek kelimelik yanıt; 1.000–1.500 token. Kendi Claude Code kurulumunuz ve oturumunuzla gönderilir, diske hiçbir şey yazılmaz, bu yüzden oturumlarınız arasında görünmez; diğer kullanımlar gibi plan limitinizden düşer.
-- Yanıt, pencerenin sıfırlanacağı saati bildirir; kart son çalışmalarda bu saati ve isteğin token sayısını gösterir.
-- Claude Code'a plan oturumu yerine bir API anahtarı ya da token verilmişse ya da Amazon Bedrock, Google Vertex AI ya da Microsoft Foundry'ye yönlendirilmişse istek gönderilmez: böyle bir istek kullanıma göre ücretlendirilir ve plan penceresi açmaz; kart bunu belirtir.
-- Bir okuma ya da zamanlayıcının kendi önceki isteği, Claude Code'un oturum açtığı hesabın penceresinin zaten açık olduğunu gösteriyorsa istek gönderilmez; kart o pencerenin ne zaman sıfırlanacağını söyler. Başka bir hesabın açık penceresi sayılmaz. Claude Code'un oturumu bir hesap belirtmiyorsa ve okumalar birden fazla hesaba aitse istek gönderilir.
-- O saatte uygulama açık, bilgisayar uyanık olmalı. Saat 15 dakikadan fazla kaçarsa o gün istek gönderilmez; geç açılan pencere planladığınız saatte sıfırlanmaz. Başarısız olan istek bu 15 dakika içinde en çok iki kez daha denenir.
-- **Şimdi dene**, saate bakmadan isteği hemen gönderir; ne yaptığını görebilirsiniz.
+**Pencere zamanlayıcı.** Claude'un 5 saatlik penceresi ilk isteğinizle başlar. **Limitler** sayfasındaki **Pencere zamanlayıcı** anahtarını açın ve bir saat seçin. Uygulama pencereyi o saatte sizin yerinize açar. 06:00'yı seçerseniz pencere 11:00'de sıfırlanır ve öğleden sonrayı ikinci bir pencereyle geçirirsiniz. Kart, çalışma saatlerinize göre bir saat de önerebilir. Her çalışma kendi Claude Code'unuzla çok küçük bir istek gönderir (Haiku, 1.000 ile 1.500 token arası) ve bu istek plan limitinizden düşer. O saatte uygulama açık, bilgisayar uyanık olmalı. Claude Code planınız yerine bir API anahtarı, Amazon Bedrock, Google Vertex AI ya da Microsoft Foundry kullanıyorsa istek gönderilmez.
 
 ### Geçmiş limit pencerelerinizi inceleyin
 
-**Limitler** sayfasındaki **Geçmiş** sekmesinde her 5 saatlik ve haftalık pencerenizi görürsünüz: ne kadar dolduğunu, dolup dolmadığını, ne kadar sürede dolduğunu ve o sırada bu bilgisayarda ne kadar kullandığınızı. Uygulama bu pencerelerden yola çıkarak bir pencerenin tamamının API eşdeğeri olarak kaça denk geldiğini de tahmin eder.
+**Limitler** sayfasındaki **Geçmiş** sekmesi, okumalarınızın kapsadığı her 5 saatlik ve haftalık pencereyi listeler. Her pencerenin ne kadar dolduğunu, dolup dolmadığını, ne kadar sürede dolduğunu ve o sırada bu bilgisayarda ne kadar kullandığınızı görürsünüz. Uygulama, sonuna kadar izlediği pencerelerden bir pencerenin tamamının API eşdeğeri olarak kaça denk geldiğini tahmin eder.
 
 ![Limit geçmişi: sağlayıcı, hesap, pencere, dönem ve durum filtreleri, pencere istatistikleri, kullanımdaki her hesap için bir pencerenin API değeri ve her pencerenin en yüksek kullanımını hesap bazında gösteren grafik](assets/readme/history-tr.webp)
 
-Her pencere için ne kadar süre dolu kaldığı ve sonuna kadar izlenip izlenmediği de yazar. Kullanım token ve API eşdeğeri olarak gösterilir. Sonu izlenmemiş pencereler taralı çizilir; bunların en yüksek okuması "en az" olarak okunmalıdır.
-
-- **Filtreler:** sağlayıcı, hesap (birden fazla Codex ya da Claude hesabı varsa), pencere (5 saatlik ya da haftalık), dönem (7 günden tümüne kadar), durum (dolanlar, %80 ve üzeri, sonuna kadar izlenenler).
-- **Özet:** kaç pencere olduğu, kaçının dolduğu ve toplamda ne kadar süre dolu kaldığı, en yüksek kullanımın ortalaması ve medyanı, ortalama dolma süresi ve en yüksek kullanımların dağılımı.
-- **Bir pencerenin tamamı API cinsinden** (tahmini): Sonuna kadar izlenmiş ve en az %10 dolmuş her pencerede, bu bilgisayardaki API eşdeğeri kullanım en yüksek okumaya kadar toplanır ve o yüzdeye bölünür. Gösterilen değer bu sonuçların medyanı ve aralığıdır. Aynı limiti başka bir cihazda, web'de ya da masaüstü sohbette de kullandıysanız gerçek değer daha yüksektir.
-- **Tablo:** tüm pencereler; başlangıca, en yüksek kullanıma, dolma süresine ya da yerel kullanıma göre sıralanabilir.
-
 ### Size uygun planı ve tasarruf fırsatlarını bulun
 
-**Öneriler** sayfası kendi kayıtlarınızdan bulgular çıkarır. Her bulgu dayandığı sayıları, ne yapabileceğinizi ve nasıl hesaplandığını gösterir. **Plan önerisi** de limitleriniz sık doluyorsa bunu söyler; daha küçük bir planı ise yalnızca yayımlanmış oranlar destekliyorsa önerir.
+**Öneriler** sayfası kendi kayıtlarınızdan bulgular çıkarır: uzun bir aradan sonra baştan yazılan önbellek, uzun bağlam ek ücretleri ve sık hata veren araçlar gibi. Her bulgu dayandığı sayıları ve ne yapabileceğinizi gösterir. Tutarlar API eşdeğeridir. Abonelikle kullanıyorsanız bunları ödemezsiniz, ama kullanımınızın büyüklüğünü gösterirler.
 
 ![Öneriler sayfası: her Claude ve Codex hesabı için plan önerisi, bir hesap limitlere takılırken diğerinin rahat olduğunu söyleyen not, önbelleğin yeniden yazılması ve uzun bağlam ek ücreti bulguları](assets/readme/tips-tr.webp)
 
-**Plan önerisi.** Son 28 güne bakar; yalnızca bu ölçümlere ve sağlayıcıların yayımladığı bilgilere dayanır:
+**Plan önerisi.** Uygulama son 28 güne bakar ve limitleriniz sık doluyorsa bir üst plan önerir. Daha küçük bir planı yalnızca sağlayıcı planlar arasındaki oranı yayımladıysa (Claude) ve kullanımınız alt plana sığacaksa önerir. Claude okumaları Max 5x ile Max 20x'i ayırmadığı için planınızı **Limitler** sayfasından seçin.
 
-- **Limitleriniz dolduysa** (bir haftalık pencere bir kez ya da 5 saatlik pencereler üç kez): Bir üst plan, fiyat farkı ve yayımlanmış oranıyla birlikte önerilir. Claude'da Max 5x ve Max 20x, Pro'nun oturum başına kullanım hakkının 5 ve 20 katını verir. ChatGPT'de Pro planının 5 saatlik limiti yoktur. Haftalık limitin planlar arasında nasıl arttığı yayımlanmadığı için kart bunu ayrıca belirtir.
-- **Daha küçük plan:** Yalnızca oturum oranının yayımlandığı durumlarda (Claude) önerilir. Bunun için en az 14 günlük okuma ve sonuna kadar izlenmiş en az iki haftalık ve beş adet 5 saatlik pencere gerekir. Ayrıca her pencerenin alt planda %80'in altında kalması gerekir. Haftalık kısım kesin bir bilgi olarak değil, bir koşul olarak yazılır ("haftalık hak da aynı oranda olsaydı"). OpenAI planları arasındaki oranı yayımlamadığı için ChatGPT'de daha küçük plan önerilmez.
-- **7 günden az okuma varsa** hiçbir öneri yapılmaz.
+**Önce ve sonra.** MCP sunucusu eklemek ya da `CLAUDE.md` dosyasını kısaltmak gibi bir değişiklik yaptığınız günü işaretleyin. Uygulama o günden önceki ve sonraki günleri karşılaştırır: oturum başına maliyet, başlangıç yükü, araç hata oranı ve önbellek isabeti. Bu karşılaştırma o gün çevresinde neyin değiştiğini gösterir, değişikliğinizin buna yol açtığını göstermez.
 
-Claude okumaları iki Max planı için de yalnızca "max" der; bu yüzden planınızı **Limitler** sayfasından seçin. Seçtiğiniz plandan farklı bir planda okunmuş Claude pencereleri (Pro ile Max arasında) hesaba katılmaz. Codex okumaları planın adını tam olarak içerir ve siz plan seçmediyseniz bu bilgi kullanılır.
+**Abonelik değeri.** **Genel bakış**, son 30 günde her sağlayıcıdaki API eşdeğeri kullanımınızı plan ücretinizle karşılaştırır ("4,7×") ve planın kendini hangi gün amorti ettiğini gösterir. Liste fiyatları [`config/plans.json`](config/plans.json) dosyasındadır ve resmi [Claude](https://claude.com/pricing) ve [ChatGPT](https://learn.chatgpt.com/docs/pricing) sayfalarından doğrulanmıştır. Kendi fiyatınızı ya da yenilenme gününüzü **Limitler** sayfasından girin. Sohbet kullanımı yerel kayıtlarda olmadığı için gerçek değer daha yüksek olabilir.
 
-Birden fazla Codex ya da Claude hesabınız varsa her hesap, kendi pencerelerine ve kendi planına göre ayrı bir öneri alır. Her hesabın planını **Limitler** sayfasından seçin. Plan seçmediğiniz hesap, okumalarının söylediği planı alır. Claude okumaları Max 5x ile Max 20x'i ayırmaz; bu yüzden Max hesabı, Claude için seçtiğiniz Max planını alır ya da sizden seçmenizi ister. Okumalar listede olmayan bir plan söylüyorsa da seçmenizi ister. Okuması olmayan hesap, sağlayıcı için seçtiğiniz planı alır. Bir hesap limitlere takılırken diğerinde yer varsa **Öneriler** sayfası bunu söyler.
-
-**Bulgular.** Her kuralın sabit bir eşiği vardır. Bir bulgunun gösterilmesi için tutarın en az 0,50 $ olması ve dönem maliyetinin en az %1'ine ulaşması gerekir. Uygulama şunlara bakar:
-
-- Uzun bir aradan sonra önbelleğin baştan yazılması. Claude, önbelleğe aldığı içeriği bir süre kullanılmazsa (5 dakika ya da 1 saat) siler. Ara verip aynı sohbete döndüğünüzde bu içerik yeniden yazılır ve daha pahalıya gelir. Uygulama bu farkı, aynı içerik önbellekten okunsaydı ne tutacağıyla karşılaştırarak gösterir. Yalnızca daha önce önbellekte olan içerik hesaba katılır; sohbete yeni eklediğiniz kısım sayılmaz.
-- Uzun bağlam, hızlı mod ve veri yerleşimi ek ücretleri. Aynı isteklerin standart fiyatıyla karşılaştırılır.
-- Maliyetin büyük kısmının bağlamı 100K token'ı aşan isteklerden gelmesi.
-- Çağrılarının %25'i ya da daha fazlası hata veren araçlar (sonucu bilinen en az 20 çağrı).
-
-Tutarlar API eşdeğeridir. Abonelikle kullanıyorsanız bu tutarları ödemezsiniz; tutarlar kullanımınızın büyüklüğünü gösterir.
-
-**Önce ve sonra.** **Öneriler** sayfasının altında, bir şeyi değiştirdiğiniz günü kendi sözlerinizle işaretleyebilirsiniz ("yeni MCP sunucusu eklendi", "CLAUDE.md kısaltıldı"). Uygulama her işaret için o günden önceki günleri, o günden sonraki aynı sayıda günle karşılaştırır (her iki yanda 3, 7, 14 ya da 30 gün); sonraki günler geçtikçe sayılır:
-
-- **oturum başına maliyet**: konuşmaların o günlerdeki fiyatlı isteklerinin API eşdeğeri maliyeti, böyle bir isteği olan konuşma sayısına bölünür
-- **başlangıç yükü**: o günlerde başlayan konuşmaların ilk isteklerinin medyanı (bkz. **Başlangıç yükü**)
-- **araç hata oranı**: sonucu bilinen araç çağrıları içinde hata verenlerin payı
-- **önbellek isabeti**: önbellekten okunan ÷ istem token'ları
-
-Bir işareti tek bir projeye ve tek bir araca daraltabilirsiniz; böylece bir projenin bellek dosyasındaki değişiklik, yaptığınız diğer her şeyle birlikte ölçülmez. Her rakam değişimi yüzde olarak, iki oran için puan olarak gösterir. Bir değişim yalnızca her iki yanda en az üç oturum (hata oranı için yirmi araç çağrısı) varsa ve fark en az %5 ya da bir puansa iyi ya da kötü olarak renklendirilir; daha azında rakam renksiz gösterilir; bir yanda üçten az oturum varsa kart bunu söyler. Fiyatı olmayan bir modelin istekleri hiçbir maliyete girmez; bunlar bir yandaki isteklerin %5'inden fazlaysa kart kaç istek olduğunu söyler ve oturum başına maliyeti renklendirmez. Karşılaştırma o gün çevresinde neyin değiştiğini gösterir, değişikliğinizin buna yol açtığını göstermez: ikinci hafta farklı türde bir iş yapmak aynı rakamları oynatır. En çok 50 işaret, uygulamanın ayarlarında tutulur; **Tüm verilerimi sil** bunları kaldırır.
-
-**Abonelik değeri.** **Genel bakış** sayfası, son 30 günde her sağlayıcıdaki API eşdeğeri kullanımınızı planınızın bu günlere düşen ücretiyle karşılaştırır ("4,7×"). Birikimli kullanımınız plan ücretiyle aynı grafikte çizilir ve planın kendini kaçıncı gün amorti ettiği gösterilir. Bu 30 günde hiç kullanmadığınız araçlar gösterilmez.
-
-- **Liste fiyatları** [`config/plans.json`](config/plans.json) dosyasındadır ve 2026-10-02'de resmi sayfalardan doğrulanmıştır ([Claude](https://claude.com/pricing), [ChatGPT](https://learn.chatgpt.com/docs/pricing)).
-- **Kendi fiyatınız:** Sabit fiyatı olmayan planlarda (ChatGPT Pro, Enterprise) fiyatı siz girersiniz. Her planın fiyatını **Limitler** sayfasından değiştirebilirsiniz (örneğin yıllık ödüyorsanız).
-- **Birden fazla hesap:** Bu 30 günde görülen her Codex ve Claude hesabı kendi planı ve fiyatıyla hesaba katılır; fiyatlar toplanır. Kart her hesabın API eşdeğeri kullanımını planıyla birlikte listeler. Ücretsiz plandaki ya da API fiyatıyla ödenen kullanım toplama girmez; hiçbir hesaba bağlanamayan kullanım ise yalnızca toplama girer. Bir hesaba girdiğiniz fiyat, yalnızca o hesabın o anki planı için geçerlidir.
-- **Abonelik dönemi:** Aboneliğinizin yenilendiği günü **Limitler** sayfasında sağlayıcı ya da her hesap için girin. Kart bu durumda son yenilemeden bu yana kullanımınızı aylık ücretin tamamıyla karşılaştırır, dönemin kaçıncı gününde olduğunuzu ve plan ücretine ulaşmak için ne kadar kullanım kaldığını gösterir. Birden fazla hesapta her hesabın bir yenilenme günü olmalıdır (kendisinin ya da sağlayıcınınki) ve her hesap kendi yenilemesinden itibaren sayılır; hiçbir hesaba bağlanamayan kullanım en son başlayan dönemden itibaren sayılır.
-- **Alt sınır:** Claude ve ChatGPT'deki sohbet kullanımı yerel kayıtlarda olmadığı için gerçek değer daha yüksek olabilir.
-
-**Aylık bütçe.** **Ayarlar → Aylık bütçe** bölümünden tüm araçların API eşdeğeri maliyeti için aylık bir sınır belirleyin. **Genel bakış** bu ayki harcamanızı bütçeyle birlikte, kalan günleri ve ayın ilk günlerinden sonra bu hızla ay sonunda nereye varacağınızı gösterir. Bütçenin %80'ine ulaştığınızda ve bütçeyi aştığınızda bildirim alırsınız; bunu **Ayarlar → Bildirimler** bölümünden kapatabilirsiniz.
+**Aylık bütçe.** **Ayarlar → Aylık bütçe** bölümünden API eşdeğeri maliyet için aylık bir sınır belirleyin. **Genel bakış** bu ayki harcamanızı, kalan günleri ve bu hızla ay sonunda nereye varacağınızı gösterir. Bütçenin %80'ine ulaştığınızda ve bütçeyi aştığınızda bildirim alırsınız.
 
 ![Genel bakıştaki bütçe kartı: bu ayki harcama ve 400 dolarlık bütçe, kalan günler ve bu hızla ay sonunda varılacak tutar](assets/readme/budget-tr.webp)
 
 ### Kullanımınızı gün gün görün
 
-**Günlük** sayfası seçtiğiniz dönemi gün gün gösterir. Kısa dönemlerde sütunlar, uzun dönemlerde takvim görürsünüz; değerleri token, API eşdeğeri ya da istek sayısı olarak seçebilirsiniz.
+**Günlük** sayfası dönemi gün gün, sütun ya da takvim olarak gösterir. En yoğun gününüzü, aktif gün serilerinizi ve hafta sonu payınızı da burada görürsünüz. Bir gün seçtiğinizde o günün saat saat kullanımı, araçları, modelleri, projeleri ve en yüksek limit okumaları açılır.
 
 ![Günlük sayfası: araç, model, proje ve hesap filtreleri, Claude Code, Codex, Antigravity ve OpenCode için günlük sütunlar, en yoğun gün ve aktif gün serileri ve gün görünümü](assets/readme/daily-tr.webp)
 
-Sayfanın üstünde en yoğun gününüz, aktif gün başına ortalamanız, en uzun ve şu anki aktif gün seriniz ve hafta sonu payınız yer alır. Bir gün seçtiğinizde ya da aktif günler arasında gezindiğinizde o günün ayrıntıları açılır: token, maliyet, istek, oturum, ilk ve son etkinlik, önbellek isabeti, saat saat grafik, kullandığınız araçlar, modeller ve projeler, o gün ulaşılan en yüksek limit okumaları. Yanında haftanın her gününün ortalamasını ve en yoğun günlerinizi görürsünüz.
-
 ### Aynı işin başka bir modelle ne tutacağını görün
 
-**Dağılım** sayfası, ilgili dönemdeki isteklerinizi aynı token sayıları ve bağlam boyutlarıyla fiyat listesindeki her modele göre yeniden hesaplar. Sonuçları gerçek maliyetinizle birlikte, en ucuzdan en pahalıya doğru görürsünüz.
+**Dağılım** sayfası dönemdeki isteklerinizi aynı token sayılarıyla fiyat listesindeki her modele göre yeniden hesaplar ve en ucuzdan başlayarak listeler. Model aileleri aynı metni farklı sayıda token'a böldüğü için aileler arasındaki karşılaştırma yaklaşıktır.
 
 ![Gerçek maliyeti, aynı isteklerin diğer Claude, GPT ve Gemini modelleriyle tutacağı maliyetle karşılaştıran grafik](assets/readme/compare-tr.webp)
 
-Model aileleri aynı metni farklı sayıda token'a böler (Claude 4.7 ve sonrası yaklaşık %30 daha fazla token üretir). Bu yüzden farklı aileler arasındaki karşılaştırma yaklaşıktır; kalite ve hız hesaba katılmaz.
-
 ### Alt ajanların ve araçların payını görün
 
-**Dağılım** sayfası, alt ajanlarınızın ana konuşmanın yanında ne kadar tuttuğunu, ajanların hangi araçları çağırdığını ve bu çağrıların ne sıklıkla hata verdiğini gösterir.
+**Dağılım** sayfası alt ajanların ana konuşmanın yanında ne kadar tuttuğunu, her aracın kaç kez çağrıldığını ve çağrıların ne sıklıkla hata verdiğini de gösterir. Yalnızca aracın adı ve sonucu saklanır, girdisi ve çıktısı hiçbir zaman saklanmaz.
 
 ![Alt ajanlar tablosu: istek, token ve maliyetin ana konuşma ile Explore gibi alt ajanlar arasındaki dağılımı](assets/readme/agents-tr.webp)
 
-- **Alt ajanlar:** Alt ajanların (Explore gibi Claude Code ajanları, Codex'in guardian otomatik incelemesi vb.) istek, token ve API eşdeğeri maliyeti, ana konuşmayla yan yana gösterilir. Bir alt ajanın kullanımı onu başlatan oturuma sayılır.
-- **Araç kullanımı:** Her aracın kaç kez çağrıldığını ve çağrıların ne kadarının hata verdiğini görürsünüz. Hata bilgisi, aracın kendi kaydettiği sonuçtan alınır. MCP araçları sunucuya göre gruplanır. Yalnızca aracın adı ve sonucu saklanır; girdileri ve çıktıları hiçbir zaman saklanmaz.
-
 ### Oturumlarınızı, önbelleği, bağlamı ve projelerinizi inceleyin
 
-| ![Oturumlar sayfası](assets/readme/sessions-tr.webp)                              | ![Önbellek sayfası](assets/readme/cache-tr.webp)                                         |
-| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| **Oturumlar**: her oturumunuz; süresi, modelleri, maliyeti ve en büyük bağlamıyla | **Önbellek**: her konuşmanın önbelleğinin kalan süresi, isabet oranı, yeniden kullanım ve önbelleğin size gerçekte ne kazandırdığı |
+| ![Oturumlar sayfası](assets/readme/sessions-tr.webp) | ![Önbellek sayfası](assets/readme/cache-tr.webp) |
+|---|---|
+| **Oturumlar**: her oturumunuzun süresi, modelleri, maliyeti ve en büyük bağlamı | **Önbellek**: her konuşmanın önbelleğinin kalan süresi, isabet oranı, yeniden kullanım ve önbelleğin size gerçekte ne kazandırdığı |
 
-| ![Bağlam sayfası](assets/readme/context-tr.webp)                      | ![Projeler sayfası](assets/readme/projects-tr.webp) |
-| --------------------------------------------------------------------- | --------------------------------------------------- |
-| **Bağlam**: istemlerinizin ne kadar büyüdüğü ve uzun bağlam ek ücreti | **Projeler**: proje ve git dalı bazında kullanım   |
-
-**Oturumlar** sayfası dönemdeki her oturumunuzu listeler: başlangıç, proje, modeller, süre (ilk ve son istek arası), istek, token, API eşdeğeri, önbellek isabeti ve en büyük bağlam. Listeyi sıralayabilir ve içinde arama yapabilirsiniz; bir satırı açınca oturumun token dağılımını, ortalama bağlamını, önbellek isabetini, modellerini, aracını ve oturum kimliğini, ardından **zaman çizelgesini** görürsünüz. Zaman çizelgesinde her istek bir sütundur ve bağlamın büyüklüğünü, ne kadarının önbellekten geldiğini gösterir. Önbelleğin bir aradan sonra yeniden yazıldığı ve bağlamın küçüldüğü yerler, alt ajan istekleri ve çağrılan araçlar da işaretlidir. Aynı anda çalışan alt ajanlar, kaç tane olduklarını gösteren tek bir işaret altında toplanır; uzun bir aranın süresi de boşluğun altında yazar. Alt ajan kayıtları ait oldukları oturuma sayılır.
+**Oturumlar.** **Oturumlar** sayfasında bir oturumu açınca isteklerinin zaman çizelgesini görürsünüz. Önbelleğin yeniden yazıldığı yerler, alt ajanlar ve araç çağrıları da işaretlidir.
 
 ![Oturumlar sayfasında açılmış bir oturum: tokenlar, ortalama bağlam, önbellek isabeti, model, araç ve oturum kimliği, altında önbellek yeniden yazımı, alt ajan istekleri ve araç çağrılarıyla zaman çizelgesi](assets/readme/session-tr.webp)
 
-**Tur maliyeti.** Tur, tek bir istem ve onun tetiklediği her şeydir: istemi yanıtlayan istekler, başlattığı alt ajanlar ve bunların yaptığı araç çağrıları. **Oturumlar** sayfası, oturum listesinin üstünde dönemde başlayan turları en pahalıdan ya da en yeniden başlayarak listeler. Her satırda turun zamanı, projesi, konuşmadaki sırası ("12. tur"), istek, alt ajan ve araç çağrısı sayıları, hatalı çağrılar, süresi ve API eşdeğeri maliyeti yer alır. Maliyetin altındaki ince çubuk, bunun ne kadarının alt ajanlardan geldiğini gösterir. Satırı açtığınızda ana konuşmanın ve her alt ajan türünün istek sayısını ve maliyetini, kullanılan modelleri, token sayısını ve turun oturumunu açan düğmeyi görürsünüz. Dönemi üç rakam özetler: kaç tur başladığı, tipik bir turun maliyeti (ortanca) ve en pahalı onda birlik dilimin toplamdaki payı.
+**Tur maliyeti.** Tur, tek bir istem ve onun tetiklediği her şeydir: istekler, alt ajanlar ve onların araç çağrıları. **Oturumlar** sayfası dönemdeki turları en pahalıdan başlayarak listeler. Böylece tek bir isteminizin neye mal olduğunu görürsünüz ("14:32'deki tur: 84 istek, 3 alt ajan, 11,40 $"). Turlar Claude Code ve Codex kayıtlarından gelir, istem metni hiçbir zaman okunmaz.
 
-- Claude Code ve Codex turları kendi günlüklerinde işaretler; zamanlamadan tahmin yapılmaz. Siz bir sonraki istemi gönderdikten sonra da çalışmayı sürdüren alt ajan, kendisini başlatan isteme yazılır. Ortasında sıkıştırılan bir konuşmanın turu da tek tur olarak kalır.
-- Sizin yazmadığınız turlar etiketiyle gösterilir: biten bir arka plan görevinin bildirimi, başka bir oturumdan gelen mesaj, zamanlanmış bir istem ya da bir programın gönderdiği istem.
-- Yalnızca turun başladığı an, onu neyin başlattığı ve konuşmadaki sırası tutulur; istem metni hiçbir zaman okunmaz.
-- Günlüğünde tur bilgisi bulunmayan istekler listede yer almaz; sayfa bunların sayısını belirtir: bu sürüm okumadan önce günlüğü silinmiş konuşmalar, istem kimliği içermeyen Claude Code günlükleri ve tur işareti içermeyen Codex günlükleri. Satırında kimlik bulunmayan bir istem kendinden önceki turu bitirir; maliyeti o tura eklenmez. Günlüğü kendisini başlatan turu belirtmeyen bir Codex alt ajanı da hiçbir tura yazılmaz.
-- Claude Code günlüğü her araç çağrısını hangi isteğin yaptığını belirtir; model, hesap ya da istemci filtresi açıkken tur, filtreden geçen isteklerin çağrılarını gösterir. Codex günlüğü bunu belirtmez: böyle bir filtre bir Codex turunun bazı isteklerini dışarıda bırakıyorsa o turun araç çağrıları sayılmaz ve sütunda çizgi görünür.
-- Hiçbir isteğinin fiyatı bilinmeyen tur maliyet göstermez ve tipik tur maliyetine katılmaz. Antigravity ve OpenCode kapsanmaz.
+**Önbelleğin kalan süresi.** Claude, bir konuşmanın önbelleğini 5 dakika ya da 1 saat kullanılmazsa siler. **Önbellek** sayfası her Claude Code konuşmasının önbelleği için geri sayım gösterir, widget ve menü çubuğu da önbelleği ilk dolacak konuşmayı gösterir. Durum satırı köprüsü açıksa Claude Code'un kendi durum satırı, o konuşmanın önbelleğinin ne zaman silineceğini gösterebilir. Süre dolmadan devam ederseniz sonraki istek önbelleği yeniden yazmak yerine ucuza okur. Nerede gösterileceğini ve süre dolmadan gelen uyarıyı **Ayarlar → Genel → Önbelleğin kalan süresi** bölümünden seçin.
 
-**Bağlam** sayfası her istekte gönderilen bağlamın büyüklüğünü gösterir (önbellekten okunan ve önbelleğe yazılanlar dahil tüm girdi token'ları):
+**Önbellek tazeleme.** Bir konuşmanın yanındaki **Tazele**, Claude Code'a kısa bir turda önbelleği okutur ve önbelleğin süresi baştan başlar. **Otomatik tazele** bunu önbellek dolmadan kısa süre önce kendisi yapar. Tazelemelerin toplamı önbelleği yeniden yazmaktan pahalıya gelecekse durur. Her tazeleme plan limitinizden bir önbellek okuması kadar düşer ve bildirim sesi gibi kendi Stop hook'larınız da her tazelemede çalışır. Uygulama ilk seferde Claude Code ayarlarınıza bir hook eklemeden önce size sorar (bkz. [Uygulamanın bilgisayarınızda değiştirdikleri](#uygulamanın-bilgisayarınızda-değiştirdikleri)).
 
-- ortalama, medyan, p90 ve en büyük değer,
-- boyut dağılımı (10K altından 1M üstüne kadar),
-- günlük ortalama ve p90,
-- model bazında dağılım ve **uzun bağlam ek ücreti**: bir modelin uzun bağlam eşiğini (GPT-5.x için 272K) aşan isteklerin standart fiyata göre fazladan tuttuğu tutar.
+**Önbellek neden yeniden yazıldı.** Durum satırı köprüsü açıksa **Önbellek** sayfası, Claude Code'un önbelleği neden yeniden yazmak zorunda kaldığını toplar (örneğin değişen bir MCP sunucusu, sistem istemi ya da model) ve bu yeniden yazmaları projelere göre gruplar.
 
-**Başlangıç yükü.** Her yeni konuşma, sizin yazmadığınız bir istemle başlar: sistem istemi, araç tanımları, `CLAUDE.md` gibi bellek dosyaları ve MCP sunucularınızın ekledikleri. Araçlar her isteğin boyutunu kaydettiği için bir konuşmanın ilk isteği bu yükü kesin olarak gösterir (ilk isteminiz de içindedir). **Bağlam** sayfası bunu her proje için, araca ve çalıştığı yere göre listeler (terminal ile Claude masaüstü uygulaması farklı başlar):
+| ![Bağlam sayfası](assets/readme/context-tr.webp) | ![Projeler sayfası](assets/readme/projects-tr.webp) |
+|---|---|
+| **Bağlam**: istemlerinizin ne kadar büyüdüğü ve uzun bağlam ek ücreti | **Projeler**: proje ve git dalı bazında kullanım |
 
-- **başlangıç yükü**: son beş konuşmanın ilk isteklerinin medyanı; uzun bir istemle başlayan tek bir konuşma bunu oynatmaz
-- dönemdeki en küçük ilk istek ve böyle bir ilk isteğin API eşdeğeri maliyeti
-- **seyir**: her konuşmanın ilk isteği, bir çizgi olarak (son 60 konuşma); üzerine gelince o konuşmanın boyutunu ve zamanını görürsünüz
-- **değişiklik**: art arda en az üç konuşma önceki beş konuşmanın hepsinden en az 2.000 token ve %10 büyük ya da küçük başladığında, satır farkı ve hangi günden beri olduğunu gösterir. Bir MCP sunucusu eklemek ya da `CLAUDE.md` dosyasını uzatmak burada görünür; kaldırmak da
-
-Yalnızca dönem içinde başlayan konuşmalar sayılır; alt ajanlar ve yakalanan telemetri dışarıda kalır. Yeni bir kimlikle devam ettirilen ya da başka bir konuşmadan çatallanan konuşma da sayılmaz, çünkü önceki konuşmanın tamamıyla başlar. Rakamlar loglardan olduğu gibi gelir; sayfa yükün değiştiğini ve ne zaman değiştiğini gösterir, hangi dosyanın ya da sunucunun değiştirdiğini göstermez.
-
-**Önbellek** sayfasında şunları görürsünüz:
-
-- isabet oranı (önbellekten okunan ÷ istem token'ları),
-- yeniden kullanım katsayısı (okuma ÷ yazma). Claude için ve önbellek yazmalarını kaydeden Codex modelleri için hesaplanır; eski Codex kayıtları yalnızca okumaları tuttuğu için hesaba katılmaz,
-- 5 dakikalık ve 1 saatlik yazmaların ayrımı,
-- günlük isabet oranı,
-- model, araç ve projeye göre dağılım,
-- **net tasarruf**: önbellekten okunan token'ları tam fiyat yerine indirimli ödediğiniz için kazandığınız tutar; önbelleğe yazma ücreti bundan düşülür. Değer, API eşdeğeridir ve her istek kendi modelinin fiyatıyla hesaplanır.
-
-Net tasarruf eksi çıkıyorsa, yazılan önbellek maliyetini karşılayacak kadar okunmamış demektir.
-
-**Önbelleğin kalan süresi.** Claude, 5 dakika ya da 1 saat kullanılmayan önbelleği siler; bu yüzden her Claude Code konuşmasının önbelleğinin kalan süresi ayrıdır. **Önbellek** sayfasının en üstünde önbelleği dolmamış her konuşmayı görürsünüz: proje, dal, model, nerede çalıştığı (terminal ya da Claude masaüstü uygulaması) ve süre azaldıkça boşalan küçük bir pastayla geri sayım. Bir satıra tıklayınca önbellekteki token sayısını, önbelleği bir kez okumanın ve yeniden yazmanın bedelini ve konuşmanın ne zaman başladığını görürsünüz. Widget önbelleği en önce silinecek konuşmayı gösterir ("notes 1:34 +3"); tepsi simgesi de onu dakika olarak gösterir: macOS ve Linux'ta simgenin yanında, Windows ve macOS'te ipucunda. Claude Code'un kendi durum satırının sonunda da konuşmanın önbelleğinin silineceği saati görebilirsiniz (`önbellek 14:32'de silinir`). Bunun için [Canlı yakalama](#canlı-yakalama) altındaki durum satırı köprüsü açık olmalıdır. Claude Code durum satırını yalnızca konuşmada bir şey değişince yenilediği için burada geri sayım yerine saat gösterilir. Süre dolmadan devam ederseniz sonraki istek önbelleği yeniden yazmak yerine ucuza okur. Süre konuşmanın son isteğinden başlar; önbelleğe yazan son istek bir kısmını 5 dakikalığına yazdıysa 5 dakika, yoksa 1 saat sayılır. **Ayarlar → Genel → Önbelleğin kalan süresi** ile açıp kapatabilirsiniz. Altındaki seçeneklerle widget'ı, menü çubuğunu, Claude Code durum satırını (ilk açılışta kapalıdır), her konuşmanın önbelleği silinmeden kısa süre önce gelen bildirimi (5 dakikalık önbellekte 1, 1 saatlikte 5 dakika kala) ve tüm projeleri mi yoksa yalnızca seçtiklerinizi mi takip edeceğinizi seçersiniz. Bir konuşmayı uygulama yeniden açılana kadar takip etmek istemezseniz satırının menüsünden **Takibi bırak**'ı seçin. 5 dakikalık önbellekte her kısa arada bildirim gelebileceği için bildirim ilk açılışta kapalıdır. Bildirime tıklayınca **Önbellek** sayfası açılır.
-
-**Önbellek tazeleme.** **Önbellek** sayfasında bir konuşmanın yanındaki **Tazele**, sizi bekleyen konuşmaya kısa bir tur attırır: Claude Code önbelleği okur, önbelleğin süresi baştan başlar ve konuşmada önce "Stop hook feedback", ardından "Önbellek tazelendi." görünür. İlk seferde uygulama, Claude Code ayarlarınıza (`~/.claude/settings.json`) küçük bir hook eklemeden önce onayınızı ister; bu hook, Claude Code bir yanıtı bitirdiğinde, siz bir istem gönderdiğinizde ve bir konuşma kapandığında çalışır. Ayarlarınızda başka hiçbir şey değişmez; **Ayarlar → Genel → Önbelleğin kalan süresi → Kaldır** ile hook'u yeniden çıkarabilirsiniz, otomatik tazeleme de kapanır. Hook eklendikten sonra Claude Code'un yanıtını bitirdiği konuşmalar tazelenebilir; yanıtı süren ya da kapalı bir konuşma tazelenemez. **Otomatik tazele** bunu önbellek dolmadan kısa süre önce kendisi yapar: 1 saatlik önbellekte 1, 2 ya da 5 dakika kala, 5 dakikalık önbellekte son dakikada. Bir konuşmanın otomatik tazelemelerinin toplamı önbelleği bir kez yeniden yazmaktan pahalıya gelecekse otomatik tazeleme durur; siz konuşmaya yazınca yeniden başlar. Otomatik tazelemeyi tek bir konuşma için satırının menüsünden açıp kapatabilir, kontrol panelindeki Canlı önbellekler kutucuğundan ve önbellek dolmadan gelen bildirimden de tazeleyebilirsiniz. Her tazeleme plan kotanızdan bir önbellek okuması kadar düşer; **Önbellek** sayfası bugünkü tazelemeleri API eşdeğeri bedelleriyle gösterir. Ardından önbelleğin süresi uzamayan bir tazeleme sayılmaz ve satırında "Tazelenemedi" olarak görünür. Konuşmanın kendi Stop hook'ları (örneğin bir bildirim sesi) her tazelemede de çalışır; araçları izin sormadan çalıştıran (`bypassPermissions`) bir konuşma tazelenmez. Bir konuşmanın ilk tazelemesi önbelleğin bir kısmını bir kez daha yazabilir; sonrakiler önbelleğin tamamını okur.
-
-**Önbellek neden yeniden yazıldı.** Claude Code, bir konuşmada önbellekte zaten olan içeriği yeniden işleyen istekleri durum satırına bildirir; 2.1.260'tan itibaren büyük olasılıkla nedenini de söyler: araç tanımları değişti (bir MCP sunucusu ya da eklenti geldi veya gitti), sistem istemi değişti, 5 dakikalık ya da 1 saatlik süre doldu, model ya da isteğin başka bir ayarı değişti, önceki mesajlar değişti ya da büyük olasılıkla sunucu tarafında. Durum satırı köprüsü açıksa (bkz. [Canlı yakalama](#canlı-yakalama)) **Önbellek** sayfası bunları dönem için toplar: yeniden yazmalar ve kaç konuşmadan geldikleri, yeniden yazdıkları token, Claude Code'un sıkıştırmadan sonra beklediği yeniden kurulumlar, her neden ile sayısı ve payı, nedene göre renklenmiş gün gün yeniden yazmalar. Altında yeniden yazmalar projelere göre, en çok olan en üstte gruplanır; her projenin başlıca nedeni, yeniden yazılan token ve son yeniden yazması görünür. Bir projeyi açınca yeniden yazmalarını tek tek görürsünüz: ne zaman olduğu, hangi dal ve modelde olduğu, nedeni ve kaç token yeniden yazdığı; ok, konuşmayı **Oturumlar** sayfasında açar. Claude Code'un bildirdiği gibi her konuşmanın ana akışını kapsar. Model, hesap ya da başka bir filtre açıkken bir yeniden yazma, onu yaşayan istek filtreden geçiyorsa sayılır; model ya da hesap değiştiren bir konuşma bu yüzden ikisi arasında bölünür. Claude Code yeniden yazmanın zamanını saniye hassasiyetiyle bildirir; birkaç saniye çevresindeki istekler filtrenin iki yanına düşüyorsa yeniden yazma hiçbirine yazılmaz. Aynı konuşma iki pencerede açıksa ve bir rapor ikisinin de sayacını sürdürüyor olabilirse, daha az yeni yeniden yazma sayılır; toplam böylece hiçbir zaman olduğundan fazla çıkmaz.
-
-**Projeler** sayfası her projenin kullanımını git dalına göre ayırır. Claude Code dalı her istekte, Codex ise oturum bir depoda başladığında kaydeder. Depo dışındaki istekler "dal yok" olarak görünür.
+**Başlangıç yükü.** Her konuşma sizin yazmadığınız bir metinle başlar: sistem istemi, araç tanımları, `CLAUDE.md` gibi bellek dosyaları ve MCP sunucularınızın ekledikleri. **Bağlam** sayfası bu yükü her proje için, arttığı ya da azaldığı günle birlikte gösterir.
 
 ### Her şeyi tek kısayolla bulun
 
-Mac'te **Cmd+K**, Windows ve Linux'ta **Ctrl+K** tuşlarına basın ya da kenar çubuğundaki **Ara** düğmesine tıklayın. Birkaç harf yazarak istediğiniz sayfaya, ayar bölümüne, projeye, modele ya da oturuma geçin. Buradan temayı değiştirebilir, widget'ı gösterip gizleyebilir ve güncellemeleri denetleyebilirsiniz.
+Mac'te **Cmd+K**, Windows ve Linux'ta **Ctrl+K** ile istediğiniz sayfaya, ayara, projeye, modele ya da oturuma geçin. Buradan temayı da değiştirebilir, widget'ı gösterip gizleyebilir ve güncellemeleri denetleyebilirsiniz.
 
 ![Genel bakışın üstünde açık arama kutusu ve "opus" için bulunan modeller ile oturumlar](assets/readme/palette-tr.webp)
 
 ### Limitlerinizi masaüstünde görün
 
-Widget her zaman üstte duran küçük bir penceredir. Varsayılan olarak ekranın sağ alt köşesinde durur. Neleri gösterdiğini ve nasıl göründüğünü **Widget stüdyosu**'nda canlı önizlemeyle değiştirirsiniz.
+Widget, her zaman üstte duran küçük bir penceredir ve varsayılan olarak ekranın sağ alt köşesinde durur. Onu istediğiniz yere sürükleyin. Sağ tıklayarak uygulamayı açabilir, widget'ın saydamlığını, boyutunu ve konumunu değiştirebilirsiniz.
 
 ![Bugünkü token ve maliyeti, önbelleği ilk dolacak konuşmayı, iki Claude hesabı, Antigravity ve iki Codex hesabı için 5 saatlik limit halkaları ve haftalık yüzdelerle, bugünkü OpenCode kullanımıyla gösteren masaüstü widget'ı](assets/readme/widget-tr.webp)
 
+**Widget stüdyosu** sayfası, widget'ın neleri gösterdiğini, yerleşimini, limit gösterimini, görünümünü, yazı tipini ve uyarı eşiklerini canlı önizlemeyle değiştirmenizi sağlar.
+
 ![Widget stüdyosu: Claude ve Codex hesaplarını, OpenCode kullanımını ve önbelleğin kalan süresini de gösteren canlı önizleme ve widget'ın gösterebileceği öğelerin listesi](assets/readme/studio-tr.webp)
 
-**Widget stüdyosu**'nda şunları ayarlayabilirsiniz:
-
-- **Gösterilenler:** ana sayı, ikincil değer, 5 saatlik ve haftalık limitler, OpenCode kullanımı, araçlara göre dağılım, 7 ve 30 günlük toplamlar, son güncelleme saati ve **Önbelleğin kalan süresi** açıkken önbelleği ilk dolacak konuşma. Her öğeyi açıp kapatabilir ve sırasını değiştirebilirsiniz. Limitleri gösterilecek araçları ve sıralarını da seçebilirsiniz. Antigravity için hangi limitin gösterileceğini belirleyin: Gemini, Claude ve GPT, ikisi birden ya da hangisi daha doluysa o.
-- **Yerleşim:** yatay, dikey ya da tek satır.
-- **Limit gösterimi:** halka, çubuk ya da metin.
-- **Görünüm:** tema, vurgu rengi, ölçek, arka plan opaklığı, köşe yuvarlaklığı, kenarlık, gölge, etiketler, araç ikonları, sıfırlanmaya kalan süre.
-- **Yazı:** bilgisayarınızda yüklü herhangi bir yazı tipi (aranabilir; her biri kendi görünümüyle listelenir), yazı boyutu, ana sayı boyutu, sayı kalınlığı, sabit genişlikli rakamlar.
-- **Uyarı eşikleri:** dikkat ve kritik seviyeleri; uygulamanın kendi limit renkleri de bunlara uyar.
-- **Davranış:** her zaman üstte, konum kilidi, tıklayınca ne olacağı, tam ekran uygulamalarda gizlenme (macOS'te uygulama Dock'ta değilken), köşeye yerleştirme.
-
-Widget boyutunu içeriğe göre kendisi ayarlar. Bir köşeye sabitlediyseniz büyüyüp küçülürken o köşede kalır; sürüklerseniz bıraktığınız yerde durur. Sağ tıklayarak paneli açabilir, saydamlığını, boyutunu ve konumunu değiştirebilirsiniz.
-
-- **Kısayol:** Sistem genelinde bir tuş kısayoluyla widget'ı gösterip gizleyebilirsiniz (varsayılan **Ctrl+Alt+Shift+W**, macOS'te **⌃⌥⇧W**). Değiştirmek için **Ayarlar → Widget** bölümünü kullanabilirsiniz. Başka bir programın kullandığı kısayol kabul edilmez.
-- **Tepsi simgesi:** Windows'ta saatin yanında, macOS'te menü çubuğunda, Linux'ta sistem tepsisinde durur. Kontrol panelini açar ve limitlerinizi simgede de gösterebilir (bkz. [Limitlerinizi menü çubuğunda ve tepside görün](#limitlerinizi-menü-çubuğunda-ve-tepside-görün)).
+Sistem genelindeki bir kısayol widget'ı gösterir ya da gizler (**Ctrl+Alt+Shift+W**, macOS'te **⌃⌥⇧W**). Kısayolu **Ayarlar → Widget** bölümünden değiştirin.
 
 ### Limitlerinizi menü çubuğunda ve tepside görün
 
-Uygulamanın simgesi Windows'ta saatin yanında, macOS'te menü çubuğunda, Linux'ta sistem tepsisinde durur. Simgeye tıklayınca kontrol paneli açılır. Sağ tıklayınca kısa bir menü açılır: uygulamayı açma, widget'ı gösterip gizleme, şimdi tarama, hazır güncellemeyi kurma ve çıkış. Windows ve macOS'te simgenin üzerine gelince güncel limitlerin hepsini görürsünüz. Linux'ta tepsi tıklamaları bildirmediği için panel bu menüden açılır.
+Uygulamanın simgesi Windows'ta saatin yanında, macOS'te menü çubuğunda, Linux'ta sistem tepsisinde durur. Simgeye tıklayınca kontrol paneli, sağ tıklayınca kısa bir menü açılır. Linux'ta tepsi tıklamaları bildirmediği için panel bu menüden açılır.
 
-![Mac'te menü çubuğunun altında açık kontrol paneli: saatin yanında kullanım göstergesi ve Claude ile Codex limitlerini çubuk ve yüzdeyle gösteren, Claude'un haftalık limitinde uyarı işareti olan metin; altında Claude ve Codex için 5 saatlik ve haftalık limit halkaları, bugünkü kullanım, OpenCode kullanımı, önbelleği ilk dolacak konuşma ve tazeleme düğmesi, Claude'un 5 saatlik limiti için tahmin ve dört düğme](assets/readme/panel-tr.webp)
+![Mac'te menü çubuğunun altında açık kontrol paneli: saatin yanında kullanım göstergesi ve Claude ile Codex limitlerini çubuk ve yüzdeyle gösteren, Claude'un haftalık limitinde uyarı işareti olan metin. Altında Claude ve Codex için 5 saatlik ve haftalık limit halkaları, bugünkü kullanım, OpenCode kullanımı, önbelleği ilk dolacak konuşma ve tazeleme düğmesi, Claude'un 5 saatlik limiti için tahmin ve dört düğme](assets/readme/panel-tr.webp)
 
-**Kontrol paneli.** Panelde seçtiğiniz kutucuklar görünür:
+Panelde seçtiğiniz kutucuklar görünür: limitler, tahminler, kullanım, canlı önbellekler, son tarama ve düğmeler. Kutucukları **Menü çubuğu** sayfasında galeriden canlı önizlemeye sürükleyerek yerleştirin.
 
-- **Limitler:** Claude, Codex ya da Antigravity için tek pencere ya da ikisi birden (5 saatlik ve haftalık); halka ya da çubuk olarak, sıfırlanmaya kalan süreyle. Birden fazla Claude ya da Codex hesabınız varsa her hesabın limitlerine ayrı kutucuk ekleyebilirsiniz.
-- **Tahminler:** bu hızla bir limitin ne zaman dolacağı ya da sıfırlandığında nerede olacağı.
-- **Kullanım:** bugün, son 7 ya da 30 günün token sayısı ve API eşdeğeri maliyeti; tüm araçlar ya da yalnızca OpenCode için. Büyük kutucukta oturum sayısı ve önbellek isabet oranı da görünür.
-- **Canlı önbellekler:** önbelleği en önce silinecek konuşmalar ve kalan süreleri. Konuşma sayısına tıklayınca **Önbellek** sayfası açılır. Uzun kutucuk konuşma sayısına göre en çok üç konuşmaya kadar uzar; tek konuşma varken ya da hiç yokken tek satır yüksekliğindedir.
-- **Son tarama:** kayıtların en son ne zaman okunduğu. Tıklayınca yeniden tarar.
-- **Düğmeler:** uygulamayı açma, widget'ı gösterip gizleme, şimdi tarama ve Ayarlar.
+![Menü çubuğu sayfasında canlı önizleme: Claude logosunu Claude renginde bir karede gösteren simge ve altında Claude ve Codex limit halkaları, bugünkü kullanım, OpenCode kullanımı, canlı önbellekler, tahmin ve düğmeler içeren kontrol paneli. Yanında her hesabı içeren kutucuk galerisi](assets/readme/menubar-tr.webp)
 
-Panel ayrıca güncelleme hazır olduğunda ve bir aracın oturumu kapandığı için limitleri okunamadığında sizi uyarır.
+Simge, uygulama simgesini, bir limitin yüzdesini, bir aracın logosunu ya da limit kadar dolan bir göstergeyi gösterebilir. Yüzde, logo ve gösterge, limit dolmaya yaklaşınca uyarı rengini alır. macOS ve Linux'ta simgenin yanına, seçtiğiniz limitler, tahminler ve kullanımla `Cl 5s ▰▰▱▱▱ %46` gibi bir metin de koyabilirsiniz. Windows, tepsi simgelerinin yanında metin göstermez.
 
-**Menü çubuğu sayfası.** Paneli **Menü çubuğu** sayfasından ayarlayın. Kutucukları galeriden panelin canlı önizlemesine sürükleyin, sürükleyerek sıralayın, galeriye geri sürükleyerek kaldırın. Bir kutucuğa tıklayıp boyutunu (küçük, geniş, büyük, tam genişlik ya da tam genişlik ve uzun) ve limitlerde halka ya da çubuk görünümünü seçin. Panele en fazla 16 kutucuk ekleyebilirsiniz. Limitler panelde kullanılan ya da kalan olarak görünür; uygulamadaki seçimi izleyebilir ya da panel için ayrı seçebilirsiniz.
-
-![Menü çubuğu sayfasında canlı önizleme: Claude logosunu Claude renginde bir karede gösteren simge ve altında Claude ve Codex limit halkaları, bugünkü kullanım, OpenCode kullanımı, canlı önbellekler, tahmin ve düğmeler içeren kontrol paneli; yanında her hesabı içeren kutucuk galerisi](assets/readme/menubar-tr.webp)
-
-**Simge.** Simgede ne görüneceğini ve hangi limiti izleyeceğini seçin (varsayılan: en dolu limitinizin yüzdesi):
-
-- **Uygulama simgesi.** macOS'te menü çubuğunun açık ya da koyu görünümüne uyar; Windows'ta açık ya da koyu görev çubuğuna göre çizilir.
-- **Bir limitin yüzdesi ya da bir aracın logosu** (Claude, Codex, Antigravity, OpenCode ya da limitin ait olduğu aracın logosu), bir karenin içinde. Kare koyu gridir; isterseniz aracın rengini alır. Limit widget'ın uyarı eşiklerini geçince (varsayılan %70 ve %90) önce turuncu, sonra kırmızı olur.
-- **Kullanım göstergesi**, limit kadar dolu. macOS'te menü çubuğunun görünümüne uyan sade bir işarettir; uyarı eşiği geçilince kare olmadan uyarı rengini alır. Windows ve Linux'ta uygulamanın lacivert karesinde durur; yayı mavi, turuncu ya da kırmızı olur.
-
-Limit en son okumadan sonra kullanıldıysa, yani gerçek değer daha yüksek olabilirse, simge soluk çizilir; metinde de böyle bir değerin başında "~" durur.
-
-**Simgenin yanındaki metin.** macOS ve Linux'ta simgenin yanına `Cl 5s ▰▰▱▱▱ %46 · Cl H ⚠︎▰▰▰▰▱ %73` gibi bir metin koyabilirsiniz. Windows, tepsi simgelerinin yanında metin göstermez. Metindeki öğeleri ve sıralarını seçin: herhangi bir limit (her Claude ve Codex hesabınızınki de) ve o limitin tahmini; bugün, son 7 ya da 30 günün token, API eşdeğeri, oturum sayısı ya da önbellek isabeti (tüm araçlar ya da yalnızca OpenCode); son taramanın saati. **Önbelleğin kalan süresi** menü çubuğunda gösteriliyorsa metnin sonunda önbelleği ilk dolacak konuşma da yer alır (`notes 2 dk`). Sonra şunları belirleyin:
-
-- **Etiket:** tam ad (`Claude 5 sa`), kısa ad (`Cl 5s`) ya da etiketsiz
-- **Değer:** kullanılan ya da kalan
-- **Gösterim:** yüzde, çubuk, ikisi birden ya da daire
-- **Sıfırlanma:** gösterme, kalan süre (`↻2sa14dk`) ya da saat (`↻18:40`)
-- **Ayraç** ve metnin başına ve sonuna eklenecek yazı
-- **Uyarı işareti:** uyarı eşiğini geçen değerin önünde ⚠︎
-
-macOS'te simgeyi gizleyip yalnızca metni bırakabilirsiniz; gösterilecek değer olmadığında simge geri gelir.
-
-![Mac'te Menü çubuğu sayfasının metin ve simge ayarları: Claude'un 5 saatlik ve haftalık limiti ile Codex'in haftalık limitinden oluşan üç öğe ve güncel değerleri; etiket, değer, gösterim, sıfırlanma, ayraç, baş ve son, uyarı işareti ve simgeyi gizleme seçenekleri; Claude'un 5 saatlik limiti için kullanım göstergesine ayarlı simge](assets/readme/trayoptions-tr.webp)
+![Mac'te Menü çubuğu sayfasının metin ve simge ayarları: Claude'un 5 saatlik ve haftalık limiti ile Codex'in haftalık limitinden oluşan üç öğe ve güncel değerleri. Etiket, değer, gösterim, sıfırlanma, ayraç, baş ve son, uyarı işareti ve simgeyi gizleme seçenekleri. Claude'un 5 saatlik limiti için kullanım göstergesine ayarlı simge](assets/readme/trayoptions-tr.webp)
 
 ### Özet kartı paylaşın
 
-**Özet kartları** sayfası bir gününüzü, haftanızı (pazartesiden pazara), ayınızı ya da yılınızı paylaşabileceğiniz bir görsele dönüştürür. Oklarla dönemler arasında geçin, bir kart ve boyut seçin; kartı PNG olarak kaydedin ya da panoya kopyalayıp doğrudan bir gönderiye veya sohbete yapıştırın.
+**Özet kartları** sayfası bir gününüzü, haftanızı, ayınızı ya da yılınızı paylaşabileceğiniz bir görsele dönüştürür: özet, takvim, saatleriniz ya da yıl hikâyesi. Kartı dört boyutta PNG olarak kaydedin ya da kopyalayıp doğrudan bir gönderiye veya sohbete yapıştırın.
 
 ![Özet kartları sayfası: Ekim ayı için token, tutar, günlük grafik, aktif günler, araç payları ve rozetlerle bir hikâye kartı, yanında kart, boyut, tema, vurgu rengi ve gösterilecekler seçenekleri](assets/readme/cards-tr.webp)
 
-- **Özet:** token, API eşdeğeri maliyet, aboneliğinizin kaç kat değer kattığı, dönemin grafiği, önceki döneme göre değişim, en yoğun gün ya da saat, aktif gün, oturum, önbellek isabeti, en çok kullandığınız model ve araçların payı.
-- **Takvim** (ay ya da yıl): her gün kullanımınıza göre renklenir; aktif günlerinizi ve en uzun serinizi gösterir.
-- **Saatler:** günün hangi saatlerinde çalıştığınızı 24 saatlik bir kadranda gösterir. Kullanımınızın çoğunun geçtiği altı saat bir ad alır (örneğin 23:00–05:00 için **Gece kuşu**); uzun dönemlerde haftanızı saat saat görürsünüz.
-- **Yıl hikâyesi:** yılınızı art arda hikâye slaytlarına döker: toplamlar, takvim, saatleriniz, modelleriniz ve kazandığınız rozetler. **Tüm slaytları kaydet** hepsini birlikte kaydeder.
-
-Her kartın dört boyutu var: 1080 × 1920 hikâye, 1080 × 1080 kare, X ve LinkedIn için 1200 × 675 yatay görsel ve ekranınızın boyutunda bir duvar kâğıdı. **Dört boyutu birden kaydet** hepsini tek bir klasöre kaydeder; klasörde aynı adda bir dosya varsa korunur, yenisi numaralı bir ad alır. Dört temadan (lacivert, açık, gün batımı ve kutup ışığı) birini ve bir vurgu rengi seçin.
-
-**Kartta göster** ile paylaşmak istemediklerinizi kartın dışında bırakın: API eşdeğeri tutar, abonelik değeri, önceki döneme göre değişim, araç payları, model adları, rozetler ya da aktif gün yayı.
-
-**Rozetler** dönemin ulaştığı sabit eşikleri gösterir: 100 milyon, 1 milyar ya da 10 milyar token; 7, 30 ya da 100 günlük seri; biten bir haftanın ya da ayın her gününde kullanım; abonelik ücretinin 2, 5 ya da 10 katı; %80, %90 ya da %95 önbellek isabeti (en az 1 milyon girdi tokenıyla) ve birlikte kullanılan 2, 3 ya da 4 araç.
-
-Önceki döneme göre değişim, önceki takvim döneminin aynı bölümüyle karşılaştırılır: süren bir ay, önceki ayın aynı günleri ve saatiyle karşılaştırılır. Arşiv o dönemin başına kadar uzanmıyorsa değişim kartta yer almaz.
-
-Kartta yalnızca toplamlar, araç adları ve model adları yer alır; proje adları ya da yazdıklarınız asla yer almaz. Aboneliğin değeri yalnızca fiyatı bilinen planlarla hesaplanır; hiçbir planın fiyatı bilinmiyorsa kartta yer almaz.
+Kartta yalnızca toplamlar, araç adları ve model adları yer alır. Proje adları ya da yazdıklarınız asla yer almaz. **Kartta göster** ile tutarı, abonelik değerini, model adlarını ve daha fazlasını da kartın dışında bırakabilirsiniz.
 
 ### Haftalık rapor alın, verilerinizi yönetin
 
-Haftalık kullanımınızı PDF olarak kaydedebilir, verilerinizi dışa aktarıp yedekleyebilir ve fiyatları kendinize göre düzenleyebilirsiniz.
+**Kullanım özeti (PDF).** **Ayarlar → Kullanım özeti (PDF)** bölümünden bir haftayı, ayı ya da yılı A4 PDF olarak kaydedin. Özette toplamlar, günlük grafik, limitler, modeller, projeler ve en maliyetli oturumlar yer alır. İsterseniz uygulama geçen haftanın özetini her hafta kendiliğinden kaydeder. Varsayılan yer, Belgeler klasörünüzdeki **AI Usage Tracker** klasörüdür.
 
-**Kullanım özeti (PDF).** **Ayarlar → Kullanım özeti (PDF)** bölümünden geçen haftayı, bu haftayı, son 7 günü, geçen ayı, bu ayı, geçen yılı ya da bu yılı A4 PDF olarak kaydedebilirsiniz. Özette şunlar yer alır: önceki döneme göre değişimiyle toplamlar, günlük grafik (üç aydan uzun dönemlerde aylık), araçlar, abonelik değeri, tahminleriyle güncel limitler, bağlam, modeller, projeler (gizlediğiniz adlar gizli kalır), en maliyetli oturumlar ve notlar. Yazdırma penceresi açılmaz. İsterseniz son tam haftanın (pazartesi–pazar) özeti, ilk tarama haftanın kayıtlarını okuduktan sonra her hafta bir kez kendiliğinden kaydedilir. Bilgisayar kapalıyken kaçırılan hafta bir sonraki açılışta kaydedilir; taşıdığınız ya da sildiğiniz özet yeniden kaydedilmez (varsayılan olarak Belgeler klasörünün içindeki **AI Usage Tracker** klasörüne kaydedilir).
+**Kalıcı arşiv ve veriler.** Araçlar eski kayıtlarını siler (Claude Code varsayılan olarak 30 gün sonra), ama uygulamanın içe aldığı her şey kendi arşivinde kalır. **Ayarlar → Veriler** bölümünden CSV ya da JSON olarak dışa aktarabilir, veri tabanını yedekleyebilir, bir yedeği mevcut verilerle birleştirebilir ve **Tüm verilerimi sil** ile her şeyi silebilirsiniz.
 
-**Kalıcı arşiv.** Araçlar kendi kayıtlarını zamanla silebilir. Örneğin Claude Code CLI eski oturumları varsayılan olarak **30 gün** sonra siler. Uygulama içe aldığı her kaydı kendi veri tabanında tuttuğu için geçmişiniz kaybolmaz. Hiçbir kayıt iki kez sayılmaz (bkz. [Nasıl çalışır](#nasıl-çalışır)).
-
-**Dışa aktarma ve yedek.** **Ayarlar → Veriler** bölümünde şunları yapabilirsiniz:
-
-- CSV ya da JSON olarak dışa aktarma (istek bazında ya da günlük özet); **CSV (;)** noktalı virgül ve ondalık virgül kullanır, Türkçe Excel'de çift tıklayınca doğru sütunlarla açılır,
-- veri tabanını yedekleme,
-- bir yedeği mevcut verilerle birleştirerek içe aktarma,
-- **Tüm verilerimi sil:** Veri tabanını boşaltır ve yeniden onaylayana kadar kayıt almayı durdurur. Başka bir yere kaydettiğiniz yedeklere ve dışa aktarımlara dokunmaz.
-
-**Fiyatlar.**
-
-- Fiyatlar [`config/pricing.json`](config/pricing.json) dosyasındadır ve 2026-10-02 ile 2026-11-10 arasında resmi sayfalardan doğrulanmıştır: [Anthropic](https://platform.claude.com/docs/en/about-claude/pricing), [OpenAI](https://developers.openai.com/api/docs/pricing), [Google Gemini](https://ai.google.dev/gemini-api/docs/pricing), [Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/pricing); OpenCode'un kullanabildiği modeller için de [DeepSeek](https://api-docs.deepseek.com/quick_start/pricing/), [Moonshot AI](https://platform.kimi.ai/docs/pricing/chat), [Z.ai](https://docs.z.ai/guides/overview/pricing), [Alibaba Cloud](https://www.alibabacloud.com/help/en/model-studio/model-pricing), [xAI](https://docs.x.ai/developers/pricing), [Mistral](https://docs.mistral.ai/inference/pricing) ve [MiniMax](https://platform.minimax.io/docs/guides/pricing-paygo).
-- Uygulama açılışta ve 12 saatte bir aynı dosyayı GitHub'dan indirir; daha yeniyse uygulamayla gelen listenin yerine onu kullanır. Böylece yeni bir modelin fiyatı yeni sürümü beklemeden gelir. İndirilen liste, uygulamanın bildiği modellerin hepsini içermiyorsa kullanılmaz. Yalnızca bu dosya indirilir, hiçbir veri gönderilmez. Bunu **Ayarlar → Fiyatlar → Fiyat listesini güncel tut** ile kapatabilir, **Fiyatları denetle** ile hemen kontrol edebilirsiniz.
-- Hesaba katılan fiyat kalemleri: önbelleğe yazma (5 dk / 1 sa), önbellekten okuma, OpenAI uzun bağlam katmanı (>272K), hızlı mod (fast mode) ve ABD veri yerleşimi çarpanları, web araması ücreti ve biten bir tanıtım fiyatı gibi belli bir tarihte değişen fiyatlar. Her istek kendi gününün fiyatıyla hesaplanır.
-- Fiyatı bilinmeyen modeller **maliyete eklenmez** ve "fiyat tanımsız" uyarısıyla listelenir. Ad benzerliğine bakılarak tahmini fiyat atanmaz. **Genel bakış**'taki bu uyarıyı kapatabilirsiniz; yalnızca başka bir model fiyatsız kalırsa yeniden çıkar. Uyarıyı **Ayarlar → Fiyatlar → Uyarıyı tekrar göster** ile de geri getirebilirsiniz.
-- Fiyatları **Ayarlar → Fiyatlar** ekranında düzenleyebilirsiniz. Listede önce kayıtlarınızda geçen modeller görünür; fiyatı tanımlı bütün modelleri görmek için **Tüm modelleri göster**'e basın. Uygulamanın veri klasöründeki `pricing.json` dosyasına (bkz. [Gizlilik](#gizlilik)) yalnızca değiştirdiğiniz fiyatlar kaydedilir; diğer bütün modeller, düzeltmeler ve sonradan eklenen modeller dahil, en yeni listeyi izler. Değiştirdiğiniz fiyat **değiştirildi** olarak işaretlenir ve tek tıkla listedeki fiyata döner. Fiyatı olmayan bir modelin fiyatını **Fiyatı olmayan bir modele fiyat girin** bölümünden kendiniz yazın; bu fiyat **sizin** olarak işaretlenir ve yeni bir liste onu değiştirmez. Aynı ekranda fiyatsız bir modeli başka bir modelin fiyatıyla hesaplatabilir ya da varsayılan fiyatlara dönebilirsiniz.
+**Fiyatlar.** API liste fiyatları uygulamayla birlikte [`config/pricing.json`](config/pricing.json) dosyasında gelir. Bu fiyatlar [Anthropic](https://platform.claude.com/docs/en/about-claude/pricing), [OpenAI](https://developers.openai.com/api/docs/pricing), [Google Gemini](https://ai.google.dev/gemini-api/docs/pricing) ve [Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/pricing) resmi sayfalarından, OpenCode'un kullanabildiği modeller için de [DeepSeek](https://api-docs.deepseek.com/quick_start/pricing/), [Moonshot AI](https://platform.kimi.ai/docs/pricing/chat), [Z.ai](https://docs.z.ai/guides/overview/pricing), [Alibaba Cloud](https://www.alibabacloud.com/help/en/model-studio/model-pricing), [xAI](https://docs.x.ai/developers/pricing), [Mistral](https://docs.mistral.ai/inference/pricing) ve [MiniMax](https://platform.minimax.io/docs/guides/pricing-paygo) sayfalarından doğrulanmıştır. Uygulama açılışta ve 12 saatte bir bu dosyanın daha yeni bir kopyasını GitHub'dan indirir. Böylece yeni modeller yeni sürümü beklemeden fiyatlanır. Bunu **Ayarlar → Fiyatlar → Fiyat listesini güncel tut** ile kapatabilirsiniz. Fiyatı bilinmeyen bir model hiçbir zaman tahmini bir fiyatla hesaplanmaz. **Ayarlar → Fiyatlar** bölümünden siz bir fiyat girene kadar maliyete eklenmez.
 
 ### Kullanımınızı komut satırından alın
 
-`ai-usage-tracker --json`, uygulamanın gösterdiği kullanımı ve limitleri JSON olarak yazar; betiklerinize ya da Raycast, tmux, SketchyBar gibi araçlara bağlayabilirsiniz. Kurulumunuza uygun komutu ve yolu doldurulmuş hazır betikleri **Ayarlar → Veriler → Komut satırı** bölümünden **Kopyala** ile alın. Windows'ta komutu PowerShell'de çalıştırın; oradaki komut `| Out-String` ile biter, böylece PowerShell çıktıyı bekler.
+`ai-usage-tracker --json`, uygulamanın gösterdiği kullanımı ve limitleri JSON olarak yazar. Bunu betiklerinize ya da Raycast, tmux, SketchyBar gibi araçlara bağlayabilirsiniz. Varsayılan dönem bugündür. Başka bir dönem için `--period` ile birlikte `7d`, `30d`, `3m`, `6m`, `1y` ya da `all` yazın. Komut uygulamanın verilerini yalnızca okur. Uygulamanın açık olması gerekmez, ama rakamlar son tarama kadar günceldir.
 
 ```sh
 ai-usage-tracker --json | jq '.limits[] | select(.window == "five_hour") | .used_pct'
 ```
 
-- Varsayılan dönem bugündür. Başka bir dönem için `--period` ile birlikte `7d`, `30d`, `3m`, `6m`, `1y` ya da `all` yazın.
-- `usage` dönemdeki istekleri, tokenleri ve API karşılığı maliyeti hem toplam hem araç araç verir.
-- `limits`, açtığınız kaynaklarda kullandığınız hesabın bütün limitlerini verir: kullanılan yüzde, sıfırlanma zamanı, okumanın alındığı an ve bu hızla ne zaman dolacağı. Okumadan sonra pencere sıfırlandıysa `used_pct` boş gelir. `state` değeri `fresh`, `behind` (okumadan sonra kullanım var, gerçek değer büyük olasılıkla daha yüksek), `stale` (sıfırlanma zamanı bilinmeyen eski bir okuma) ya da `reset` olur; `budget`, okuma değil de Limitler sayfasında kendi tanımladığınız bir bütçeyse `true` olur.
-- Komut uygulamanın verilerini yalnızca okur, hiçbir şeyi değiştirmez. Uygulamanın açık olması gerekmez, ama rakamlar uygulamanın son taraması kadar günceldir.
-- Zamanlar sizin saat diliminizdedir (ISO 8601). `schema` yalnızca bir alanın anlamı değiştiğinde ya da bir alan kaldırıldığında artar.
-
-**Hazır betikler.** Aşağıdakini `~/bin/claude-status.sh` olarak kaydedin ve `chmod +x ~/bin/claude-status.sh` ile çalıştırılabilir yapın. Betik `5h ~46% · 7d 64% · $12.84` gibi tek bir satır yazar: `~` okumadan sonra kullanım olduğunu, gerçek değerin büyük olasılıkla daha yüksek olduğunu gösterir. Okunduktan sonra sıfırlanmış ya da okuması eskimiş bir pencere atlanır. `jq` gerektirir; macOS 15 ve sonrasında yüklü gelir, diğer sistemlerde paket yöneticinizle kurun. Linux'ta ya da uygulama başka bir yerdeyse betikleri **Ayarlar → Veriler → Komut satırı** bölümünden alın; oradakiler kurulumunuzun yolunu kullanır.
-
-```sh
-#!/bin/sh
-# One line for a status bar: Claude's five-hour and weekly use, and today's cost.
-tracker="/Applications/AI Usage Tracker.app/Contents/MacOS/ai-usage-tracker"
-"$tracker" --json | jq -r '
-  [ .limits[]
-    | select(.provider == "anthropic" and (.window == "five_hour" or .window == "seven_day"))
-    | select(.used_pct != null and (.state == "fresh" or .state == "behind") and (.budget | not))
-    | (if .window == "five_hour" then "5h " else "7d " end)
-      + (if .state == "behind" then "~" else "" end) + "\(.used_pct | floor)%" ]
-  + [ "$\(.usage.cost_usd * 100 | floor / 100)" ]
-  | join(" · ")'
-```
-
-tmux için `~/.tmux.conf` dosyasına şunu ekleyin:
-
-```
-set -g status-interval 60
-set -g status-right '#(~/bin/claude-status.sh)'
-```
-
-SketchyBar için `sketchybarrc` dosyasına bir öğe ekleyin ve çalıştırdığı eklentiyi `plugins/claude.sh` olarak kaydedin:
-
-```sh
-sketchybar --add item claude right --set claude update_freq=120 script="$PLUGIN_DIR/claude.sh"
-```
-
-```sh
-#!/bin/sh
-sketchybar --set "$NAME" label="$(~/bin/claude-status.sh)"
-```
-
-Raycast için şunu betik komutu olarak kaydedin; satırı ana aramada gösterir ve beş dakikada bir tazeler:
-
-```sh
-#!/bin/sh
-# @raycast.schemaVersion 1
-# @raycast.title Claude usage
-# @raycast.mode inline
-# @raycast.refreshTime 5m
-~/bin/claude-status.sh
-```
-
-Windows'ta PowerShell çıktıyı süzüp biçimlendirebileceğiniz nesnelere çevirir:
-
-```powershell
-$usage = & "$env:LOCALAPPDATA\AI Usage Tracker\ai-usage-tracker.exe" --json | Out-String | ConvertFrom-Json
-$usage.limits | Where-Object provider -eq anthropic | Format-Table window, used_pct, state, resets_at
-```
+Kurulumunuza uygun komutu ve tmux, SketchyBar, Raycast ve PowerShell için hazır betikleri **Ayarlar → Veriler → Komut satırı** bölümünde bulursunuz.
 
 ## Desteklenen kaynaklar
 
-| Kaynak                                                 | Okunan konum                                                             | Token     | Limit                      | Not                                                                                 |
-| ------------------------------------------------------ | ------------------------------------------------------------------------ | --------- | -------------------------- | ----------------------------------------------------------------------------------- |
-| **Claude Code** (CLI, VS Code, Claude masaüstü "Code") | `$CLAUDE_CONFIG_DIR` ya da `~/.claude/projects/**/*.jsonl` | **Kesin** | Yalnızca limit dolduğunda  | Yardımcı arka plan çağrıları (örneğin web araması özetleme) bu kayıtlarda yer almaz |
-| **Cowork oturumları** (Claude masaüstü)                | *Claude klasörü*`/local-agent-mode-sessions/**` | **Kesin** | **Kesin %** (5 sa / 7 gün) | Yalnızca bilgisayarınızda çalışan işler. Yeni Cowork işleri bulutta çalışır: token sayıları bilgisayarınızda tutulmaz ancak plan limitlerinize dahil edilir |
-| **Claude masaüstü: plan kullanımı**                    | *Claude klasörü*`/plan-usage-history.json` | —         | **Kesin %**                | Sohbet token'ları yerelde tutulmadığı için token verisi **yok**                     |
-| **Codex** (CLI ve masaüstü)                            | `$CODEX_HOME` ya da `~/.codex/{sessions,archived_sessions}` | **Kesin** | **Kesin %** (her istekte)  | Yeni Codex sürümlerinin sıkıştırdığı oturumlar (`.jsonl.zst`) da okunur             |
-| **Antigravity** (uygulama, IDE ve `agy` CLI)           | `~/.gemini/{antigravity,antigravity-ide,antigravity-cli}/conversations/*.db` ya da `$ANTIGRAVITY_APP_DATA_DIR` | **Kesin** | **Yakalanan %** (`agy` ile) | Veritabanının bir kopyası okunur; Antigravity'nin dosyalarına dokunulmaz. Gemini ile Claude/GPT modellerinin limitleri ayrı gösterilir |
-| **OpenCode**                                           | `$XDG_DATA_HOME/opencode` ya da `~/.local/share/opencode` (Windows'ta da): `opencode.db`, ya da `$OPENCODE_DB` | **Kesin** | —                          | OpenCode'da kullandığınız her sağlayıcı (Anthropic, OpenAI, OpenRouter, GitHub Copilot, OpenCode Zen…) modelin kendi API fiyatıyla hesaplanır. OpenCode bir isteğin abonelikle mi API anahtarıyla mı yapıldığını kaydetmediği için bu kullanım hiçbir planın değerine eklenmez. 1.3.16'dan eski sürümlerle yapılan oturumlar sayılmaz |
-| ChatGPT masaüstü                                       | —                                                                        | **Yok**   | —                          | Yalnızca algılanır                                                                  |
+| Kaynak | Okunan konum | Token | Limit | Not |
+|---|---|---|---|---|
+| **Claude Code** (CLI, VS Code, Claude masaüstü "Code") | `$CLAUDE_CONFIG_DIR` ya da `~/.claude/projects/**/*.jsonl` | **Kesin** | Yalnızca limit dolduğunda | Yardımcı arka plan çağrıları bu kayıtlarda yer almaz |
+| **Cowork oturumları** (Claude masaüstü) | *Claude klasörü*`/local-agent-mode-sessions/**` | **Kesin** | **Kesin %** (5 sa / 7 gün) | Yalnızca bilgisayarınızda çalışan işler. Bulut işleri limitlerinize dahil edilir ama token sayıları bilgisayarınızda tutulmaz |
+| **Claude masaüstü: plan kullanımı** | *Claude klasörü*`/plan-usage-history.json` | Yok | **Kesin %** | Sohbet token'ları yerelde tutulmaz |
+| **Codex** (CLI ve masaüstü) | `$CODEX_HOME` ya da `~/.codex/{sessions,archived_sessions}` | **Kesin** | **Kesin %** (her istekte) | Sıkıştırılmış oturumlar (`.jsonl.zst`) da okunur |
+| **Antigravity** (uygulama, IDE ve `agy` CLI) | `~/.gemini/{antigravity,antigravity-ide,antigravity-cli}/conversations/*.db` ya da `$ANTIGRAVITY_APP_DATA_DIR` | **Kesin** | **Yakalanan %** (`agy` ile) | Bir kopya okunur, Antigravity'nin dosyalarına dokunulmaz |
+| **OpenCode** | `$XDG_DATA_HOME/opencode` ya da `~/.local/share/opencode` (Windows'ta da): `opencode.db`, ya da `$OPENCODE_DB` | **Kesin** | Yok | Modeli yapan şirketin API fiyatıyla hesaplanır ve hiçbir planın değerine eklenmez. 1.3.16'dan eski sürümlerle yapılan oturumlar sayılmaz |
+| ChatGPT masaüstü | Hiçbir şey | Yok | Yok | Yalnızca algılanır |
 
-`~` kullanıcı klasörünüzü gösterir (Windows'ta `%USERPROFILE%`, örneğin `C:\Users\adınız`). *Claude klasörü* Windows'ta `%APPDATA%\Claude`, macOS'te `~/Library/Application Support/Claude` klasörüdür; Claude masaüstü uygulamasının Linux sürümü yoktur.
-
-Her sayının yanında bir doğruluk etiketi bulunur:
-
-- **Kesin:** Aracın kendi kaydındaki değer.
-- **Tahmini:** Uygulamanın hesapladığı değer; örneğin bir projenin limit payı ya da belirlediğiniz bütçeye göre hesaplanan yüzde.
-- **Yakalanan:** Uygulamanın canlı okuduğu değer (bkz. [Canlı yakalama](#canlı-yakalama)): limit okuma, durum satırı köprüsü ya da yerel telemetri alıcısı üzerinden gelir.
+`~` kullanıcı klasörünüzdür (Windows'ta `%USERPROFILE%`). *Claude klasörü* Windows'ta `%APPDATA%\Claude`, macOS'te `~/Library/Application Support/Claude` klasörüdür. Claude masaüstü uygulamasının Linux sürümü yoktur.
 
 ## Kurulum
 
@@ -450,44 +187,41 @@ Her sayının yanında bir doğruluk etiketi bulunur:
 
 ### Windows
 
-Windows 10 ve 11.
-
-1. `AI-Usage-Tracker_x.y.z_x64-setup.exe` dosyasını çalıştırın. Kurulum yalnızca sizin kullanıcı hesabınıza yapılır ve yönetici yetkisi istemez; uygulama `%LOCALAPPDATA%\AI Usage Tracker` klasörüne kurulur.
-2. WebView2 Windows 11'de zaten yüklüdür. Windows 10'da eksikse kurulum dosyası onu da yükler.
+Windows 10 ve 11. `AI-Usage-Tracker_x.y.z_x64-setup.exe` dosyasını çalıştırın. Kurulum yalnızca sizin kullanıcı hesabınıza yapılır (`%LOCALAPPDATA%\AI Usage Tracker`), yönetici yetkisi istemez ve Windows 10'da eksikse WebView2'yi de yükler.
 
 > **SmartScreen uyarısı.** Kurulum dosyası kod imzası taşımadığı için Windows "Bilinmeyen yayımcı" uyarısı gösterebilir. Bu durumda **Ek bilgi → Yine de çalıştır**'ı seçin.
 
-**Kaldırma.** **Ayarlar → Uygulamalar → AI Usage Tracker → Kaldır** yolunu izleyin. Uygulama kaldırılırken **Canlı yakalama** ile Claude Code ayarlarında yapılan değişiklikler geri alınır; önbellek tazeleme hook'u, limit hook'u ve Claude Code ile Codex'teki devir notu hook'ları silinir. "Uygulama verilerini sil" kutusunu işaretlerseniz `%LOCALAPPDATA%\AIUsageTracker` klasörü de silinir. "Windows ile başlat" kaydı her durumda temizlenir.
+**Kaldırma.** Windows'ta **Ayarlar → Uygulamalar** bölümünü kullanın. Kaldırıcı, "Windows ile başlat" kaydı dahil [Uygulamanın bilgisayarınızda değiştirdikleri](#uygulamanın-bilgisayarınızda-değiştirdikleri) altındaki her değişikliği geri alır. "Uygulama verilerini sil" kutusunu işaretlerseniz `%LOCALAPPDATA%\AIUsageTracker` klasörü de silinir.
 
 ### macOS
 
-macOS 11 ve sonrası; Apple Silicon ve Intel Mac'lerde çalışır.
+macOS 11 ve sonrası, Apple Silicon ve Intel Mac'lerde. `AI-Usage-Tracker_x.y.z_universal.dmg` dosyasını açın ve **AI Usage Tracker**'ı **Uygulamalar** klasörüne sürükleyin. Uygulama Apple tarafından imzalanıp onaylandığı (notarize) için uyarı göstermeden açılır.
 
-1. `AI-Usage-Tracker_x.y.z_universal.dmg` dosyasını açın ve **AI Usage Tracker**'ı **Uygulamalar** klasörüne sürükleyin.
-2. Uygulamayı **Uygulamalar** klasöründen açın. Apple tarafından imzalanıp onaylandığı (notarize) için uyarı göstermeden açılır.
+Uygulamayı disk görüntüsünden değil, Uygulamalar klasöründen çalıştırın. Disk görüntüsünden açılan kopya oturum açılışında başlayamaz, Claude Code durum satırını koruyamaz ve kendini güncelleyemez. Uygulamanın Dock'ta ve ⌘Tab listesinde görünmesini istemiyorsanız **Ayarlar → Dock'ta göster** seçeneğini kapatın.
 
-Uygulamayı disk görüntüsünden değil, Uygulamalar klasöründen çalıştırın. Disk görüntüsünden açılan kopya oturum açılışında başlayamaz, Claude Code durum satırını koruyamaz ve kendini güncelleyemez; böyle açtığınızda uygulama sizi uyarır.
+**Kaldırma.** macOS'te kaldırıcı olmadığı için önce uygulamanın değişikliklerini geri alın:
 
-Uygulamanın Dock'ta ve ⌘Tab listesinde görünmesini istemiyorsanız **Ayarlar → Dock'ta göster** seçeneğini kapatın. Uygulamayı o zaman menü çubuğundaki simgeden ya da widget kısayolundan açarsınız. Widget da tam ekran uygulamaların üstünde kalabilir: **Widget stüdyosu**'nda **Tam ekran uygulamalarda gizle** seçeneğini kapatın.
-
-**Kaldırma.** macOS'te uygulama silinirken bu değişiklikler geri alınamadığı için önce **Kaynaklar → Canlı yakalama** bölümünde açtığınız anahtarları ve **Ayarlar → Oturum açınca başlat** seçeneğini kapatın. Önbellek tazeleme hook'unu eklediyseniz **Ayarlar → Genel → Önbelleğin kalan süresi → Kaldır** ile onu da çıkarın. **Limitler** sayfasındaki **Limit sıfırlanınca devam et** ve **Limit dolmadan devir notu** anahtarlarını da kapatın. Ardından uygulamayı Çöp Sepeti'ne sürükleyin. Verileriniz siz silene kadar `~/Library/Application Support/AIUsageTracker` klasöründe kalır.
+1. **Kaynaklar → Canlı yakalama** bölümünde ve **Ayarlar → Oturum açınca başlat** seçeneğinde açtıklarınızı kapatın.
+2. **Limitler** sayfasındaki **Limit sıfırlanınca devam et** ve **Limit dolmadan devir notu** anahtarlarını kapatın.
+3. Önbellek tazeleme hook'unu eklediyseniz **Ayarlar → Genel → Önbelleğin kalan süresi → Kaldır** ile çıkarın.
+4. Uygulamayı Çöp Sepeti'ne sürükleyin. Verileriniz siz silene kadar `~/Library/Application Support/AIUsageTracker` klasöründe kalır.
 
 ### Linux
 
 Debian 12, Ubuntu 22.04 ve sonrası, Fedora, openSUSE ve WebKitGTK 4.1 bulunan diğer x86_64 dağıtımlarda çalışır.
 
-- **Debian, Ubuntu, Mint:** `AI-Usage-Tracker_x.y.z_x86_64.deb` dosyasını `sudo apt install ./AI-Usage-Tracker_x.y.z_x86_64.deb` ile kurun.
-- **Fedora:** `AI-Usage-Tracker_x.y.z_x86_64.rpm` dosyasını `sudo dnf install ./AI-Usage-Tracker_x.y.z_x86_64.rpm` ile kurun.
-- **openSUSE:** Paketler GPG imzası taşımadığı için zypper'a `sudo zypper install --allow-unsigned-rpm ./AI-Usage-Tracker_x.y.z_x86_64.rpm` komutunu verin. Önce dosyayı `SHA256SUMS` ile doğrulayabilirsiniz (bkz. [Dosyanın doğruluğunu kontrol edin](#dosyanın-doğruluğunu-kontrol-edin)).
-- **Her dağıtım:** `AI-Usage-Tracker_x.y.z_x86_64.AppImage` dosyasını çalıştırılabilir yapın (`chmod +x`) ve açın. Hiçbir şey kurulmaz. Açılmazsa FUSE 3'ü kurun (Debian ve Ubuntu'da `sudo apt install fuse3`) ya da dosyayı `APPIMAGE_EXTRACT_AND_RUN=1 ./AI-Usage-Tracker_x.y.z_x86_64.AppImage` ile başlatın.
+- **Debian, Ubuntu, Mint:** `sudo apt install ./AI-Usage-Tracker_x.y.z_x86_64.deb`
+- **Fedora:** `sudo dnf install ./AI-Usage-Tracker_x.y.z_x86_64.rpm`
+- **openSUSE:** Paketler GPG imzası taşımadığı için `sudo zypper install --allow-unsigned-rpm ./AI-Usage-Tracker_x.y.z_x86_64.rpm` komutunu çalıştırın. Önce dosyayı `SHA256SUMS` ile doğrulayabilirsiniz (bkz. [Dosyanın doğruluğunu kontrol edin](#dosyanın-doğruluğunu-kontrol-edin)).
+- **Her dağıtım:** `AI-Usage-Tracker_x.y.z_x86_64.AppImage` dosyasını çalıştırılabilir yapın (`chmod +x`) ve açın. Açılmazsa FUSE 3'ü kurun (Debian ve Ubuntu'da `sudo apt install fuse3`) ya da dosyayı `APPIMAGE_EXTRACT_AND_RUN=1 ./AI-Usage-Tracker_x.y.z_x86_64.AppImage` ile başlatın.
 
-Uygulama üç biçimde de kendini günceller. `.deb` ve `.rpm` için sisteminiz parolanızı sorar ve güncellemeyi paket yöneticiniz kurar. Bu mümkün olmazsa uygulama yeni paketi elle kurmanızı ister.
+Uygulama üç biçimde de kendini günceller. `.deb` ve `.rpm` için sisteminiz parolanızı sorar.
 
-**GNOME'da tepsi simgesi.** GNOME tepsi simgelerini yalnızca AppIndicator eklentisiyle gösterir. Ubuntu'da hazır gelir; diğer GNOME sistemlerinde "AppIndicator and KStatusNotifierItem Support" eklentisini kurun.
+**GNOME'da tepsi simgesi.** GNOME tepsi simgelerini yalnızca AppIndicator eklentisiyle gösterir. Ubuntu'da bu eklenti hazır gelir. Diğer GNOME sistemlerinde "AppIndicator and KStatusNotifierItem Support" eklentisini kurun.
 
-**Widget kısayolu.** KDE Plasma ve GNOME'da, Wayland'de de, hangi programda olursanız olun çalışır. GNOME 47 ve öncesinde uygulama bunun için bir GNOME özel kısayolu ekler (Ayarlar → Klavye → Özel Kısayollar). Sway ya da Hyprland kullanıyorsanız `ai-usage-tracker --toggle-widget` komutuna kendiniz bir tuş atayın; örneğin Sway'de `bindsym Ctrl+Alt+Shift+w exec ai-usage-tracker --toggle-widget`, Hyprland'de `bind = CTRL ALT SHIFT, W, exec, ai-usage-tracker --toggle-widget`.
+**Widget kısayolu.** KDE Plasma ve GNOME'da, Wayland'de de, hangi programda olursanız olun çalışır. GNOME 47 ve öncesinde uygulama bunun için bir GNOME özel kısayolu ekler. Sway ya da Hyprland kullanıyorsanız `ai-usage-tracker --toggle-widget` komutuna kendiniz bir tuş atayın. Örneğin Sway'de `bindsym Ctrl+Alt+Shift+w exec ai-usage-tracker --toggle-widget`, Hyprland'de `bind = CTRL ALT SHIFT, W, exec, ai-usage-tracker --toggle-widget` kullanabilirsiniz.
 
-**Kaldırma.** `sudo apt remove ai-usage-tracker` ya da `sudo dnf remove ai-usage-tracker`. Paketi kaldırdığınızda, uygulamayı varsayılan klasörlerle (`~/.local/share` ve `~/.config`) kullanan her kullanıcı için **Canlı yakalama** ile Claude Code ayarlarında yapılan değişiklikler, önbellek tazeleme hook'u, limit hook'u, Claude Code ile Codex'teki devir notu hook'ları ve oturum açılışında başlatma kaydı geri alınır. AppImage kullanıyorsanız önce bu anahtarları kapatın ve önbellek tazeleme hook'unu **Ayarlar → Genel → Önbelleğin kalan süresi → Kaldır** ile çıkarın, **Limitler** sayfasındaki **Limit sıfırlanınca devam et** ve **Limit dolmadan devir notu** anahtarlarını da kapatın, sonra dosyayı silin. Verileriniz siz silene kadar `~/.local/share/AIUsageTracker` klasöründe kalır. GNOME'da widget kısayolunu da **Ayarlar → Widget kısayolu → Kaldır** bölümünden ya da GNOME'un klavye ayarlarından kaldırın.
+**Kaldırma.** `sudo apt remove ai-usage-tracker` ya da `sudo dnf remove ai-usage-tracker` komutunu çalıştırın. Paket kaldırılınca, uygulamayı varsayılan klasörlerle (`~/.local/share` ve `~/.config`) kullanan her kullanıcı için Claude Code ve Codex ayarlarındaki değişiklikler ve oturum açılışında başlatma kaydı geri alınır. AppImage kullanıyorsanız macOS kaldırma adımlarının ilk üçünü uygulayın, sonra dosyayı silin. Verileriniz siz silene kadar `~/.local/share/AIUsageTracker` klasöründe kalır. GNOME'da widget kısayolunu da **Ayarlar → Widget kısayolu → Kaldır** ile ya da sonradan GNOME'un klavye ayarlarından kaldırın.
 
 ### Dosyanın doğruluğunu kontrol edin
 
@@ -499,97 +233,86 @@ Her sürümde, her dosyanın sağlama değerini içeren bir `SHA256SUMS` dosyas�
 
 ## Gizlilik
 
-> **Prompt ve yanıtlarınız arşive alınmaz.** Uygulama kayıtlardan yalnızca token sayısı, model ve zaman gibi bilgileri alır; prompt ve yanıt metinleri uygulamanın arşivine kaydedilmez. Kullanım verileriniz bilgisayarınızdan hiçbir yere gönderilmez ve uygulamada telemetri yoktur.
+> **Prompt ve yanıtlarınız arşive alınmaz.** Uygulama kayıtlardan yalnızca token sayısı, model ve zaman gibi bilgileri alır. Prompt ve yanıt metinleri arşive kaydedilmez, kullanım verileriniz bilgisayarınızdan çıkmaz ve uygulamada telemetri yoktur.
 
-- **Okunanlar:** Araçların kendi kayıtlarındaki zaman damgası, model adı, proje klasörü, git dalı, oturum kimliği, alt ajan adı, her istemin gönderildiği an ve türü (metni asla), token sayıları, araç çağrılarının adı ve sonucu (girdisi ya da çıktısı asla) ve limit yüzdeleri.
-- **Saklananlar:** Yalnızca bu sayılar ve meta veriler. Hepsi uygulamanın veri klasöründeki `tracker.db` (SQLite) dosyasında durur: Windows'ta `%LOCALAPPDATA%\AIUsageTracker`, macOS'te `~/Library/Application Support/AIUsageTracker`, Linux'ta `~/.local/share/AIUsageTracker`. Proje adları bu bilgisayardan çıkmaz. İsterseniz adları tek tek ya da toplu olarak gizleyebilirsiniz; gizlenen adlar dışa aktarımlarda da maskelenir.
-- **Uygulamanın arşivinde hiçbir zaman tutulmayanlar:** Prompt ve yanıtlar, dosya içerikleri, kimlik bilgileri ve erişim token'ları. Uygulama, araçların oturum anahtarlarını tutan dosyaları (`.credentials.json`, `auth.json`) **okumaz**.
-- **Codex ve Claude hesapları:** Uygulama hesapları ayırt etmek için Codex hesap kimliğinin ve Claude planının bağlı olduğu kuruluş kimliğinin yalnızca geri çözülemeyen bir özetini saklar. Claude'da yalnızca bu kimliği okur: `~/.claude.json` dosyasından, telemetri kayıtlarından ve Claude masaüstünün Code sekmesi oturum listesindeki klasör adları ile oturum kimliklerinden. Hesap adları sizin verdiğiniz adlardır; e-posta adresi hiç okunmaz.
-- **Antigravity'nin geçici kopyası:** Antigravity, sohbetlerini metinleriyle birlikte bir veri tabanında tutar. Uygulama bu dosyaya dokunmamak için onu, yalnızca sizin erişebildiğiniz geçici bir klasöre kopyalar, sayıları okur ve kopyayı hemen siler. Uygulama zorla kapatılırsa kalan kopyalar, Antigravity bir sonraki okunduğunda 10 dakikadan eskiyse silinir. Sohbet metni uygulamanın arşivine hiçbir zaman alınmaz.
-- **OpenCode'un veritabanı:** OpenCode, oturumlarını metinleriyle birlikte tek bir veritabanında tutar. Uygulama bu dosyayı salt okunur açar ve yalnızca token sayılarını, modeli, sağlayıcıyı, ajanı, proje klasörünü ve araç çağrılarının adını, sonucunu ve zamanını sorar; metin hiç okunmaz.
-- **Önbellek tazeleme hook'u:** Önbellek tazelemeyi açarsanız `~/.claude/settings.json` dosyasına küçük bir hook eklenir (önce yedeği alınır). Hook ile uygulama, uygulamanın veri klasöründe yalnızca konuşmanın oturum kimliğiyle adlandırılmış küçük dosyaları paylaşır: konuşmanın sizi bekleyip beklemediği, en son ne zaman istem gönderdiğiniz ve tazeleme isteği. Hook konuşmayı hiç okumaz; **Ayarlar → Genel → Önbelleğin kalan süresi → Kaldır** onu yeniden çıkarır.
-- **Limit hook'u:** **Limit sıfırlanınca devam et** anahtarını açarsanız `~/.claude/settings.json` dosyasına küçük bir hook eklenir (önce yedeği alınır). Hook ile uygulama, uygulamanın veri klasöründe yalnızca konuşmanın oturum kimliğiyle adlandırılmış küçük dosyaları paylaşır: konuşmanın sıfırlanmayı bekleyip beklemediği, limitin onu ne zaman durdurduğu, ne zaman devam ettirildiği ve devam isteği. Konuşmayı devam ettiren mesaj uygulamanın içinde sabittir; bir dosyada yazan hiçbir şey konuşmaya ulaşmaz. Hook konuşmayı hiç okumaz; **Limitler** sayfasındaki anahtarı kapattığınızda yeniden çıkarılır.
-- **Devir notu hook'u:** **Limit dolmadan devir notu** anahtarını açarsanız `~/.claude/settings.json` dosyasına bir hook ve uygulamanın not klasörü için bir yazma izni eklenir (önce yedeği alınır). Hook ile uygulama, uygulamanın veri klasöründe küçük dosyalar paylaşır: her konuşmanın son limit okuması, tek Claude hesabı varken uygulamanın kendi Claude okuması ve hangi konuşmalardan not istendiği. Hook'un konuşmaya eklediği istek uygulamanın içinde sabittir. Notu Claude kendisi uygulamanın veri klasörüne yazar; uygulama notu okumaz, yalnızca açar ya da yolunu diğer araca verir. Notlar 14 gün sonra ya da **Tüm verilerimi sil** ile silinir; anahtarı kapattığınızda hook ve izin yeniden çıkarılır.
-- **Codex devir notu hook'u:** **Limit dolmadan devir notu** kartında Codex'i açarsanız `~/.codex/hooks.json` dosyasında üç olayın her birinin sonuna bir hook eklenir; sonradan yalnızca bu hook çıkarılır, Codex'in `config.toml` dosyasına hiç dokunulmaz. Hook limit için konuşmanın kendi Codex günlüğünün sonunu okur ve yalnızca o konuşmanın limit satırlarını alır; fork'un başındaki kopyalanmış geçmiş sayılmaz. Günlükte böyle bir satır yoksa, tek Codex hesabı varken uygulamanın kendi Codex okumasını kullanır. Başka bir şey saklamaz. Codex notu geçici klasörde yalnızca sizin açabileceğiniz bir klasöre yazar, uygulama da onu kendi veri klasörüne taşır; uygulama notu okumaz.
-- **Pencere zamanlayıcı:** Başlangıçta kapalıdır. Açıkken seçtiğiniz her gün kendi Claude Code'unuzu bir kez çalıştırıp tek küçük bir istek gönderir (bkz. [Limitlerinizi anlık izleyin](#limitlerinizi-anlık-izleyin) altındaki **Pencere zamanlayıcı**); bu çalıştırmada Claude Code'un telemetrisi, hata bildirimi, MCP sunucuları ve hook'ları kapalıdır.
-- **İnternet bağlantısı:** Uygulamanın kendisi internete yalnızca güncelleme ve yeni fiyat listesi denetimi için bağlanır. Her denetimde tek bir dosya, sürüm dosyası ya da bu depodaki `config/pricing.json` indirilir ve hiçbir veri gönderilmez (**Ayarlar → Güncellemeler**, **Ayarlar → Fiyatlar**). Varsayılan olarak açık gelen limit okumaları bilgisayarınızdaki Claude Code, Codex ve Antigravity CLI'ı çalıştırır; bu araçlar limit yüzdenizi kendi servislerinden sorar. Uygulama Claude Code'u telemetri ve hata raporlaması kapalı, Codex'i analitik kapalı olarak başlatır; Antigravity CLI'da böyle bir ayar yoktur. Limit okumalarını **Kaynaklar → Canlı yakalama** bölümünden kapatabilirsiniz. Bir aracı uygulamadan kurarsanız kurulum dosyası üreticinin sitesinden indirilir. Plan dosyası uygulamayla birlikte gelir. Döviz kuru için de internetten veri çekilmez; kuru kendiniz girersiniz.
+- **Okunanlar:** zaman damgası, model, proje klasörü, git dalı, oturum kimliği, alt ajan adı, her istemin gönderildiği an ve türü (metni asla), token sayıları, araç çağrılarının adı ve sonucu (girdisi ya da çıktısı asla) ve limit yüzdeleri.
+- **Saklananlar:** yalnızca bu değerler, uygulamanın veri klasöründeki `tracker.db` (SQLite) dosyasında: Windows'ta `%LOCALAPPDATA%\AIUsageTracker`, macOS'te `~/Library/Application Support/AIUsageTracker`, Linux'ta `~/.local/share/AIUsageTracker`. Proje adlarını gizleyebilirsiniz, gizlenen adlar dışa aktarımlarda da maskelenir.
+- **Hiçbir zaman tutulmayanlar:** prompt ve yanıtlar, dosya içerikleri, kimlik bilgileri ve erişim token'ları. Uygulama, araçların kimlik bilgisi dosyalarını okumaz.
+- **Hesaplar:** Uygulama hesapları ayırt etmek için Codex hesap kimliğinin ve Claude planının bağlı olduğu kuruluş kimliğinin yalnızca geri çözülemeyen bir özetini saklar. Claude'da yalnızca bu kimliği okur: `~/.claude.json` dosyasından, telemetri kayıtlarından ve Claude masaüstünün Code sekmesindeki oturum listesinden. Hesap adları sizin verdiğiniz adlardır ve e-posta adresi hiç okunmaz.
+- **Antigravity ve OpenCode:** İkisi de sohbet metnini bir veri tabanında tutar. Uygulama Antigravity'ninkini yalnızca sizin açabildiğiniz geçici bir kopyadan okur ve kopyayı hemen siler. OpenCode'unkini salt okunur açar. İkisinden de yalnızca sayıları ve meta verileri alır.
+- **İnternet bağlantısı:** Uygulamanın kendisi internete yalnızca güncelleme ve yeni fiyat listesi denetimi için bağlanır. Her denetim tek bir dosya indirir ve hiçbir veri göndermez. Limit okumaları kendi Claude Code, Codex ve Antigravity CLI kurulumunuzu çalıştırır ve bu araçlar limitlerinizi kendi servislerinden sorar. Uygulama bu okumalarda Claude Code'un telemetrisini ve Codex'in analitiğini kapatır. Uygulamadan kurduğunuz bir araç, üreticisinin sitesinden gelir.
+- **Pencere zamanlayıcı:** Açıksa seçtiğiniz her gün kendi Claude Code'unuzu bir kez çalıştırıp tek küçük bir istek gönderir. Bu çalıştırmada Claude Code'un telemetrisi, hata bildirimi, MCP sunucuları ve hook'ları kapalıdır.
+
+### Uygulamanın bilgisayarınızda değiştirdikleri
+
+Uygulama, Claude Code ve Codex dosyalarını yalnızca siz bir özelliği açınca değiştirir ve bir hook eklemeden önce size sorar. `~/.claude/settings.json` dosyasının her değişiklikten önce yedeğini alır. Bir özelliği kapattığınızda yalnızca uygulamanın yazdıkları çıkarılır, sizin değişiklikleriniz korunur.
+
+| Özellik | Ne ekler | Nasıl kaldırılır |
+|---|---|---|
+| **Önbellek tazeleme** | `~/.claude/settings.json` dosyasına bir hook | **Ayarlar → Genel → Önbelleğin kalan süresi → Kaldır** |
+| **Limit sıfırlanınca devam et** | `~/.claude/settings.json` dosyasına bir hook | **Limitler** sayfasındaki anahtarı kapatın |
+| **Limit dolmadan devir notu** (Claude Code) | `~/.claude/settings.json` dosyasına bir hook ve yalnızca uygulamanın not klasörü için bir yazma izni. Hook her konuşmanın başına kısa bir cümle ekler | **Limitler** sayfasındaki anahtarı kapatın |
+| **Limit dolmadan devir notu** (Codex) | `~/.codex/hooks.json` dosyasına bir hook. Codex bu hook'u bir kez onaylamanızı ister. Codex'in `config.toml` dosyasına dokunulmaz | Kartta Codex'i ya da anahtarın tamamını kapatın |
+| **Claude Code durum satırı köprüsü** | `~/.claude/settings.json` dosyasındaki `statusLine` alanı. Mevcut durum satırınız çalışmaya devam eder | **Kaynaklar → Canlı yakalama** bölümünden kapatın |
+| **Yerel telemetri alıcısı** | `~/.claude/settings.json` dosyasındaki `env` bloğuna log dışa aktarma değişkenleri | **Kaynaklar → Canlı yakalama** bölümünden kapatın |
+| **Oturum açınca başlat** | Uygulama için bir oturum açılışı kaydı | **Ayarlar → Oturum açınca başlat** seçeneğini kapatın |
+| **Widget kısayolu** (GNOME 47 ve öncesi, Wayland'de) | Widget tuşu için kendiliğinden eklenen bir GNOME özel kısayolu | **Ayarlar → Widget kısayolu → Kaldır** |
+
+Bir hook dosyada birkaç olayın altında görünebilir, her seferinde uygulamanın kendi komutuyla. Önbellek tazeleme ve limit hook'ları konuşmayı hiç okumaz. Limit ve devir notu hook'larının konuşmaya eklediği mesajlar uygulamanın içinde sabittir. Codex hook'u konuşmanın kendi Codex kaydının sonunu okur ve yalnızca limit satırlarını alır. Codex notunu geçici klasörde yalnızca sizin açabileceğiniz bir klasöre yazar, uygulama da onu kendi veri klasörüne taşır. Uygulama devir notlarını okumaz, yalnızca açar ya da yolunu diğer araca verir.
+
+Windows kaldırıcısı ve Linux paketinin kaldırılması, GNOME kısayolu dışında bu değişiklikleri geri alır. Güncellemeler bunlara dokunmaz. macOS'te ve AppImage'da uygulamayı silmeden önce bunları kapatın.
 
 ### Canlı yakalama
 
-**Kaynaklar → Canlı yakalama** bölümünde beş yöntem bulunur. **Claude, Codex ve Antigravity limit okuma varsayılan olarak açıktır.** Bu üçü için uygulama hiçbir dosyayı değiştirmez, modele istek göndermez ve yalnızca kendi Claude Code, Codex ya da Antigravity CLI oturumunuzu kullanır. Okumalar uygulama açıldıktan birkaç saniye sonra yapılır; widget güncel limitlerinizi hemen gösterir. Claude Code'un ayar dosyasını değiştiren diğer iki yöntem **varsayılan olarak kapalıdır**. Her yöntemin neyi değiştirdiği ekranda yazar; yöntemi kapattığınızda değişiklik geri alınır. Windows'ta uygulama, Linux'ta paket kaldırılırken bu değişiklikler kendiliğinden geri alınır; güncellemelerde ise dokunulmaz. macOS'te ve AppImage'da uygulamayı silmeden önce bu anahtarları kapatın.
+**Kaynaklar → Canlı yakalama** bölümünde beş anahtar bulunur. Üç limit okuması varsayılan olarak açıktır. Bunlar hiçbir dosyayı değiştirmez, modele istek göndermez ve yalnızca kendi oturumunuzu kullanır. Claude Code'un ayarlarını değiştiren iki yöntem varsayılan olarak kapalıdır.
 
 ![Canlı yakalama paneli: beş anahtar, her birinin neyi değiştirdiği ve limit okumalarının ne sıklıkla yapıldığı](assets/readme/capture-tr.webp)
 
-| Yöntem                               | Ne yapar                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Neyi değiştirir                                                                                                                                                                                                        |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Claude limit okuma**               | Claude Code'un kendi kullanım sorgusuyla 5 saatlik ve haftalık limit yüzdenizi okur. Modele istek gönderilmediği için kotanızdan bir şey harcanmaz. Claude'u kullanırken 5 dakikada bir ya da **Sıklık** alanında seçtiğiniz aralıkla güncellenir (Claude'un kullanım servisi 5 dakikadan sık sorulmasına izin vermez); kullanmadığınızda en sık 15 dakikada bir güncellenir. Böylece Claude masaüstü sohbetleri, Code sekmesi, Cowork ve web kullanımı da yansır. Claude Code'da Pro/Max hesabıyla oturum açmış olmanız gerekir (`claude` → `/login`). | Hiçbir şeyi değiştirmez. Kendi Claude Code kurulumunuzu ve oturumunuzu kullanır. Okuma sırasında MCP sunucuları, hook'lar, telemetri, hata raporlaması ve otomatik güncelleme kapalıdır. Giriş bilgilerinize dokunmaz. |
-| **Codex limit okuma**                | Codex'in resmi arayüzüyle 5 saatlik ve haftalık limit yüzdenizi 5 dakikada bir okur (**Sıklık** alanından dakikada birden saatte bire kadar değiştirebilirsiniz). Böylece Codex'i kullanmadığınız zamanlarda da değer güncel kalır. Birden fazla Codex kuruluysa (örneğin macOS'te ChatGPT uygulamasının içindeki) en yenisi kullanılır. | Hiçbir dosyayı değiştirmez. Kendi Codex kurulumunuzu ve oturumunuzu analitik kapalı olarak kullanır. Giriş bilgilerinize dokunmaz.                                                                                     |
-| **Antigravity limit okuma**          | Antigravity CLI'ın (`agy`) kendi `/usage` komutuyla Gemini ve Claude/GPT havuzlarının 5 saatlik ve haftalık limit yüzdenizi 5 dakikada bir okur (**Sıklık** alanından dakikada birden saatte bire kadar değiştirebilirsiniz). Antigravity uygulaması ve IDE bu okumayı yapamaz; `agy` gerekir. | Hiçbir dosyayı değiştirmez. Kendi `agy` kurulumunuzu ve Google oturumunuzu kullanır; okuma sırasında `agy` kendini güncellemez. Giriş bilgilerinize dokunmaz. |
-| **Claude Code durum satırı köprüsü** | Claude Code'un resmi `statusLine` verisinden (Pro/Max) 5 saatlik ve haftalık limit yüzdenizi ve her konuşmada önbelleğin kaç kez, neden yeniden yazıldığını kaydeder. Zaten bir durum satırınız varsa aynı girdiyle çalışmaya devam eder. İsterseniz satırın sonuna konuşmanın önbelleğinin silineceği saati (**Ayarlar → Genel → Önbelleğin kalan süresi**) ve konuşmanın Claude Code'un hesapladığı şimdiye kadarki tutarını uygulamanın para birimiyle (köprünün altındaki **Konuşmanın maliyeti**) de ekler. Yalnızca Claude Code'un durum satırı gösterdiği yerde (terminalde) çalışır; Claude masaüstündeki Code sekmesi durum satırı çalıştırmaz.                                 | `~/.claude/settings.json` dosyasındaki `statusLine` alanı (önce yedeği alınır).                                                                                                                                        |
-| **Yerel telemetri alıcısı**          | Claude Code'un resmi telemetri verisinden istek bazında token sayılarını ve her isteğin hangi Claude hesabından gittiğini alır. Kayıt dosyalarında görünmeyen yardımcı model çağrılarını da yakalar.                                                                                                                                                                                                                                                                                                                             | `~/.claude/settings.json` dosyasındaki `env` bloğuna yalnızca log dışa aktarma değişkenleri eklenir. Alıcı yalnızca `127.0.0.1` adresini dinler ve yalnızca bu kuruluma özel anahtarı taşıyan istekleri kabul eder.    |
+| Yöntem | Ne yapar | Ne gerekir |
+|---|---|---|
+| **Claude limit okuma** | Claude'u kullanırken limitlerinizi 5 dakikada bir Claude Code'un kendi kullanım sorgusuyla okur. Claude masaüstü, Cowork ve web kullanımı da yansır | Claude Code'da Pro ya da Max hesabıyla oturum (`claude` → `/login`) |
+| **Codex limit okuma** | Limitlerinizi Codex'in resmi arayüzüyle 5 dakikada bir ya da **Sıklık** alanında seçtiğiniz aralıkla okur | Oturum açılmış Codex |
+| **Antigravity limit okuma** | Gemini ve Claude/GPT limitlerini `agy` aracının `/usage` komutuyla 5 dakikada bir ya da seçtiğiniz aralıkla okur | Antigravity CLI (`agy`). Antigravity uygulaması ve IDE bu okumayı yapamaz |
+| **Claude Code durum satırı köprüsü** | Claude Code'un resmi `statusLine` verisinden limitleri ve önbellek yeniden yazmalarını kaydeder. İsterseniz durum satırınıza önbelleğin süresini ve konuşmanın maliyetini de ekler | Terminalde Pro ya da Max hesaplı Claude Code. Claude masaüstündeki Code sekmesi durum satırı çalıştırmaz |
+| **Yerel telemetri alıcısı** | Claude Code'un resmi telemetrisinden istek bazında token sayılarını ve Claude hesabını alır. Kayıtlarda olmayan yardımcı çağrıları da yakalar. Yalnızca `127.0.0.1` adresini dinler, bu kuruluma özel bir anahtar kullanır ve prompt kaydını hiçbir zaman açmaz | Claude Code |
 
-Limit okuma için gereken araç kurulu değilse kartında **Kur** ve **Kurulum sayfası** düğmeleri çıkar. **Kur**, aracı üreticinin resmi kurulum betiğiyle kurar: Claude Code için `claude.ai/install`, Codex için `chatgpt.com/codex/install`, Antigravity CLI için `antigravity.google/cli/install`. Araç kurulu ama giriş yapılmamışsa genel bakışta ve ilgili kartta nasıl giriş yapacağınız adım adım yazar; **Tekrar dene** ile limitleri hemen okutabilirsiniz.
-
-Güvenlik önlemleri:
-
-- Hem telemetride hem kayıt dosyasında görünen bir istek bir kez sayılır.
-- E-posta adresi hiç okunmaz, hesap kimlikleri yalnızca geri çözülemeyen özet olarak saklanır; prompt kaydı hiçbir zaman açılmaz.
-- Kendi telemetri kurulumunuz varsa uygulama ona dokunmaz ve sizi uyarır.
-- Bir anahtarı kapattığınızda yalnızca uygulamanın yazdığı değerler geri alınır; sizin yaptığınız değişiklikler korunur.
+Limit okuma için gereken araç kurulu değilse kartında **Kur** düğmesi çıkar. Bu düğme üreticinin kendi kurulum betiğini kullanır (`claude.ai/install`, `chatgpt.com/codex/install` ya da `antigravity.google/cli/install`). Araçta oturum kapalıysa kart nasıl giriş yapacağınızı gösterir. Kendi telemetri kurulumunuz varsa uygulama ona dokunmaz ve sizi uyarır.
 
 ## Nasıl çalışır
 
 Her şey sizin bilgisayarınızda olur:
 
-1. Claude Code, Cowork, Claude masaüstü, Codex (CLI ve masaüstü), Antigravity (uygulama, IDE ve CLI) ve OpenCode kullanım kayıtlarını diske yazar.
-2. Uygulama bu kayıtları okur ve içlerinden yalnızca token sayısı, model ve zaman gibi bilgileri alır. Prompt ve yanıt metinleri uygulamanın arşivine kaydedilmez.
+1. Yapay zekâ araçlarınız kullanım kayıtlarını zaten diske yazar.
+2. Uygulama her kaydı kaldığı yerden okur ve yerel bir SQLite arşivinde yalnızca sayıları ve meta verileri tutar. Akış sırasındaki ara kayıtlar ile devam ettirilen ya da çatallanan oturumlardaki tekrarlar bir kez sayılır.
 3. Limit okumaları açıksa limit yüzdeleri bilgisayarınızdaki `claude`, `codex` ve `agy` üzerinden alınır.
-4. Yerel veri tabanına (SQLite) yalnızca sayılar ve meta veriler yazılır.
-5. Panel, widget, tepsi simgesi ve PDF özet bu veri tabanını kullanır.
-
-Kayıtlar her seferinde baştan değil, kalınan yerden okunur; yeniden tarama yalnızca yeni eklenen kısmı işler. Aynı yanıtın ara kayıtları ile devam ettirilen ya da kopyalanarak yeni oturuma dönüştürülen sohbetlerdeki tekrarlar ve arşive taşınan Codex dosyaları yalnızca bir kez sayılır.
+4. Panel, widget, tepsi simgesi ve PDF özet bu arşivi kullanır.
 
 ## Güncellemeler
 
-Uygulama açılışta ve 6 saatte bir yeni sürüm olup olmadığına bakar. Bunun için bu deponun sürümlerinden yalnızca küçük bir sürüm dosyası indirir ve hiçbir veri göndermez. Yeni sürüm hazır olduğunda, siz kurana kadar pencerenin sol altında gösterilir. Güncelleme yalnızca siz onayladıktan sonra ve imzası uygulamaya gömülü anahtarla eşleşirse kurulur. Denetimi **Ayarlar → Güncellemeler** bölümünden kapatabilirsiniz.
+Uygulama açılışta ve 6 saatte bir yeni sürüm olup olmadığına bakar. Bunun için yalnızca küçük bir sürüm dosyası indirir ve hiçbir veri göndermez. Güncelleme yalnızca siz onayladıktan sonra ve imzası uygulamaya gömülü anahtarla eşleşirse kurulur. Denetimi **Ayarlar → Güncellemeler** bölümünden kapatabilirsiniz.
 
 ## Bilinen sınırlamalar
 
-- **Claude Code toplamları:** Claude Code kayıtları ana model dışındaki yardımcı çağrıları içermez. Bu yüzden toplamlar gerçek kullanımın biraz altında kalabilir.
-- **Masaüstü sohbetleri:** Claude masaüstü ve ChatGPT masaüstü sohbetlerinin token sayıları yerelde bulunmaz.
-- **Codex hızlı katmanı:** Codex fast/priority katmanını istek bazında kaydetmediği için standart fiyat uygulanır.
-- **Yalnızca telemetriden bilinen istekler:** Bu isteklerde önbellek yazmaları 5 dakikalık fiyattan hesaplanır, bu yüzden maliyetleri biraz düşük çıkabilir.
-- **`codex-auto-review`:** Bu modelin resmi fiyatı yayımlanmamıştır.
-- **Eski Antigravity konuşmaları:** Antigravity'nin eski sürümlerinin şifreli olarak sakladığı `.pb` konuşmaları ve veritabanı silinmiş konuşmalar okunmaz; bunlarda gerçek token sayısı bulunmaz.
-- **Google AI plan fiyatları:** Ülkeye ve kampanyaya göre değiştiği için Antigravity planınızın aylık ücretini kendiniz girersiniz.
-- **OpenCode:** Oturuma ad veren istekler OpenCode tarafından kaydedilmediği için bunlar eksik kalır; model kullanımını bildirmeden durdurulan bir istek de token'sız kaydedilir. Gösterilen maliyet modelin kendi API fiyatıdır; OpenRouter, GitHub Copilot ya da OpenCode Zen'in aldığı ücret değildir. Anthropic, OpenAI, Google, DeepSeek, Moonshot AI (Kimi), Z.ai (GLM), Alibaba Cloud (Qwen), xAI (Grok), Mistral ve MiniMax modelleri, üreticinin kendi fiyat sayfasındaki fiyatla hesaplanır. DeepSeek'in yoğun saatleri dışında yapılan istekler, DeepSeek'in aldığı gibi yarı fiyatla hesaplanır. Diğer modeller, üreticinin OpenCode'un bilgisayarınızdaki model kataloğunda bir fiyatı varsa o fiyatı alır; uygulama bu fiyatları "doğrulanmadı" diye işaretler. Üretici fiyatı olmayan model maliyete girmez.
-- **Kayıt biçimleri:** Araçların kayıt biçimleri resmi olarak belgelenmiş değildir ve sürümden sürüme değişebilir. Uygulama bilmediği alanları atlar ve tanıyamadığı kayıtları **Kaynaklar** ekranında listeler.
+- **Claude Code toplamları** biraz düşük kalabilir, çünkü ana model dışındaki yardımcı çağrılar kayıtlarda yer almaz.
+- **Masaüstü sohbetlerinin** (Claude ve ChatGPT) token sayıları yerelde bulunmaz.
+- **Codex'in hızlı katmanı** istek bazında kaydedilmediği için standart fiyat uygulanır.
+- **Eski Antigravity konuşmaları** okunmaz. Antigravity'nin eski sürümleri bunları şifreli `.pb` dosyaları olarak saklıyordu.
+- **Google AI plan fiyatları** ülkeye ve kampanyaya göre değiştiği için Antigravity planınızın ücretini kendiniz girersiniz.
+- **OpenCode** maliyeti, modeli yapan şirketin API fiyatıdır. OpenRouter, GitHub Copilot ya da OpenCode Zen'in aldığı ücret değildir. Üretici fiyatı olmayan model maliyete girmez.
+- **Kayıt biçimleri** resmi olarak belgelenmiş değildir ve değişebilir. Uygulama bilmediği alanları atlar ve tanıyamadığı dosyaları **Kaynaklar** ekranında listeler.
 
 ## Kaynaktan derleme
 
-Gereksinimler: Rust 1.99+ (CI'ın ve sürüm derlemelerinin kullandığı sürüm) ve Node 22.12+; bunlara ek olarak:
-
-- **Windows:** Visual Studio Build Tools (C++)
-- **macOS:** Xcode Command Line Tools; universal sürüm derlemesi için ayrıca `rustup target add aarch64-apple-darwin x86_64-apple-darwin`
-- **Linux:** WebKitGTK 4.1 ve geliştirme dosyaları; örneğin Debian ve Ubuntu'da `sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev`
+Rust 1.99+ ve Node 22.12+ gerekir. Bunlara ek olarak Windows'ta Visual Studio Build Tools (C++), macOS'te Xcode Command Line Tools, Linux'ta WebKitGTK 4.1 ve geliştirme dosyaları gerekir (Debian ve Ubuntu'da `sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev`).
 
 ```bash
 npm --prefix ui install
-cargo test -p tracker-core              # parser, hesaplama ve içe aktarma testleri
-npx --prefix ui tauri dev               # geliştirme modu
-npm --prefix ui run release             # paketler → target/release/bundle/release/
+cargo test -p tracker-core
+npx --prefix ui tauri dev
+npm --prefix ui run release
 ```
 
-Yalnızca `npm --prefix ui run dev` komutunu çalıştırırsanız panel tarayıcıda örnek verilerle açılır.
-
-| Klasör                | İçerik                                                                                                                 |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `crates/tracker-core` | Rust çekirdeği: keşif, ayrıştırıcılar, SQLite arşivi, fiyatlandırma, analiz, dışa aktarma (ve sentetik örnek kayıtlar) |
-| `src-tauri`           | Masaüstü kabuğu: arka plan işçisi, dosya izleme, tepsi simgesi, widget, IPC                                            |
-| `ui`                  | Svelte 5 arayüzü (panel ve widget)                                                                                     |
-| `config`              | `pricing.json`, `plans.json`, `updates.json` (yayın yeri)                                                              |
-
-Hata bildirimlerinizi, pull request'lerinizi ve geri bildirimlerinizi almaktan mutluluk duyarım.
+Yalnızca `npm --prefix ui run dev` komutunu çalıştırırsanız panel tarayıcıda örnek verilerle açılır. Hata bildirimlerinizi ve pull request'lerinizi bekliyorum.
 
 ## Kod imzalama politikası
 
