@@ -45,6 +45,7 @@
               st.antigravity_poll &&
               st.antigravity_candidates_found &&
               st.antigravity.last_error === 'agy_not_signed_in' &&
+              app.settings?.plans.google !== 'api' &&
               sources.includes('antigravity') &&
               !arriving('google'),
             binary: st.antigravity.binary,

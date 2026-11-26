@@ -211,12 +211,16 @@ fn signal(app: &AppHandle, s: &Settings, c: &Cache, auto: bool) -> Result<(), St
     let state = app.state::<AppState>();
     let dirs = hook_dirs(&state);
     let dir = waiter_dir(&dirs, &c.session_id).ok_or("not_waiting")?;
+    // under the record's lock: the tick and a click at the same moment send one signal, not two
+    let mut b = BOOK.lock().unwrap();
+    load(&state, &mut b);
+    if on_its_way(&b, &c.session_id) {
+        return Err("refreshing".into());
+    }
     // before the signal: the hook can take it at once, and a refresh counts only from a later take
     let now = now_ms();
     rh::signal(dir, rh::Wait::Cache, &c.session_id, message(s)).map_err(|e| e.to_string())?;
     log::info!("cache refresh {}", if auto { "(automatic)" } else { "(by hand)" });
-    let mut b = BOOK.lock().unwrap();
-    load(&state, &mut b);
     b.failed.remove(&c.session_id);
     b.log.push(Refresh { at_ms: now, session_id: c.session_id.clone(), usd: c.refresh_usd, auto, done: false, before_ms: c.expires_ms, stalled: false });
     save(&state, &mut b);

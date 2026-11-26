@@ -147,10 +147,10 @@ fn read(path: &Path, state: &Value) -> Result<ParseOutput, Box<dyn std::error::E
     Ok(out)
 }
 
-/// Returns how many of the session's records are not valid JSON and were left out, and whether a
-/// tool call has no outcome yet.
+/// Returns how many of the session's records were damaged and left out (so the session is read
+/// again once they change), and whether a tool call has no outcome yet.
 fn read_session(conn: &Connection, sessions: &HashMap<String, Session>, id: &str, out: &mut ParseOutput) -> rusqlite::Result<(usize, bool)> {
-    let damaged: usize = conn.query_row(
+    let mut damaged: usize = conn.query_row(
         "SELECT count(*) FROM part p JOIN message m ON m.id = p.message_id WHERE p.session_id = ?1 AND NOT (json_valid(p.data) AND json_valid(m.data))",
         [id],
         |r| r.get::<_, i64>(0),
@@ -202,6 +202,7 @@ fn read_session(conn: &Connection, sessions: &HashMap<String, Session>, id: &str
         let row = match row {
             Err(e) if unexpected_field(&e) => {
                 out.warn(format!("session {id}: a part with unexpected fields was skipped"));
+                damaged += 1;
                 continue;
             }
             r => r?,
@@ -219,6 +220,7 @@ fn read_session(conn: &Connection, sessions: &HashMap<String, Session>, id: &str
             Some("step-finish") => {
                 let Some(tokens) = tokens(&row.counts) else {
                     out.warn(format!("step {}: implausible token count", row.part));
+                    damaged += 1;
                     continue;
                 };
                 // a request that failed before its usage arrived is stored with zeros; one made

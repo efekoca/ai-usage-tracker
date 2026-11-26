@@ -331,7 +331,8 @@ const CATALOG_VENDORS: [&str; 13] = ["anthropic", "openai", "google", "deepseek"
 pub fn catalog_prices(json: &str) -> HashMap<String, ModelPrice> {
     let mut out = HashMap::new();
     let Ok(serde_json::Value::Object(all)) = serde_json::from_str::<serde_json::Value>(json) else { return out };
-    let num = |v: &serde_json::Value, k: &str| v.get(k).and_then(serde_json::Value::as_f64).filter(|x| x.is_finite() && *x >= 0.0);
+    // the same bounds as the shipped list, so a catalog entry cannot make a cost infinite either
+    let num = |v: &serde_json::Value, k: &str| v.get(k).and_then(serde_json::Value::as_f64).filter(|x| (0.0..=MAX_RATE).contains(x));
     let rates = |c: &serde_json::Value| -> Option<Rates> {
         Some(Rates { input: num(c, "input")?, output: num(c, "output")?, cache_read: num(c, "cache_read"), cache_write_5m: num(c, "cache_write"), cache_write_1h: None })
     };
@@ -784,6 +785,8 @@ mod tests {
         assert_eq!(cost(&b, "glm-4.7-flash", &t, 0, None, None), None);
         assert_eq!(b.catalog_entries(["deepseek-chat", "glm-5.1", "llama-4"]).iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["deepseek-chat"]);
         assert!(catalog_prices("not json").is_empty());
+        let huge = catalog_prices(r#"{"deepseek": {"models": {"deepseek-x": {"id": "deepseek-x", "cost": {"input": 1e308, "output": 1}}}}}"#);
+        assert!(huge.is_empty(), "a price past the cap is no price");
     }
 
     #[test]

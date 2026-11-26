@@ -35,6 +35,8 @@ pub fn candidates(env: &Env, configured: Option<&Path>) -> Vec<PathBuf> {
     }
     #[cfg(not(windows))]
     v.extend(super::unix_bin_dirs(env).into_iter().map(|d| d.join(&agy)));
+    // the Antigravity 2.0 app's own copy, kept off PATH; last, so a CLI installed apart wins
+    v.extend(env.home.iter().map(|h| h.join(".gemini").join("bin").join(&agy)));
     v.retain(|p| p.is_absolute());
     v
 }
@@ -76,7 +78,8 @@ pub fn parse_output(v: &Value, now_ms: i64) -> Vec<LimitSnapshot> {
                 limit_id: pool_of(b, g),
                 window: window.into(),
                 used_pct: Some(((1.0 - left.clamp(0.0, 1.0)) * 100.0 * 100.0).round() / 100.0),
-                resets_at: str_at(b, "reset_time").and_then(parse_ts_ms).map(|ms| ms / 1000),
+                // an unused pool says 1970: no window is open
+                resets_at: str_at(b, "reset_time").and_then(parse_ts_ms).filter(|&ms| ms > 0).map(|ms| ms / 1000),
                 status: None,
                 plan: None,
                 source: SOURCE.into(),
@@ -167,7 +170,7 @@ mod tests {
                 {"id": "gemini-5h", "window": "5h", "remaining_fraction": 0.25, "reset_time": "2026-10-08T11:09:06Z"}]},
             {"name": "Claude and GPT models", "buckets": [
                 {"id": "3p-weekly", "window": "weekly", "remaining_fraction": 1, "reset_time": "2026-10-15T06:09:44Z"},
-                {"id": "3p-5h", "window": "5h", "remaining_fraction": 1}]}]}}})
+                {"id": "3p-5h", "window": "5h", "remaining_fraction": 1, "reset_time": "1970-01-01T00:00:00Z"}]}]}}})
     }
 
     #[test]
@@ -241,6 +244,7 @@ mod tests {
         assert_eq!(c[0], home.join("AppData").join("Local").join("agy").join("bin").join("agy.exe"));
         #[cfg(not(windows))]
         assert!(c.contains(&home.join(".local").join("bin").join("agy")));
+        assert_eq!(c.last(), Some(&home.join(".gemini").join("bin").join(super::super::exe("agy"))), "the app's own copy, last");
     }
 
     #[test]

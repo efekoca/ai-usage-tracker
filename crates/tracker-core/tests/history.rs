@@ -514,6 +514,16 @@ fn antigravity_limits_get_plan_advice_from_either_pool() {
 }
 
 #[test]
+fn both_antigravity_pools_full_in_one_week_are_one_full_week() {
+    let reset = NOW - 2 * DAY;
+    let v = vec![antigravity(reset - HOUR, "gemini", "seven_day", 100.0, reset), antigravity(reset - HOUR, "3p", "seven_day", 100.0, reset + 2 * HOUR)];
+    let h = limit_history(&store_with(v), NOW, 28).unwrap();
+    let a = plan_advice(&h, Provider::Google, Some("pro"), &PlansFile::bundled(), NOW);
+    assert_eq!((a.weekly.windows, a.weekly.full), (1, 1));
+    assert!(!a.strong, "one full week, not two");
+}
+
+#[test]
 fn readings_that_contradict_their_reset_times_neither_panic_nor_invert_a_window() {
     // a later window was first read before an earlier window began
     let n = NOW - 12 * HOUR;

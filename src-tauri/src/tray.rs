@@ -492,15 +492,22 @@ fn fit_tooltip(text: String) -> String {
 
 fn update(app: &AppHandle) {
     let epoch = crate::alerts::epoch();
-    let s = app.state::<AppState>().settings.read().unwrap().clone();
+    let state = app.state::<AppState>();
+    // as a writer: "Delete all data" waits for a tick that read the settings before it
+    let writing = state.writers.read().unwrap_or_else(|e| e.into_inner());
+    let s = state.settings.read().unwrap().clone();
     let Some(readings) = readings(app, &s) else { return };
     let now = chrono::Utc::now().timestamp_millis();
-    let caches = crate::caches::followed(&app.state::<AppState>(), &s, now);
-    guarded("refresh", || crate::refresh::tick(app, &s, &caches, now));
-    guarded("resume", || crate::resume::tick(app, &s, now));
-    guarded("handoff", || crate::handoff::tick(app, &s, now));
-    guarded("opener", || crate::opener::tick(app, &s, now));
+    let caches = crate::caches::followed(&state, &s, now);
+    // before the first setup nothing is refreshed, continued, asked for or opened
+    if s.onboarded {
+        guarded("refresh", || crate::refresh::tick(app, &s, &caches, now));
+        guarded("resume", || crate::resume::tick(app, &s, now));
+        guarded("handoff", || crate::handoff::tick(app, &s, now));
+        guarded("opener", || crate::opener::tick(app, &s, now));
+    }
     guarded("alerts", || crate::alerts::check(app, &s, &readings, &caches, epoch));
+    drop(writing);
     let Some(tray) = app.tray_by_id(ID) else { return };
     let limits = current_limits(&readings);
     let update = app.state::<AppState>().updates.lock().unwrap().available.as_ref().map(|a| a.version.clone());

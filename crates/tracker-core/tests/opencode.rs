@@ -379,6 +379,10 @@ fn opencode_is_found_in_its_xdg_folder_its_channel_databases_and_opencode_db() {
     assert!(status.found && status.supported);
     let none = Env { home: Some(dir.path().join("nobody")), ..Default::default() };
     assert!(!detect(&none, &ExtraPaths::default()).into_iter().find(|s| s.id == SourceId::OpenCode).unwrap().found);
+    // only a database `OPENCODE_DB` names, no data folder
+    let alone = Env { home: Some(dir.path().join("nobody")), opencode_db: env.opencode_db.clone(), ..Default::default() };
+    let status = detect(&alone, &ExtraPaths::default()).into_iter().find(|s| s.id == SourceId::OpenCode).unwrap();
+    assert!(status.found && status.file_count == 1);
 }
 
 #[test]
@@ -451,4 +455,23 @@ fn a_part_with_a_count_of_the_wrong_type_is_skipped_and_the_rest_is_read() {
     assert!(rep.errors.is_empty(), "{:?}", rep.errors);
     assert!(rep.warnings.iter().any(|(_, w)| w.contains("unexpected fields")), "{:?}", rep.warnings);
     assert_eq!(events(&store).len(), 4);
+}
+
+#[test]
+fn an_invalid_field_repaired_in_place_is_read_again() {
+    let db = opencode();
+    let c = &db.conn;
+    c.execute(
+        "INSERT INTO part VALUES('prt_repaired', 'msg_001', ?1, ?2, ?2, ?3)",
+        params![MAIN, T0 + 1600, r#"{"type":"step-finish","tokens":{"input":"10","output":5}}"#],
+    )
+    .unwrap();
+    let mut store = Store::open_in_memory().unwrap();
+    let first = run(&mut store, &db.env);
+    assert!(first.warnings.iter().any(|(_, w)| w.contains("unexpected fields")));
+    assert_eq!(events(&store).len(), 4);
+    c.execute("UPDATE part SET data = json_set(data, '$.tokens.input', 10), time_updated = time_updated + 1 WHERE id = 'prt_repaired'", []).unwrap();
+    let second = run(&mut store, &db.env);
+    assert!(second.errors.is_empty());
+    assert_eq!(events(&store).len(), 5);
 }

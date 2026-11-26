@@ -437,7 +437,12 @@ pub fn detect(env: &Env, extra: &ExtraPaths) -> Vec<SourceStatus> {
                 SourceId::Codex => existing(codex_homes(env, extra)),
                 SourceId::ChatgptDesktop => existing(chatgpt_desktop_dirs(env)),
                 SourceId::Antigravity => existing(antigravity_dirs(env)),
-                SourceId::OpenCode => existing(opencode_dirs(env)),
+                // `OPENCODE_DB` can name a database outside the data folder
+                SourceId::OpenCode => {
+                    let mut roots = existing(opencode_dirs(env));
+                    roots.extend(files.iter().filter(|f| f.source == id).filter_map(|f| f.path.parent().map(Path::to_path_buf)));
+                    unique(roots)
+                }
             };
             let file_count = count(id);
             // A tool counts as found if its data directory exists, even with no usage yet.
