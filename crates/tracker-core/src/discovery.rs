@@ -243,12 +243,16 @@ fn opencode_dbs(env: &Env) -> Vec<PathBuf> {
             }
         }
     }
-    if let Some(db) = env.opencode_db.as_deref().filter(|d| *d != ":memory:") {
-        let given = Path::new(db);
-        let found = if given.is_absolute() { vec![given.to_path_buf()] } else { dirs.iter().map(|d| d.join(given)).collect() };
-        v.extend(found.into_iter().filter(|p| p.is_file()));
-    }
+    v.extend(opencode_custom_dbs(env).into_iter().filter(|p| p.is_file()));
     v
+}
+
+/// Where `OPENCODE_DB` points (absolute, or in each data folder), whether or not the file is there
+/// yet, so a database made later is watched too.
+pub fn opencode_custom_dbs(env: &Env) -> Vec<PathBuf> {
+    let Some(db) = env.opencode_db.as_deref().filter(|d| *d != ":memory:") else { return Vec::new() };
+    let given = Path::new(db);
+    if given.is_absolute() { vec![given.to_path_buf()] } else { opencode_dirs(env).iter().map(|d| d.join(given)).collect() }
 }
 
 /// When a SQLite database was last written: the file itself or its write-ahead log.

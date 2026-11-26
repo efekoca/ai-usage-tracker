@@ -36,7 +36,13 @@
           },
           {
             kind: 'codex' as const,
-            on: st.codex_poll && st.codex_candidates_found && st.codex.last_error === 'codex_not_signed_in' && sources.includes('codex') && !arriving('openai'),
+            on:
+              st.codex_poll &&
+              st.codex_candidates_found &&
+              st.codex.last_error === 'codex_not_signed_in' &&
+              app.settings?.plans.openai !== 'api' &&
+              sources.includes('codex') &&
+              !arriving('openai'),
             binary: st.codex.binary,
           },
           {

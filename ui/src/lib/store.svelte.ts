@@ -22,6 +22,8 @@ export const app = $state({
   limitsTab: 'current' as 'current' | 'history',
   /** A session the Sessions page opens once it loads (`tool` + `session_id`), set from the command palette. */
   openSession: null as string | null,
+  /** Folders "Delete all data" could not empty, for the first setup to name. */
+  wipeLeft: [] as string[],
   /** bumps whenever backend data changes, so views can refetch their own data */
   tick: 0,
   /** The local date (YYYY-MM-DD); it moves on at midnight, so "today" and the periods do too. */
@@ -133,6 +135,8 @@ export function latest<T>(load: () => Promise<T>, done: (v: T) => void, fail?: (
 
 export type SettingsPatch = Partial<Settings> | ((s: Settings) => Partial<Settings>)
 let saving: Promise<unknown> = Promise.resolve()
+/** Bumped when "Delete all data" sends the app back to onboarding: a save answered after it is stale. */
+let restarts = 0
 
 /** One save at a time, each patch applied to the newest settings, so quick changes never undo each other. */
 export function saveSettings(patch: SettingsPatch): Promise<void> {
@@ -140,8 +144,12 @@ export function saveSettings(patch: SettingsPatch): Promise<void> {
     if (!app.settings) return
     const cur = $state.snapshot(app.settings) as Settings
     const next = { ...cur, ...(typeof patch === 'function' ? patch(cur) : patch) } as Settings
+    const at = restarts
     // only what this page changed is saved over what the tray or a shortcut changed meanwhile
-    app.settings = await api.saveSettings(next, cur)
+    const saved = await api.saveSettings(next, cur)
+    // a reply from before "Delete all data" would take the app back out of onboarding
+    if (at !== restarts) return
+    app.settings = saved
     applyAppearance(app.settings, app.info)
   }
   const p = saving.then(run)
@@ -165,11 +173,16 @@ export async function init() {
     const wasOnboarded = app.settings?.onboarded
     app.settings = s
     applyAppearance(s, app.info)
-    if (!wasOnboarded && s.onboarded) refreshSoon()
+    if (!wasOnboarded && s.onboarded) {
+      // the notice about a wipe's leftovers belongs to that one setup
+      app.wipeLeft = []
+      refreshSoon()
+    }
     // "Delete all data" starts over: project ids are handed out again, so a kept filter could name another project
     if (wasOnboarded && !s.onboarded) {
-      // a refresh asked for before the data went must not bring it back
+      // a refresh asked for before the data went must not bring it back, nor a settings reply
       refreshGen++
+      restarts++
       clearTimeout(refreshTimer)
       waitingSince = 0
       fresh = false

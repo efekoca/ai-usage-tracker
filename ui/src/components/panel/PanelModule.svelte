@@ -2,11 +2,12 @@
   import type { PanelData, PanelLimit, PanelModule, Provider } from '../../lib/api'
 
   import { ofModule, tileWindows } from '../../lib/panelLimits'
+  import { poolRank } from '../../lib/pools'
 
   /** The module's limit window. */
   export function findLimit(data: PanelData | null, provider: string, pool: string, window: string, account = ''): PanelLimit | null {
     const all = (data?.limits ?? []).filter((l) => l.window === window && ofModule(provider, pool, account)(l))
-    return all.sort((a, b) => (b.used_pct ?? -1) - (a.used_pct ?? -1))[0] ?? null
+    return all.sort((a, b) => poolRank(b) - poolRank(a))[0] ?? null
   }
 
   export const live = (l: PanelLimit | null): l is PanelLimit & { used_pct: number } => !!l && l.used_pct !== null && (l.state === 'fresh' || l.state === 'behind')

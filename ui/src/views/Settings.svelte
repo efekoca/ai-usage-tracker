@@ -2,7 +2,7 @@
   import { ask, open } from '@tauri-apps/plugin-dialog'
   import { saveAs } from '../lib/dialogs'
   import { onMount } from 'svelte'
-  import { app, refresh, saveSettings } from '../lib/store.svelte'
+  import { app, latest, refresh, saveSettings } from '../lib/store.svelte'
   import { api, on, providersOf, type HotkeyStatus, type ModelPrice, type NotifySettings, type PricingFile, type PricingInfo, type ProjectChoice, type Provider } from '../lib/api'
   import { fmtDate, fmtDateTime, fmtDuration, fmtInput, fmtInt, fmtPct, has, localDate, parseNumber, t, windowLabel } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
@@ -15,7 +15,7 @@
   import ColorPick, { type Swatch } from '../components/ColorPick.svelte'
   import ReportCard from '../components/ReportCard.svelte'
   import { ensureRefresh, loadRefreshInfo, refresh as hook, removeRefresh } from '../lib/refresh.svelte'
-  import { ownPrice } from '../lib/pricing'
+  import { editedModels, ownPrice } from '../lib/pricing'
 
   const s = $derived(app.settings!)
 
@@ -83,8 +83,17 @@
   }
   // the projects to follow caches in, loaded once the list is shown
   let cacheChoices: ProjectChoice[] | null = $state(null)
+  const listShown = $derived(s.cache_timer && s.cache_projects === 'picked')
+  // loaded again when names are hidden or shown, as the list comes with them masked or not
+  const hideNames = $derived(s.hide_project_names)
   $effect(() => {
-    if (s.cache_timer && s.cache_projects === 'picked' && !cacheChoices) api.cacheProjectChoices().then((c) => (cacheChoices = c)).catch(() => (cacheChoices = []))
+    if (!listShown) return
+    void hideNames
+    return latest(
+      () => api.cacheProjectChoices(),
+      (c) => (cacheChoices = c),
+      () => (cacheChoices = []),
+    )
   })
   // the list is taken when the save runs, so a quick second switch builds on the first
   const follow = (path: string, on: boolean) => saveSettings((c) => ({ cache_picked: on ? [...new Set([...c.cache_picked, path])] : c.cache_picked.filter((p) => p !== path) }))
@@ -244,7 +253,8 @@
   async function savePricing() {
     if (!pricing) return
     await guard(async () => {
-      await api.savePricing($state.snapshot(pricing) as PricingFile)
+      const file = $state.snapshot(pricing) as PricingFile
+      await api.savePricing({ ...file, models: editedModels(file.models, $state.snapshot(priceBase)) })
       await loadPricing()
       await refresh()
       flash(t('settings.data.done'))
@@ -353,12 +363,16 @@
     if (typeof path !== 'string') return
     await guard(async () => {
       const r = await api.importDb(path)
-      flash(t('settings.data.imported', { n: fmtInt(r.events) }))
+      const added = r.events + r.limits
+      flash(added ? t('settings.data.imported', { n: fmtInt(added) }) : t('settings.data.importedNone'))
     })
   }
   async function doWipe() {
     const ok = await ask(t('settings.data.wipe.confirm'), { title: t('settings.data.wipe'), kind: 'warning' })
-    if (ok) await guard(() => api.wipe())
+    if (ok)
+      await guard(async () => {
+        app.wipeLeft = await api.wipe()
+      })
   }
 </script>
 
@@ -471,9 +485,10 @@
         </div>
         {#if s.cache_projects === 'picked' && cacheChoices}
           {#each cacheChoices as p (p.path)}
-            {@const name = p.hidden ? `${t('projects.hidden')} #${p.id}` : p.name}
+            {@const hidden = p.hidden || s.hide_project_names}
+            {@const name = hidden ? `${t('projects.hidden')} #${p.id}` : p.name}
             <div class="choice plain">
-              <span class="label" title={p.hidden ? undefined : p.path}>{name}</span>
+              <span class="label" title={hidden ? undefined : p.path}>{name}</span>
               <Toggle small checked={s.cache_picked.includes(p.path)} label={t('settings.cacheTimer.follow', { name })} onchange={(v) => follow(p.path, v)} />
             </div>
           {:else}
@@ -511,7 +526,14 @@
   </div>
   <div class="item">
     <div><span>{t(autostartKey)}</span><div class="subtle small">{t('settings.autostart.help')}</div></div>
-    <Toggle checked={s.autostart} label={t(autostartKey)} onchange={(v) => saveSettings({ autostart: v })} />
+    <Toggle
+      checked={s.autostart}
+      label={t(autostartKey)}
+      onchange={(v) =>
+        guard(async () => {
+          await saveSettings({ autostart: v })
+        })}
+    />
   </div>
   {#if app.info?.platform === 'macos'}
     <div class="item">

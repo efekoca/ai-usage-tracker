@@ -1371,7 +1371,8 @@ export const api = {
     invoke<number>('export_data', { path, period, filter, granularity, format }),
   backup: (path: string) => invoke<void>('backup_database', { path }),
   importDb: (path: string) => invoke<{ events: number; limits: number }>('import_database', { path }),
-  wipe: () => invoke<void>('wipe_all_data'),
+  /** The folders it could not empty. */
+  wipe: () => invoke<string[]>('wipe_all_data'),
   openDataFolder: () => invoke<void>('open_data_folder'),
   cliCommand: () => invoke<string>('cli_command'),
   openUrl: (url: string) => invoke<void>('open_url', { url }),

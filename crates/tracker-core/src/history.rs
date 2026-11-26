@@ -40,6 +40,9 @@ pub struct WindowRecord {
     pub full_at_ms: Option<i64>,
     /// How long it stayed full until its reset (until now while it runs).
     pub full_minutes: Option<i64>,
+    /// When it was full, as (from, to) stretches.
+    #[serde(skip)]
+    pub full_spans: Vec<(i64, i64)>,
     /// Watched until (near) its end, so `peak_pct` is how full it got.
     pub complete: bool,
     pub in_progress: bool,
@@ -286,6 +289,10 @@ fn record(items: &[&Reading], reset: Option<(i64, i64)>, dur_ms: i64, now_ms: i6
     let plan = plans.iter().max_by_key(|(p, n)| (**n, std::cmp::Reverse(**p))).map(|(p, _)| (*p).to_owned());
     let mut named: Vec<String> = plans.into_keys().map(str::to_owned).collect();
     named.sort();
+    let full_spans = match (full_at, reset) {
+        (Some(_), Some((_, end))) => full_spans(&reads, end.min(now_ms)),
+        _ => Vec::new(),
+    };
     WindowRecord {
         start_ms: reset.map(|(r, _)| r - dur_ms),
         resets_at_ms: reset.map(|(r, _)| r),
@@ -297,10 +304,8 @@ fn record(items: &[&Reading], reset: Option<(i64, i64)>, dur_ms: i64, now_ms: i6
         readings: items.len() as u32,
         full: full_at.is_some(),
         full_at_ms: full_at,
-        full_minutes: match (full_at, reset) {
-            (Some(_), Some((_, end))) => Some(full_ms(&reads, end.min(now_ms)) / MIN_MS),
-            _ => None,
-        },
+        full_minutes: (full_at.is_some() && reset.is_some()).then(|| full_spans.iter().map(|(a, b)| b - a).sum::<i64>() / MIN_MS),
+        full_spans,
         complete,
         in_progress,
         plan,
@@ -311,9 +316,9 @@ fn record(items: &[&Reading], reset: Option<(i64, i64)>, dur_ms: i64, now_ms: i6
 
 /// How long a window's readings (oldest first) stayed full until `end`: a reset the provider
 /// granted inside the window ends a full stretch, and use may fill the window again after it.
-fn full_ms(reads: &[(i64, f64)], end: i64) -> i64 {
+fn full_spans(reads: &[(i64, f64)], end: i64) -> Vec<(i64, i64)> {
     let mut resets = crate::insights::restarts(reads).into_iter().peekable();
-    let (mut total, mut since) = (0, None);
+    let (mut spans, mut since) = (Vec::new(), None);
     for (i, &(ts, used)) in reads.iter().enumerate() {
         if used >= FULL_PCT {
             since.get_or_insert(ts);
@@ -321,10 +326,48 @@ fn full_ms(reads: &[(i64, f64)], end: i64) -> i64 {
         if resets.next_if_eq(&i).is_some()
             && let Some(f) = since.take()
         {
-            total += (ts.min(end) - f).max(0);
+            spans.push((f, ts.min(end).max(f)));
         }
     }
-    total + since.map_or(0, |f| (end - f).max(0))
+    spans.extend(since.map(|f| (f, end.max(f))));
+    spans
+}
+
+/// How long the stretches cover together.
+fn union_ms(mut spans: Vec<(i64, i64)>) -> i64 {
+    spans.sort_unstable();
+    let (mut total, mut run): (i64, Option<(i64, i64)>) = (0, None);
+    for (a, b) in spans {
+        match &mut run {
+            Some((_, end)) if a <= *end => *end = (*end).max(b),
+            _ => {
+                total += run.map_or(0, |(s, e)| e - s);
+                run = Some((a, b));
+            }
+        }
+    }
+    total + run.map_or(0, |(s, e)| e - s)
+}
+
+/// Antigravity's pools run side by side: windows of two pools that share more than half a window
+/// are one stretch of the plan's room. A window shares that much with at most one window of each
+/// other pool, and one pool's windows follow one another, so they never join.
+fn side_by_side<'a>(mut ws: Vec<(&'a str, &'a WindowRecord)>, dur_ms: i64) -> Vec<Vec<&'a WindowRecord>> {
+    let span = |w: &WindowRecord| (w.start_ms.unwrap_or(w.first_ms), w.end_ms.unwrap_or(w.last_ms));
+    ws.sort_by_key(|(_, w)| span(w));
+    let mut groups: Vec<Vec<(&str, &WindowRecord)>> = Vec::new();
+    for (pool, w) in ws {
+        let (a, b) = span(w);
+        let shared = |o: &WindowRecord| {
+            let (c, d) = span(o);
+            b.min(d) - a.max(c) > dur_ms / 2
+        };
+        match groups.iter_mut().find(|g| g.iter().all(|(p, _)| *p != pool) && g.iter().any(|(_, o)| shared(o))) {
+            Some(g) => g.push((pool, w)),
+            None => groups.push(vec![(pool, w)]),
+        }
+    }
+    groups.into_iter().map(|g| g.into_iter().map(|(_, w)| w).collect()).collect()
 }
 
 /// A window's capacity is estimated only from readings this high: providers report whole
@@ -490,8 +533,11 @@ fn stats(history: &LimitHistory, provider: Provider, pick: &dyn Fn(&WindowSeries
     // a name no listed plan has tells no more than a reading without one
     let other = |want: &str, had: &str| !crate::plans::fits(provider, want, had) && plans.plans(provider).iter().any(|d| crate::plans::fits(provider, &d.id, had));
     let mut all = WindowStats::default();
-    for series in history.series.iter().filter(|x| x.provider == provider && x.window == window && pick(x)) {
-        let mut s = WindowStats::default();
+    let mut pools: Vec<(&str, &WindowRecord)> = Vec::new();
+    let mut dur_ms = 0;
+    // a Codex model's own pool fills beside the main one, which every request and the plan's room are about
+    for series in history.series.iter().filter(|x| x.provider == provider && x.window == window && pick(x) && crate::analytics::logs_pool(provider, &x.limit_id)) {
+        dur_ms = series.window_minutes * MIN_MS;
         for w in &series.windows {
             if w.resets_at_ms.unwrap_or(w.last_ms) < since_ms {
                 continue;
@@ -502,44 +548,34 @@ fn stats(history: &LimitHistory, provider: Provider, pick: &dyn Fn(&WindowSeries
             {
                 continue;
             }
-            s.windows += 1;
-            s.peak_seen = Some(s.peak_seen.unwrap_or(0.0).max(w.peak_pct));
-            if w.full {
-                s.full += 1;
-                s.full_minutes += w.full_minutes.unwrap_or(0);
-            }
-            if w.complete && !w.in_progress {
-                s.complete += 1;
-                s.peak_complete = Some(s.peak_complete.unwrap_or(0.0).max(w.peak_pct));
+            if provider == Provider::Google {
+                pools.push((&series.limit_id, w));
+            } else {
+                all.add(&[w]);
             }
         }
-        // Antigravity's two pools run side by side in the same weeks: the fuller one tells the
-        // plan's room, as two full pools in one week are not two full weeks
-        all = if provider == Provider::Google { all.fuller(s) } else { all.plus(s) };
+    }
+    // two full pools in one week are not two full weeks
+    for g in side_by_side(pools, dur_ms) {
+        all.add(&g);
     }
     all
 }
 
 impl WindowStats {
-    fn plus(self, o: WindowStats) -> WindowStats {
-        WindowStats {
-            windows: self.windows + o.windows,
-            complete: self.complete + o.complete,
-            full: self.full + o.full,
-            full_minutes: self.full_minutes + o.full_minutes,
-            peak_complete: max_of(self.peak_complete, o.peak_complete),
-            peak_seen: max_of(self.peak_seen, o.peak_seen),
+    /// One window, or windows of side-by-side pools counted as one: full when any is, watched to
+    /// its end only when all are.
+    fn add(&mut self, g: &[&WindowRecord]) {
+        let peak = g.iter().map(|w| w.peak_pct).fold(0.0, f64::max);
+        self.windows += 1;
+        self.peak_seen = max_of(self.peak_seen, Some(peak));
+        if g.iter().any(|w| w.full) {
+            self.full += 1;
+            self.full_minutes += union_ms(g.iter().flat_map(|w| w.full_spans.iter().copied()).collect()) / MIN_MS;
         }
-    }
-
-    fn fuller(self, o: WindowStats) -> WindowStats {
-        WindowStats {
-            windows: self.windows.max(o.windows),
-            complete: self.complete.max(o.complete),
-            full: self.full.max(o.full),
-            full_minutes: self.full_minutes.max(o.full_minutes),
-            peak_complete: max_of(self.peak_complete, o.peak_complete),
-            peak_seen: max_of(self.peak_seen, o.peak_seen),
+        if g.iter().all(|w| w.complete && !w.in_progress) {
+            self.complete += 1;
+            self.peak_complete = max_of(self.peak_complete, Some(peak));
         }
     }
 }

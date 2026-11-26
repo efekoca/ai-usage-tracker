@@ -268,7 +268,7 @@ pub async fn panel_data(app: AppHandle) -> Result<PanelData, String> {
     let signed_out: Vec<Provider> = crate::capture::sign_ins(&app, &s).into_iter().filter(|&(p, st)| st == crate::capture::SignIn::Out && !live(p)).map(|(p, _)| p).collect();
     let limits = limits
         .into_iter()
-        .filter(|l| providers.contains(&l.provider) && (l.window == "five_hour" || l.window == "seven_day"))
+        .filter(|l| providers.contains(&l.provider) && tile_window(&l.window))
         .map(|l| PanelLimit {
             provider: l.provider,
             limit_id: l.limit_id,
@@ -328,9 +328,21 @@ pub fn panel_action(app: AppHandle, window: WebviewWindow, action: String) -> Re
     Ok(())
 }
 
+/// The windows a provider tile can show: the usual two, and a plan's own when it has neither
+/// (Codex's 30 days, an Antigravity day). Per-model weeks stay out.
+fn tile_window(w: &str) -> bool {
+    matches!(w, "five_hour" | "one_day" | "seven_day" | "thirty_day")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_plans_own_window_reaches_the_tile() {
+        assert!(["five_hour", "seven_day", "thirty_day", "one_day"].iter().all(|w| tile_window(w)));
+        assert!(!tile_window("seven_day_opus") && !tile_window("seven_day_sonnet"));
+    }
 
     #[test]
     fn the_panel_opens_against_the_icon_inside_its_screen() {

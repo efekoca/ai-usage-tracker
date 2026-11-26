@@ -1,6 +1,6 @@
 <script lang="ts">
   import { app, latest, saveSettings } from '../lib/store.svelte'
-  import { api, type ExperimentSide, type MarkerView, type ProjectRow } from '../lib/api'
+  import { api, type ExperimentSide, type MarkerView, type ProjectRow, type Tool } from '../lib/api'
   import { fmtCompact, fmtDate, fmtInt, fmtMoney, fmtPct, t, toolLabel } from '../lib/i18n.svelte'
   import Icon from './Icon.svelte'
   import Select from './Select.svelte'
@@ -39,7 +39,8 @@
     api.projects().then((p) => (projects = p)).catch(() => {})
   })
 
-  const tools = $derived([...new Set((app.report?.by_tool ?? []).map((g) => g.key))])
+  // a marker's before and after cover the whole archive, so every tool can be picked, used this period or not
+  const tools = $derived([...new Set([...(['claude_code', 'codex', 'antigravity', 'opencode'] as Tool[]), ...(app.report?.by_tool ?? []).map((g) => g.key)])])
   const projectName = (p: { id: number; name: string; hidden: boolean }) => (p.hidden || !p.name ? `${t('projects.hidden')} #${p.id}` : p.name)
 
   const dayStart = $derived(new Date(`${date}T00:00:00`).getTime())

@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   report: vi.fn(),
   limits: vi.fn(),
   accounts: vi.fn(),
+  saveSettings: vi.fn(),
 }))
 vi.mock('./api', () => ({
   api: mocks,
@@ -20,7 +21,7 @@ vi.mock('./api', () => ({
   },
 }))
 
-const { app, init, refresh, setFilter, setPeriod } = await import('./store.svelte')
+const { app, init, refresh, saveSettings, setFilter, setPeriod } = await import('./store.svelte')
 
 afterEach(() => {
   vi.useRealTimers()
@@ -63,6 +64,27 @@ describe('the app state', () => {
     await asked
     expect(app.report).toBeNull()
     expect(app.limits).toEqual([])
+  })
+
+  it('stays on onboarding when a settings save sent before "Delete all data" answers after it', async () => {
+    const settings = { onboarded: true, theme: 'system', accent: 'blue', language: 'en', currency: 'USD', fx_rate: 1 } as unknown as Settings
+    handlers.get('settings-changed')!(settings)
+    let answer: (s: Settings) => void = () => {}
+    mocks.saveSettings.mockReturnValueOnce(new Promise<Settings>((r) => (answer = r)))
+    const saved = saveSettings({ theme: 'dark' })
+    await vi.waitFor(() => expect(mocks.saveSettings).toHaveBeenCalled())
+    handlers.get('settings-changed')!({ ...settings, onboarded: false })
+    answer({ ...settings, theme: 'dark' } as Settings)
+    await saved
+    expect(app.settings?.onboarded).toBe(false)
+  })
+
+  it('does not show the last wipe\'s leftover folders on a later setup', () => {
+    const settings = { onboarded: false, theme: 'system', accent: 'blue', language: 'en', currency: 'USD', fx_rate: 1 } as unknown as Settings
+    handlers.get('settings-changed')!(settings)
+    app.wipeLeft = ['/data/handoff']
+    handlers.get('settings-changed')!({ ...settings, onboarded: true })
+    expect(app.wipeLeft).toEqual([])
   })
 
   it('refreshes during a steady stream of changes', async () => {

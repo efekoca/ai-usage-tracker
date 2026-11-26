@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { ownPrice } from './pricing'
+import type { ModelPrice } from './api'
+import { editedModels, ownPrice } from './pricing'
 
 const fields = (over = {}) => ({ model: 'my-model', input: '3', output: '15', cache_read: '', cache_write_5m: '', ...over })
 
@@ -14,3 +15,13 @@ describe('ownPrice', () => {
     expect(ownPrice(fields({ cache_write_5m: '-1' }))).toEqual({ error: 'cache' })
   })
 })
+
+describe('editedModels', () => {
+  const price = (id: string, input: number): ModelPrice => ({ id, provider: 'openai', aliases: [], input, output: 1, cache_read: null, cache_write_5m: null, cache_write_1h: null, verified_at: null, notes: null })
+  it('keeps only what differs from the list the form was opened on', () => {
+    const seen = [price('a', 1), price('b', 2)]
+    const form = [price('a', 1), price('b', 3), price('mine', 4)]
+    expect(editedModels(form, seen).map((m) => m.id)).toEqual(['b', 'mine'])
+  })
+})
+

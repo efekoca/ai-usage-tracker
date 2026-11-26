@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { app, init, type View } from './lib/store.svelte'
+  import { refresh as consent } from './lib/refresh.svelte'
   import { t } from './lib/i18n.svelte'
   import Icon from './components/Icon.svelte'
   import Toolbar from './components/Toolbar.svelte'
@@ -31,7 +32,8 @@ import Cards from './views/Cards.svelte'
   function globalKey(e: KeyboardEvent) {
     // Ctrl+K on a Mac stays the text fields' "delete to the end of the line"
     const mod = app.info?.platform === 'macos' ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
-    if (mod && !e.altKey && !e.shiftKey && !e.isComposing && e.key.toLowerCase() === 'k' && app.settings?.onboarded) {
+    // not over the cache refresh consent, which keeps the keyboard to itself
+    if (mod && !e.altKey && !e.shiftKey && !e.isComposing && e.key.toLowerCase() === 'k' && app.settings?.onboarded && !consent.asking) {
       e.preventDefault()
       palette = !palette
     }

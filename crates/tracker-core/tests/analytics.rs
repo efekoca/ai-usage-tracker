@@ -490,6 +490,28 @@ fn user_thresholds_only_fill_windows_without_real_readings() {
 }
 
 #[test]
+fn an_archive_a_newer_version_saved_is_not_opened_or_changed() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("tracker.db");
+    drop(Store::open(&path).unwrap());
+    let raw = || tracker_core::rusqlite::Connection::open(&path).unwrap();
+    let version = || raw().pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap();
+    let known = version();
+    // a journal mode this build would change shows whether anything ran before the check
+    raw().execute_batch(&format!("PRAGMA journal_mode = DELETE; CREATE TABLE later(x); PRAGMA user_version = {};", known + 1)).unwrap();
+    let mode = || raw().pragma_query_value(None, "journal_mode", |r| r.get::<_, String>(0)).unwrap();
+    let e = Store::open(&path).err().expect("a newer archive is refused");
+    assert!(tracker_core::store::is_newer_archive(&e), "{e}");
+    assert!(!tracker_core::store::is_newer_archive(&tracker_core::rusqlite::Error::InvalidQuery));
+    assert_eq!((version(), mode().as_str()), (known + 1, "delete"), "left as the newer version saved it");
+    let mut live = Store::open_in_memory().unwrap();
+    let e = live.merge_from(&path).expect_err("a newer backup is refused");
+    assert!(tracker_core::store::is_newer_archive(&e), "{e}");
+    raw().execute_batch(&format!("DROP TABLE later; PRAGMA user_version = {known};")).unwrap();
+    assert!(Store::open(&path).is_ok(), "the same version still opens");
+}
+
+#[test]
 fn backup_merges_back_without_duplicates() {
     let (_m, store) = loaded();
     let dir = tempfile::tempdir().unwrap();
@@ -728,7 +750,7 @@ fn a_backup_row_with_a_value_of_the_wrong_type_or_no_key_is_not_imported() {
     }
     let mut fresh = Store::open(&dir.path().join("fresh.db")).unwrap();
     assert_eq!(fresh.merge_from(&backup).unwrap(), (1, 1));
-    assert_eq!(fresh.merge_from(&backup).unwrap(), (1, 0), "a second import adds nothing");
+    assert_eq!(fresh.merge_from(&backup).unwrap(), (0, 0), "a second import adds nothing");
     assert_eq!(fresh.events_between(0, i64::MAX).unwrap().len(), 1);
     assert_eq!(fresh.limits_between(0, i64::MAX).unwrap().len(), 1);
     assert_eq!(fresh.tool_calls_between(0, i64::MAX).unwrap().len(), 1);
