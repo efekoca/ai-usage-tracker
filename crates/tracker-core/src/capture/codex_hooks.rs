@@ -124,6 +124,12 @@ pub fn retarget(old: &CodexHookChange, command: &str, now_ms: i64) -> Result<Opt
     Ok(Some(CodexHookChange { command: command.to_owned(), installed_at_ms: now_ms, ..old.clone() }))
 }
 
+/// Some of our hook is still in the file.
+pub fn any_in_place(c: &CodexHookChange) -> bool {
+    let Ok(Some(doc)) = read(&c.file) else { return false };
+    doc.get("hooks").and_then(Value::as_object).is_some_and(|h| h.values().filter_map(Value::as_array).flatten().any(|g| ours(g, &c.command)))
+}
+
 /// Our hook is in every event it should be.
 pub fn in_place(c: &CodexHookChange) -> bool {
     let Ok(Some(doc)) = read(&c.file) else { return false };
@@ -223,6 +229,16 @@ mod tests {
         let c = install(&file, CMD, None, 5).unwrap();
         let moved = retarget(&c, "'/elsewhere/aiut' --codex-handoff-hook", 6).unwrap().unwrap();
         assert!(in_place(&moved) && !fs::read_to_string(&file).unwrap().contains(CMD));
+    }
+
+    #[test]
+    fn a_hook_the_user_took_out_everywhere_is_no_longer_ours_to_revert() {
+        let d = tempfile::tempdir().unwrap();
+        let file = hooks_file(d.path());
+        let c = install(&file, CMD, None, 1).unwrap();
+        assert!(any_in_place(&c));
+        fs::write(&file, other().to_string()).unwrap();
+        assert!(!any_in_place(&c));
     }
 
     #[test]

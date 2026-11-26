@@ -63,6 +63,13 @@
       <div class="lang"><Select label={t('settings.language')} value={app.settings?.language ?? 'system'} minWidth={170} options={[{ value: 'system', label: t('settings.language.system') }, { value: 'tr', label: 'Türkçe' }, { value: 'en', label: 'English' }]} onchange={(v) => saveSettings({ language: v as 'system' | 'tr' | 'en' })} /></div>
     </div>
 
+    {#if app.wipeLeft.length}
+      <div class="banner" role="status">
+        <span class="icon-text"><Icon name="warning" size={16} /><span>{t('onb.wipeLeft', { dirs: app.wipeLeft.join(', ') })}</span></span>
+        <button class="btn ghost" onclick={() => api.openDataFolder().catch(() => {})}>{t('settings.data.openFolder')}</button>
+      </div>
+    {/if}
+
     <section class="card">
       <h2>{t('onb.detected')}</h2>
       {#if loadError}

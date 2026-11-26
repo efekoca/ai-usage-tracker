@@ -220,7 +220,8 @@ struct Request {
 /// window of the main limit resets and `began` when it started, `pct` how full it is, `short` when
 /// its shorter window in use resets.
 struct Reading {
-    rowids: Vec<i64>,
+    /// Each row and the owner stored for it.
+    rows: Vec<(i64, Option<String>)>,
     ts_ms: i64,
     source: String,
     main: bool,
@@ -230,7 +231,8 @@ struct Reading {
     pct: Option<f64>,
     short: Option<i64>,
     account: Option<String>,
-    owner: Option<String>,
+    /// A status line showing a window after it reset: its figures are older than its time.
+    replay: bool,
 }
 
 #[derive(Default)]
@@ -500,10 +502,8 @@ pub fn resolve_codex(store: &mut Store) -> Result<()> {
         }
         let mut st = tx.prepare_cached("UPDATE limit_snapshot SET owner = ?2 WHERE rowid = ?1")?;
         for (r, o) in readings.iter().zip(&read_owner) {
-            if r.owner != *o {
-                for id in &r.rowids {
-                    st.execute(params![id, o])?;
-                }
+            for (id, _) in r.rows.iter().filter(|(_, was)| was != o) {
+                st.execute(params![id, o])?;
             }
         }
     }
@@ -583,7 +583,11 @@ pub fn resolve_claude(store: &mut Store) -> Result<()> {
     let conn = store.conn();
     // only a weekly window marks an account's window: a five-hour reading alone (the line Claude
     // Code logs at a five-hour limit) would look like a window of its own
-    let readings = load_readings(store, "provider = 'anthropic'", |limit, window| limit.is_empty() && matches!(window, "five_hour" | "seven_day"), 7 * 24 * 60)?;
+    let mut readings = load_readings(store, "provider = 'anthropic'", |limit, window| limit.is_empty() && matches!(window, "five_hour" | "seven_day"), 7 * 24 * 60)?;
+    // a status line showing a window again after it reset: its figures say nothing of the time it was shown
+    for r in readings.iter_mut().filter(|r| r.replay) {
+        r.used = false;
+    }
     let bounds = chain(readings.iter().filter(|r| r.used).filter_map(|r| r.mark).collect());
     let find = |mark: i64| {
         let i = bounds.partition_point(|(_, hi)| *hi + SAME_WINDOW_S < mark);
@@ -635,10 +639,8 @@ pub fn resolve_claude(store: &mut Store) -> Result<()> {
         let mut st = tx.prepare_cached("UPDATE limit_snapshot SET owner = ?2 WHERE rowid = ?1")?;
         for (r, w) in readings.iter().zip(&read_win) {
             let o = r.account.clone().or_else(|| w.and_then(|w| owner[w].clone()));
-            if r.owner != o {
-                for id in &r.rowids {
-                    st.execute(params![id, o])?;
-                }
+            for (id, _) in r.rows.iter().filter(|(_, was)| *was != o) {
+                st.execute(params![id, o])?;
             }
         }
     }
@@ -775,7 +777,7 @@ fn load_readings(store: &Store, rows: &str, main: fn(&str, &str) -> bool, mark_m
         let k = (ts, source, limit_id, account);
         if key.as_ref() != Some(&k) {
             readings.push(Reading {
-                rowids: Vec::new(),
+                rows: Vec::new(),
                 ts_ms: ts,
                 source: k.1.clone(),
                 main: false,
@@ -785,13 +787,16 @@ fn load_readings(store: &Store, rows: &str, main: fn(&str, &str) -> bool, mark_m
                 pct: None,
                 short: None,
                 account: (!k.3.is_empty()).then(|| k.3.clone()),
-                owner,
+                replay: false,
             });
             key = Some(k);
             windows.clear();
         }
         let r = readings.last_mut().expect("pushed above");
-        r.rowids.push(rowid);
+        r.rows.push((rowid, owner));
+        // a reset outside 1970-3000 is a damaged row an older version stored
+        let reset = reset.filter(|r| (0..=crate::model::MAX_EPOCH_SECS).contains(r));
+        r.replay |= is_main && reset.is_some_and(|reset| reset * 1000 + crate::model::SHOWN_AFTER_RESET_MS < ts);
         r.main |= is_main;
         if let (true, Some(m), Some(reset)) = (is_main, window_minutes(&window), reset) {
             windows.push((m, reset, used));

@@ -286,9 +286,10 @@ mod tests {
         assert_eq!(v["usage"]["requests"], 1);
         assert!(ro.conn().execute("DELETE FROM usage_event", []).is_err(), "nothing can be written");
 
-        Store::open(&path).unwrap().conn().pragma_update(None, "user_version", 999).unwrap();
+        let set = |v: i64| tracker_core::rusqlite::Connection::open(&path).unwrap().pragma_update(None, "user_version", v).unwrap();
+        set(999);
         assert_eq!(Store::open_read_only(&path).unwrap().schema_age().unwrap(), std::cmp::Ordering::Greater, "an archive a newer build left");
-        Store::open(&path).unwrap().conn().pragma_update(None, "user_version", 1).unwrap();
+        set(1);
         assert_eq!(Store::open_read_only(&path).unwrap().schema_age().unwrap(), std::cmp::Ordering::Less, "an archive an older build left");
     }
 }

@@ -543,3 +543,95 @@ fn readings_that_contradict_their_reset_times_neither_panic_nor_invert_a_window(
     let five = h.series.iter().find(|s| s.window == "five_hour").unwrap();
     assert!(five.windows.iter().all(|w| w.end_ms.zip(w.start_ms).is_none_or(|(e, s)| e >= s)), "{:#?}", five.windows);
 }
+
+/// One reading a day through a weekly window, rising to `peak` on its last day.
+fn week_of(v: &mut Vec<LimitSnapshot>, pool: &str, reset: i64, peak: f64) {
+    for k in 0..7 {
+        v.push(antigravity(reset - WEEK + k * DAY + 4 * HOUR, pool, "seven_day", peak * (k + 1) as f64 / 7.0, reset));
+    }
+}
+
+#[test]
+fn antigravity_pools_full_in_different_weeks_are_two_full_weeks() {
+    let mut v = Vec::new();
+    week_of(&mut v, "gemini", NOW - 8 * DAY, 100.0);
+    week_of(&mut v, "3p", NOW - 8 * DAY + 3 * HOUR, 25.0);
+    week_of(&mut v, "gemini", NOW - DAY, 25.0);
+    week_of(&mut v, "3p", NOW - DAY + 3 * HOUR, 100.0);
+    let h = limit_history(&store_with(v), NOW, 28).unwrap();
+    let a = plan_advice(&h, Provider::Google, Some("pro"), &PlansFile::bundled(), NOW);
+    assert_eq!((a.weekly.windows, a.weekly.full), (2, 2));
+    assert_eq!((a.kind, a.strong), (AdviceKind::Upgrade, true));
+}
+
+#[test]
+fn antigravity_five_hour_fills_of_the_two_pools_on_different_days_add_up() {
+    let mut v = Vec::new();
+    for d in 1..=10 {
+        let reset = NOW - d * DAY;
+        let gemini = if [1, 2].contains(&d) { 100.0 } else { 20.0 };
+        let other = if [4, 5].contains(&d) { 100.0 } else { 20.0 };
+        v.push(antigravity(reset - HOUR, "gemini", "five_hour", gemini, reset));
+        v.push(antigravity(reset - HOUR, "3p", "five_hour", other, reset + 30 * MIN));
+    }
+    let h = limit_history(&store_with(v), NOW, 28).unwrap();
+    let a = plan_advice(&h, Provider::Google, Some("pro"), &PlansFile::bundled(), NOW);
+    assert_eq!((a.five_hour.windows, a.five_hour.full), (10, 4));
+    assert_eq!((a.kind, a.suggested.as_deref(), a.strong), (AdviceKind::Upgrade, Some("ultra5x"), false));
+}
+
+#[test]
+fn antigravity_offset_pools_never_chain_one_pools_weeks_into_one() {
+    // Gemini weeks end 15, 8 and 1 days ago; the other pool's 11 and 4 days ago (three days off)
+    let mut v = Vec::new();
+    week_of(&mut v, "gemini", NOW - 15 * DAY, 100.0);
+    week_of(&mut v, "gemini", NOW - 8 * DAY, 30.0);
+    week_of(&mut v, "gemini", NOW - DAY, 30.0);
+    week_of(&mut v, "3p", NOW - 11 * DAY, 30.0);
+    week_of(&mut v, "3p", NOW - 4 * DAY, 100.0);
+    let h = limit_history(&store_with(v), NOW, 28).unwrap();
+    let a = plan_advice(&h, Provider::Google, Some("pro"), &PlansFile::bundled(), NOW);
+    assert_eq!((a.weekly.windows, a.weekly.full), (3, 2));
+    assert!(a.strong);
+}
+
+#[test]
+fn antigravity_a_window_touching_two_of_the_other_pool_goes_with_the_one_it_shares_most_of() {
+    // the other pool's week (ends 9 days ago) shares one day with Gemini's first week, six with its second
+    let mut v = Vec::new();
+    week_of(&mut v, "gemini", NOW - 15 * DAY, 100.0);
+    week_of(&mut v, "gemini", NOW - 8 * DAY, 30.0);
+    week_of(&mut v, "gemini", NOW - DAY, 30.0);
+    week_of(&mut v, "3p", NOW - 9 * DAY, 100.0);
+    let h = limit_history(&store_with(v), NOW, 28).unwrap();
+    let a = plan_advice(&h, Provider::Google, Some("pro"), &PlansFile::bundled(), NOW);
+    assert_eq!((a.weekly.windows, a.weekly.full), (3, 2));
+}
+
+#[test]
+fn antigravity_full_time_of_one_week_counts_the_two_pools_stretches_once() {
+    let reset = NOW - 2 * DAY;
+    let v = vec![
+        antigravity(reset - 2 * DAY, "gemini", "seven_day", 100.0, reset),
+        antigravity(reset - HOUR, "gemini", "seven_day", 100.0, reset),
+        antigravity(reset - DAY, "3p", "seven_day", 100.0, reset + 2 * HOUR),
+    ];
+    let h = limit_history(&store_with(v), NOW, 28).unwrap();
+    let a = plan_advice(&h, Provider::Google, Some("pro"), &PlansFile::bundled(), NOW);
+    assert_eq!((a.weekly.windows, a.weekly.full), (1, 1));
+    assert_eq!(a.weekly.full_minutes, 50 * 60, "two days to the reset, two hours more in the other pool");
+}
+
+#[test]
+fn a_codex_models_own_pool_does_not_count_toward_plan_advice() {
+    let mut v = Vec::new();
+    for d in 1..=10 {
+        let reset = NOW - d * DAY;
+        let full = if [2, 5].contains(&d) { 100.0 } else { 30.0 };
+        v.push(snap(reset - HOUR, Provider::OpenAI, "five_hour", full, reset, Some("plus")));
+        v.push(LimitSnapshot { limit_id: "codex_bengalfox".into(), ..snap(reset - HOUR, Provider::OpenAI, "five_hour", full, reset, Some("plus")) });
+    }
+    let h = limit_history(&store_with(v), NOW, 28).unwrap();
+    let a = plan_advice(&h, Provider::OpenAI, Some("plus"), &PlansFile::bundled(), NOW);
+    assert_eq!(a.five_hour.full, 2, "two full main windows");
+}

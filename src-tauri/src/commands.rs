@@ -92,10 +92,19 @@ fn save_settings_inner(app: &AppHandle, state: &AppState, make: impl FnOnce(&Set
     settings.widget.y = old.widget.y;
     settings.widget.points = old.widget.points;
     settings.widget.anchor = old.widget.anchor.clone();
-    if old.autostart != settings.autostart && windows::apply_autostart(settings.autostart, true).is_err() {
-        settings.autostart = old.autostart;
+    // the system's login entry and the saved switch must agree: a refused change is said, and a
+    // failed save takes the system's change back
+    let autostart = old.autostart != settings.autostart;
+    if autostart {
+        // a copy run from the disk image has its own message
+        windows::apply_autostart(settings.autostart, true).map_err(|e| if e == "app_not_installed" { e } else { "autostart_failed".to_owned() })?;
     }
-    settings.save(&store)?;
+    if let Err(e) = settings.save(&store) {
+        if autostart {
+            let _ = windows::apply_autostart(old.autostart, true);
+        }
+        return Err(e);
+    }
     *state.settings.write().unwrap() = settings.clone();
     drop(store);
     crate::capture::write_statusline_options(&state.data_dir, &settings);
@@ -599,6 +608,7 @@ pub async fn import_database(window: WebviewWindow, app: AppHandle, path: PathBu
         let merged = db.merge_from(&path).map_err(|e| match e {
             tracker_core::rusqlite::Error::InvalidQuery => "not an AI Usage Tracker database".to_string(),
             tracker_core::rusqlite::Error::InvalidPath(_) => "cannot import the live database into itself".to_string(),
+            e if tracker_core::store::is_newer_archive(&e) => "backup_newer".to_string(),
             e => e.to_string(),
         })?;
         if let Err(e) = tracker_core::accounts::resolve(&mut db) {
@@ -615,12 +625,13 @@ pub async fn import_database(window: WebviewWindow, app: AppHandle, path: PathBu
 /// Returns to onboarding so nothing is re-imported until the user confirms sources again.
 /// Async and off the async workers: waiting for a running scan or limit read must not block the window.
 #[tauri::command]
-pub async fn wipe_all_data(window: WebviewWindow, app: AppHandle) -> Res<()> {
+pub async fn wipe_all_data(window: WebviewWindow, app: AppHandle) -> Res<Vec<String>> {
     main_only(&window)?;
     tauri::async_runtime::spawn_blocking(move || wipe_all(&app)).await.map_err(err)?
 }
 
-fn wipe_all(app: &AppHandle) -> Res<()> {
+/// The folders it could not empty, so the first setup can say so; they never hold it up.
+fn wipe_all(app: &AppHandle) -> Res<Vec<String>> {
     let state = app.state::<AppState>();
     if let Err(e) = crate::capture::pause(app) {
         crate::capture::resume(app);
@@ -661,7 +672,29 @@ fn wipe_all(app: &AppHandle) -> Res<()> {
     crate::tray::refresh_soon();
     let _ = app.emit("settings-changed", &s);
     let _ = app.emit("data-changed", ());
-    Ok(())
+    Ok(leftovers(&state.data_dir))
+}
+
+/// Folders that still hold records of the deleted use after "Delete all data", in the data folder
+/// and the copies an MSIX app writes into. A waiting hook's own files go away by themselves.
+fn leftovers(data_dir: &std::path::Path) -> Vec<String> {
+    const RECORDS: [&str; 6] = ["prompt-", "woke-", "took-", "unasked-", "stopped-", "resumed-"];
+    let mut left = Vec::new();
+    for dir in std::iter::once(data_dir.to_owned()).chain(crate::capture::package_data_dirs(data_dir)) {
+        // one that cannot be read counts too: that is when files are left behind
+        let there = |p: &std::path::Path| p.try_exists().unwrap_or(true);
+        let refresh = dir.join("refresh");
+        let records = match std::fs::read_dir(&refresh) {
+            Ok(entries) => entries.flatten().any(|e| RECORDS.iter().any(|p| e.file_name().to_string_lossy().starts_with(p))),
+            Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+        };
+        for (path, there) in [(dir.join("handoff"), there(&dir.join("handoff"))), (refresh, records), (dir.join("unused-told.json"), there(&dir.join("unused-told.json")))] {
+            if there {
+                left.push(path.to_string_lossy().into_owned());
+            }
+        }
+    }
+    left
 }
 
 /// The status-line records, also the copies a Claude Code started from an MSIX app writes into.
@@ -1367,6 +1400,38 @@ pub async fn get_day_detail(app: AppHandle, date: String, filter: Option<Filter>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_what_a_wipe_left_is_named() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        assert!(leftovers(d).is_empty());
+        std::fs::create_dir(d.join("refresh")).unwrap();
+        std::fs::write(d.join("refresh").join("state.json"), b"{}").unwrap();
+        assert!(leftovers(d).is_empty());
+        std::fs::write(d.join("refresh").join("prompt-1"), b"").unwrap();
+        std::fs::create_dir(d.join("handoff")).unwrap();
+        let name = |p: &str| d.join(p).to_string_lossy().into_owned();
+        assert_eq!(leftovers(d), [name("handoff"), name("refresh")]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_that_cannot_be_read_counts_as_left() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().join("data");
+        std::fs::create_dir_all(d.join("refresh")).unwrap();
+        let mode = |p: &std::path::Path, m| std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap();
+        mode(&d.join("refresh"), 0o000);
+        let refresh = leftovers(&d);
+        mode(&d.join("refresh"), 0o755);
+        mode(&d, 0o000);
+        let all = leftovers(&d);
+        mode(&d, 0o755);
+        let name = |p: &str| d.join(p).to_string_lossy().into_owned();
+        assert_eq!((refresh, all), (vec![name("refresh")], vec![name("handoff"), name("refresh"), name("unused-told.json")]));
+    }
 
     #[test]
     fn a_card_saved_next_to_one_of_the_same_name_gets_a_free_name() {

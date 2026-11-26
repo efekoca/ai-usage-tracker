@@ -571,7 +571,7 @@ pub(crate) fn counts_toward(provider: Provider, limit_id: &str, window: &str, e:
 
 /// Whether the local logs tell which requests a pool counted: a Codex request does not name the
 /// pool it used, so only the main one, which every request fills, is credited with them.
-fn logs_pool(provider: Provider, limit_id: &str) -> bool {
+pub(crate) fn logs_pool(provider: Provider, limit_id: &str) -> bool {
     provider != Provider::OpenAI || limit_id.is_empty() || limit_id == MAIN_LIMIT
 }
 
@@ -586,18 +586,33 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
     // desktop history, Cowork and Claude Code readings describe the same account-wide pool
     type Key = (String, Option<String>, String, String);
     let mut newest: BTreeMap<Key, LimitSnapshot> = BTreeMap::new();
-    // the latest reset a source told, with the use it read then
-    let mut known_reset: HashMap<Key, (i64, Option<f64>)> = HashMap::new();
+    // the latest reset a source told, with the use the newest reading of it read then
+    let mut known_reset: HashMap<Key, (i64, i64, Option<f64>)> = HashMap::new();
+    let full_read = |s: &LimitSnapshot| [crate::capture::claude_usage::SOURCE, crate::capture::codex_limits::SOURCE, crate::capture::antigravity_limits::SOURCE].contains(&s.source.as_str());
+    let mut current_plan: HashMap<(Provider, Option<String>), (i64, String)> = HashMap::new();
+    let mut last_read: HashMap<(Provider, Option<String>, String), i64> = HashMap::new();
     for (s, owner) in store.latest_owned_limits()? {
         let owner = owner.filter(|_| several.contains(&s.provider));
         if owner.as_deref() == Some(crate::accounts::NAMELESS) {
             continue;
         }
+        // every source's own rows, also those a newer reading of another source hides
+        if let Some(plan) = &s.plan {
+            let e = current_plan.entry((s.provider, owner.clone())).or_insert((s.ts_ms, plan.clone()));
+            if s.ts_ms > e.0 {
+                *e = (s.ts_ms, plan.clone());
+            }
+        }
+        if full_read(&s) {
+            let t = last_read.entry((s.provider, owner.clone(), s.source.clone())).or_insert(s.ts_ms);
+            *t = (*t).max(s.ts_ms);
+        }
         let k = (s.provider.as_str().to_owned(), owner, s.limit_id.clone(), s.window.clone());
-        if let Some(r) = s.resets_at {
-            let e = known_reset.entry(k.clone()).or_insert((r, s.used_pct));
-            if r > e.0 {
-                *e = (r, s.used_pct);
+        if let Some(r) = s.resets_at_ms().map(|ms| ms / 1000) {
+            let e = known_reset.entry(k.clone()).or_insert((r, s.ts_ms, s.used_pct));
+            // sources round a reset differently: within that, the newer reading tells the use
+            if r > e.0 + crate::accounts::SAME_WINDOW_S || (r >= e.0 - crate::accounts::SAME_WINDOW_S && s.ts_ms > e.1) {
+                *e = (r.max(e.0), s.ts_ms, s.used_pct);
             }
         }
         match newest.get(&k) {
@@ -613,7 +628,7 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
     // fallen since (a window that started again early)
     for (k, s) in newest.iter_mut() {
         if s.resets_at.is_none()
-            && let Some(&(r, then)) = known_reset.get(k)
+            && let Some(&(r, _, then)) = known_reset.get(k)
             && r.saturating_mul(1000) > s.ts_ms
             && !matches!((s.used_pct, then), (Some(now), Some(then)) if now + 10.0 < then)
         {
@@ -628,15 +643,6 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
         }
     }
     // drop windows that belong to a plan the account no longer has (e.g. a monthly window on an old plan)
-    let mut current_plan: HashMap<(Provider, Option<String>), (i64, String)> = HashMap::new();
-    for ((_, owner, _, _), s) in &newest {
-        if let Some(plan) = &s.plan {
-            let e = current_plan.entry((s.provider, owner.clone())).or_insert((s.ts_ms, plan.clone()));
-            if s.ts_ms > e.0 {
-                *e = (s.ts_ms, plan.clone());
-            }
-        }
-    }
     let snaps: Vec<(Option<String>, LimitSnapshot)> = newest
         .into_iter()
         .filter(|((_, owner, _, _), s)| match (&s.plan, current_plan.get(&(s.provider, owner.clone()))) {
@@ -648,12 +654,6 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
 
     // these reads list every window the provider reports, so a window a newer read leaves out is
     // no longer reported (Claude's Opus week): once it is over, it goes
-    let full_read = |s: &LimitSnapshot| [crate::capture::claude_usage::SOURCE, crate::capture::codex_limits::SOURCE, crate::capture::antigravity_limits::SOURCE].contains(&s.source.as_str());
-    let mut last_read: HashMap<(Provider, Option<String>, String), i64> = HashMap::new();
-    for (owner, s) in snaps.iter().filter(|(_, s)| full_read(s)) {
-        let t = last_read.entry((s.provider, owner.clone(), s.source.clone())).or_insert(s.ts_ms);
-        *t = (*t).max(s.ts_ms);
-    }
 
     let projects: HashMap<i64, ProjectRow> = store.projects()?.into_iter().map(|p| (p.id, p)).collect();
     let mut out = Vec::new();

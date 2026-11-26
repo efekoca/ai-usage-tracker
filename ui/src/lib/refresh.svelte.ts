@@ -18,6 +18,8 @@ export function ensureRefresh(): Promise<boolean> {
   if (refresh.info?.installed) return Promise.resolve(true)
   refresh.error = ''
   refresh.asking = true
+  // a second ask while one is open answers the first, so it is not left waiting
+  answer?.(false)
   return new Promise((done) => (answer = done))
 }
 

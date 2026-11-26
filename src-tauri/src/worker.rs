@@ -2,6 +2,7 @@ use crate::settings::Settings;
 use crate::state::AppState;
 use notify::{RecursiveMode, Watcher};
 use std::collections::HashSet;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
@@ -75,7 +76,7 @@ fn run(app: AppHandle, db_path: PathBuf, rx: std::sync::mpsc::Receiver<Msg>, tx:
         }
     }
     let mut watcher: Option<notify::RecommendedWatcher> = None;
-    let mut watched: Vec<(PathBuf, bool)> = Vec::new();
+    let mut watched: (Vec<(PathBuf, bool)>, Vec<OsString>) = Default::default();
     let mut pending = true;
     let mut rewatch = true;
     let mut last_watch = Instant::now();
@@ -83,10 +84,11 @@ fn run(app: AppHandle, db_path: PathBuf, rx: std::sync::mpsc::Receiver<Msg>, tx:
     loop {
         if rewatch {
             let settings = app.state::<AppState>().settings.read().unwrap().clone();
-            let roots = watch_roots(&Env::from_system(), &settings);
-            if roots != watched || watcher.is_none() {
-                watcher = make_watcher(&roots, tx.clone());
-                watched = roots;
+            let env = Env::from_system();
+            let want = (watch_roots(&env, &settings), opencode_names(&env));
+            if want != watched || watcher.is_none() {
+                watcher = make_watcher(&want.0, want.1.clone(), tx.clone());
+                watched = want;
                 last_watch = Instant::now();
             }
             rewatch = false;
@@ -236,6 +238,8 @@ fn watch_roots(env: &Env, s: &Settings) -> Vec<(PathBuf, bool)> {
     }
     if on(SourceId::OpenCode) {
         v.extend(discovery::opencode_dirs(env).into_iter().map(|d| (d, false)));
+        // `OPENCODE_DB` may name a database in a folder of its own
+        v.extend(discovery::opencode_custom_dbs(env).iter().filter_map(|p| Some((p.parent()?.to_path_buf(), false))));
     }
     v.retain(|(p, _)| p.is_dir());
     v.sort();
@@ -247,14 +251,27 @@ fn crate_data_dir() -> PathBuf {
     tracker_core::store::default_data_dir().unwrap_or_default()
 }
 
-fn is_relevant(p: &Path) -> bool {
-    p.extension().is_some_and(|e| e == "jsonl" || e == "zst" || e == "db" || e == "db-wal")
-        || p.file_name().is_some_and(|n| n == "plan-usage-history.json")
+/// The custom OpenCode database and its WAL by name: they need not end in `.db`.
+fn opencode_names(env: &Env) -> Vec<OsString> {
+    discovery::opencode_custom_dbs(env)
+        .iter()
+        .filter_map(|p| p.file_name())
+        .flat_map(|n| {
+            let mut wal = n.to_os_string();
+            wal.push("-wal");
+            [n.to_os_string(), wal]
+        })
+        .collect()
 }
 
-fn make_watcher(roots: &[(PathBuf, bool)], tx: Sender<Msg>) -> Option<notify::RecommendedWatcher> {
+fn is_relevant(p: &Path, names: &[OsString]) -> bool {
+    p.extension().is_some_and(|e| e == "jsonl" || e == "zst" || e == "db" || e == "db-wal")
+        || p.file_name().is_some_and(|n| n == "plan-usage-history.json" || names.iter().any(|x| x == n))
+}
+
+fn make_watcher(roots: &[(PathBuf, bool)], names: Vec<OsString>, tx: Sender<Msg>) -> Option<notify::RecommendedWatcher> {
     let mut w = notify::recommended_watcher(move |res: notify::Result<notify::Event>| match res {
-        Ok(ev) if ev.paths.iter().any(|p| is_relevant(p)) => {
+        Ok(ev) if ev.paths.iter().any(|p| is_relevant(p, &names)) => {
             let _ = tx.send(Msg::Scan);
         }
         Ok(_) => {}
@@ -278,5 +295,22 @@ fn watch_failed(watcher: &mut Option<notify::RecommendedWatcher>, rewatch: &mut 
     if last_watch.elapsed() >= REWATCH_GAP && watcher.take().is_some() {
         log::warn!("file watcher reported an error; rebuilding it");
         *rewatch = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_custom_opencode_database_is_watched_by_its_folder_and_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("usage.sqlite");
+        let env = Env { opencode_db: Some(db.to_string_lossy().into_owned()), ..Default::default() };
+        let names = opencode_names(&env);
+        assert!(is_relevant(&db, &names) && is_relevant(&dir.path().join("usage.sqlite-wal"), &names));
+        assert!(!is_relevant(&dir.path().join("notes.sqlite"), &names));
+        let s = Settings { enabled_sources: vec![SourceId::OpenCode], ..Default::default() };
+        assert!(watch_roots(&env, &s).contains(&(dir.path().to_path_buf(), false)), "watched before the file exists");
     }
 }

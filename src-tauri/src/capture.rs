@@ -233,20 +233,27 @@ pub fn cache_hook_main() -> i32 {
     let Some(session) = json.get("session_id").and_then(|v| v.as_str()).filter(|s| rh::valid_session(s)) else { return 0 };
     let dir = rh::dir(&data_dir);
     // nothing is printed: a prompt hook's output would be added to the conversation
+    // after "Delete all data", until the first setup, nothing is written
+    let paused = statusline::paused(&data_dir);
     match json.get("hook_event_name").and_then(|v| v.as_str()) {
         Some("UserPromptSubmit") => {
-            rh::prompted(&dir, session, now_ms());
+            if paused {
+                rh::retire(&dir, session);
+            } else {
+                rh::prompted(&dir, session, now_ms());
+            }
             return 0;
         }
         Some("SessionEnd") => {
             rh::retire(&dir, session);
             return 0;
         }
+        _ if paused => return 0,
         _ if json.get("permission_mode").and_then(|v| v.as_str()) == Some("bypassPermissions") => {
             rh::unasked(&dir, session);
             return 0;
         }
-        _ if scripted() || statusline::paused(&data_dir) => return 0,
+        _ if scripted() => return 0,
         _ => {}
     }
     let transcript = json.get("transcript_path").and_then(|v| v.as_str()).map(PathBuf::from);
@@ -842,7 +849,9 @@ pub fn revert_all_main() -> i32 {
             return 2;
         }
     };
-    let had = (state.statusline.is_some(), state.otel.is_some(), state.refresh.is_some(), state.resume.is_some(), state.handoff.is_some(), state.codex_handoff.is_some());
+    // a Codex hook the user already took out is not one this uninstall reverted
+    let codex_ours = state.codex_handoff.as_ref().is_some_and(tracker_core::capture::codex_hooks::any_in_place);
+    let had = (state.statusline.is_some(), state.otel.is_some(), state.refresh.is_some(), state.resume.is_some(), state.handoff.is_some(), codex_ours);
     let statusline = cs::uninstall_statusline(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: status line: {e}"));
     let otel = cs::uninstall_otel(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: telemetry: {e}"));
     let refresh = cs::uninstall_refresh_hook(&mut state, &data_dir).inspect_err(|e| eprintln!("ai-usage-tracker: cache refresh: {e}"));
@@ -994,7 +1003,15 @@ pub fn status(app: &AppHandle) -> CaptureStatus {
     let s = state.settings.read().unwrap().clone();
     let st = cs::load_state(&state.data_dir);
     let rt = &state.capture;
-    let recv = rt.receiver.lock().unwrap();
+    // the receiver only for its few fields: finding the CLIs below can take seconds
+    let (otel_listening, otel_events, otel_last_ms) = {
+        let recv = rt.receiver.lock().unwrap();
+        (
+            recv.is_some(),
+            recv.as_ref().map(|r| r.stats.events.load(Ordering::Relaxed)).unwrap_or(0),
+            recv.as_ref().map(|r| r.stats.last_event_ms.load(Ordering::Relaxed)).filter(|v| *v > 0),
+        )
+    };
     let last_line = std::fs::metadata(statusline::capture_file(&state.data_dir)).and_then(|m| m.modified()).ok();
     CaptureStatus {
         codex_poll: s.capture.codex_poll,
@@ -1012,9 +1029,9 @@ pub fn status(app: &AppHandle) -> CaptureStatus {
         statusline_last_ms: last_line.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64),
         otel: s.capture.otel,
         otel_port: s.capture.otel_port,
-        otel_listening: recv.is_some(),
-        otel_events: recv.as_ref().map(|r| r.stats.events.load(Ordering::Relaxed)).unwrap_or(0),
-        otel_last_ms: recv.as_ref().map(|r| r.stats.last_event_ms.load(Ordering::Relaxed)).filter(|v| *v > 0),
+        otel_listening,
+        otel_events,
+        otel_last_ms,
         otel_error: rt.receiver_error.lock().unwrap().clone(),
         settings_file: claude_settings_file(&s).to_string_lossy().into_owned(),
     }
@@ -1046,7 +1063,7 @@ pub(crate) fn sign_ins(app: &AppHandle, s: &Settings) -> [(Provider, SignIn); 3]
     [
         // an API plan has no limits to read
         of(Provider::Anthropic, s.capture.claude_poll && s.plans.get("anthropic").map(String::as_str) != Some("api"), &rt.claude, claude_usage::NOT_SIGNED_IN),
-        of(Provider::OpenAI, s.capture.codex_poll, &rt.codex, codex_limits::NOT_SIGNED_IN),
+        of(Provider::OpenAI, s.capture.codex_poll && s.plans.get("openai").map(String::as_str) != Some("api"), &rt.codex, codex_limits::NOT_SIGNED_IN),
         of(Provider::Google, s.capture.antigravity_poll && s.plans.get("google").map(String::as_str) != Some("api"), &rt.antigravity, antigravity_limits::NOT_SIGNED_IN),
     ]
 }

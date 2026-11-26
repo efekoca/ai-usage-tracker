@@ -10,6 +10,23 @@ use std::path::{Path, PathBuf};
 
 pub type Result<T> = std::result::Result<T, rusqlite::Error>;
 
+/// An archive a newer build migrated: this build does not know all its tables, and a write could
+/// leave them out of step.
+#[derive(Debug)]
+pub struct NewerArchive;
+
+impl std::fmt::Display for NewerArchive {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the archive was saved by a newer version of the app")
+    }
+}
+
+impl std::error::Error for NewerArchive {}
+
+pub fn is_newer_archive(e: &rusqlite::Error) -> bool {
+    matches!(e, rusqlite::Error::ToSqlConversionFailure(inner) if inner.is::<NewerArchive>())
+}
+
 const MIGRATIONS: &[&str] = &[
     r#"
     CREATE TABLE project (
@@ -610,10 +627,13 @@ impl Store {
 
     fn init(conn: Connection) -> Result<Store> {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if version > MIGRATIONS.len() as i64 {
+            return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(NewerArchive)));
+        }
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
-        let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
         for (i, sql) in MIGRATIONS.iter().enumerate().skip(version as usize) {
             conn.execute_batch(&format!("BEGIN; {sql} PRAGMA user_version = {}; COMMIT;", i + 1))?;
         }
@@ -992,7 +1012,8 @@ impl Store {
     }
 
     /// Merges another tracker database (e.g. a backup) into this one using the same de-dup
-    /// rules as ingestion. Nothing is deleted. Returns (events touched, snapshots added).
+    /// rules as ingestion. Nothing is deleted. Returns (events added, snapshots added): an event
+    /// the archive already has can still gain a field it lacked, which adds none.
     pub fn merge_from(&mut self, other: &Path) -> Result<(usize, usize)> {
         // by canonical path: another spelling of the live file must not be attached to itself
         if self.is_live_file(other) {
@@ -1005,7 +1026,10 @@ impl Store {
         self.conn.execute("ATTACH DATABASE ?1 AS other", [other.to_string_lossy()])?;
         let result = (|| {
             let theirs: i64 = self.conn.query_row("PRAGMA other.user_version", [], |r| r.get(0))?;
-            if theirs == 0 || theirs as usize > MIGRATIONS.len() {
+            if theirs > MIGRATIONS.len() as i64 {
+                return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(NewerArchive)));
+            }
+            if theirs <= 0 {
                 return Err(rusqlite::Error::InvalidQuery);
             }
             // backups made before v2 have no request_id column, before v7 no branch/agent/thread
@@ -1076,7 +1100,9 @@ impl Store {
             let latest = latest_accepted_ms();
             let tail = UPSERT_EVENT_TAIL.replace("project_id = COALESCE(excluded.project_id, project_id)", "project_id = COALESCE(project_id, excluded.project_id)");
             debug_assert_ne!(tail, UPSERT_EVENT_TAIL);
-            let events = tx.execute(
+            let count = || tx.query_row("SELECT count(*) FROM main.usage_event", [], |r| r.get::<_, i64>(0));
+            let before = count()?;
+            tx.execute(
                 &format!(
                     "INSERT INTO usage_event({EVENT_COLUMNS})
                      SELECT e.key, e.ts_ms, e.tool, e.client, e.model, p.id, e.session_id, e.input, e.cache_read,
@@ -1091,6 +1117,7 @@ impl Store {
                 ),
                 [],
             )?;
+            let events = usize::try_from(count()? - before).unwrap_or(0);
             let limits = tx.execute(
                 &format!("INSERT INTO limit_snapshot(ts_ms, provider, tool, account, limit_id, window, used_pct, resets_at, status,
                      plan, source, accuracy)

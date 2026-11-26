@@ -344,11 +344,19 @@ fn instance_lock(data_dir: &std::path::Path) -> bool {
 
 /// A damaged database, a full disk or a lock held past the busy timeout would otherwise end the
 /// app without a word. It quits once the message is closed and leaves the file as it is.
-fn database_failed(app: &tauri::AppHandle, data_dir: &std::path::Path, error: &str) {
+fn database_failed(app: &tauri::AppHandle, data_dir: &std::path::Path, error: &tracker_core::rusqlite::Error) {
     use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
     log::error!("cannot open the database: {error}");
     let folder = data_dir.display();
-    let (title, text) = if windows::system_is_turkish() {
+    let tr = windows::system_is_turkish();
+    // moving the file away would start an empty archive, and only a newer build can read this one
+    let (title, text) = if tracker_core::store::is_newer_archive(error) {
+        if tr {
+            ("Daha yeni bir sürüm gerekiyor", format!("Verileriniz AI Usage Tracker'ın daha yeni bir sürümüyle kaydedilmiş. Bu sürüm onları açamaz.\n\nEn son sürümü github.com/efekoca/ai-usage-tracker/releases adresinden yükleyin. Verileriniz bu klasörde olduğu gibi duruyor:\n{folder}"))
+        } else {
+            ("A newer version is needed", format!("Your data was saved by a newer version of AI Usage Tracker, and this version cannot open it.\n\nInstall the latest version from github.com/efekoca/ai-usage-tracker/releases. Your data is kept as it is in this folder:\n{folder}"))
+        }
+    } else if tr {
         (
             "Veritabanı açılamadı",
             format!("AI Usage Tracker veritabanını açamadı:\n\n{error}\n\nVeritabanı bu klasördeki tracker.db dosyası:\n{folder}\n\nDiskte yer açın ya da dosyayı kullanan başka bir programı kapatın, sonra uygulamayı yeniden başlatın. Dosya bozulduysa klasörün dışına taşıyın: uygulama boş bir arşivle başlar, taşıdığınız dosya olduğu gibi kalır."),
@@ -417,7 +425,7 @@ pub fn run() {
             let store = match Store::open(&db_path) {
                 Ok(store) => store,
                 Err(e) => {
-                    database_failed(app.handle(), &data_dir, &e.to_string());
+                    database_failed(app.handle(), &data_dir, &e);
                     return Ok(());
                 }
             };

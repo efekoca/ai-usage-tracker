@@ -443,7 +443,8 @@ fn antigravity_models_are_priced_under_their_public_names() {
     }
     let t = tracker_core::model::Tokens { input: 1_000_000, cache_read: 1_000_000, output: 1_000_000, ..Default::default() };
     let cost = |model, request_input| {
-        let c = b.cost(&CostInput { model, tokens: &t, request_input, web_search_requests: 0, speed: None, inference_geo: None, ts_ms: None }).unwrap();
+        // a day of the introductory prices, so the test does not change on 2027-01-01
+        let c = b.cost(&CostInput { model, tokens: &t, request_input, web_search_requests: 0, speed: None, inference_geo: None, ts_ms: Some(1_793_000_000_000) }).unwrap();
         (c.total() * 1e6).round() / 1e6
     };
     assert_eq!(cost("gemini-3.8-flash-n", 0), 0.75 + 0.075 + 3.75);
