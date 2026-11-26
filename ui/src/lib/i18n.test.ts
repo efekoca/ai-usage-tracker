@@ -62,6 +62,11 @@ describe('t', () => {
     expect(t('rep.valueLine', { c: '$1', s: '$2', n: 1 })).toContain('for this day')
     expect(t('rep.valueLine', { c: '$1', s: '$2', n: 3 })).toContain('for these 3 days')
   })
+
+  it('puts a value in as it is, dollar signs and all', () => {
+    expect(t('common.error', { e: "unexpected '$' here" })).toContain("unexpected '$' here")
+    expect(t('common.error', { e: "a$'b $& $$" })).toContain("a$'b $& $$")
+  })
 })
 
 describe('dictionaries', () => {

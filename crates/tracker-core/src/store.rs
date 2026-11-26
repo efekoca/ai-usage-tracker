@@ -915,12 +915,14 @@ impl Store {
     }
 
     /// One pool's percentages between two times, oldest first; `owner` keeps one account's. A
-    /// window shown again after its reset is not part of the one that followed.
+    /// window shown again after its reset is not part of the one that followed, nor is a reading
+    /// whose own reset came by `from_ms`, the start of the window asked for.
     pub fn pool_readings(&self, provider: Provider, limit_id: &str, window: &str, owner: Option<Option<&str>>, from_ms: i64, to_ms: i64) -> Result<Vec<(i64, f64)>> {
         let mut st = self.conn.prepare_cached(
             "SELECT ts_ms, used_pct FROM limit_snapshot
              WHERE provider = ?1 AND limit_id = ?2 AND window = ?3 AND ts_ms BETWEEN ?4 AND ?5 AND used_pct IS NOT NULL
                AND (?6 = 0 OR owner IS ?7) AND NOT (resets_at IS NOT NULL AND resets_at * 1000 + ?8 < ts_ms)
+               AND (resets_at IS NULL OR resets_at * 1000 > ?4)
              ORDER BY ts_ms",
         )?;
         let rows = st.query_map(params![provider.as_str(), limit_id, window, from_ms, to_ms, owner.is_some(), owner.flatten(), crate::model::SHOWN_AFTER_RESET_MS], |r| Ok((r.get(0)?, r.get(1)?)))?;
@@ -966,11 +968,14 @@ impl Store {
     /// Deletes every usage record, snapshot and checkpoint (settings are kept).
     pub fn wipe_data(&self) -> Result<()> {
         self.project_cache.borrow_mut().clear();
-        self.conn.execute_batch(
-            "BEGIN; DELETE FROM usage_event; DELETE FROM tool_call; DELETE FROM limit_snapshot; DELETE FROM file_checkpoint;
+        // rolled back when it fails, so the connection is never left inside the transaction
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+        tx.execute_batch(
+            "DELETE FROM usage_event; DELETE FROM tool_call; DELETE FROM limit_snapshot; DELETE FROM file_checkpoint;
              DELETE FROM project; DELETE FROM account_session; DELETE FROM signin_span; DELETE FROM session_root;
-             DELETE FROM cache_miss_report; DELETE FROM turn; DELETE FROM limit_stop; DELETE FROM session_carried; COMMIT;",
+             DELETE FROM cache_miss_report; DELETE FROM turn; DELETE FROM limit_stop; DELETE FROM session_carried;",
         )?;
+        tx.commit()?;
         // the data is gone once committed; a full disk only keeps the file from shrinking
         if let Err(e) = self.conn.execute_batch("VACUUM;") {
             log::warn!("could not compact the database after deleting the data: {e}");

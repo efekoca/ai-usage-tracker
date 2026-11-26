@@ -1,14 +1,19 @@
 // @vitest-environment happy-dom
 import { flushSync, mount, unmount } from 'svelte'
-import { afterEach, describe, expect, it } from 'vitest'
-import { ensureRefresh, refresh } from '../lib/refresh.svelte'
-import RefreshConsent from './RefreshConsent.svelte'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+const mocks = vi.hoisted(() => ({ setCacheRefresh: vi.fn() }))
+vi.mock('../lib/api', () => ({ api: mocks }))
+
+const { answerConsent, ensureRefresh, refresh } = await import('../lib/refresh.svelte')
+const { default: RefreshConsent } = await import('./RefreshConsent.svelte')
 
 let done: (() => void)[] = []
 afterEach(() => {
   done.forEach((d) => d())
   done = []
   refresh.asking = false
+  refresh.error = ''
 })
 
 function setup() {
@@ -46,5 +51,15 @@ describe('the refresh consent dialog', () => {
     expect(await answer).toBe(false)
     expect(target.querySelector('.dialog')).toBeNull()
     expect(document.activeElement).toBe(opener)
+  })
+
+  it('says in words why the hook could not be added', async () => {
+    const { target } = setup()
+    mocks.setCacheRefresh.mockRejectedValueOnce('app_not_installed')
+    await answerConsent(true)
+    flushSync()
+    const alert = target.querySelector('[role=alert]')?.textContent ?? ''
+    expect(alert).toContain('Move it to the Applications folder')
+    expect(alert).not.toContain('app_not_installed')
   })
 })

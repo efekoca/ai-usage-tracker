@@ -3,7 +3,7 @@
   import { saveAs } from '../lib/dialogs'
   import { onMount } from 'svelte'
   import { app, refresh, saveSettings } from '../lib/store.svelte'
-  import { api, providersOf, type HotkeyStatus, type ModelPrice, type NotifySettings, type PricingFile, type PricingInfo, type ProjectChoice, type Provider } from '../lib/api'
+  import { api, on, providersOf, type HotkeyStatus, type ModelPrice, type NotifySettings, type PricingFile, type PricingInfo, type ProjectChoice, type Provider } from '../lib/api'
   import { fmtDate, fmtDateTime, fmtDuration, fmtInput, fmtInt, fmtPct, has, localDate, parseNumber, t, windowLabel } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
   import Select from '../components/Select.svelte'
@@ -15,6 +15,7 @@
   import ColorPick, { type Swatch } from '../components/ColorPick.svelte'
   import ReportCard from '../components/ReportCard.svelte'
   import { ensureRefresh, loadRefreshInfo, refresh as hook, removeRefresh } from '../lib/refresh.svelte'
+  import { ownPrice } from '../lib/pricing'
 
   const s = $derived(app.settings!)
 
@@ -99,6 +100,11 @@
   let cli: { command?: string; error?: string } = $state({})
 
   let loadFailed = $state('')
+  // on Wayland the desktop answers a new shortcut after it was saved
+  onMount(() => {
+    const sub = on('hotkey-changed', async () => (hk = await api.hotkeyStatus().catch(() => hk)))
+    return () => void sub.then((off) => off())
+  })
   onMount(async () => {
     api.cliCommand().then((command) => (cli = { command }), (e) => (cli = { error: String(e) }))
     hk = await api.hotkeyStatus().catch(() => null)
@@ -289,13 +295,12 @@
   let ownError = $state('')
   function addOwn() {
     if (!pricing || !own.model) return
-    const [input, output] = [num(own.input), num(own.output)]
-    if (input === null || output === null) {
-      ownError = t('settings.pricing.ownNeed')
+    const price = ownPrice(own)
+    if ('error' in price) {
+      ownError = t(price.error === 'need' ? 'settings.pricing.ownNeed' : 'settings.pricing.ownCache')
       return
     }
-    const opt = (v: string) => (v.trim() === '' ? null : num(v))
-    pricing.models = [...pricing.models, { id: own.model, provider: 'custom', aliases: [], input, output, cache_read: opt(own.cache_read), cache_write_5m: opt(own.cache_write_5m), cache_write_1h: null, verified_at: null, notes: null }]
+    pricing.models = [...pricing.models, price]
     pricingDirty = true
     own = { model: '', input: '', output: '', cache_read: '', cache_write_5m: '' }
     ownError = ''
@@ -494,7 +499,7 @@
         <span class="hook">
           {#if hook.info?.installed}
             <span title={hook.info.settings_file}>{t('settings.cacheTimer.hook')}</span>
-            <button class="btn ghost small" onclick={() => removeRefresh().catch(() => {})}>{t('settings.cacheTimer.hook.remove')}</button>
+            <button class="btn ghost small" onclick={() => guard(removeRefresh)}>{t('settings.cacheTimer.hook.remove')}</button>
           {:else if hook.info}
             <span>{t('settings.cacheTimer.hook.none')}</span>
             <button class="btn ghost small" onclick={() => ensureRefresh()}>{t('settings.cacheTimer.hook.add')}</button>

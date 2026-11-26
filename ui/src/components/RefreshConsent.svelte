@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t } from '../lib/i18n.svelte'
+  import { hookError, t } from '../lib/i18n.svelte'
   import { answerConsent, refresh } from '../lib/refresh.svelte'
 
   let primary: HTMLButtonElement | undefined = $state()
@@ -42,7 +42,7 @@
       <span>⏺ {t('refresh.consent.reply')}</span>
     </div>
     <p class="note">{t('refresh.consent.note')}</p>
-    {#if refresh.error}<p class="error" role="alert">{t('refresh.consent.failed', { why: refresh.error })}</p>{/if}
+    {#if refresh.error}<p class="error" role="alert">{t('refresh.consent.failed', { why: hookError(refresh.error) })}</p>{/if}
     <div class="actions">
       <button class="btn" disabled={refresh.busy} onclick={() => answerConsent(false)}>{t('common.cancel')}</button>
       <button class="btn primary" bind:this={primary} disabled={refresh.busy} onclick={() => answerConsent(true)}>{t('refresh.consent.ok')}</button>

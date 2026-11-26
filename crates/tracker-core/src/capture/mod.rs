@@ -21,6 +21,14 @@ use std::time::{Duration, Instant};
 
 const MAX_LINE: usize = 1024 * 1024;
 
+/// Why no line came: the time ran out, or the CLI closed its output (it exited or crashed).
+pub(crate) fn no_answer(e: mpsc::RecvTimeoutError, cli: &str) -> String {
+    match e {
+        mpsc::RecvTimeoutError::Timeout => format!("{cli} did not answer in time"),
+        mpsc::RecvTimeoutError::Disconnected => format!("{cli} stopped before answering"),
+    }
+}
+
 /// Lines are capped and the queue is bounded, so a misbehaving child cannot exhaust memory.
 pub(crate) fn json_lines(out: impl Read + Send + 'static) -> mpsc::Receiver<Value> {
     let (tx, rx) = mpsc::sync_channel::<Value>(64);
@@ -85,7 +93,9 @@ fn installer_command(cli: Cli) -> Command {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let _ = (unix, shell);
-        let mut c = Command::new("powershell.exe");
+        // Windows' own copy, never one in the app's folder or on PATH
+        let root = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+        let mut c = Command::new(root.join(r"System32\WindowsPowerShell\v1.0\powershell.exe"));
         // older Windows PowerShell may not offer TLS 1.2 on its own
         c.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"]).arg(format!(
             "[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072; irm {windows} | iex"
@@ -239,6 +249,14 @@ pub fn child_path(bin: &std::path::Path) -> Option<std::ffi::OsString> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cli_that_exited_is_told_apart_from_a_slow_one() {
+        let (tx, rx) = mpsc::channel::<Value>();
+        assert_eq!(rx.recv_timeout(Duration::from_millis(1)).map_err(|e| no_answer(e, "codex")), Err("codex did not answer in time".into()));
+        drop(tx);
+        assert_eq!(rx.recv_timeout(Duration::from_secs(5)).map_err(|e| no_answer(e, "codex")), Err("codex stopped before answering".into()));
+    }
 
     #[cfg(not(windows))]
     #[test]

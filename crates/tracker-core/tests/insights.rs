@@ -1628,6 +1628,21 @@ fn a_report_joins_the_window_whose_causes_it_carries_on() {
 }
 
 #[test]
+fn a_helper_request_only_telemetry_saw_does_not_hide_a_miss() {
+    let t = ms(2026, 11, 10, 12, 0);
+    let mut store = store_with(&[
+        ev("a", t + 100, Tool::ClaudeCode, "claude-opus-5-5", Some("s1"), "/p/notes", 10, 100, 5),
+        ev("title", t + 2_000, Tool::ClaudeCode, "claude-haiku-4-5", Some("s1"), "/p/notes", 50, 0, 5).captured(),
+    ]);
+    let mut tx = store.transaction().unwrap();
+    tx.insert_cache_miss_reports(&[CacheMissReport { session_id: "s1".into(), ts_ms: t + MIN, last_miss_ms: Some(t), requests: 2, misses: 1, rebuilds: 0, recached_tokens: 1_000, causes: vec![("model_changed".into(), 1)] }]).unwrap();
+    tx.commit().unwrap();
+    let range = Range { from_ms: t - HOUR, to_ms: t + HOUR };
+    let opus = cache_misses(&store, &PriceBook::default_book(), range, &Filter { models: vec!["claude-opus-5-5".into()], ..Default::default() }, &chrono::Utc).unwrap();
+    assert_eq!(opus.misses, 1);
+}
+
+#[test]
 fn a_miss_two_requests_of_its_second_could_have_made_is_counted_under_neither_filter() {
     let t = ms(2026, 11, 10, 12, 0);
     let mut store = store_with(&[

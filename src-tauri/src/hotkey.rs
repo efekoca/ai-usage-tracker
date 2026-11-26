@@ -86,6 +86,8 @@ pub fn apply(app: &AppHandle, hotkey: &str, chosen: bool) -> Result<(), String> 
                         *app.state::<AppState>().hotkey_error.lock().unwrap() = Some(e);
                     }
                 }
+                // Settings said "saved" before the desktop answered; it shows the answer now
+                let _ = tauri::Emitter::emit(&app, "hotkey-changed", ());
             });
             return Ok(());
         }

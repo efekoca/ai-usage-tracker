@@ -535,6 +535,7 @@ const tr: Dict = {
   'opener.error.claude_not_found': 'Claude Code bulunamadı',
   'opener.error.claude_limit_full': 'limit dolu',
   'opener.error.claude_timeout': 'Claude Code zamanında yanıt vermedi',
+  'opener.error.claude_stopped': 'Claude Code yanıt vermeden kapandı',
   'opener.error.claude_not_started': 'Claude Code başlatılamadı',
   'opener.error.claude_own_key': "Claude Code bir API anahtarı, token ya da bulut sağlayıcısıyla (Bedrock, Vertex AI, Foundry) çalışıyor; bu istek plan penceresini açmaz ve kullanıma göre ücretlendirilir, bu yüzden gönderilmedi",
   'opener.error.running': 'bir istek zaten gönderiliyor',
@@ -778,6 +779,7 @@ const tr: Dict = {
   'settings.pricing.ownAdd': 'Ekle',
   'settings.pricing.ownHelp': 'USD / 1 milyon token. Önbellek alanlarını boş bırakırsanız önbellek girdi fiyatıyla hesaplanır. Eklediğiniz fiyat, kaydettiğinizde listeye girer ve liste güncellense de değişmez.',
   'settings.pricing.ownNeed': 'Girdi ve çıktı fiyatını girin.',
+  'settings.pricing.ownCache': 'Önbellek fiyatını 0 ya da daha büyük bir sayı olarak girin veya alanı boş bırakın.',
   'settings.pricing.reset': 'Varsayılana dön',
   'settings.pricing.save': 'Fiyatları kaydet',
   'settings.pricing.alias': 'Fiyatsız modeli başka bir modelin fiyatıyla hesapla',
@@ -1512,6 +1514,7 @@ const tr: Dict = {
   "settings.notifyOff": "Bildirimler kapalı olduğu için gönderilmez.",
   "route.title": "Hesap önerisi:",
   "route.go": "“{to}” ile devam edin: haftalık {week}, 5 saatlik {five} dolu.",
+  "route.goWeek": "“{to}” ile devam edin: haftalık {week} dolu.",
   "route.renewed": "“{to}” ile devam edin: haftalık limiti yenilendi.",
   "route.fromFull": "Kullandığınız “{from}” dolu.",
   "route.fromLeft": "Kullandığınız “{from}” hesabında {left} yer kaldı.",
@@ -1790,6 +1793,7 @@ const tr: Dict = {
   'cap.msg.port_busy': 'Port kullanımda ({detail}). Başka bir uygulama bu portu kullanıyor olabilir.',
   'cap.msg.port_busy_off': '{detail} portunu başka bir program kullandığı için telemetri kapatıldı. Port boşalınca yeniden açın.',
   'cap.msg.settings_unparseable': 'settings.json geçerli bir JSON değil ({detail}); dokunulmadı.',
+  'cap.msg.codex_hooks_unparseable': "Codex'in hooks.json dosyası geçerli bir JSON değil ({detail}). Uygulama dosyayı değiştirmedi.",
   'cap.msg.settings_changed': 'settings.json düzenlenirken başka bir program tarafından değiştirildi; dokunulmadı. Tekrar deneyin.',
   'cap.msg.state_unreadable': 'Önceki değişikliklerin kaydı okunamadı ({detail}); hiçbir şey değiştirilmedi.',
   'limits.source.claude_statusline': 'Claude Code durum satırı',
@@ -2360,6 +2364,7 @@ const en: Dict = {
   'opener.error.claude_not_found': 'Claude Code was not found',
   'opener.error.claude_limit_full': 'the limit is full',
   'opener.error.claude_timeout': 'Claude Code did not answer in time',
+  'opener.error.claude_stopped': 'Claude Code stopped before answering',
   'opener.error.claude_not_started': 'Claude Code could not be started',
   'opener.error.claude_own_key': 'Claude Code runs on an API key, a token or a cloud provider (Bedrock, Vertex AI, Foundry); the request would open no plan window and be billed by use, so it was not sent',
   'opener.error.running': 'a request is already on its way',
@@ -2603,6 +2608,7 @@ const en: Dict = {
   'settings.pricing.ownAdd': 'Add',
   'settings.pricing.ownHelp': 'USD per 1M tokens. Leave the cache fields empty and the cache is priced as input. A price you add joins the list when you save, and a newer list never changes it.',
   'settings.pricing.ownNeed': 'Enter the input and output prices.',
+  'settings.pricing.ownCache': 'Enter a cache price of 0 or more, or leave the field empty.',
   'settings.pricing.reset': 'Restore defaults',
   'settings.pricing.save': 'Save prices',
   'settings.pricing.alias': 'Price an unpriced model like another model',
@@ -3337,6 +3343,7 @@ const en: Dict = {
   "settings.notifyOff": "Not sent while notifications are off.",
   "route.title": "Account suggestion:",
   "route.go": "Continue with “{to}”: weekly {week}, 5-hour {five} used.",
+  "route.goWeek": "Continue with “{to}”: weekly {week} used.",
   "route.renewed": "Continue with “{to}”: its week has started again.",
   "route.fromFull": "“{from}”, the one in use, is full.",
   "route.fromLeft": "“{from}”, the one in use, has {left} left.",
@@ -3614,6 +3621,7 @@ const en: Dict = {
   'cap.msg.port_busy': 'The port is in use ({detail}). Another program may be using it.',
   'cap.msg.port_busy_off': 'Telemetry was turned off because another program was using port {detail}. Turn it on again once the port is free.',
   'cap.msg.settings_unparseable': 'settings.json is not valid JSON ({detail}); it was not changed.',
+  'cap.msg.codex_hooks_unparseable': "Codex's hooks.json is not valid JSON ({detail}). The app did not change it.",
   'cap.msg.settings_changed': 'Another program changed settings.json while it was being edited; it was not changed. Try again.',
   'cap.msg.state_unreadable': 'The record of earlier changes could not be read ({detail}); nothing was changed.',
   'limits.source.claude_statusline': 'Claude Code status line',
@@ -3662,7 +3670,8 @@ export function resolveLang(pref: string): 'tr' | 'en' {
 export function t(key: string, params?: Record<string, string | number>): string {
   let s = dicts[i18n.lang][key] ?? dicts.en[key] ?? key
   if (params) {
-    for (const [k, v] of Object.entries(params)) s = s.replaceAll(`{${k}}`, String(v))
+    // a function, so `$'` or `$&` in a value is not read as a replacement pattern
+    for (const [k, v] of Object.entries(params)) s = s.replaceAll(`{${k}}`, () => String(v))
     // `{n|day|days}`: the first form when n is 1
     s = s.replace(/\{(\w+)\|([^|{}]*)\|([^|{}]*)\}/g, (_, k: string, one: string, many: string) => (String(params[k]) === '1' ? one : many))
   }
@@ -3875,6 +3884,14 @@ export function limitName(provider: string, limitId: string): string {
 
 export function windowLabel(w: string): string {
   return has(`limits.window.${w}`) ? t(`limits.window.${w}`) : w
+}
+
+/** Why a hook could not be added or taken out: a code the app sends ("codex_hooks_unparseable:<why>") in words, any other error as it came. */
+export function hookError(e: unknown): string {
+  const raw = String(e)
+  const at = raw.indexOf(':')
+  const [code, detail] = at < 0 ? [raw, ''] : [raw.slice(0, at), raw.slice(at + 1)]
+  return has(`cap.msg.${code}`) ? t(`cap.msg.${code}`, { detail }) : raw
 }
 
 export function fmtMonth(d: string): string {

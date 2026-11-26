@@ -25,11 +25,18 @@ pub fn json_main() -> i32 {
     attach_console();
     let tr = crate::windows::system_is_turkish();
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let names = PERIODS.map(|(n, _)| n).join(", ");
     let period = match period_arg(&args) {
         Ok(p) => p,
-        Err(name) => {
-            let names = PERIODS.map(|(n, _)| n).join(", ");
+        Err(ArgError::Period(name)) => {
             return fail(&if tr { format!("Bilinmeyen dönem: {name}. Şunlardan biri olabilir: {names}") } else { format!("Unknown period: {name}. Use one of: {names}") });
+        }
+        Err(ArgError::Unknown(a)) => {
+            return fail(&if tr {
+                format!("Bilinmeyen seçenek: {a}. Kullanım: --json [--period {names}]")
+            } else {
+                format!("Unknown option: {a}. Usage: --json [--period {names}]")
+            });
         }
     };
     let Some(data_dir) = tracker_core::store::default_data_dir() else { return fail(if tr { "Veri klasörü bulunamadı." } else { "No data folder found." }) };
@@ -66,8 +73,15 @@ fn fail(message: &str) -> i32 {
     1
 }
 
+#[derive(Debug, PartialEq)]
+enum ArgError {
+    Period(String),
+    /// Anything else, so a typo is not answered with today's figures.
+    Unknown(String),
+}
+
 /// `--period 7d` or `--period=7d`; today when none is given.
-fn period_arg(args: &[String]) -> Result<(&'static str, Period), String> {
+fn period_arg(args: &[String]) -> Result<(&'static str, Period), ArgError> {
     let mut it = args.iter();
     let mut name = None;
     while let Some(a) = it.next() {
@@ -75,10 +89,12 @@ fn period_arg(args: &[String]) -> Result<(&'static str, Period), String> {
             name = Some(it.next().cloned().unwrap_or_default());
         } else if let Some(v) = a.strip_prefix("--period=") {
             name = Some(v.to_owned());
+        } else if a != FLAG {
+            return Err(ArgError::Unknown(a.clone()));
         }
     }
     let Some(name) = name else { return Ok(PERIODS[0]) };
-    PERIODS.iter().find(|(n, _)| n.eq_ignore_ascii_case(name.trim())).copied().ok_or(name)
+    PERIODS.iter().find(|(n, _)| n.eq_ignore_ascii_case(name.trim())).copied().ok_or(ArgError::Period(name))
 }
 
 pub(crate) fn build<Tz: TimeZone>(store: &Store, book: &PriceBook, settings: &Settings, (name, period): (&str, Period), now_ms: i64, tz: &Tz) -> analytics::Result<Value>
@@ -170,8 +186,10 @@ mod tests {
         assert_eq!(period_arg(&args(&["--json"])), Ok(("today", Period::Today)));
         assert_eq!(period_arg(&args(&["--json", "--period", "7d"])), Ok(("7d", Period::Days7)));
         assert_eq!(period_arg(&args(&["--period=ALL", "--json"])), Ok(("all", Period::All)));
-        assert_eq!(period_arg(&args(&["--json", "--period", "week"])), Err("week".into()));
-        assert_eq!(period_arg(&args(&["--json", "--period"])), Err(String::new()));
+        assert_eq!(period_arg(&args(&["--json", "--period", "week"])), Err(ArgError::Period("week".into())));
+        assert_eq!(period_arg(&args(&["--json", "--period"])), Err(ArgError::Period(String::new())));
+        assert_eq!(period_arg(&args(&["--json", "7d"])), Err(ArgError::Unknown("7d".into())));
+        assert_eq!(period_arg(&args(&["--json", "--peroid", "30d"])), Err(ArgError::Unknown("--peroid".into())));
     }
 
     fn event(key: &str, ts_ms: i64, tool: Tool, model: &str, input: u64, output: u64) -> UsageEvent {

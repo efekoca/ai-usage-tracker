@@ -354,6 +354,8 @@ export interface OpenerRun {
   resets_ms: number | null
   tokens: number | null
   error: string | null
+  /** The account the request went with, when its sign-in was known. */
+  account: string | null
 }
 
 export interface OpenerInfo {
@@ -460,7 +462,8 @@ export interface Route {
   from_room: number
   to: string
   to_room: number
-  five_hour: number
+  /** `null` for a plan without a five-hour window (ChatGPT Pro). */
+  five_hour: number | null
   seven_day: number
   /** Its week started again since its last reading. */
   renewed: boolean
@@ -485,6 +488,8 @@ export interface WidgetSettings {
   scale: number
   x: number | null
   y: number | null
+  /** `x` and `y` are points (macOS), not pixels. */
+  points: boolean
   anchor: string
   auto_hide_fullscreen: boolean
   layout: 'horizontal' | 'vertical' | 'line'
@@ -744,7 +749,7 @@ export interface ScanStatus {
 export interface AppInfo {
   version: string
   data_dir: string
-  pricing_origin: 'bundled' | 'user'
+  pricing_origin: 'bundled' | 'updated' | 'user'
   pricing_updated_at: string
   platform: string
   supports_mica: boolean
@@ -798,6 +803,7 @@ export interface PricingFile {
   schema_version: number
   updated_at: string
   currency: string
+  unit: string
   sources: Record<string, string>
   notes: string[]
   models: ModelPrice[]
@@ -1198,6 +1204,7 @@ export interface WindowRecord {
   first_ms: number
   last_ms: number
   peak_pct: number
+  peak_ms: number
   readings: number
   full: boolean
   full_at_ms: number | null

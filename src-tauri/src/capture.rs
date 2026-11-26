@@ -34,7 +34,7 @@ pub struct CaptureRuntime {
     pub antigravity: Mutex<PollStatus>,
     antigravity_wake: Mutex<Option<Sender<()>>>,
     /// Bumped by "delete all data": a limit read started before it is not stored.
-    wipes: AtomicU64,
+    pub(crate) wipes: AtomicU64,
 }
 
 impl CaptureRuntime {
@@ -851,7 +851,9 @@ pub fn revert_all_main() -> i32 {
     let (statusline_ok, otel_ok, refresh_ok) = (statusline.is_ok(), otel.is_ok(), refresh.is_ok());
     // only what the uninstaller itself took out is put back; a value the user changed stays theirs
     let restored = |r: &Result<RevertOutcome, _>| matches!(r, Ok(RevertOutcome::Restored));
-    let store = Store::open(&data_dir.join("tracker.db")).ok();
+    // an app installed and never started has no archive, and none is made for it here
+    let db = data_dir.join("tracker.db");
+    let store = db.is_file().then(|| Store::open(&db).ok()).flatten();
     let mut settings = store.as_ref().map(Settings::load);
     let auto = settings.as_ref().is_some_and(|s| s.cache_auto);
     let reverted = Reverted {
@@ -879,6 +881,9 @@ pub fn revert_all_main() -> i32 {
         s.codex_handoff &= !codex_handoff.is_ok();
         let _ = s.save(store);
     }
+    // GNOME before 48 keeps the shortcut as a custom keybinding of its own, which would outlive the app
+    #[cfg(target_os = "linux")]
+    let _ = crate::gnome_shortcut::remove();
     if statusline_ok && otel_ok && refresh_ok && resume.is_ok() && handoff.is_ok() && codex_handoff.is_ok() { 0 } else { 1 }
 }
 
@@ -1113,6 +1118,8 @@ fn claim_read(last_ms: &Mutex<i64>, now: i64, gap_ms: i64) -> bool {
 
 /// The last read survives a restart, so a relaunch within five minutes does not read again.
 const CLAUDE_LAST_READ: &str = "capture.claude_last_read_ms";
+/// The app's own five minutes between reads are not over; Claude's throttle answers `claude_throttled`.
+const SLOT_BUSY: &str = "claude_slot_busy";
 
 fn read_claude(state: &AppState, s: &Settings, bin: &Path) -> Result<Vec<tracker_core::model::LimitSnapshot>, String> {
     let stored = state.db().setting(CLAUDE_LAST_READ).ok().flatten().and_then(|v| v.parse::<i64>().ok());
@@ -1122,7 +1129,7 @@ fn read_claude(state: &AppState, s: &Settings, bin: &Path) -> Result<Vec<tracker
     }
     let now = now_ms();
     if !claim_read(&state.capture.claude_last_read_ms, now, CLAUDE_MIN_GAP_MS) {
-        return Err("claude_throttled".into());
+        return Err(SLOT_BUSY.into());
     }
     let _ = state.db().set_setting(CLAUDE_LAST_READ, &now.to_string());
     let work = state.data_dir.join("claude-usage");
@@ -1239,23 +1246,33 @@ fn outcome_text(o: RevertOutcome) -> &'static str {
 
 /// The Claude Code setting that keeps our hooks from running, if one does.
 pub(crate) fn hooks_blocked(s: &Settings) -> Option<String> {
-    cs::hooks_blocked(&claude_settings_file(s), &managed_settings()).map(str::to_owned)
+    // Claude Code's rank: MDM or HKLM, then the files merged into one, then HKCU
+    let (policy, user_policy) = policy_values();
+    let files = cs::merged(cs::managed_dir().map(|d| cs::managed_files(&d)).unwrap_or_default());
+    let ranked: Vec<serde_json::Value> = parsed(&policy).chain([files]).chain(parsed(&user_policy)).collect();
+    cs::hooks_blocked(&claude_settings_file(s), &ranked).map(str::to_owned)
+}
+
+fn parsed(values: &[String]) -> impl Iterator<Item = serde_json::Value> + '_ {
+    values.iter().filter_map(|s| serde_json::from_str(s).ok())
 }
 
 fn managed_settings() -> Vec<serde_json::Value> {
     let mut docs = cs::managed_dir().map(|d| cs::managed_files(&d)).unwrap_or_default();
-    docs.extend(policy_values().iter().filter_map(|s| serde_json::from_str(s).ok()));
+    let (policy, user_policy) = policy_values();
+    docs.extend(parsed(&policy).chain(parsed(&user_policy)));
     docs
 }
 
+/// The policy values ranked above the managed files, and those below them (Windows' per-user key).
 #[cfg(windows)]
-fn policy_values() -> Vec<String> {
+fn policy_values() -> (Vec<String>, Vec<String>) {
     use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ};
     let key: Vec<u16> = "SOFTWARE\\Policies\\ClaudeCode\0".encode_utf16().collect();
     let val: Vec<u16> = "Settings\0".encode_utf16().collect();
     let flags = RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ;
-    let mut out = Vec::new();
-    for root in [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {
+    let mut out = (Vec::new(), Vec::new());
+    for (machine, root) in [(true, HKEY_LOCAL_MACHINE), (false, HKEY_CURRENT_USER)] {
         let mut size = 0u32;
         // SAFETY: size query, then a read into a buffer of the reported size.
         let rc = unsafe { RegGetValueW(root, key.as_ptr(), val.as_ptr(), flags, std::ptr::null_mut(), std::ptr::null_mut(), &mut size) };
@@ -1266,7 +1283,12 @@ fn policy_values() -> Vec<String> {
         let rc = unsafe { RegGetValueW(root, key.as_ptr(), val.as_ptr(), flags, std::ptr::null_mut(), buf.as_mut_ptr().cast(), &mut size) };
         if rc == 0 {
             let n = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
-            out.push(String::from_utf16_lossy(&buf[..n]));
+            let value = String::from_utf16_lossy(&buf[..n]);
+            if machine {
+                out.0.push(value);
+            } else {
+                out.1.push(value);
+            }
         }
     }
     out
@@ -1274,25 +1296,26 @@ fn policy_values() -> Vec<String> {
 
 /// MDM configuration profiles land as `com.anthropic.claudecode` managed preferences, per user or machine-wide.
 #[cfg(target_os = "macos")]
-fn policy_values() -> Vec<String> {
+fn policy_values() -> (Vec<String>, Vec<String>) {
     let base = Path::new("/Library/Managed Preferences");
     let mut plists = Vec::new();
     if let Ok(user) = std::env::var("USER") {
         plists.push(base.join(user).join("com.anthropic.claudecode.plist"));
     }
     plists.push(base.join("com.anthropic.claudecode.plist"));
-    plists
+    let values = plists
         .iter()
         .filter(|p| p.is_file())
         .filter_map(|p| std::process::Command::new("/usr/bin/plutil").args(["-convert", "json", "-o", "-"]).arg(p).output().ok())
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-        .collect()
+        .collect();
+    (values, Vec::new())
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
-fn policy_values() -> Vec<String> {
-    Vec::new()
+fn policy_values() -> (Vec<String>, Vec<String>) {
+    (Vec::new(), Vec::new())
 }
 
 fn code(e: cs::SettingsError) -> String {
@@ -1376,7 +1399,7 @@ pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
                 }
                 // too soon to ask, so nothing is known yet about the sign-in: the status stays
                 // as it was and the next cycle reads the limits
-                Err(e) if e == "claude_throttled" => false,
+                Err(e) if e == "claude_throttled" || e == SLOT_BUSY => false,
                 Err(e) => return Err(e),
             };
             if read {
@@ -1577,13 +1600,18 @@ pub fn pause(app: &AppHandle) -> std::io::Result<()> {
     *state.capture.codex.lock().unwrap() = PollStatus::default();
     *state.capture.claude.lock().unwrap() = PollStatus::default();
     *state.capture.antigravity.lock().unwrap() = PollStatus::default();
-    statusline::set_paused(&state.data_dir, true)
+    for dir in std::iter::once(state.data_dir.clone()).chain(package_data_dirs(&state.data_dir)) {
+        statusline::set_paused(&dir, true)?;
+    }
+    Ok(())
 }
 
 pub fn resume(app: &AppHandle) {
     let state = app.state::<AppState>();
-    if let Err(e) = statusline::set_paused(&state.data_dir, false) {
-        log::warn!("could not resume the status-line capture: {e}");
+    for dir in std::iter::once(state.data_dir.clone()).chain(package_data_dirs(&state.data_dir)) {
+        if let Err(e) = statusline::set_paused(&dir, false) {
+            log::warn!("could not resume the status-line capture: {e}");
+        }
     }
     if state.settings.read().unwrap().capture.otel {
         start_otel(app);
@@ -1767,6 +1795,8 @@ fn start_claude_poller(app: &AppHandle) {
                     drop(c);
                     let _ = app.emit("data-changed", ());
                 }
+                // a wake that came before the app's own five minutes were over reads once they are
+                Err(e) if e == SLOT_BUSY => forced = true,
                 // throttled: keep the last reading, no error shown
                 Err(e) if e == "claude_throttled" || e == DISCARDED => {}
                 Err(e) => {

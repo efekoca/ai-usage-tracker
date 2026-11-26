@@ -812,13 +812,18 @@ pub struct Route {
     pub from_room: f64,
     pub to: String,
     pub to_room: f64,
-    pub five_hour: f64,
+    /// `None` for a plan without a five-hour window (ChatGPT Pro).
+    pub five_hour: Option<f64>,
     pub seven_day: f64,
     /// The suggested account's week started again since its last reading, so it holds that
     /// reading's room or more.
     pub renewed: bool,
     pub observed_ms: Option<i64>,
 }
+
+/// An account's room, its five-hour and weekly use, whether its week started again since its
+/// reading, and when that was taken.
+type Room = (f64, Option<f64>, f64, bool, Option<i64>);
 
 /// The most room an account needs over the one in use before it is suggested; a full account
 /// in use takes any account with room.
@@ -828,8 +833,10 @@ const ROUTE_MARGIN: f64 = 25.0;
 /// its five-hour and weekly window, when the account in use is full or has clearly less. Only
 /// readings count: an account without one for each window, or with a stale one, is never
 /// suggested, and a window that started again since its reading counts as empty. Nor is one
-/// suggested while the account in use has no current reading: it might have room.
+/// suggested while the account in use has no current reading: it might have room. A plan
+/// without a five-hour window (ChatGPT Pro) is weighed on its week alone.
 pub fn route(views: &[LimitView]) -> Vec<Route> {
+    let plans = crate::plans::PlansFile::bundled();
     let mut out = Vec::new();
     for (provider, pool) in [(Provider::Anthropic, ""), (Provider::OpenAI, "codex")] {
         let mine: Vec<&LimitView> = views.iter().filter(|v| v.provider == provider && v.limit_id == pool && v.accuracy != Accuracy::Estimated).collect();
@@ -847,11 +854,21 @@ pub fn route(views: &[LimitView]) -> Vec<Route> {
                 LimitState::Stale => None,
             }
         };
-        let room = |account: Option<&str>| -> Option<(f64, f64, f64, bool, Option<i64>)> {
-            let (five, _, _) = read(account, "five_hour")?;
+        let of = |account: Option<&str>, window: &str| mine.iter().find(|v| v.account.as_deref() == account && v.window == window);
+        // not "unread": the account's plan has no such window
+        let no_five_hour = |account: Option<&str>| {
+            of(account, "five_hour").is_none()
+                && of(account, "seven_day").and_then(|v| v.plan.as_deref()).and_then(|p| plans.find(provider, p)).is_some_and(|p| !p.windows.iter().any(|w| w == "five_hour"))
+        };
+        let room = |account: Option<&str>| -> Option<Room> {
+            let five = match read(account, "five_hour") {
+                Some((five, _, _)) => Some(five),
+                None if no_five_hour(account) => None,
+                None => return None,
+            };
             let (week, renewed, seen) = read(account, "seven_day")?;
-            let full = five >= 99.5 || week >= 99.5;
-            Some((if full { 0.0 } else { 100.0 - five.max(week) }, five, week, renewed, seen))
+            let fuller = five.unwrap_or(0.0).max(week);
+            Some((if fuller >= 99.5 { 0.0 } else { 100.0 - fuller }, five, week, renewed, seen))
         };
         let Some(active) = mine.iter().find(|v| v.active).map(|v| v.account.as_deref()) else { continue };
         let Some((from_room, ..)) = room(active) else { continue };

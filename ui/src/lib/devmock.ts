@@ -46,7 +46,7 @@ const settings: Settings = {
   fx_rate: 1,
   monthly_budget_usd: 0,
   widget: {
-    visible: true, opacity: showcase ? 1 : 0.85, size: 'm', scale: 1, x: null, y: null, anchor: 'bottom-right', auto_hide_fullscreen: true, layout: 'horizontal',
+    visible: true, opacity: showcase ? 1 : 0.85, size: 'm', scale: 1, x: null, y: null, points: false, anchor: 'bottom-right', auto_hide_fullscreen: true, layout: 'horizontal',
     items: (['primary', 'cost', 'limit_five_hour', 'limit_seven_day', 'opencode', 'tools', 'week_tokens', 'week_cost', 'month_cost', 'updated'] as const).map((k, i) => ({ kind: k, enabled: i < 5 })),
     providers: [], provider_order: ['anthropic', 'google', 'openai'], antigravity_pool: 'fullest', accounts: twoAccounts ? [ACCOUNT_A, CLAUDE_A] : [], primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '', corner_radius: 14,
     border: true, shadow: false, show_labels: true, show_icons: false, show_reset_time: false, warn_at: 70, high_at: 90, always_on_top: true, lock_position: false, click_action: 'open_dashboard',
@@ -587,13 +587,13 @@ function mockHistory() {
   const five = Array.from({ length: 24 }, (_, i) => {
     const reset = now - (27 - i) * day + ((i * 7) % 10) * H
     const peak = [18, 44, 63, 100, 37, 22, 81, 55, 12, 100, 47, 28, 66, 39, 91, 24, 51, 33, 70, 15, 58, 42, 100, 31][i]
-    return { start_ms: reset - 5 * H, resets_at_ms: reset, end_ms: reset, first_ms: reset - 4.5 * H, last_ms: reset - (i % 4 === 1 ? 2 * H : 0.2 * H), peak_pct: peak, readings: 30, full: peak >= 99.5, full_at_ms: peak >= 99.5 ? reset - H : null, full_minutes: peak >= 99.5 ? 60 : null, complete: peak >= 99.5 || i % 4 !== 1, in_progress: false, plan: null }
+    return { start_ms: reset - 5 * H, resets_at_ms: reset, end_ms: reset, first_ms: reset - 4.5 * H, last_ms: reset - (i % 4 === 1 ? 2 * H : 0.2 * H), peak_pct: peak, peak_ms: reset - 2.5 * H, readings: 30, full: peak >= 99.5, full_at_ms: peak >= 99.5 ? reset - H : null, full_minutes: peak >= 99.5 ? 60 : null, complete: peak >= 99.5 || i % 4 !== 1, in_progress: false, plan: null }
   })
   five[five.length - 1] = { ...five[five.length - 1], resets_at_ms: now + 2 * H, end_ms: now + 2 * H, start_ms: now - 3 * H, last_ms: now - 0.1 * H, in_progress: true, complete: false, full: false, full_at_ms: null, full_minutes: null, peak_pct: 31 }
   const week = Array.from({ length: 8 }, (_, i) => {
     const reset = now - (7 - i) * 7 * day + 2 * day
     const peak = [34, 52, 61, 100, 47, 58, 72, 41][i]
-    return { start_ms: reset - 7 * day, resets_at_ms: reset, end_ms: reset, first_ms: reset - 6.8 * day, last_ms: reset - (i === 2 ? 2 * day : 0.3 * day), peak_pct: peak, readings: 400, full: peak >= 99.5, full_at_ms: peak >= 99.5 ? reset - 9 * H : null, full_minutes: peak >= 99.5 ? 540 : null, complete: i !== 2, in_progress: i === 7, plan: null }
+    return { start_ms: reset - 7 * day, resets_at_ms: reset, end_ms: reset, first_ms: reset - 6.8 * day, last_ms: reset - (i === 2 ? 2 * day : 0.3 * day), peak_pct: peak, peak_ms: reset - 3 * day, readings: 400, full: peak >= 99.5, full_at_ms: peak >= 99.5 ? reset - 9 * H : null, full_minutes: peak >= 99.5 ? 540 : null, complete: i !== 2, in_progress: i === 7, plan: null }
   })
   const codexWeek = week.map((w, i) => ({ ...w, peak_pct: [12, 20, 9, 31, 26, 18, 44, 7][i], full: false, full_at_ms: null, full_minutes: null, plan: 'plus' }))
   const codexFive = five.slice(0, 12).map((w, i) => ({ ...w, peak_pct: [8, 22, 15, 41, 5, 13, 29, 18, 9, 36, 12, 7][i], full: false, full_at_ms: null, full_minutes: null, plan: 'plus', complete: i % 3 !== 0, in_progress: false }))
@@ -826,8 +826,8 @@ const resumeCancelled = new Set<string>()
 // the window opener's last runs: one sent this morning, one that found a window open
 const morning = new Date().setHours(6, 0, 0, 0)
 const openerRuns = [
-  { at_ms: morning, day: 'today' as string | null, outcome: 'sent', resets_ms: morning + 5 * 3_600_000, tokens: 1054 as number | null, error: null as string | null },
-  { at_ms: morning - 86_400_000, day: 'yesterday', outcome: 'open', resets_ms: morning - 86_400_000 + 2 * 3_600_000, tokens: null as number | null, error: null as string | null },
+  { at_ms: morning, day: 'today' as string | null, outcome: 'sent', resets_ms: morning + 5 * 3_600_000, tokens: 1054 as number | null, error: null as string | null, account: null as string | null },
+  { at_ms: morning - 86_400_000, day: 'yesterday', outcome: 'open', resets_ms: morning - 86_400_000 + 2 * 3_600_000, tokens: null as number | null, error: null as string | null, account: null as string | null },
 ]
 const autoOverride = new Map<string, boolean>()
 const refreshLog: { at: number; usd: number; session: string }[] = []
@@ -901,6 +901,7 @@ const pricing = {
   schema_version: 1,
   updated_at: '2026-10-02',
   currency: 'USD',
+  unit: 'per_million_tokens',
   sources: { anthropic: 'https://platform.claude.com/docs/en/about-claude/pricing', openai: 'https://developers.openai.com/api/docs/pricing', google: 'https://ai.google.dev/gemini-api/docs/pricing', vertex_ai: 'https://cloud.google.com/vertex-ai/generative-ai/pricing', deepseek: 'https://api-docs.deepseek.com/quick_start/pricing/', moonshotai: 'https://platform.kimi.ai/docs/pricing/chat', zai: 'https://docs.z.ai/guides/overview/pricing', alibaba: 'https://www.alibabacloud.com/help/en/model-studio/model-pricing', xai: 'https://docs.x.ai/developers/pricing', mistral: 'https://docs.mistral.ai/inference/pricing', minimax: 'https://platform.minimax.io/docs/guides/pricing-paygo' },
   notes: [],
   models: models.filter((m) => m[3] > 0).map(([id, tool, , i, o, cr]) => ({ id, provider: tool === 'codex' ? 'openai' : tool === 'antigravity' ? 'google' : 'anthropic', input: i, output: o, cache_read: cr, cache_write_5m: i * 1.25, cache_write_1h: tool === 'codex' ? null : i * 2, verified_at: '2026-10-02' })),
@@ -1082,7 +1083,7 @@ export function installMock() {
         }
         case 'window_opener_info':
         case 'open_window_now': {
-          if (cmd === 'open_window_now') openerRuns.unshift({ at_ms: Date.now(), day: null, outcome: 'sent', resets_ms: Date.now() + 5 * 3_600_000, tokens: 1054, error: null })
+          if (cmd === 'open_window_now') openerRuns.unshift({ at_ms: Date.now(), day: null, outcome: 'sent', resets_ms: Date.now() + 5 * 3_600_000, tokens: 1054, error: null, account: null })
           const o = settings.window_opener
           const at = (days: number) => new Date(new Date().setHours(0, o.minute, 0, 0) + days * 86_400_000)
           const next = [0, 1, 2, 3, 4, 5, 6, 7].map(at).find((d) => d.getTime() > Date.now() && o.days.includes(((d.getDay() + 6) % 7) + 1))

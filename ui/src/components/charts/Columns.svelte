@@ -67,7 +67,9 @@
   )
 
   function barPath(x0: number, top: number, bottom: number, w: number, round: boolean): string {
-    const h = Math.max(0, bottom - top)
+    // a segment thinner than the gaps around it would otherwise turn upside down
+    top = Math.min(top, bottom)
+    const h = bottom - top
     const r = round ? Math.min(4, w / 2, h) : 0
     return `M${x0},${bottom}V${top + r}${r ? `Q${x0},${top} ${x0 + r},${top}` : ''}H${x0 + w - r}${r ? `Q${x0 + w},${top} ${x0 + w},${top + r}` : ''}V${bottom}Z`
   }

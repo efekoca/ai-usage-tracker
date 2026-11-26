@@ -105,6 +105,25 @@ describe('the handoff note', () => {
     expect(document.activeElement).toBe(header(target))
   })
 
+  it('says in words why a hook could not be added', async () => {
+    app.settings = { limit_handoff: false, codex_handoff: false } as unknown as Settings
+    const target = await render(info({ installed: false, codex_installed: false, notes: [] }))
+    header(target).click()
+    flushSync()
+    mocks.setLimitHandoff.mockRejectedValueOnce('app_not_installed')
+    confirm(target).click()
+    await settle()
+    const alert = target.querySelector('[role=alert]')?.textContent ?? ''
+    expect(alert).toContain('Move it to the Applications folder')
+    expect(alert).not.toContain('app_not_installed')
+
+    mocks.setLimitHandoff.mockResolvedValueOnce(info({ codex_installed: false, notes: [] }))
+    mocks.setCodexHandoff.mockRejectedValueOnce('codex_hooks_unparseable:expected value at line 1 column 1')
+    confirm(target).click()
+    await settle()
+    expect(target.querySelector('[role=alert]')?.textContent).toContain("Codex's hooks.json is not valid JSON (expected value at line 1 column 1)")
+  })
+
   it('keeps what turning it on returned over an older read that comes back later', async () => {
     app.settings = { limit_handoff: false, codex_handoff: false } as unknown as Settings
     const off = info({ installed: false, codex_installed: false, codex_here: false, notes: [] })

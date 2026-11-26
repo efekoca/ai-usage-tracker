@@ -66,7 +66,7 @@ fn attrs(record: &Value) -> HashMap<&str, Value> {
 fn num(a: &HashMap<&str, Value>, k: &str) -> u64 {
     match a.get(k) {
         Some(Value::Number(n)) => n.as_u64().or_else(|| n.as_f64().map(|f| f.max(0.0) as u64)).unwrap_or(0),
-        Some(Value::String(s)) => s.parse::<f64>().map(|f| f.max(0.0) as u64).unwrap_or(0),
+        Some(Value::String(s)) => s.parse::<f64>().ok().filter(|f| f.is_finite()).map_or(0, |f| f.max(0.0) as u64),
         _ => 0,
     }
 }
@@ -289,7 +289,7 @@ fn read_chunked(c: &mut Conn) -> Result<Vec<u8>, u16> {
             while !c.until(b"\r\n", 1024, 400)?.is_empty() {}
             return Ok(body);
         }
-        if body.len() + size > MAX_BODY {
+        if size > MAX_BODY - body.len() {
             return Err(413);
         }
         body.extend(c.take(size)?);
@@ -376,7 +376,8 @@ impl Receiver {
             let (batch_tx, batches) = mpsc::channel::<Batch>();
             let busy = Arc::new(AtomicUsize::new(0));
             while !stp.load(Ordering::SeqCst) {
-                loop {
+                // a bounded pass, so a stream of connections cannot keep batches or a stop waiting
+                for _ in 0..MAX_CONNECTIONS * 4 {
                     let mut stream = match listener.accept() {
                         Ok((s, _)) => s,
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
@@ -391,17 +392,14 @@ impl Receiver {
                         answer(&mut stream, 503);
                         continue;
                     }
-                    busy.fetch_add(1, Ordering::SeqCst);
-                    let (st, tok, tx, held) = (st.clone(), tok.clone(), batch_tx.clone(), busy.clone());
-                    let spawned = std::thread::Builder::new().name("otlp-request".into()).spawn(move || {
+                    let slot = Slot::take(&busy);
+                    let (st, tok, tx) = (st.clone(), tok.clone(), batch_tx.clone());
+                    let _ = std::thread::Builder::new().name("otlp-request".into()).spawn(move || {
+                        let _slot = slot;
                         let mut c = Conn { stream, buf: Vec::new(), deadline: Instant::now() + REQUEST_TIME };
                         let code = serve(&mut c, &tok, &st, &tx);
                         answer(&mut c.stream, code);
-                        held.fetch_sub(1, Ordering::SeqCst);
                     });
-                    if spawned.is_err() {
-                        busy.fetch_sub(1, Ordering::SeqCst);
-                    }
                 }
                 if let Ok(b) = batches.recv_timeout(POLL) {
                     let _ = b.done.send(store_batch(&mut store, &b.body, &st, &on_events));
@@ -409,6 +407,22 @@ impl Receiver {
             }
         })?;
         Ok(Receiver { stop, port, stats, token, thread: Some(thread) })
+    }
+}
+
+/// A connection slot, given back when dropped, also when its request thread panics or never starts.
+struct Slot(Arc<AtomicUsize>);
+
+impl Slot {
+    fn take(busy: &Arc<AtomicUsize>) -> Slot {
+        busy.fetch_add(1, Ordering::SeqCst);
+        Slot(busy.clone())
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -608,6 +622,12 @@ mod tests {
             let got = send(r.port, raw.as_bytes());
             assert!(got.starts_with("HTTP/1.1 413") || got.starts_with("HTTP/1.1 400"), "{length}: {got}");
         }
+        // more times than there are connection slots, so a slot lost per try would show
+        for _ in 0..=MAX_CONNECTIONS {
+            let raw = "POST /v1/logs HTTP/1.1\r\nContent-Type: application/json\r\nx-aiut-token: k\r\nTransfer-Encoding: chunked\r\n\r\n1\r\nx\r\nffffffffffffffff\r\n";
+            let got = send(r.port, raw.as_bytes());
+            assert!(got.starts_with("HTTP/1.1 413"), "{got}");
+        }
         // without the token nothing is read, so a body that never comes keeps nothing waiting
         let t = Instant::now();
         let got = send(r.port, b"POST /v1/logs HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 5000\r\n\r\n");
@@ -650,6 +670,15 @@ mod tests {
         let t = Instant::now();
         drop(r);
         assert!(t.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn a_count_that_is_not_a_finite_number_is_unknown() {
+        for text in ["inf", "-inf", "NaN", "1e400"] {
+            let a = HashMap::from([("input_tokens", json!(text))]);
+            assert_eq!(num(&a, "input_tokens"), 0, "{text}");
+        }
+        assert_eq!(num(&HashMap::from([("input_tokens", json!("12"))]), "input_tokens"), 12);
     }
 
     #[test]

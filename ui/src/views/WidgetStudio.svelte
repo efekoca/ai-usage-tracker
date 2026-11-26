@@ -146,7 +146,7 @@
   }
   async function reset() {
     const d: WidgetSettings = {
-      visible: ws.visible, opacity: 0.85, size: 'm', scale: 1, x: ws.x, y: ws.y, anchor: 'bottom-right', auto_hide_fullscreen: true,
+      visible: ws.visible, opacity: 0.85, size: 'm', scale: 1, x: ws.x, y: ws.y, points: ws.points, anchor: 'bottom-right', auto_hide_fullscreen: true,
       layout: 'horizontal',
       items: (['primary', 'cost', 'limit_five_hour', 'limit_seven_day', 'opencode', 'tools', 'week_tokens', 'week_cost', 'month_cost', 'updated'] as WidgetItemKind[]).map((k, i) => ({ kind: k, enabled: i < 5 })),
       providers: [], provider_order: ['anthropic', 'google', 'openai'], antigravity_pool: 'fullest', accounts: [], primary_period: 'today', primary_metric: 'tokens', limit_style: 'ring', theme: 'system', accent: '',
@@ -157,7 +157,7 @@
       hotkey: ws.hotkey,
     }
     ws = d
-    commit(...(Object.keys(d) as Key[]).filter((k) => k !== 'visible' && k !== 'x' && k !== 'y' && k !== 'anchor' && k !== 'hotkey'))
+    commit(...(Object.keys(d) as Key[]).filter((k) => k !== 'visible' && k !== 'x' && k !== 'y' && k !== 'points' && k !== 'anchor' && k !== 'hotkey'))
     api.placeWidget('bottom-right')
   }
   const providers: Provider[] = PROVIDERS

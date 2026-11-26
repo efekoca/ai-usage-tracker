@@ -291,7 +291,10 @@ pub fn waiting(dir: &Path, kind: Wait, session: &str, now: SystemTime) -> bool {
 pub fn signal(dir: &Path, kind: Wait, session: &str, message: &str) -> io::Result<()> {
     fs::create_dir_all(dir)?;
     let target = signal_file(dir, kind, session);
-    let tmp = dir.join(format!(".{}-{session}-{}", kind.signal(), std::process::id()));
+    // the app's tick and a click can signal the same conversation at once
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = dir.join(format!(".{}-{session}-{}.{n}", kind.signal(), std::process::id()));
     // written whole first, so a waiter never reads half of it
     fs::write(&tmp, message)?;
     fs::rename(&tmp, &target).inspect_err(|_| {

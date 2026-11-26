@@ -44,6 +44,9 @@ pub struct WidgetSettings {
     pub scale: f64,
     pub x: Option<i32>,
     pub y: Option<i32>,
+    /// `x` and `y` are points: macOS saves them so, as its screens can each have a scale of their
+    /// own. Earlier versions saved pixels.
+    pub points: bool,
     /// Corner kept while resizing ("bottom-right", …); empty once the user drags the widget.
     pub anchor: String,
     pub auto_hide_fullscreen: bool,
@@ -104,6 +107,7 @@ impl Default for WidgetSettings {
             scale: 1.0,
             x: None,
             y: None,
+            points: false,
             anchor: "bottom-right".into(),
             auto_hide_fullscreen: true,
             layout: "horizontal".into(),
@@ -976,10 +980,8 @@ impl Settings {
                 }
             },
         };
-        s.widget.normalize();
-        s.tray.normalize();
-        s.panel.normalize();
-        s.cards.normalize();
+        // a file an older version saved gets this version's rules before its first save
+        s.normalize();
         s.keep_later_sources(&text);
         s.adopt_new_sources();
         s
@@ -1222,6 +1224,14 @@ mod tests {
         assert_eq!(accounts, ["", "3f9c1a7e52b0d846", "", "3f9c1a7e52b0d846", ""]);
         let modules: Vec<(&str, &str)> = s.panel.modules.iter().map(|m| (m.kind.as_str(), m.account.as_str())).collect();
         assert_eq!(modules, [("provider", "3f9c1a7e52b0d846"), ("usage", "")], "the same account's module once");
+    }
+
+    #[test]
+    fn a_stored_value_this_version_would_not_save_is_put_right_on_load() {
+        let store = Store::open_in_memory().unwrap();
+        store.set_setting(KEY, r#"{"onboarded":true,"fx_rate":0,"cache_lead":3,"accent":"x"}"#).unwrap();
+        let s = Settings::load(&store);
+        assert_eq!((s.fx_rate, s.cache_lead, s.accent.as_str()), (1.0, 2, "app"));
     }
 
     #[test]

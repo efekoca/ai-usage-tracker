@@ -90,6 +90,7 @@ fn save_settings_inner(app: &AppHandle, state: &AppState, make: impl FnOnce(&Set
     settings.widget.hotkey = old.widget.hotkey.clone();
     settings.widget.x = old.widget.x;
     settings.widget.y = old.widget.y;
+    settings.widget.points = old.widget.points;
     settings.widget.anchor = old.widget.anchor.clone();
     if old.autostart != settings.autostart && windows::apply_autostart(settings.autostart, true).is_err() {
         settings.autostart = old.autostart;
@@ -545,10 +546,11 @@ pub fn get_plans() -> serde_json::Value {
     serde_json::from_str(PLANS_JSON).unwrap_or(serde_json::Value::Null)
 }
 
+// The file work below runs off the async workers, which other commands' replies need.
 #[tauri::command]
 pub async fn export_data(
     window: WebviewWindow,
-    state: State<'_, AppState>,
+    app: AppHandle,
     path: PathBuf,
     period: Period,
     filter: Option<Filter>,
@@ -556,24 +558,29 @@ pub async fn export_data(
     format: Format,
 ) -> Res<usize> {
     main_only(&window)?;
-    let hide = state.settings.read().unwrap().hide_project_names;
-    let store = state.db();
-    let book = state.book.read().unwrap();
-    let range = analytics::period_range(period, &chrono::Local, now_ms(), store.first_event_ms().map_err(err)?);
-    crate::pdf::not_the_archive(&store, &path)?;
-    export::write_atomically(&path, |f| {
-        // UTF-8 BOM so Excel opens Turkish characters correctly
-        if format != Format::Json {
-            std::io::Write::write_all(f, b"\xEF\xBB\xBF").map_err(err)?;
-        }
-        export::export(&store, &book, range, &filter.unwrap_or_default(), &chrono::Local, granularity, format, hide, f).map_err(err)
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let hide = state.settings.read().unwrap().hide_project_names;
+        let store = state.db();
+        let book = state.book.read().unwrap();
+        let range = analytics::period_range(period, &chrono::Local, now_ms(), store.first_event_ms().map_err(err)?);
+        crate::pdf::not_the_archive(&store, &path)?;
+        export::write_atomically(&path, |f| {
+            // UTF-8 BOM so Excel opens Turkish characters correctly
+            if format != Format::Json {
+                std::io::Write::write_all(f, b"\xEF\xBB\xBF").map_err(err)?;
+            }
+            export::export(&store, &book, range, &filter.unwrap_or_default(), &chrono::Local, granularity, format, hide, f).map_err(err)
+        })
     })
+    .await
+    .map_err(err)?
 }
 
 #[tauri::command]
-pub async fn backup_database(window: WebviewWindow, state: State<'_, AppState>, path: PathBuf) -> Res<()> {
+pub async fn backup_database(window: WebviewWindow, app: AppHandle, path: PathBuf) -> Res<()> {
     main_only(&window)?;
-    state.db().backup_to(&path).map_err(err)
+    tauri::async_runtime::spawn_blocking(move || app.state::<AppState>().db().backup_to(&path).map_err(err)).await.map_err(err)?
 }
 
 #[derive(Serialize)]
@@ -583,30 +590,40 @@ pub struct ImportResult {
 }
 
 #[tauri::command]
-pub async fn import_database(window: WebviewWindow, app: AppHandle, state: State<'_, AppState>, path: PathBuf) -> Res<ImportResult> {
+pub async fn import_database(window: WebviewWindow, app: AppHandle, path: PathBuf) -> Res<ImportResult> {
     main_only(&window)?;
-    let mut db = state.db();
-    let (events, limits) = db.merge_from(&path).map_err(|e| match e {
-        tracker_core::rusqlite::Error::InvalidQuery => "not an AI Usage Tracker database".to_string(),
-        tracker_core::rusqlite::Error::InvalidPath(_) => "cannot import the live database into itself".to_string(),
-        e => e.to_string(),
-    })?;
-    if let Err(e) = tracker_core::accounts::resolve(&mut db) {
-        log::warn!("accounts not resolved after import: {e}");
-    }
-    drop(db);
+    let worker = app.clone();
+    let (events, limits) = tauri::async_runtime::spawn_blocking(move || {
+        let state = worker.state::<AppState>();
+        let mut db = state.db();
+        let merged = db.merge_from(&path).map_err(|e| match e {
+            tracker_core::rusqlite::Error::InvalidQuery => "not an AI Usage Tracker database".to_string(),
+            tracker_core::rusqlite::Error::InvalidPath(_) => "cannot import the live database into itself".to_string(),
+            e => e.to_string(),
+        })?;
+        if let Err(e) = tracker_core::accounts::resolve(&mut db) {
+            log::warn!("accounts not resolved after import: {e}");
+        }
+        Ok::<_, String>(merged)
+    })
+    .await
+    .map_err(err)??;
     let _ = app.emit("data-changed", ());
     Ok(ImportResult { events, limits })
 }
 
 /// Returns to onboarding so nothing is re-imported until the user confirms sources again.
-/// Async: waiting for a running scan or limit read must not block the window.
+/// Async and off the async workers: waiting for a running scan or limit read must not block the window.
 #[tauri::command]
 pub async fn wipe_all_data(window: WebviewWindow, app: AppHandle) -> Res<()> {
     main_only(&window)?;
+    tauri::async_runtime::spawn_blocking(move || wipe_all(&app)).await.map_err(err)?
+}
+
+fn wipe_all(app: &AppHandle) -> Res<()> {
     let state = app.state::<AppState>();
-    if let Err(e) = crate::capture::pause(&app) {
-        crate::capture::resume(&app);
+    if let Err(e) = crate::capture::pause(app) {
+        crate::capture::resume(app);
         return Err(err(e));
     }
     let wiped = (|| {
@@ -622,14 +639,17 @@ pub async fn wipe_all_data(window: WebviewWindow, app: AppHandle) -> Res<()> {
             *state.settings.write().unwrap() = s.clone();
             s
         };
-        tracker_core::capture::statusline::delete_records(&state.data_dir).map_err(err)?;
+        // the copies a Claude Code started from an MSIX app writes into, too
+        for dir in std::iter::once(state.data_dir.clone()).chain(crate::capture::package_data_dirs(&state.data_dir)) {
+            tracker_core::capture::statusline::delete_records(&dir).map_err(err)?;
+        }
         Ok::<_, String>(s)
     })();
     let s = match wiped {
         Ok(s) => s,
         Err(e) => {
             if state.settings.read().unwrap().onboarded {
-                crate::capture::resume(&app);
+                crate::capture::resume(app);
             }
             return Err(e);
         }
@@ -638,10 +658,10 @@ pub async fn wipe_all_data(window: WebviewWindow, app: AppHandle) -> Res<()> {
     crate::resume::forget(&state);
     crate::handoff::forget(&state);
     crate::opener::forget(&state);
-    crate::alerts::forget();
+    crate::alerts::forget(&state.data_dir);
     state.worker.send(Msg::Reconfigure);
     // onboarding starts over: the widget hides and the tray drops the old limits
-    crate::windows::apply_widget_settings(&app, &s);
+    crate::windows::apply_widget_settings(app, &s);
     crate::tray::refresh_soon();
     let _ = app.emit("settings-changed", &s);
     let _ = app.emit("data-changed", ());
@@ -788,7 +808,7 @@ pub async fn capture_status(app: AppHandle) -> Res<crate::capture::CaptureStatus
 #[tauri::command]
 pub async fn set_capture(window: WebviewWindow, app: AppHandle, kind: String, enabled: bool) -> Res<String> {
     main_only(&window)?;
-    crate::capture::set(&app, &kind, enabled)
+    tauri::async_runtime::spawn_blocking(move || crate::capture::set(&app, &kind, enabled)).await.map_err(err)?
 }
 
 #[tauri::command]

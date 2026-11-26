@@ -545,6 +545,20 @@ fn archive_survives_reopen_and_backup_and_wipe() {
 }
 
 #[test]
+fn a_wipe_that_fails_leaves_the_data_and_the_connection_usable() {
+    let store = Store::open_in_memory().unwrap();
+    store.conn().execute("INSERT INTO project(path, name) VALUES('/w', 'W')", []).unwrap();
+    // stands in for another program holding the write lock past the busy wait
+    store.conn().execute_batch("CREATE TEMP TRIGGER stop BEFORE DELETE ON main.project BEGIN SELECT RAISE(ABORT, 'locked'); END;").unwrap();
+    assert!(store.wipe_data().is_err());
+    assert!(store.conn().is_autocommit(), "no transaction left open");
+    store.conn().execute_batch("DROP TRIGGER temp.stop").unwrap();
+    assert_eq!(store.projects().unwrap().len(), 1, "nothing deleted");
+    store.wipe_data().unwrap();
+    assert!(store.projects().unwrap().is_empty());
+}
+
+#[test]
 fn a_session_that_changes_directory_stays_one_project() {
     let m = machine();
     let p = m.home.join(".claude/projects/C--Work-site/s.jsonl");
