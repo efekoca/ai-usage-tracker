@@ -9,7 +9,7 @@ use crate::state::AppState;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
-use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 use tracker_core::capture::claude_settings as cs;
 use tracker_core::capture::codex_hooks as ch;
 use tracker_core::capture::handoff as ho;
@@ -86,8 +86,9 @@ pub fn follow_app(state: &AppState) {
     }
     let command = crate::capture::codex_handoff_hook_command(&exe);
     let Some(old) = st.codex_handoff.clone().filter(|c| c.command != command) else { return };
-    match ch::install(&old.file, &command, Some(&old), now_ms()) {
-        Ok(c) => {
+    match ch::retarget(&old, &command, now_ms()) {
+        Ok(None) => {}
+        Ok(Some(c)) => {
             st.codex_handoff = Some(c);
             match cs::save_state(&state.data_dir, &st) {
                 Ok(()) => log::info!("codex handoff hook brought up to date"),
@@ -219,14 +220,27 @@ pub fn tick(app: &AppHandle, s: &Settings, now: i64) {
     }
 }
 
+/// The project `cwd` is in, the innermost when projects nest. Compared as the archive keys
+/// projects, so another spelling of the folder (letter case on Windows) is the same project.
+fn project_for(projects: Vec<tracker_core::store::ProjectRow>, cwd: &str) -> Option<tracker_core::store::ProjectRow> {
+    let key = tracker_core::store::normalize_project_path;
+    let c = key(cwd);
+    projects
+        .into_iter()
+        .filter(|p| {
+            let k = key(&p.path);
+            c == k || c.strip_prefix(k.as_str()).is_some_and(|rest| rest.starts_with(['/', '\\']))
+        })
+        .max_by_key(|p| p.path.len())
+}
+
 /// The project's name as the app shows it; empty while names are hidden. A folder inside a
 /// project is that project, so a hidden one stays hidden.
 fn project_name(state: &AppState, s: &Settings, cwd: &Path) -> String {
     if s.hide_project_names {
         return String::new();
     }
-    let within = state.db().projects().unwrap_or_default().into_iter().filter(|p| cwd.starts_with(&p.path)).max_by_key(|p| p.path.len());
-    match within {
+    match project_for(state.db().projects().unwrap_or_default(), &cwd.to_string_lossy()) {
         Some(p) if p.hidden => String::new(),
         Some(p) => p.name,
         None => cwd.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
@@ -291,9 +305,10 @@ fn info(state: &AppState) -> HandoffInfo {
     }
 }
 
+/// Off the async workers: finding Codex can run `codex --version`.
 #[tauri::command]
-pub async fn handoff_info(state: State<'_, AppState>) -> Result<HandoffInfo, String> {
-    Ok(info(&state))
+pub async fn handoff_info(app: AppHandle) -> Result<HandoffInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || info(&app.state::<AppState>())).await.map_err(|e| e.to_string())
 }
 
 /// Turns the handoff note on or off, and with it our hook and its write rule in Claude Code's
@@ -417,7 +432,7 @@ pub async fn continue_handoff(window: WebviewWindow, app: AppHandle, id: String)
     if window.label() != crate::windows::MAIN {
         return Err("not_allowed".into());
     }
-    continue_in_other(&app, &id)
+    tauri::async_runtime::spawn_blocking(move || continue_in_other(&app, &id)).await.map_err(|e| e.to_string())?
 }
 
 /// "Delete all data" takes the notes and the records with it, and what Codex left in the temp folder.
@@ -442,13 +457,14 @@ fn launch(dir: &Path, name: &str, bin: &Path, cwd: &Path, args: &[String]) -> st
     use std::os::unix::fs::PermissionsExt;
     let script = dir.join(format!("{name}.command"));
     // an npm-installed CLI needs its `node`, which a terminal's own PATH may lack
-    let path = tracker_core::capture::child_path(bin).map(|p| format!("PATH={}; export PATH\n", sh_quote(&p.to_string_lossy()))).unwrap_or_default();
+    // ahead of the terminal's own PATH, which keeps the user's other tools
+    let path = tracker_core::capture::child_path(bin).map(|p| format!("PATH={}:\"$PATH\"; export PATH\n", sh_quote(&p.to_string_lossy()))).unwrap_or_default();
     let args: Vec<String> = args.iter().map(|a| sh_quote(a)).collect();
     let body = format!("#!/bin/sh\n{path}cd {} || exit 1\nexec {} {}\n", sh_quote(&cwd.to_string_lossy()), sh_quote(&bin.to_string_lossy()), args.join(" "));
     std::fs::create_dir_all(dir)?;
     std::fs::write(&script, body)?;
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700))?;
-    std::process::Command::new("/usr/bin/open").arg(&script).spawn().map(|_| ())
+    crate::spawn_reaped(std::process::Command::new("/usr/bin/open").arg(&script)).map(|_| ())
 }
 
 /// A PowerShell window of its own, in the project's folder.
@@ -482,7 +498,7 @@ fn launch(_: &Path, _: &str, bin: &Path, cwd: &Path, args: &[String]) -> std::io
         if let Some(p) = tracker_core::capture::child_path(bin) {
             c.env("PATH", p);
         }
-        match c.spawn() {
+        match crate::spawn_reaped(&mut c) {
             Ok(_) => return Ok(()),
             Err(e) => last = e,
         }
@@ -498,5 +514,22 @@ mod tests {
         let q = super::sh_quote("it's $HOME `x`");
         let out = std::process::Command::new("sh").args(["-c", &format!("printf %s {q}")]).output().unwrap();
         assert_eq!(String::from_utf8_lossy(&out.stdout), "it's $HOME `x`");
+    }
+
+    #[test]
+    fn a_hidden_project_stays_hidden_in_another_spelling_of_its_folder() {
+        let row = |path: &str, hidden| tracker_core::store::ProjectRow { id: 1, path: path.into(), name: "Proj".into(), hidden };
+        assert!(super::project_for(vec![row(r"C:\Code\Proj", true)], r"c:\code\proj\sub").is_some_and(|p| p.hidden));
+        assert!(super::project_for(vec![row(r"C:\Code\Proj", true)], r"c:\code\project").is_none(), "only a whole folder name counts");
+        assert_eq!(super::project_for(vec![row("/w/a", false), row("/w/a/b", false)], "/w/a/b/c").map(|p| p.path), Some("/w/a/b".into()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_program_the_app_starts_and_leaves_leaves_no_zombie() {
+        let pid = crate::spawn_reaped(&mut std::process::Command::new("/usr/bin/true")).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let ps = std::process::Command::new("ps").args(["-o", "stat=", "-p", &pid.to_string()]).output().unwrap();
+        assert!(!String::from_utf8_lossy(&ps.stdout).contains('Z'), "{}", String::from_utf8_lossy(&ps.stdout));
     }
 }

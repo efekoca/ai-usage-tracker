@@ -25,7 +25,7 @@
   import Icon from '../Icon.svelte'
   import Ring from './Ring.svelte'
   import CachePie from '../CachePie.svelte'
-  import { cacheClient, cacheName, cacheTone, mmss, refreshError } from '../../lib/caches'
+  import { cacheClient, cacheName, cacheSince, cacheTone, cacheTwin, mmss, refreshError } from '../../lib/caches'
 
   let {
     m,
@@ -290,7 +290,7 @@
         {@const why = failed[c.session_id] ?? (c.refresh_failed ? t('cache.live.failed') : null)}
         <span class="crow">
           <CachePie frac={left / c.ttl_ms} {tone} size={16} />
-          <span class="txt grow"><span class="lbl">{cacheName(c)}</span><span class="sub" class:bad={!!why}>{why ?? c.branch ?? cacheClient(c.client)}</span></span>
+          <span class="txt grow"><span class="lbl">{cacheName(c)}</span><span class="sub" class:bad={!!why}>{why ?? [c.branch ?? cacheClient(c.client), cacheTwin(c, caches) ? cacheSince(c) : ''].filter(Boolean).join(' · ')}</span></span>
           <b class="num ctime {tone}">{mmss(left)}</b>
           <button
             class="rf"

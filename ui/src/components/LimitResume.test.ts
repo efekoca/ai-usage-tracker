@@ -125,6 +125,19 @@ describe('continuing after a limit resets', () => {
     expect(toggle(target).getAttribute('aria-checked')).toBe('true')
   })
 
+  it('says in words why the hook could not be added', async () => {
+    app.settings = { limit_resume: false } as unknown as Settings
+    const target = await render(info({ installed: false }))
+    toggle(target).click()
+    flushSync()
+    mocks.setLimitResume.mockRejectedValueOnce('app_not_installed')
+    target.querySelector<HTMLButtonElement>('.ask .primary')!.click()
+    await settle()
+    const alert = target.querySelector('.ask [role=alert]')?.textContent ?? ''
+    expect(alert).toContain('Move it to the Applications folder')
+    expect(alert).not.toContain('app_not_installed')
+  })
+
   it('takes the error away with the question when the user cancels', async () => {
     app.settings = { limit_resume: false } as unknown as Settings
     const target = await render(info({ installed: false }))

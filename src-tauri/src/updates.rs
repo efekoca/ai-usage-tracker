@@ -188,8 +188,18 @@ async fn install_claimed(app: &AppHandle) -> Result<(), String> {
             || log::info!("update downloaded and verified; starting the installer"),
         )
         .await
-        .map_err(|e| e.to_string())
-        .and_then(|bytes| install_package(&update, &bytes, &data_dir));
+        .map_err(|e| e.to_string());
+    // pkexec waits for the password and the package tool: off the async workers
+    #[cfg(target_os = "linux")]
+    let result = match result {
+        Ok(bytes) => {
+            let update = update.clone();
+            tauri::async_runtime::spawn_blocking(move || install_package(&update, &bytes, &data_dir)).await.map_err(|e| e.to_string()).and_then(|r| r)
+        }
+        Err(e) => Err(e),
+    };
+    #[cfg(not(target_os = "linux"))]
+    let result = result.and_then(|bytes| install_package(&update, &bytes, &data_dir));
     // on Windows a successful install exits the process before this point
     if let Err(msg) = result {
         log::warn!("update install failed: {msg}");
@@ -287,6 +297,9 @@ fn root_install(ext: &str, file: &std::path::Path, sha: &str, tool: &[String]) -
     ["/bin/sh", "-c", ROOT_INSTALL, "sh"].iter().map(|s| s.to_string()).chain([file.to_string_lossy().into_owned(), sha.to_owned(), ext.to_owned()]).chain(tool.iter().cloned()).collect()
 }
 
+/// How often a check waiting for the first setup looks again, so it runs soon after.
+pub(crate) const UNTIL_ONBOARDED: Duration = Duration::from_secs(30);
+
 pub fn start(app: AppHandle) {
     if endpoint().is_none() {
         return;
@@ -298,7 +311,15 @@ pub fn start(app: AppHandle) {
             if state.quitting.load(Ordering::SeqCst) {
                 return;
             }
-            let on = state.settings.read().unwrap().update_check;
+            let (onboarded, on) = {
+                let s = state.settings.read().unwrap();
+                (s.onboarded, s.update_check)
+            };
+            // nothing goes out before the user finished the first setup, which says so
+            if !onboarded {
+                tokio::time::sleep(UNTIL_ONBOARDED).await;
+                continue;
+            }
             let busy = state.updates.lock().unwrap().installing;
             if on && !busy {
                 let _ = check(&app).await;

@@ -82,7 +82,7 @@
   /** A column with only its top corners rounded. */
   function column(x: number, top: number, bottom: number): string {
     const w = geo.bw
-    const r = Math.min(2.5, (bottom - top) / 2, w / 2)
+    const r = Math.max(0, Math.min(2.5, (bottom - top) / 2, w / 2))
     return `M${x} ${bottom}V${top + r}Q${x} ${top} ${x + r} ${top}H${x + w - r}Q${x + w} ${top} ${x + w} ${top + r}V${bottom}Z`
   }
 

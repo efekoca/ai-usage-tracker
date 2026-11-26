@@ -239,7 +239,7 @@ pub fn open_window(bin: &Path, work_dir: &Path, config_dir: Option<&Path>, timeo
         let mut opened = Opened::default();
         loop {
             let left = deadline.checked_duration_since(Instant::now()).ok_or_else(|| fail("claude did not answer in time".into()))?;
-            let msg = rx.recv_timeout(left).map_err(|_| fail("claude did not answer in time".into()))?;
+            let msg = rx.recv_timeout(left).map_err(|e| fail(super::no_answer(e, "claude")))?;
             if let Some(over) = note_opening(&msg, &mut opened) {
                 return over.map(|()| opened);
             }
@@ -264,7 +264,7 @@ pub fn query(bin: &Path, work_dir: &Path, config_dir: Option<&Path>, timeout: Du
         let deadline = Instant::now() + timeout;
         loop {
             let left = deadline.checked_duration_since(Instant::now()).ok_or_else(|| fail("claude did not answer in time".into()))?;
-            let msg = rx.recv_timeout(left).map_err(|_| fail("claude did not answer in time".into()))?;
+            let msg = rx.recv_timeout(left).map_err(|e| fail(super::no_answer(e, "claude")))?;
             let Some(r) = msg.get("response").filter(|_| str_at(&msg, "type") == Some("control_response")) else { continue };
             if str_at(r, "request_id") != Some("aut-usage") {
                 continue;

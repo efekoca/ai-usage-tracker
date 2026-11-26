@@ -65,9 +65,14 @@ fn run(app: AppHandle, db_path: PathBuf, rx: std::sync::mpsc::Receiver<Msg>, tx:
             }
         }
     };
-    // an update can change how accounts are told apart, and unchanged logs would not resolve them
-    if let Err(e) = tracker_core::accounts::resolve(&mut store) {
-        log::warn!("accounts not resolved at start: {e}");
+    // an update can change how accounts are told apart, and unchanged logs would not resolve them;
+    // as a writer, so a "Delete all data" waits for it instead of finding the archive locked
+    {
+        let state = app.state::<AppState>();
+        let _writing = state.writers.read().unwrap_or_else(|e| e.into_inner());
+        if let Err(e) = tracker_core::accounts::resolve(&mut store) {
+            log::warn!("accounts not resolved at start: {e}");
+        }
     }
     let mut watcher: Option<notify::RecommendedWatcher> = None;
     let mut watched: Vec<(PathBuf, bool)> = Vec::new();

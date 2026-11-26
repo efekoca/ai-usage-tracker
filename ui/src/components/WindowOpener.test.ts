@@ -14,7 +14,7 @@ const { app } = await import('../lib/store.svelte')
 const { default: WindowOpener } = await import('./WindowOpener.svelte')
 
 const now = Date.now()
-const run = (over: Partial<OpenerRun> = {}): OpenerRun => ({ at_ms: now - 60_000, day: '2026-11-13', outcome: 'sent', resets_ms: now + 5 * 3_600_000, tokens: 1313, error: null, ...over })
+const run = (over: Partial<OpenerRun> = {}): OpenerRun => ({ at_ms: now - 60_000, day: '2026-11-13', outcome: 'sent', resets_ms: now + 5 * 3_600_000, tokens: 1313, error: null, account: null, ...over })
 const info = (over: Partial<OpenerInfo> = {}): OpenerInfo => ({ available: true, running: false, next_ms: now + 3_600_000, runs: [], day: null, ...over })
 const settings = (o: Partial<Settings['window_opener']> = {}) => ({ window_opener: { enabled: true, minute: 360, days: [1, 2, 3, 4, 5], ...o } }) as unknown as Settings
 

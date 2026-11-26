@@ -29,7 +29,16 @@ pub fn start(app: AppHandle) {
             if state.quitting.load(Ordering::SeqCst) {
                 return;
             }
-            if state.settings.read().unwrap().price_updates {
+            let (onboarded, on) = {
+                let s = state.settings.read().unwrap();
+                (s.onboarded, s.price_updates)
+            };
+            // nothing goes out before the user finished the first setup, which says so
+            if !onboarded {
+                tokio::time::sleep(crate::updates::UNTIL_ONBOARDED).await;
+                continue;
+            }
+            if on {
                 let _ = check(&app).await;
             }
             tokio::time::sleep(EVERY).await;

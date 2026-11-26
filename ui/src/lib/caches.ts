@@ -1,5 +1,5 @@
 import type { LiveCache } from './api'
-import { clientLabel, has, t } from './i18n.svelte'
+import { clientLabel, clockCase, has, t } from './i18n.svelte'
 import { app, saveSettings } from './store.svelte'
 
 export type CacheTone = 'ok' | 'soon' | 'urgent'
@@ -25,6 +25,14 @@ export function cacheTone(c: Pick<LiveCache, 'ttl_ms'>, leftMs: number): CacheTo
 }
 
 export const cacheName = (c: Pick<LiveCache, 'project'>) => c.project || t('projects.hidden')
+
+type Told = Pick<LiveCache, 'session_id' | 'project' | 'branch' | 'started_ms'>
+
+/** Another conversation of the same project and branch has a cache too, so the name alone cannot tell them apart. */
+export const cacheTwin = (c: Told, all: Told[]) => all.some((o) => o.session_id !== c.session_id && o.project === c.project && o.branch === c.branch)
+
+/** "Since 14:02": when the conversation started, which tells it apart from a twin. */
+export const cacheSince = (c: Told) => t('cache.live.since', { at: clockCase(c.started_ms, 'from') })
 
 type Place = 'cache_widget' | 'cache_menubar'
 

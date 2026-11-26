@@ -8,7 +8,7 @@ use chrono::{DateTime, Datelike, Duration as Days, Local, NaiveTime, TimeZone};
 use serde::{Deserialize, Serialize};
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 use tracker_core::capture::claude_usage;
 use tracker_core::discovery::Env;
 use tracker_core::model::{LimitSnapshot, Provider};
@@ -128,6 +128,7 @@ fn opened_until(runs: &[Run], account: Option<&str>, now: i64) -> Option<i64> {
 fn error_code(e: &str) -> String {
     match e {
         e if e.starts_with("claude did not answer in time") => "claude_timeout".into(),
+        e if e.starts_with("claude stopped before answering") => "claude_stopped".into(),
         e if e.starts_with("cannot start claude") => "claude_not_started".into(),
         e => e.to_owned(),
     }
@@ -193,12 +194,16 @@ fn run_and_keep(app: &AppHandle, day: Option<String>) -> Option<Run> {
         b.running = true;
         b.runs.clone()
     };
+    let wipes = state.capture.wipes.load(std::sync::atomic::Ordering::SeqCst);
     let done = run(app, day, &earlier);
     log::info!("window opener: {}", done.outcome);
     let mut b = BOOK.lock().unwrap();
     b.running = false;
-    b.runs.push(done.clone());
-    save(&state, &mut b);
+    // "Delete all data" came while it ran: its record goes with the rest
+    if state.capture.wipes.load(std::sync::atomic::Ordering::SeqCst) == wipes {
+        b.runs.push(done.clone());
+        save(&state, &mut b);
+    }
     drop(b);
     crate::capture::wake_claude(app);
     let _ = app.emit("data-changed", ());
@@ -241,20 +246,24 @@ pub struct OpenerInfo {
 
 fn info(state: &AppState) -> OpenerInfo {
     let s = state.settings.read().unwrap().clone();
-    let mut b = BOOK.lock().unwrap();
-    load(state, &mut b);
+    // the record only: the tray's tick waits on it, not on the reads below
+    let (running, runs) = {
+        let mut b = BOOK.lock().unwrap();
+        load(state, &mut b);
+        (b.running, b.runs.clone())
+    };
     OpenerInfo {
         available: crate::capture::claude_binary(&s).is_some(),
-        running: b.running,
-        next_ms: s.window_opener.enabled.then(|| next_ms(&s.window_opener, &b.runs, &Local::now())).flatten(),
-        runs: b.runs.iter().rev().take(5).cloned().collect(),
+        running,
+        next_ms: s.window_opener.enabled.then(|| next_ms(&s.window_opener, &runs, &Local::now())).flatten(),
+        runs: runs.iter().rev().take(5).cloned().collect(),
         day: tracker_core::insights::working_day(&state.db(), Local::now().timestamp_millis(), &Local, &s.window_opener.days).ok().flatten(),
     }
 }
 
 #[tauri::command]
-pub async fn window_opener_info(state: State<'_, AppState>) -> Result<OpenerInfo, String> {
-    Ok(info(&state))
+pub async fn window_opener_info(app: AppHandle) -> Result<OpenerInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || info(&app.state::<AppState>())).await.map_err(|e| e.to_string())
 }
 
 /// Sends the request now, whatever the time: from the main window, to try it out.
@@ -361,6 +370,7 @@ mod tests {
         assert_eq!(opened_until(&runs, None, now), None, "whose window it was is not known");
         assert_eq!(opened_until(&[Run { outcome: "failed".into(), ..sent(Some("me"), Some(now + 600_000)) }], Some("me"), now), None);
         assert_eq!(error_code("claude did not answer in time"), "claude_timeout");
+        assert_eq!(error_code("claude stopped before answering"), "claude_stopped");
         assert_eq!(error_code("cannot start claude: No such file"), "claude_not_started");
         assert_eq!(error_code("claude_limit_full"), "claude_limit_full");
     }

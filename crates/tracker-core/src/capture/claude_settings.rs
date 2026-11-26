@@ -219,7 +219,10 @@ fn create_private(path: &Path, content: &[u8]) -> std::io::Result<()> {
     opts.write(true).create(true).truncate(true);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
-    opts.open(path)?.write_all(content)
+    let mut f = opts.open(path)?;
+    f.write_all(content)?;
+    // on disk before the rename, so a power cut cannot leave the user's settings empty
+    f.sync_all()
 }
 
 /// The replaced file keeps whatever permissions the user gave it.
@@ -317,7 +320,7 @@ pub fn revert_statusline(change: &StatuslineChange) -> Result<RevertOutcome, Set
             doc.insert("statusLine".into(), prev.clone());
         }
         None => {
-            doc.remove("statusLine");
+            doc.shift_remove("statusLine");
         }
     }
     write_doc(&change.settings_file, &doc, &original)?;
@@ -477,11 +480,11 @@ fn drop_rules(doc: &mut Map<String, Value>, rules: &[String]) {
     if let Some(Value::Array(allow)) = perms.get_mut("allow") {
         allow.retain(|r| !r.as_str().is_some_and(|r| rules.iter().any(|x| x == r)));
         if allow.is_empty() {
-            perms.remove("allow");
+            perms.shift_remove("allow");
         }
     }
     if perms.is_empty() {
-        doc.remove("permissions");
+        doc.shift_remove("permissions");
     }
 }
 
@@ -514,11 +517,11 @@ fn tidy_hooks(doc: &mut Map<String, Value>, events: &[&str]) {
     let Some(Value::Object(hooks)) = doc.get_mut("hooks") else { return };
     for e in events {
         if hooks.get(*e).and_then(Value::as_array).is_some_and(Vec::is_empty) {
-            hooks.remove(*e);
+            hooks.shift_remove(*e);
         }
     }
     if hooks.is_empty() {
-        doc.remove("hooks");
+        doc.shift_remove("hooks");
     }
 }
 
@@ -708,10 +711,15 @@ pub fn managed_conflicts(docs: &[Value]) -> Vec<String> {
 
 /// The setting that keeps Claude Code from running the hooks in the user's settings file, if one
 /// does: `disableAllHooks` (managed settings decide it when they set it, as they come first), or
-/// a managed `allowManagedHooksOnly`.
+/// a managed `allowManagedHooksOnly`. `managed` is in Claude Code's rank, with the files already
+/// merged into one: only the first source that holds a setting counts, unless one asks for
+/// `managedSourcesBehavior: "merge"`, when each key comes from the first source that sets it.
 pub fn hooks_blocked(settings_file: &Path, managed: &[Value]) -> Option<&'static str> {
-    let flag = |d: &Value, key: &str| d.get(key).and_then(Value::as_bool);
-    match managed.iter().find_map(|d| flag(d, "disableAllHooks")) {
+    let holds = |d: &&Value| d.as_object().is_some_and(|m| m.keys().any(|k| k != "managedSourcesBehavior"));
+    let merge = managed.iter().any(|d| d.get("managedSourcesBehavior").and_then(Value::as_str) == Some("merge"));
+    let sources: Vec<&Value> = if merge { managed.iter().collect() } else { managed.iter().find(holds).into_iter().collect() };
+    let flag = |key: &str| sources.iter().find_map(|d| d.get(key).and_then(Value::as_bool));
+    match flag("disableAllHooks") {
         Some(true) => return Some("managedDisableAllHooks"),
         Some(false) => {}
         None => {
@@ -720,7 +728,19 @@ pub fn hooks_blocked(settings_file: &Path, managed: &[Value]) -> Option<&'static
             }
         }
     }
-    managed.iter().any(|d| flag(d, "allowManagedHooksOnly") == Some(true)).then_some("allowManagedHooksOnly")
+    (flag("allowManagedHooksOnly") == Some(true)).then_some("allowManagedHooksOnly")
+}
+
+/// The managed files as Claude Code reads them: `managed-settings.json` first, then each drop-in,
+/// a later one's value over an earlier one's.
+pub fn merged(files: Vec<Value>) -> Value {
+    let mut all = Map::new();
+    for f in files {
+        if let Value::Object(m) = f {
+            all.extend(m);
+        }
+    }
+    Value::Object(all)
 }
 
 /// Claude Code's system folder for managed settings on this platform.
@@ -777,7 +797,7 @@ pub fn own_sign_in(docs: &[Value]) -> bool {
     };
     docs.iter().any(|d| {
         let env = d.get("env").and_then(Value::as_object);
-        env.is_some_and(|e| OWN_SIGN_IN.iter().any(|k| e.contains_key(*k)) || OWN_PROVIDER.iter().any(|k| e.get(*k).is_some_and(on))) || d.get("apiKeyHelper").is_some()
+        env.is_some_and(|e| OWN_SIGN_IN.iter().any(|k| e.contains_key(*k)) || OWN_PROVIDER.iter().any(|k| e.get(*k).is_some_and(on))) || d.get("apiKeyHelper").and_then(Value::as_str).is_some_and(|h| !h.trim().is_empty())
     })
 }
 
@@ -842,7 +862,7 @@ pub fn logs_only_header(st: &mut CaptureState, data_dir: &Path) -> Result<bool, 
     }
     let mut next = ch.clone();
     let header = next.added.remove(OLD_HEADERS_KEY).unwrap_or_default();
-    env.remove(OLD_HEADERS_KEY);
+    env.shift_remove(OLD_HEADERS_KEY);
     env.insert(HEADERS_KEY.into(), Value::String(header.clone()));
     next.added.insert(HEADERS_KEY.into(), header);
     let before = st.otel.replace(next);
@@ -870,12 +890,12 @@ pub fn revert_otel(change: &OtelChange) -> Result<RevertOutcome, SettingsError> 
             continue;
         }
         if env.get(k).and_then(Value::as_str) == Some(v.as_str()) {
-            env.remove(k);
+            env.shift_remove(k);
             removed += 1;
         }
     }
     if env.is_empty() {
-        doc.remove("env");
+        doc.shift_remove("env");
     }
     if removed > 0 {
         write_doc(&change.settings_file, &doc, &original)?;
@@ -950,6 +970,21 @@ mod tests {
         assert_eq!(read(&file), json!({"theme": "dark", "statusLine": user_sl, "effortLevel": "high"}));
         assert_eq!(read_state(&data).unwrap(), CaptureState::default());
         assert!(!ch.backup.exists(), "the backup is not kept once the change is undone");
+    }
+
+    #[test]
+    fn a_revert_keeps_the_order_of_keys_added_after_ours() {
+        let (_d, file, data) = setup(Some(&json!({"theme": "dark"}).to_string()));
+        let mut st = CaptureState::default();
+        install_statusline(&mut st, &data, &file, "aiut --statusline", 1).unwrap();
+        let mut doc = read(&file);
+        doc["model"] = json!("opus");
+        doc["effortLevel"] = json!("high");
+        fs::write(&file, doc.to_string()).unwrap();
+        assert_eq!(uninstall_statusline(&mut st, &data).unwrap(), RevertOutcome::Restored);
+        let after = read(&file);
+        let keys: Vec<&String> = after.as_object().unwrap().keys().collect();
+        assert_eq!(keys, vec!["theme", "model", "effortLevel"]);
     }
 
     #[test]
@@ -1400,11 +1435,25 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_key_helper_is_no_sign_in_of_its_own() {
+        assert!(!own_sign_in(&[json!({"apiKeyHelper": null})]));
+        assert!(!own_sign_in(&[json!({"apiKeyHelper": " "})]));
+        assert!(own_sign_in(&[json!({"apiKeyHelper": "~/bin/key.sh"})]));
+    }
+
+    #[test]
     fn hooks_turned_off_in_the_users_or_managed_settings_are_told() {
         let (_d, file, _data) = setup(Some(r#"{"model": "opus"}"#));
         assert_eq!(hooks_blocked(&file, &[]), None);
         assert_eq!(hooks_blocked(&file, &[json!({"allowManagedHooksOnly": true})]), Some("allowManagedHooksOnly"));
         assert_eq!(hooks_blocked(&file, &[json!({"disableAllHooks": true})]), Some("managedDisableAllHooks"));
+        let ranked = [json!({"allowManagedHooksOnly": false, "disableAllHooks": false}), json!({"allowManagedHooksOnly": true, "disableAllHooks": true})];
+        assert_eq!(hooks_blocked(&file, &ranked), None, "the first managed source decides");
+        let ranked = [json!({"permissions": {}}), json!({"allowManagedHooksOnly": true})];
+        assert_eq!(hooks_blocked(&file, &ranked), None, "the others are not read at all");
+        let ranked = [json!({"permissions": {}, "managedSourcesBehavior": "merge"}), json!({"allowManagedHooksOnly": true})];
+        assert_eq!(hooks_blocked(&file, &ranked), Some("allowManagedHooksOnly"), "unless they are merged");
+        assert_eq!(merged(vec![json!({"a": 1, "b": 1}), json!({"b": 2})]), json!({"a": 1, "b": 2}), "a later drop-in wins");
         fs::write(&file, r#"{"disableAllHooks": true}"#).unwrap();
         assert_eq!(hooks_blocked(&file, &[json!({"allowManagedHooksOnly": true})]), Some("disableAllHooks"));
         assert_eq!(hooks_blocked(&file, &[json!({"disableAllHooks": false})]), None, "managed settings win");

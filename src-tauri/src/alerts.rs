@@ -23,8 +23,9 @@ static BUDGET: Mutex<Option<BudgetSeen>> = Mutex::new(None);
 static SIGNED_OUT: LazyLock<Mutex<HashSet<Provider>>> = LazyLock::new(Default::default);
 /// When the cache already told about runs out.
 static CACHE_TOLD: LazyLock<Mutex<HashMap<String, i64>>> = LazyLock::new(Default::default);
-/// The reset of each week already told to be largely unused.
-static UNUSED_TOLD: LazyLock<Mutex<HashMap<Limit, i64>>> = LazyLock::new(Default::default);
+/// The reset of each week already told to be largely unused; read from disk on first use, as a
+/// start in a week's last hours would otherwise tell it again.
+static UNUSED_TOLD: Mutex<Option<HashMap<Limit, i64>>> = Mutex::new(None);
 /// A week with this much left this close to its reset is told about, while there is time to use it.
 const UNUSED_LEFT_PCT: f64 = 30.0;
 const UNUSED_LEAD_S: i64 = 12 * 3600;
@@ -115,12 +116,30 @@ pub(crate) fn epoch() -> u64 {
 }
 
 /// After "Delete all data" nothing seen before is told about later.
-pub(crate) fn forget() {
+pub(crate) fn forget(data_dir: &std::path::Path) {
     FORGOTTEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     SEEN.lock().unwrap().clear();
     *BUDGET.lock().unwrap() = None;
     CACHE_TOLD.lock().unwrap().clear();
-    UNUSED_TOLD.lock().unwrap().clear();
+    *UNUSED_TOLD.lock().unwrap() = Some(HashMap::new());
+    let _ = std::fs::remove_file(unused_file(data_dir));
+}
+
+fn unused_file(data_dir: &std::path::Path) -> std::path::PathBuf {
+    data_dir.join("unused-told.json")
+}
+
+fn load_unused(data_dir: &std::path::Path) -> HashMap<Limit, i64> {
+    let rows: Vec<(Provider, String, String, Option<String>, i64)> = std::fs::read(unused_file(data_dir)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    rows.into_iter().map(|(provider, pool, window, account, at)| (Limit { provider, pool, window, account }, at)).collect()
+}
+
+/// Only weeks still running are kept.
+fn save_unused(data_dir: &std::path::Path, told: &HashMap<Limit, i64>, now_ms: i64) {
+    let rows: Vec<_> = told.iter().filter(|(_, at)| **at * 1000 > now_ms).map(|(l, at)| (l.provider, &l.pool, &l.window, &l.account, *at)).collect();
+    if let Ok(bytes) = serde_json::to_vec(&rows) {
+        let _ = std::fs::write(unused_file(data_dir), bytes);
+    }
 }
 
 pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading], caches: &[Cache], epoch: u64) {
@@ -165,7 +184,13 @@ pub(crate) fn check(app: &AppHandle, s: &Settings, readings: &[Reading], caches:
         if epoch != self::epoch() {
             return;
         }
-        unused_due(&mut told, readings, now_ms)
+        let data_dir = &app.state::<crate::state::AppState>().data_dir;
+        let told = told.get_or_insert_with(|| load_unused(data_dir));
+        let due = unused_due(told, readings, now_ms);
+        if !due.is_empty() {
+            save_unused(data_dir, told, now_ms);
+        }
+        due
     };
     if !n.enabled {
         return;
@@ -303,8 +328,14 @@ fn route_text(r: &tracker_core::analytics::Route, names: &HashMap<String, String
     match (r.renewed, tr) {
         (true, true) => format!("“{to}” ile devam edin: haftalık limiti yenilendi."),
         (true, false) => format!("Continue with “{to}”: its week has started again."),
-        (false, true) => format!("“{to}” ile devam edin: haftalık {}, 5 saatlik {} dolu.", pct(r.seven_day), pct(r.five_hour)),
-        (false, false) => format!("Continue with “{to}”: weekly {}, 5-hour {} used.", pct(r.seven_day), pct(r.five_hour)),
+        (false, true) => match r.five_hour {
+            Some(five) => format!("“{to}” ile devam edin: haftalık {}, 5 saatlik {} dolu.", pct(r.seven_day), pct(five)),
+            None => format!("“{to}” ile devam edin: haftalık {} dolu.", pct(r.seven_day)),
+        },
+        (false, false) => match r.five_hour {
+            Some(five) => format!("Continue with “{to}”: weekly {}, 5-hour {} used.", pct(r.seven_day), pct(five)),
+            None => format!("Continue with “{to}”: weekly {} used.", pct(r.seven_day)),
+        },
     }
 }
 
@@ -1033,6 +1064,11 @@ mod tests {
         let due = unused_due(&mut told, &[week(40.0, 6 * 3600), read(Provider::Anthropic, "five_hour", 0.0, 3600)], now_ms);
         assert_eq!(due.iter().map(|(l, used, _)| (l.window.as_str(), *used)).collect::<Vec<_>>(), [("seven_day", 40.0)], "the week, not the five hours");
         assert!(unused_due(&mut told, &[week(40.0, 6 * 3600 + 60)], now_ms).is_empty(), "the same week read again");
+        // a start later in the same week does not tell it again
+        let dir = tempfile::tempdir().unwrap();
+        save_unused(dir.path(), &told, now_ms);
+        let mut kept = load_unused(dir.path());
+        assert!(unused_due(&mut kept, &[week(40.0, 6 * 3600)], now_ms).is_empty());
         let later_ms = now_ms + (7 * 86_400 - 13 * 3600) * 1000;
         let next = Reading { observed_ms: Some(later_ms - 60_000), ..read(Provider::Anthropic, "seven_day", 10.0, 7 * 86_400 - 3600) };
         assert_eq!(unused_due(&mut told, &[next], later_ms).len(), 1, "the next week is told again");
@@ -1168,7 +1204,7 @@ mod tests {
             from_room: 0.0,
             to: "b".into(),
             to_room: 88.0,
-            five_hour: 0.0,
+            five_hour: Some(0.0),
             seven_day: 12.4,
             renewed: false,
             observed_ms: None,

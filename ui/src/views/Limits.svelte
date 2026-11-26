@@ -47,7 +47,9 @@
     const to = accountName(r.to, r.provider)
     const go = r.renewed
       ? t('route.renewed', { to })
-      : t('route.go', { to, week: fmtPct(r.seven_day), five: fmtPct(r.five_hour) })
+      : r.five_hour === null
+        ? t('route.goWeek', { to, week: fmtPct(r.seven_day) })
+        : t('route.go', { to, week: fmtPct(r.seven_day), five: fmtPct(r.five_hour) })
     if (r.from === null) return go
     const from = accountName(r.from, r.provider)
     return `${go} ${r.from_room <= 0 ? t('route.fromFull', { from }) : t('route.fromLeft', { from, left: fmtPct(r.from_room) })}`

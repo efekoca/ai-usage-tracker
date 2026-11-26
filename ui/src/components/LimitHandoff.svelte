@@ -2,7 +2,7 @@
   import { app } from '../lib/store.svelte'
   import { api, type HandoffAgent, type HandoffInfo } from '../lib/api'
   import { backToSwitch } from '../lib/focus'
-  import { fmtClock, fmtWhen, has, t } from '../lib/i18n.svelte'
+  import { fmtClock, fmtWhen, has, hookError, t } from '../lib/i18n.svelte'
   import AutoCard from './AutoCard.svelte'
   import Icon from './Icon.svelte'
   import HooksOff from './HooksOff.svelte'
@@ -167,14 +167,14 @@
           <li>{t('limits.handoff.ask.only')}</li>
           <li>{t('limits.handoff.ask.off')}</li>
         </ul>
-        {#if error}<p class="error small" role="alert">{t('refresh.consent.failed', { why: error })}</p>{/if}
+        {#if error}<p class="error small" role="alert">{t('refresh.consent.failed', { why: hookError(error) })}</p>{/if}
         <div class="actions">
           <button class="btn" disabled={busy} onclick={(e) => backToSwitch(e, () => ((asking = []), (error = '')), () => !asking.length, opener)}>{t('common.cancel')}</button>
           <button class="btn primary" disabled={busy} onclick={(e) => backToSwitch(e, () => apply(Object.fromEntries(asking.map((tool) => [tool, true]))), () => !asking.length, opener)}>{t('limits.handoff.ok')}</button>
         </div>
       </div>
     {:else if error}
-      <p class="error small" role="alert">{t('common.error', { e: error })}</p>
+      <p class="error small" role="alert">{t('common.error', { e: hookError(error) })}</p>
     {/if}
     {#if moved}<p class="moved subtle small" role="status">{t('limits.handoff.codexMoved', { n: moved })}</p>{/if}
     {#if claudeOn}<HooksOff setting={info.hooks_off} />{/if}

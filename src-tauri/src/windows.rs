@@ -224,18 +224,30 @@ pub fn ensure_widget(app: &AppHandle, s: &Settings) -> Option<WebviewWindow> {
         .visible(false);
     match b.build() {
         Ok(win) => {
-            // saved positions are physical (from Moved events), so they are restored as physical
-            match (s.widget.anchor.as_str(), s.widget.x, s.widget.y) {
-                ("", Some(x), Some(y)) if fits_a_monitor(&win, x, y) => {
+            let spot = match (s.widget.anchor.as_str(), s.widget.x, s.widget.y) {
+                ("", Some(x), Some(y)) => saved_spot(&win, x, y, s.widget.points),
+                _ => None,
+            };
+            match (spot, s.widget.anchor.as_str()) {
+                (Some(p), _) => {
                     LAST_PLACED_MS.store(chrono::Utc::now().timestamp_millis(), Ordering::SeqCst);
-                    let _ = win.set_position(PhysicalPosition::new(x, y));
+                    let _ = win.set_position(p);
                 }
-                ("", _, _) => place_widget(&win, "bottom-right"), // never placed, or its monitor is gone
-                (corner, _, _) => place_widget(&win, corner),
+                (None, "") => place_widget(&win, "bottom-right"), // never placed, or its monitor is gone
+                (None, corner) => place_widget(&win, corner),
             }
             let handle = app.clone();
             win.on_window_event(move |e| {
                 if let tauri::WindowEvent::Moved(p) = e {
+                    // in points on macOS, where each screen can have a scale of its own
+                    #[cfg(target_os = "macos")]
+                    let p = match handle.get_webview_window(WIDGET).and_then(|w| w.scale_factor().ok()) {
+                        Some(scale) => {
+                            let l = p.to_logical::<f64>(scale);
+                            PhysicalPosition::new(l.x.round() as i32, l.y.round() as i32)
+                        }
+                        None => *p,
+                    };
                     remember_widget_position(&handle, p.x, p.y);
                 }
             });
@@ -248,15 +260,30 @@ pub fn ensure_widget(app: &AppHandle, s: &Settings) -> Option<WebviewWindow> {
     }
 }
 
-fn fits_a_monitor(w: &WebviewWindow, x: i32, y: i32) -> bool {
-    let Ok(size) = w.outer_size() else { return false };
-    let rects: Vec<(i32, i32, i32, i32)> = w
-        .available_monitors()
-        .unwrap_or_default()
-        .iter()
-        .map(|m| (m.position().x, m.position().y, m.size().width as i32, m.size().height as i32))
-        .collect();
-    rect_fits((x, y, size.width as i32, size.height as i32), &rects)
+/// Where a saved position puts the widget, while it is still on a screen: in points when
+/// `points`, which only macOS saves, else in pixels.
+fn saved_spot(w: &WebviewWindow, x: i32, y: i32, points: bool) -> Option<tauri::Position> {
+    let monitors = w.available_monitors().unwrap_or_default();
+    let size = w.outer_size().ok()?;
+    #[cfg(target_os = "macos")]
+    if points {
+        let scale = w.scale_factor().ok()?;
+        let points = size.to_logical::<f64>(scale);
+        let rects: Vec<_> = monitors.iter().map(|m| point_rect((m.position().x, m.position().y), (m.size().width, m.size().height), m.scale_factor())).collect();
+        let fits = rect_fits((x, y, points.width.round() as i32, points.height.round() as i32), &rects);
+        return fits.then(|| tauri::LogicalPosition::new(x, y).into());
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = points;
+    let rects: Vec<_> = monitors.iter().map(|m| (m.position().x, m.position().y, m.size().width as i32, m.size().height as i32)).collect();
+    rect_fits((x, y, size.width as i32, size.height as i32), &rects).then(|| PhysicalPosition::new(x, y).into())
+}
+
+/// A macOS screen in points: its origin and size come scaled by its own factor.
+#[cfg(any(target_os = "macos", test))]
+fn point_rect((x, y): (i32, i32), (w, h): (u32, u32), scale: f64) -> (i32, i32, i32, i32) {
+    let p = |v: f64| (v / scale).round() as i32;
+    (p(x as f64), p(y as f64), p(w as f64), p(h as f64))
 }
 
 fn rect_fits((x, y, w, h): (i32, i32, i32, i32), monitors: &[(i32, i32, i32, i32)]) -> bool {
@@ -277,6 +304,7 @@ fn apply_pending_drag(s: &mut Settings) {
     if let Some((x, y)) = DRAGGED_TO.lock().unwrap().take() {
         s.widget.x = Some(x);
         s.widget.y = Some(y);
+        s.widget.points = cfg!(target_os = "macos");
         s.widget.anchor.clear();
     }
 }
@@ -288,12 +316,14 @@ fn remember_widget_position(app: &AppHandle, x: i32, y: i32) {
     }
     let state = app.state::<AppState>();
     let mut s = state.settings.write().unwrap();
-    if s.widget.x == Some(x) && s.widget.y == Some(y) {
+    let points = cfg!(target_os = "macos");
+    if s.widget.x == Some(x) && s.widget.y == Some(y) && s.widget.points == points {
         return;
     }
     // a user drag: drop the corner anchor
     s.widget.x = Some(x);
     s.widget.y = Some(y);
+    s.widget.points = points;
     s.widget.anchor.clear();
     drop(s);
     *DRAGGED_TO.lock().unwrap() = Some((x, y));
@@ -321,7 +351,7 @@ fn remember_widget_position(app: &AppHandle, x: i32, y: i32) {
 }
 
 pub fn place_widget(w: &WebviewWindow, corner: &str) {
-    let Ok(Some(m)) = w.current_monitor().or_else(|_| w.primary_monitor()) else { return };
+    let Some(m) = w.current_monitor().ok().flatten().or_else(|| w.primary_monitor().ok().flatten()) else { return };
     let area = m.work_area();
     let Ok(size) = w.outer_size() else { return };
     let margin = (16.0 * m.scale_factor()) as i32;
@@ -980,6 +1010,11 @@ mod tests {
         assert!(rect_fits((-300, 100, 280, 120), &mons));
         assert!(!rect_fits((1800, 900, 300, 150), &mons), "half off the right edge");
         assert!(!rect_fits((4000, 100, 300, 150), &mons), "the monitor is gone");
+        // a 2x MacBook with a 1x display to its right, as macOS reports them
+        let mac = [point_rect((0, 0), (2940, 1912), 2.0), point_rect((1470, 0), (1920, 1080), 1.0)];
+        assert_eq!(mac, [(0, 0, 1470, 956), (1470, 0, 1920, 1080)]);
+        assert!(rect_fits((3000, 50, 288, 128), &mac), "on the external display");
+        assert!(!rect_fits((3300, 50, 288, 128), &mac), "past its right edge");
     }
 
     #[test]

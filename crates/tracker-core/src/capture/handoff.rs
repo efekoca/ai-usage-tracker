@@ -314,7 +314,9 @@ pub fn claim(dir: &Path, session: &str, resets_ms: i64) -> bool {
     // a hook stopped between its claim and its record (Claude Code ends one at its timeout) would
     // hold the window for good: the record, not the claim, says the conversation was asked
     let Some(written) = fs::metadata(&path).and_then(|m| m.modified()).ok() else { return false };
-    if written.elapsed().is_ok_and(|age| age <= std::time::Duration::from_secs(60)) || told_record(dir, session).is_some_and(|t| t.resets_ms == resets_ms) {
+    // a claim up to a minute ahead of the clock (it was set back) is as fresh as one a minute old
+    let age = written.elapsed().unwrap_or_else(|ahead| ahead.duration());
+    if age <= std::time::Duration::from_secs(60) || told_record(dir, session).is_some_and(|t| t.resets_ms == resets_ms) {
         return false;
     }
     // of two hooks that both find it stale only the one that marks this very claim takes it over
@@ -559,8 +561,9 @@ pub fn collect(dir: &Path, t: &Told) -> bool {
     if !m.is_file() || !single || written.is_none_or(|w| w + 2_000 < t.told_ms) || m.len() > 1024 * 1024 {
         return false;
     }
+    // the size again as read, as Codex can still be writing it
     let mut text = Vec::new();
-    if file.read_to_end(&mut text).is_err() || write_note(dir, &t.session, &text).is_err() {
+    if (&mut file).take(1024 * 1024 + 1).read_to_end(&mut text).is_err() || text.len() > 1024 * 1024 || write_note(dir, &t.session, &text).is_err() {
         return false;
     }
     let _ = fs::remove_file(from);
@@ -710,6 +713,11 @@ mod tests {
         let stamp = fs::metadata(&left).unwrap().modified().unwrap().duration_since(UNIX_EPOCH).unwrap().as_millis();
         fs::write(told_dir(d.path()).join(format!("s2.2000.claim.{stamp}.take")), "").unwrap();
         assert!(!claim(d.path(), "s2", 2_000), "only one of two takes it over");
+        // the clock was set back after the claim
+        assert!(claim(d.path(), "s3", 2_000));
+        let ahead = told_dir(d.path()).join("s3.2000.claim");
+        fs::File::options().write(true).open(&ahead).unwrap().set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(30)).unwrap();
+        assert!(!claim(d.path(), "s3", 2_000), "a claim ahead of the clock is still held");
     }
 
     #[test]

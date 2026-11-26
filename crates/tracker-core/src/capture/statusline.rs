@@ -95,7 +95,8 @@ pub fn record(data_dir: &Path, windows: &Map<String, Value>, now_ms: i64) -> boo
     let _ = fs::create_dir_all(capture_dir(data_dir));
     let last: Option<Value> = fs::read_to_string(last_file(data_dir)).ok().and_then(|s| serde_json::from_str(&s).ok());
     let same = last.as_ref().and_then(|l| l.get("windows")) == Some(&Value::Object(windows.clone()));
-    let recent = last.as_ref().and_then(|l| l.get("ts")).and_then(Value::as_i64).is_some_and(|t| now_ms - t < HEARTBEAT_MS);
+    // a clock set back does not hold the next line back until it catches up
+    let recent = last.as_ref().and_then(|l| l.get("ts")).and_then(Value::as_i64).is_some_and(|t| (0..HEARTBEAT_MS).contains(&(now_ms - t)));
     if same && recent {
         return false;
     }
@@ -233,7 +234,10 @@ pub fn write_options(data_dir: &Path, options: &Options) -> std::io::Result<()> 
         return Ok(());
     }
     fs::create_dir_all(capture_dir(data_dir))?;
-    let tmp = capture_dir(data_dir).join(format!(".statusline.options.{}", std::process::id()));
+    // two of the app's commands can save the options at once
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = capture_dir(data_dir).join(format!(".statusline.options.{}.{n}", std::process::id()));
     // written whole first, so a bridge never reads half of it
     fs::write(&tmp, serde_json::to_vec(options)?)?;
     fs::rename(&tmp, options_file(data_dir)).inspect_err(|_| {
@@ -410,6 +414,14 @@ mod tests {
         assert_eq!(serde_json::to_string(&w).unwrap(), r#"{"five_hour":{"used_percentage":23.5,"resets_at":1738425600},"seven_day":{"used_percentage":41.2,"resets_at":1738857600}}"#);
         assert!(extract_windows(&json!({"model": {}})).is_none());
         assert_eq!(render_default(Some(&w)), "5h 24% · 7d 41%");
+    }
+
+    #[test]
+    fn a_clock_set_back_does_not_hold_the_next_line_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let w = extract_windows(&input()).unwrap();
+        assert!(record(dir.path(), &w, 10_000_000));
+        assert!(record(dir.path(), &w, 5_000_000));
     }
 
     #[test]

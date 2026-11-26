@@ -24,7 +24,9 @@ session_dir() {
 }
 
 getent passwd | while IFS=: read -r user _ uid _ _ home _; do
-  [ "$uid" -ge 1000 ] 2>/dev/null && [ "$uid" -lt 60000 ] || continue
+  # people, not system accounts; systemd-homed users sit above 60000, and accounts that never ran
+  # the app are skipped below
+  [ "$uid" -ge 1000 ] 2>/dev/null && [ "$uid" -ne 65534 ] || continue
   data=$(session_dir "$user" "$uid" XDG_DATA_HOME)
   config=$(session_dir "$user" "$uid" XDG_CONFIG_HOME)
   # only users who ran the app; the revert would otherwise create its data folder
@@ -33,7 +35,10 @@ getent passwd | while IFS=: read -r user _ uid _ _ home _; do
     if [ -d "$d/AIUsageTracker" ]; then dir=$d; break; fi
   done
   [ -n "$dir" ] || continue
-  runuser -u "$user" -- env -i HOME="$home" XDG_DATA_HOME="$dir" PATH=/usr/bin:/bin timeout 30 /usr/bin/ai-usage-tracker --revert-capture </dev/null \
+  # the session bus, for gsettings to take the GNOME shortcut out of the user's settings
+  bus= run=
+  if [ -S "/run/user/$uid/bus" ]; then bus="DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus" run="XDG_RUNTIME_DIR=/run/user/$uid"; fi
+  runuser -u "$user" -- env -i HOME="$home" XDG_DATA_HOME="$dir" PATH=/usr/bin:/bin ${bus:+"$bus"} ${run:+"$run"} timeout 30 /usr/bin/ai-usage-tracker --revert-capture </dev/null \
     || echo "ai-usage-tracker: could not undo the Claude Code and Codex settings changes for $user; see $home/.claude/settings.json and $home/.codex/hooks.json" >&2
   runuser -u "$user" -- rm -f "$home/.config/autostart/ai-usage-tracker.desktop" ${config:+"$config/autostart/ai-usage-tracker.desktop"} || true
 done

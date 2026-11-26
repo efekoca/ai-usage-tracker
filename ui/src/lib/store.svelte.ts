@@ -152,6 +152,14 @@ export async function init() {
     app.settings = s
     applyAppearance(s, app.info)
     if (!wasOnboarded && s.onboarded) refreshSoon()
+    // "Delete all data" starts over: project ids are handed out again, so a kept filter could name another project
+    if (wasOnboarded && !s.onboarded) {
+      app.filter = {}
+      app.report = null
+      app.limits = []
+      app.accounts = []
+      app.openSession = null
+    }
   })
   await on<{ done: number; total: number }>('scan-progress', (p) => {
     app.scan = { ...(app.scan ?? ({} as ScanStatus)), running: true, done: p.done, total: p.total }

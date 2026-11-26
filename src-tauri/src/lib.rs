@@ -201,7 +201,7 @@ pub(crate) fn open_path(path: &std::path::Path) -> std::io::Result<()> {
     let mut c = std::process::Command::new("xdg-open");
     #[cfg(target_os = "linux")]
     desktop_env(&mut c);
-    c.arg(path).spawn().map(|_| ())
+    spawn_reaped(c.arg(path)).map(|_| ())
 }
 
 pub(crate) fn open_link(url: &str) -> std::io::Result<()> {
@@ -217,7 +217,18 @@ pub(crate) fn open_link(url: &str) -> std::io::Result<()> {
     let mut c = std::process::Command::new("xdg-open");
     #[cfg(target_os = "linux")]
     desktop_env(&mut c);
-    c.arg(url).spawn().map(|_| ())
+    spawn_reaped(c.arg(url)).map(|_| ())
+}
+
+/// Starts a program the app does not wait for, and collects its exit in the background so a
+/// finished one leaves no zombie process behind on macOS and Linux.
+pub(crate) fn spawn_reaped(c: &mut std::process::Command) -> std::io::Result<u32> {
+    let mut child = c.spawn()?;
+    let pid = child.id();
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(pid)
 }
 
 /// By full path, so PATH and the current folder play no part in which file runs.

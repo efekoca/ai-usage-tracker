@@ -1068,8 +1068,9 @@ pub fn cache_misses<Tz: TimeZone>(store: &Store, book: &PriceBook, range: Range,
             *counts.entry(e.project_id).or_default() += 1;
         }
         let project_id = counts.iter().max_by_key(|(id, n)| (**n, id.unwrap_or(i64::MIN))).and_then(|(id, _)| *id);
-        // a miss is the main conversation's: a subagent's request tells nothing about it
-        let main: Vec<&EventRow> = events.iter().filter(|e| e.agent.is_none() && !e.advisor).collect();
+        // a miss is the main conversation's: a subagent's or a helper's request (only telemetry
+        // sees those) tells nothing about it
+        let main: Vec<&EventRow> = events.iter().filter(|e| e.agent.is_none() && !e.advisor && e.accuracy != Accuracy::Captured).collect();
         let mut missed = false;
         let mut runs: Vec<MissRun> = Vec::new();
         // the latest miss told so far

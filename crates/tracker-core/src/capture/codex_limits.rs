@@ -212,7 +212,7 @@ pub fn query(bin: &Path, timeout: Duration, now_ms: i64) -> Result<Vec<LimitSnap
     let wait_for = |id: i64| -> Result<Value, String> {
         loop {
             let left = deadline.checked_duration_since(Instant::now()).ok_or("codex did not answer in time")?;
-            let msg = rx.recv_timeout(left).map_err(|_| "codex did not answer in time".to_string())?;
+            let msg = rx.recv_timeout(left).map_err(|e| super::no_answer(e, "codex"))?;
             if msg.get("id").and_then(Value::as_i64) == Some(id) {
                 if let Some(err) = msg.get("error") {
                     let text = str_at(err, "message").unwrap_or("codex returned an error");

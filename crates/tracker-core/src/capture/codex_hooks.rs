@@ -32,10 +32,12 @@ fn read(file: &Path) -> Result<Option<Map<String, Value>>, SettingsError> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(SettingsError::Io(e)),
     };
+    // a file saved by Windows Notepad or PowerShell starts with a byte order mark
+    let raw = raw.trim_start_matches('\u{feff}');
     if raw.trim().is_empty() {
         return Ok(Some(Map::new()));
     }
-    match serde_json::from_str(&raw) {
+    match serde_json::from_str(raw) {
         Ok(Value::Object(m)) => Ok(Some(m)),
         Ok(_) => Err(SettingsError::Unparseable("not a JSON object".into())),
         Err(e) => Err(SettingsError::Unparseable(e.to_string())),
@@ -93,6 +95,33 @@ pub fn install(file: &Path, command: &str, previous: Option<&CodexHookChange>, n
         _ => now_ms,
     };
     Ok(CodexHookChange { file: file.to_owned(), command: command.to_owned(), created, installed_at_ms })
+}
+
+/// Points our hook at `command` when the app moved. One the user took out of an event is not put
+/// back, as Codex would ask to trust it again; where it is left, it points at the app. `None` when
+/// none of it is left.
+pub fn retarget(old: &CodexHookChange, command: &str, now_ms: i64) -> Result<Option<CodexHookChange>, SettingsError> {
+    if in_place(old) {
+        return install(&old.file, command, Some(old), now_ms).map(Some);
+    }
+    let Some(mut doc) = read(&old.file)? else { return Ok(None) };
+    let mut changed = false;
+    if let Some(hooks) = doc.get_mut("hooks").and_then(Value::as_object_mut) {
+        for event in EVENTS {
+            let groups = hooks.get_mut(event).and_then(Value::as_array_mut).into_iter().flatten();
+            for h in groups.filter_map(|g| g.get_mut("hooks")).filter_map(Value::as_array_mut).flatten() {
+                if h.get("command").and_then(Value::as_str) == Some(old.command.as_str()) {
+                    h["command"] = json!(command);
+                    changed = true;
+                }
+            }
+        }
+    }
+    if !changed {
+        return Ok(None);
+    }
+    write(&old.file, &doc)?;
+    Ok(Some(CodexHookChange { command: command.to_owned(), installed_at_ms: now_ms, ..old.clone() }))
 }
 
 /// Our hook is in every event it should be.
@@ -172,6 +201,39 @@ mod tests {
 
     fn other() -> Value {
         json!({"hooks": {"SessionStart": [{"hooks": [{"command": "'/Users/u/.local/bin/jcode' setup-hotkey", "timeout": 5, "type": "command"}], "matcher": "startup|resume"}]}})
+    }
+
+    #[test]
+    fn a_moved_app_does_not_put_back_a_hook_the_user_took_out() {
+        let d = tempfile::tempdir().unwrap();
+        let file = hooks_file(d.path());
+        let c = install(&file, CMD, None, 1).unwrap();
+        let mut doc: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
+        doc["hooks"]["PostToolUse"] = json!([]);
+        fs::write(&file, doc.to_string()).unwrap();
+        let moved = retarget(&c, "'/elsewhere/aiut' --codex-handoff-hook", 2).unwrap().unwrap();
+        let doc: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(doc["hooks"]["PostToolUse"], json!([]), "not put back");
+        assert_eq!(doc["hooks"]["SessionStart"][0]["hooks"][0]["command"], "'/elsewhere/aiut' --codex-handoff-hook", "the rest follows the app");
+        assert!(!fs::read_to_string(&file).unwrap().contains(CMD));
+        assert_eq!(retarget(&moved, "'/third/aiut' --codex-handoff-hook", 3).unwrap().map(|m| m.command), Some("'/third/aiut' --codex-handoff-hook".into()));
+        fs::write(&file, r#"{"hooks": {}}"#).unwrap();
+        assert_eq!(retarget(&moved, "'/fourth/aiut' --codex-handoff-hook", 4).unwrap(), None, "none of it left");
+
+        let c = install(&file, CMD, None, 5).unwrap();
+        let moved = retarget(&c, "'/elsewhere/aiut' --codex-handoff-hook", 6).unwrap().unwrap();
+        assert!(in_place(&moved) && !fs::read_to_string(&file).unwrap().contains(CMD));
+    }
+
+    #[test]
+    fn a_file_with_a_byte_order_mark_is_read() {
+        let d = tempfile::tempdir().unwrap();
+        let file = hooks_file(d.path());
+        fs::write(&file, format!("\u{feff}{}", other())).unwrap();
+        let c = install(&file, CMD, None, 1).unwrap();
+        assert!(in_place(&c));
+        let doc: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(doc["hooks"]["SessionStart"][0], other()["hooks"]["SessionStart"][0]);
     }
 
     #[test]

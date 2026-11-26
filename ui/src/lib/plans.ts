@@ -36,7 +36,7 @@ export function planPrice(s: Settings | null, p: Provider, plan: PlanDef | undef
   const mine = account && plan ? s?.account_prices?.[priceKey(account, plan.id)] : undefined
   if (typeof mine === 'number' && mine > 0) return { usd: mine, custom: true }
   const shared = s?.plan_prices?.[p]
-  if ((!account || (plan && plan.id === s?.plans[p])) && typeof shared === 'number' && shared > 0) return { usd: shared, custom: true }
+  if (plan && (!account || plan.id === s?.plans[p]) && typeof shared === 'number' && shared > 0) return { usd: shared, custom: true }
   const list = plan?.monthly_usd
   return { usd: typeof list === 'number' ? list : null, custom: false }
 }
@@ -51,7 +51,7 @@ export interface ValueInput {
   value: PlanValue | null
   /** Count each account's plan only from the day it was first seen, for periods longer than its use. It runs on to the period's end: a plan can be paid while unused, so the value stays a lower bound. */
   fromFirstSeen?: boolean
-  /** Compare a plan with a renewal day against its full price over the billing period it is in. */
+  /** Compare a plan with a renewal day against its full price over the billing period it is in, and one without over the last 30 days. */
   cycles?: boolean
   today?: Date
 }
@@ -61,7 +61,7 @@ export interface Cycle {
   from: string
   to: string
   days: number
-  /** Days of it the data reaches, today included. */
+  /** Days of it gone by, today included. */
   elapsed: number
   /** The renewal days of the plans it covers. */
   renews: number[]
@@ -94,6 +94,22 @@ function since(cum: number[], dates: string[], from: string): number[] {
   return cum.map((c, j) => (j < i ? 0 : c - base))
 }
 
+/** A running total from `from` on, one entry a day. A period's data starts at the archive's first day, so the days before it had no use. */
+function runFrom(cum: number[], dates: string[], from: string): number[] {
+  const gap = dates.length ? Math.max(0, daysBetween(from, dates[0])) : 0
+  return [...Array<number>(gap).fill(0), ...since(cum, dates, from).filter((_, i) => dates[i] >= from)]
+}
+
+const ROLLING_DAYS = 30
+/** The first of the last 30 days the data reaches. */
+const rollingFrom = (dates: string[]) => {
+  const last = dates.at(-1)
+  if (!last) return undefined
+  const d = new Date(`${last}T12:00:00`)
+  d.setDate(d.getDate() + 1 - ROLLING_DAYS)
+  return dayOf(d.getTime())
+}
+
 function planOf(v: ValueInput, p: Provider): PlanDef | undefined {
   const id = v.settings?.plans[p]
   return id ? v.plans?.providers[p]?.plans.find((x) => x.id === id) : undefined
@@ -113,10 +129,11 @@ export function valueRow(v: ValueInput, p: Provider) {
   const dates = v.value?.dates ?? []
   const renews = v.cycles ? renewalDay(v.settings, p) : undefined
   const c = renews ? cycleOf(renews, v.today) : null
-  const cumulative = c ? since(pv?.cumulative ?? [], dates, c.from).filter((_, i) => dates[i] >= c.from) : (pv?.cumulative ?? [])
+  const start = c ? c.from : v.cycles ? rollingFrom(dates) : undefined
+  const cumulative = start ? runFrom(pv?.cumulative ?? [], dates, start) : (pv?.cumulative ?? [])
   const cycle: Cycle | null = c && renews ? { ...c, elapsed: cumulative.length, renews: [renews] } : null
-  const cost = cycle ? (cumulative.at(-1) ?? 0) : (pv?.cost_usd ?? 0)
-  const share = cycle ? price.usd : shareOf(v, price.usd)
+  const cost = start ? (cumulative.at(-1) ?? 0) : (pv?.cost_usd ?? 0)
+  const share = cycle ? price.usd : shareOf(v, price.usd, start ? ROLLING_DAYS : undefined)
   const ratio = share && share > 0 ? cost / share : null
   const day = share !== null && pv ? cumulative.findIndex((x) => x >= share) : -1
   return { pv, plan, price, cost, share, ratio, day, cumulative, cycle }
@@ -148,18 +165,21 @@ export function valueSplit(v: ValueInput, p: Provider) {
   const latest = periods.map((c) => c.from).sort().at(-1)
   // the figure changes at the first renewal, so the period ends there
   const to = periods.map((c) => c.to).sort()[0]
+  const rolling = v.cycles && !cycled ? rollingFrom(dates) : undefined
   const runs = (u: AccountValue | undefined, start: string | undefined) => (u ? (start ? since(u.cumulative, dates, start) : u.cumulative) : dates.map(() => 0))
   for (const x of parts) {
-    const own = cycled ? (x.renews ? cycleOf(x.renews, v.today).from : from) : undefined
+    const own = cycled ? (x.renews ? cycleOf(x.renews, v.today).from : from) : rolling
     x.cost = own ? (runs(x.use, own).at(-1) ?? 0) : (x.use?.cost_usd ?? 0)
     if (cycled && counted.includes(x)) x.share = x.price.usd
+    else if (rolling) x.share = shareOf(v, x.price.usd, ROLLING_DAYS)
   }
   // use of an unknown account counts only from the latest renewal, so the figure stays a lower bound
-  const lines = [...counted.map((x) => runs(x.use, cycled ? cycleOf(x.renews as number, v.today).from : undefined)), runs(unknown, latest)]
-  const unknownCost = unknown ? (cycled ? (lines.at(-1)?.at(-1) ?? 0) : unknown.cost_usd) : 0
+  const lines = [...counted.map((x) => runs(x.use, cycled ? cycleOf(x.renews as number, v.today).from : rolling)), runs(unknown, cycled ? latest : rolling)]
+  const unknownCost = unknown ? (cycled || rolling ? (lines.at(-1)?.at(-1) ?? 0) : unknown.cost_usd) : 0
   const all = dates.map((_, i) => lines.reduce((t, l) => t + (l[i] ?? 0), 0))
-  const cumulative = cycled && from ? all.filter((_, i) => dates[i] >= from) : all
-  const cost = cycled ? (cumulative.at(-1) ?? 0) : [...counted.map((x) => x.use), unknown].reduce((t, u) => t + (u?.cost_usd ?? 0), 0)
+  const start = cycled ? from : rolling
+  const cumulative = start ? runFrom(all, dates, start) : all
+  const cost = start ? (cumulative.at(-1) ?? 0) : [...counted.map((x) => x.use), unknown].reduce((t, u) => t + (u?.cost_usd ?? 0), 0)
   const share = counted.reduce((t, x) => t + (x.share ?? 0), 0)
   const cycle: Cycle | null =
     cycled && from && to ? { from, to, days: daysBetween(from, to), elapsed: cumulative.length, renews: [...new Set(counted.map((x) => x.renews as number))].sort((a, b) => a - b) } : null

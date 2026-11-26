@@ -71,6 +71,18 @@ describe('the Live caches list', () => {
     expect(row('unasked').querySelector<HTMLButtonElement>('.go')?.disabled).toBe(true)
   })
 
+  it('tells two conversations of one project and branch apart by when they started', async () => {
+    const { target } = await render([
+      cache({ session_id: 'a', project: 'site', started_ms: new Date(2026, 10, 26, 9, 5).getTime() }),
+      cache({ session_id: 'b', project: 'site', started_ms: new Date(2026, 10, 26, 14, 40).getTime(), expires_ms: now + 600_000 }),
+      cache({ session_id: 'c', project: 'notes' }),
+    ])
+    const meta = [...target.querySelectorAll('li .meta')].map((m) => m.textContent ?? '')
+    expect(meta.filter((m) => m.includes('Since'))).toHaveLength(2)
+    expect(new Set(meta.filter((m) => m.includes('Since'))).size).toBe(2)
+    expect(meta.find((m) => !m.includes('Since'))).toBeDefined()
+  })
+
   it('shows why a refresh could not be asked for', async () => {
     mocks.refreshCache.mockRejectedValue('not_waiting')
     const { row } = await render([cache({ project: 'notes' })])

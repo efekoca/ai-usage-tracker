@@ -180,6 +180,26 @@ fn snap(ts: i64, provider: Provider, tool: Tool, window: &str, used: f64, resets
 }
 
 #[test]
+fn the_last_reading_of_a_window_shown_after_its_reset_is_not_the_next_windows() {
+    let mut store = Store::open_in_memory().unwrap();
+    let r1 = ms(2026, 10, 2, 10, 0);
+    let min = 60_000;
+    let next = Some((r1 + 5 * 60 * min) / 1000);
+    let reading = |at: i64, used: f64, resets: Option<i64>| snap(r1 + at * min, Provider::Anthropic, Tool::ClaudeCode, "five_hour", used, resets, None, "claude_statusline");
+    let mut tx = store.transaction().unwrap();
+    // a status line repeats the old window's 15 % a minute after it reset
+    tx.insert_limits(&[reading(1, 15.0, Some(r1 / 1000)), reading(5, 5.0, next), reading(8, 8.0, next), reading(20, 12.0, next), reading(45, 20.0, next)]).unwrap();
+    let events: Vec<_> = (3..=44).step_by(4).map(|m| ev(&format!("e{m}"), r1 + m * min, Tool::ClaudeCode, "claude-sonnet-5", r"C:\p\a", 1_000, 100)).collect();
+    tx.upsert_events(&events).unwrap();
+    tx.commit().unwrap();
+    let book = PriceBook::default_book();
+    let views = limits_view(&store, &book, r1 + 50 * min, &[]).unwrap();
+    let v = views.iter().find(|v| v.provider == Provider::Anthropic && v.window == "five_hour").unwrap();
+    assert_eq!(v.used_pct, Some(20.0));
+    assert_eq!(v.unlogged_pct, None, "every rise came with this project's requests");
+}
+
+#[test]
 fn a_reset_granted_inside_the_window_restarts_the_forecast_pace() {
     let mut store = Store::open_in_memory().unwrap();
     let now = ms(2026, 10, 2, 12, 0);
@@ -391,6 +411,17 @@ fn the_router_suggests_the_account_with_clearly_more_room() {
     assert!(at(pair("team", true, 10.0, 99.6, fresh), pair("home", false, 0.0, 10.0, LimitState::Stale)).is_empty(), "no reading, no suggestion");
     assert!(at(pair("team", true, 10.0, 100.0, fresh), pair("home", false, 100.0, 10.0, fresh)).is_empty(), "both full");
     assert!(at(pair("team", true, 10.0, 90.0, LimitState::Stale), pair("home", false, 0.0, 10.0, fresh)).is_empty(), "the account in use might have room");
+}
+
+#[test]
+fn a_codex_account_whose_plan_has_no_five_hour_window_is_weighed_on_its_week() {
+    let codex = |a: &str, active, window: &str, used, plan: &str| LimitView { provider: Provider::OpenAI, limit_id: "codex".into(), plan: Some(plan.into()), ..view(a, active, window, used, LimitState::Fresh) };
+    let work = vec![codex("work", true, "five_hour", 30.0, "plus"), codex("work", true, "seven_day", 100.0, "plus")];
+    let r = route(&[work.clone(), vec![codex("home", false, "seven_day", 10.0, "pro")]].concat());
+    assert_eq!(r.iter().map(|r| (r.to.as_str(), r.five_hour, r.to_room)).collect::<Vec<_>>(), [("home", None, 90.0)]);
+    let in_use = route(&[vec![codex("home", true, "seven_day", 100.0, "pro")], vec![codex("work", false, "five_hour", 0.0, "plus"), codex("work", false, "seven_day", 10.0, "plus")]].concat());
+    assert_eq!(in_use.iter().map(|r| r.to.as_str()).collect::<Vec<_>>(), ["work"]);
+    assert!(route(&[work, vec![codex("home", false, "seven_day", 10.0, "plus")]].concat()).is_empty(), "a plan with a five-hour window and no reading of it");
 }
 
 #[test]

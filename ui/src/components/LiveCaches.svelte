@@ -3,7 +3,7 @@
   import { api, on, type LiveCache } from '../lib/api'
   import { app } from '../lib/store.svelte'
   import { clockCase, fmtCompact, fmtMoney, t } from '../lib/i18n.svelte'
-  import { cacheClient, cacheName, cacheTone, mmss, refreshError, shortModel } from '../lib/caches'
+  import { cacheClient, cacheName, cacheSince, cacheTone, cacheTwin, mmss, refreshError, shortModel } from '../lib/caches'
   import { ensureRefresh, loadRefreshInfo, refresh } from '../lib/refresh.svelte'
   import CachePie from './CachePie.svelte'
   import Icon from './Icon.svelte'
@@ -131,7 +131,7 @@
   }
 
   const meta = (c: LiveCache) =>
-    [shortModel(c.model), cacheClient(c.client), t(c.ttl_ms <= 300_000 ? 'cache.live.ttl.5' : 'cache.live.ttl.60'), c.branch ? '' : t('cache.live.since', { at: clockCase(c.started_ms, 'from') })].filter(Boolean).join(' · ')
+    [shortModel(c.model), cacheClient(c.client), t(c.ttl_ms <= 300_000 ? 'cache.live.ttl.5' : 'cache.live.ttl.60'), !c.branch || cacheTwin(c, live) ? cacheSince(c) : ''].filter(Boolean).join(' · ')
   const money = (usd: number | null) => (usd === null ? '—' : fmtMoney(usd))
 
   // the row menu takes the focus when it opens and gives it back to its button when it closes

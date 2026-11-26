@@ -479,9 +479,11 @@ function toolsItem(P: Painter, tools: Share[], S: Spec, anchor: boolean): Block 
     draw: (x, y, w) => {
       const gap = Math.max(2, S.bar * 0.25)
       const usable = w - gap * (tools.length - 1)
+      // each bar gets its least width first, so the row still adds up to the width
+      const floor = S.bar * 0.6
       let bx = x
       tools.forEach((s, i) => {
-        const sw = Math.max(S.bar * 0.6, usable * s.share)
+        const sw = floor + Math.max(0, usable - floor * tools.length) * s.share
         P.rect(bx, y, Math.min(sw, x + w - bx), S.bar, S.bar / 2, c.toolColors[i] ?? c.ink3)
         bx += sw + gap
       })

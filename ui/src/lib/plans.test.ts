@@ -72,6 +72,10 @@ describe('planPrice', () => {
     const left = settings({ plans: { anthropic: 'free' }, plan_prices: { anthropic: 24 } })
     expect(planPrice(left, 'anthropic', free), 'a price left from another plan').toEqual({ usd: 0, custom: false })
   })
+
+  it('takes no price kept from an earlier plan once no plan is chosen', () => {
+    expect(planPrice(settings({ plan_prices: { anthropic: 90 } }), 'anthropic', undefined)).toEqual({ usd: null, custom: false })
+  })
 })
 
 describe('planMultiple', () => {
@@ -154,5 +158,58 @@ describe('billing periods', () => {
     const partly = valueSplit({ ...v, settings: settings({ account_plans: { a1: 'pro', a2: 'max5x' }, renewal_days: { a1: 21 } }) }, 'anthropic')
     expect(partly.cycle).toBeNull()
     expect(partly.partly).toBe(true)
+  })
+})
+
+describe('billing periods before the archive’s first day', () => {
+  // the period starts on 2026-10-01; the backend starts the data at the first request, on 2026-10-22
+  const dates = Array.from({ length: 10 }, (_, i) => `2026-10-${22 + i}`)
+  const range = { from_ms: new Date(2026, 9, 22).getTime(), to_ms: new Date(2026, 10, 1).getTime() }
+  const today = new Date(2026, 9, 31)
+  const month = 365.25 / 12
+  // $3 a day
+  const daily = dates.map((_, i) => 3 * (i + 1))
+  const use = (account: string | null) => ({ account, cost_usd: 30, events: 5, unpriced_events: 0, cumulative: daily })
+  const value = (accounts: PlanValue['providers'][number]['accounts'] = []): PlanValue => ({
+    range,
+    dates,
+    providers: [
+      { provider: 'anthropic', cost_usd: 30, events: 10, unpriced_events: 0, cumulative: daily, accounts },
+      { provider: 'openai', cost_usd: 30, events: 10, unpriced_events: 0, cumulative: daily, accounts: [] },
+    ],
+  })
+  const s = settings({ plans: { anthropic: 'pro', openai: 'plus' }, renewal_days: { anthropic: 1 } })
+
+  it('counts the days of the period from its first day', () => {
+    const r = valueRow({ plans, settings: s, accounts: [], value: value(), cycles: true, today }, 'anthropic')
+    expect(r.cycle).toEqual({ from: '2026-10-01', to: '2026-11-01', days: 31, elapsed: 31, renews: [1] })
+    expect(r.cost).toBe(30)
+    expect(r.day, 'day 28: $21 on 2026-10-28').toBe(27)
+    expect(r.cumulative.slice(0, 21).every((x) => x === 0)).toBe(true)
+  })
+
+  it('compares a plan without a renewal day over the last 30 days', () => {
+    const r = valueRow({ plans, settings: s, accounts: [], value: value(), cycles: true, today }, 'openai')
+    expect(r.cycle).toBeNull()
+    expect(r.cost).toBe(30)
+    expect(r.share).toBeCloseTo((20 * 30) / month)
+    expect(r.cumulative).toHaveLength(30)
+    const long = { ...value(), dates: Array.from({ length: 31 }, (_, i) => `2026-10-${String(i + 1).padStart(2, '0')}`) }
+    long.providers = long.providers.map((x) => ({ ...x, cost_usd: 93, cumulative: long.dates.map((_, i) => 3 * (i + 1)) }))
+    const full = valueRow({ plans, settings: s, accounts: [], value: long, cycles: true, today }, 'openai')
+    expect(full.cost, 'the 31st day back is left out').toBe(90)
+    expect(full.share).toBeCloseTo((20 * 30) / month)
+  })
+
+  it('counts the days of a shared period, or the last 30 days, for several accounts', () => {
+    const seen = (id: string) => ({ provider: 'anthropic', id, read_plan: null, first_ms: range.from_ms, last_ms: range.to_ms - 1, requests: 1, active: true }) as Account
+    const accounts = [seen('a1'), seen('a2')]
+    const cycled = valueSplit({ plans, settings: settings({ account_plans: { a1: 'pro', a2: 'pro' }, renewal_days: { a1: 1, a2: 1 } }), accounts, value: value([use('a1'), use('a2')]), cycles: true, today }, 'anthropic')
+    expect(cycled.cycle).toMatchObject({ from: '2026-10-01', elapsed: 31 })
+    expect(cycled.day, 'day 28: $42 against $40').toBe(27)
+    const rolling = valueSplit({ plans, settings: settings({ account_plans: { a1: 'pro', a2: 'pro' } }), accounts, value: value([use('a1'), use('a2')]), cycles: true, today }, 'anthropic')
+    expect(rolling.cycle).toBeNull()
+    expect(rolling.cost).toBe(60)
+    expect(rolling.share).toBeCloseTo((2 * 20 * 30) / month)
   })
 })

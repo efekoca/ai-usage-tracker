@@ -135,7 +135,10 @@
     <span class="spacer"></span>
     {#if cyc}
       <span title={t('value.cycleDay', { n: cyc.elapsed, of: cyc.days })}>{fmtDate(cyc.from, 'short')} – {fmtDate(shift(cyc.to, -1), 'short')}</span>
-    {:else if value}<span>{fmtDate(value.dates[0], 'short')} – {fmtDate(value.dates[value.dates.length - 1], 'short')}</span>{/if}
+    {:else if value?.dates.length}
+      {@const last = value.dates[value.dates.length - 1]}
+      <span>{fmtDate(shift(last, 1 - Math.max(1, cumulative.length)), 'short')} – {fmtDate(last, 'short')}</span>
+    {/if}
   </div>
   <p class="verdict small icon-text">
     {#if (ratio ?? 0) >= 1}

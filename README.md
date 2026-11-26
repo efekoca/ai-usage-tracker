@@ -155,7 +155,7 @@ A card shows only totals, tool names and model names, never project names or any
 
 **Archive and data.** Source tools delete old logs (Claude Code after 30 days by default), but everything the app has imported stays in its archive. **Settings → Data** exports CSV or JSON, backs up the database, merges a backup back in, and offers **Delete all my data**.
 
-**Prices.** API list prices ship with the app in [`config/pricing.json`](config/pricing.json), checked against the official pages of [Anthropic](https://platform.claude.com/docs/en/about-claude/pricing), [OpenAI](https://developers.openai.com/api/docs/pricing), [Google Gemini](https://ai.google.dev/gemini-api/docs/pricing) and [Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/pricing), and for models OpenCode can use, of [DeepSeek](https://api-docs.deepseek.com/quick_start/pricing/), [Moonshot AI](https://platform.kimi.ai/docs/pricing/chat), [Z.ai](https://docs.z.ai/guides/overview/pricing), [Alibaba Cloud](https://www.alibabacloud.com/help/en/model-studio/model-pricing), [xAI](https://docs.x.ai/developers/pricing), [Mistral](https://docs.mistral.ai/inference/pricing) and [MiniMax](https://platform.minimax.io/docs/guides/pricing-paygo). At startup and every 12 hours the app downloads a newer copy of this file from GitHub, so new models are priced without an update. Turn this off with **Settings → Prices → Keep the price list current**. A model without a known price is never priced by guesswork. It stays out of costs until you enter a price in **Settings → Prices**.
+**Prices.** API list prices ship with the app in [`config/pricing.json`](config/pricing.json), checked against the official pages of [Anthropic](https://platform.claude.com/docs/en/about-claude/pricing), [OpenAI](https://developers.openai.com/api/docs/pricing), [Google Gemini](https://ai.google.dev/gemini-api/docs/pricing) and [Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/pricing), and for models OpenCode can use, of [DeepSeek](https://api-docs.deepseek.com/quick_start/pricing/), [Moonshot AI](https://platform.kimi.ai/docs/pricing/chat), [Z.ai](https://docs.z.ai/guides/overview/pricing), [Alibaba Cloud](https://www.alibabacloud.com/help/en/model-studio/model-pricing), [xAI](https://docs.x.ai/developers/pricing), [Mistral](https://docs.mistral.ai/inference/pricing) and [MiniMax](https://platform.minimax.io/docs/guides/pricing-paygo). Once you finish the first setup, the app downloads a newer copy of this file from GitHub at startup and every 12 hours, so new models are priced without an update. Turn this off with **Settings → Prices → Keep the price list current**. A model without a known price is never priced by guesswork. It stays out of costs until you enter a price in **Settings → Prices**.
 
 ### Your usage from the command line
 
@@ -289,7 +289,7 @@ Everything runs on your computer:
 
 ## Updates
 
-The app checks for a new version at startup and every 6 hours. The check downloads only a small version file and sends nothing. An update is installed only after you confirm it, and only if its signature matches the key built into the app. Turn the check off under **Settings → Updates**.
+Once you finish the first setup, the app checks for a new version at startup and every 6 hours. The check downloads only a small version file and sends nothing. An update is installed only after you confirm it, and only if its signature matches the key built into the app. Turn the check off under **Settings → Updates**.
 
 ## Known limitations
 
