@@ -1573,3 +1573,24 @@ fn a_report_an_earlier_build_passed_over_is_read_from_the_status_line_file_again
     tracker_core::ingest::ingest(&mut store, &files, |_| {});
     assert_eq!(store.cache_miss_reports(0, i64::MAX).unwrap().len(), 1);
 }
+
+#[test]
+fn a_conversation_is_found_by_its_own_transcript() {
+    let mut store = Store::open_in_memory().unwrap();
+    let id = "0199aaaa-0000-4000-8000-000000000001";
+    let root = std::path::Path::new("/home/u/.claude/projects/-p-app");
+    let mut tx = store.transaction().unwrap();
+    for (path, parser, at) in [
+        (root.join(id).join("subagents").join("agent-a.jsonl"), "claude_code_jsonl", 3),
+        (root.join(format!("x{id}.jsonl")), "claude_code_jsonl", 3),
+        (root.join(format!("{id}.jsonl")), "codex_rollout", 3),
+        (root.join(format!("{id}.jsonl")).with_extension("jsonl.bak"), "claude_code_jsonl", 3),
+        (std::path::Path::new("/home/u/claude-work/projects/-p-app").join(format!("{id}.jsonl")), "claude_code_jsonl", 1),
+        (root.join(format!("{id}.jsonl")), "claude_code_jsonl", 2),
+    ] {
+        tx.set_checkpoint(&path.to_string_lossy(), &format!("{at}"), parser, 1, at, 1, &serde_json::Value::Null, 0, None).unwrap();
+    }
+    tx.commit().unwrap();
+    assert_eq!(store.claude_transcript(id).unwrap(), Some(root.join(format!("{id}.jsonl"))));
+    assert_eq!(store.claude_transcript("0199aaaa-0000-4000-8000-000000000002").unwrap(), None);
+}

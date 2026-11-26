@@ -678,7 +678,7 @@
 
 {#if drag && previewSettings}
   {@const [w, h] = ghostSize(drag.m)}
-  <div class="ghost-tile" data-theme={backdrop} style:left="{drag.x - drag.dx}px" style:top="{drag.y - drag.dy}px" style:width="{w}px" style:height="{h}px" aria-hidden="true">
+  <div class="ghost-tile" class:round={drag.m.kind === 'action' && drag.m.size === 's'} data-theme={backdrop} style:left="{drag.x - drag.dx}px" style:top="{drag.y - drag.dy}px" style:width="{w}px" style:height="{h}px" aria-hidden="true">
     <PanelModuleView m={drag.m} {data} settings={previewSettings} {now} mode={panelMode} edit />
   </div>
 {/if}
@@ -1191,6 +1191,18 @@
   }
   .ghost-tile :global(.mod) {
     background: color-mix(in srgb, var(--surface) 82%, transparent);
+  }
+  /* a small button is round, so the lift follows its circle */
+  .ghost-tile.round {
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .ghost-tile.round :global(.mod) {
+    background: transparent;
+  }
+  .ghost-tile.round :global(.disc) {
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.3);
   }
   :global(html.dragging-tile),
   :global(html.dragging-tile *) {

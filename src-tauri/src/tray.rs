@@ -416,12 +416,21 @@ fn cache_text(caches: &[Cache], now_ms: i64, tr: bool) -> Option<(String, String
     let minutes = |c: &Cache| (c.expires_ms - now_ms + 59_999) / 60_000;
     let word = if tr { "Önbellek" } else { "Cache" };
     let unit = |c: &Cache| if tr { format!("{} dk", minutes(c)) } else { format!("{}m", minutes(c)) };
-    let short = if first.project.is_empty() { format!("{word} {}", unit(first)) } else { format!("{} {}", first.project, unit(first)) };
+    let short = if first.project.is_empty() { format!("{word} {}", unit(first)) } else { format!("{} {}", fit_name(&first.project), unit(first)) };
     let hidden = if tr { "gizli proje" } else { "hidden project" };
-    let list = caches.iter().take(2).map(|c| format!("{} {}", if c.project.is_empty() { hidden } else { &c.project }, unit(c))).collect::<Vec<_>>().join(" · ");
+    let list = caches.iter().take(2).map(|c| format!("{} {}", if c.project.is_empty() { hidden.to_owned() } else { fit_name(&c.project) }, unit(c))).collect::<Vec<_>>().join(" · ");
     let more = caches.len().saturating_sub(2);
     let more = if more > 0 { format!(" +{more}") } else { String::new() };
     Some((short, format!("{word}: {list}{more}")))
+}
+
+/// A project's name cut short, so a long one does not widen the menu bar item.
+fn fit_name(name: &str) -> String {
+    const MAX: usize = 16;
+    if name.chars().count() <= MAX {
+        return name.to_owned();
+    }
+    format!("{}…", name.chars().take(MAX - 1).collect::<String>().trim_end_matches([' ', '-', '_', '.']))
 }
 
 /// The menu bar text with the soonest cache after it ("%46  notes 2 dk").
@@ -1115,6 +1124,9 @@ mod tests {
         assert_eq!(short, "notes 2 dk");
         assert!(tooltip(&l, &s, None, Some(&long)).ends_with("\nÖnbellek: notes 2 dk · gizli proje 4 dk +2"));
         assert_eq!(cache_text(&[cache("", 3)], 0, false).unwrap(), ("Cache 3m".into(), "Cache: hidden project 3m".into()));
+        let long = cache_text(&[cache("customer-portal-backend-services", 2), cache("ğüşıöçĞÜŞİÖÇğüşıöç", 4)], 0, true).unwrap();
+        assert_eq!(long, ("customer-portal… 2 dk".into(), "Önbellek: customer-portal… 2 dk · ğüşıöçĞÜŞİÖÇğüş… 4 dk".into()));
+        assert_eq!(fit_name("sixteen-letters!"), "sixteen-letters!");
     }
 
     #[test]

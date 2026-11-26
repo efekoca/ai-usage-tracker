@@ -26,7 +26,7 @@
   import Icon from '../Icon.svelte'
   import Ring from './Ring.svelte'
   import CachePie from '../CachePie.svelte'
-  import { cacheClient, cacheName, cacheSince, cacheTone, cacheTwin, mmss, refreshError } from '../../lib/caches'
+  import { cacheClient, cacheName, cacheProject, cacheSince, cacheTone, cacheTwin, mmss, refreshError } from '../../lib/caches'
 
   let {
     m,
@@ -165,7 +165,7 @@
 
 {#if m.kind === 'action'}
   <button class="mod action {m.size}" class:on={active} class:spin={m.action === 'rescan' && scanning} class:done={m.action === 'rescan' && scanned && !scanning} title={actionLabel} aria-label={actionLabel} aria-pressed={m.action === 'widget' ? active : undefined} aria-busy={m.action === 'rescan' ? scanning : undefined} disabled={m.action === 'rescan' && scanning && !edit} tabindex={edit ? -1 : 0} onclick={act(m.action)}>
-    <span class="disc"><Icon name={m.action === 'rescan' && scanned && !scanning ? 'check' : actionIcon[m.action]} size={m.size === 's' ? 22 : 16} /></span>
+    <span class="disc"><Icon name={m.action === 'rescan' && scanned && !scanning ? 'check' : actionIcon[m.action]} size={m.size === 's' ? 19 : 16} /></span>
     {#if m.size === 'w'}<span class="lbl">{actionLabel}</span>{/if}
   </button>
 {:else if m.kind === 'scan'}
@@ -289,9 +289,10 @@
         {@const tone = cacheTone(c, left)}
         {@const busy = c.refreshing || asked.includes(c.session_id)}
         {@const why = failed[c.session_id] ?? (c.refresh_failed ? t('cache.live.failed') : null)}
+        {@const sub = (max: number) => why ?? [cacheProject(c, max), c.branch ?? cacheClient(c.client), cacheTwin(c, caches) ? cacheSince(c) : ''].filter(Boolean).join(' · ')}
         <span class="crow">
           <CachePie frac={left / c.ttl_ms} {tone} size={16} />
-          <span class="txt grow"><span class="lbl">{cacheName(c)}</span><span class="sub" class:bad={!!why}>{why ?? [c.branch ?? cacheClient(c.client), cacheTwin(c, caches) ? cacheSince(c) : ''].filter(Boolean).join(' · ')}</span></span>
+          <span class="txt grow"><span class="lbl" title={cacheName(c)}>{cacheName(c)}</span><span class="sub" class:bad={!!why} title={sub(Infinity)}>{sub(16)}</span></span>
           <b class="num ctime {tone}">{mmss(left)}</b>
           <button
             class="rf"
@@ -614,21 +615,40 @@
     background: color-mix(in srgb, var(--good) 18%, transparent);
     color: var(--good-ink);
   }
-  /* small buttons fill their cell like the other tiles */
-  .action.s {
-    padding: 0;
+  /* a small button is a round key in its cell, the shape the panel editor rings */
+  .action.s,
+  .action.s:hover,
+  .action.s.on,
+  .action.s.on:hover {
+    padding: 6px;
+    border-color: transparent;
+    background: transparent;
   }
   .action.s .disc {
     width: 100%;
     height: 100%;
-    border-radius: inherit;
-    background: transparent;
+    border: 0.5px solid var(--cc-edge);
+    background: var(--cc-tile);
+  }
+  .action.s:hover .disc {
+    background: var(--cc-tile-hover);
+  }
+  .action.s:focus-visible {
+    outline: none;
+  }
+  .action.s:focus-visible .disc {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
   .action.on,
   .action.on:hover {
     background: var(--accent);
     color: var(--accent-ink);
     border-color: transparent;
+  }
+  .action.s.on .disc {
+    border-color: transparent;
+    background: var(--accent);
   }
   .mod.done .disc {
     background: color-mix(in srgb, var(--good) 22%, transparent);
@@ -679,6 +699,9 @@
     }
   }
 
+  .forecast .track {
+    margin-top: 5px;
+  }
   .track {
     display: block;
     width: 100%;

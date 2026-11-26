@@ -5,6 +5,7 @@ use crate::settings::Settings;
 use crate::state::AppState;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, State, WebviewWindow};
 use tracker_core::insights;
@@ -12,6 +13,17 @@ use tracker_core::model::Tool;
 
 /// Conversations the user stopped following, until the app restarts.
 static DROPPED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Conversation names read from transcripts, kept with the file's length so a file is read again
+/// only once it grew.
+static TITLES: Mutex<Vec<Titled>> = Mutex::new(Vec::new());
+
+struct Titled {
+    session_id: String,
+    path: PathBuf,
+    len: u64,
+    title: Option<String>,
+}
 
 const MONTH_MS: i64 = 30 * 86_400_000;
 
@@ -22,6 +34,8 @@ pub struct Cache {
     pub project: String,
     /// The branch, left out with a hidden project's name.
     pub branch: Option<String>,
+    /// The conversation's name in Claude Code or the Claude app, left out with a hidden project's name.
+    pub title: Option<String>,
     pub model: String,
     pub client: Option<String>,
     pub ttl_ms: i64,
@@ -70,7 +84,8 @@ fn listed(state: &AppState, s: &Settings, now_ms: i64, keep: impl Fn(&str) -> bo
         (live, store.projects().unwrap_or_default())
     };
     let projects: HashMap<i64, _> = projects.into_iter().map(|p| (p.id, p)).collect();
-    live.into_iter()
+    let mut out: Vec<Cache> = live
+        .into_iter()
         .filter(|c| keep(&c.session_id))
         .filter_map(|c| {
             let p = c.project_id.and_then(|id| projects.get(&id));
@@ -93,7 +108,36 @@ fn listed(state: &AppState, s: &Settings, now_ms: i64, keep: impl Fn(&str) -> bo
                 ..Cache::default()
             })
         })
-        .collect()
+        .collect();
+    for c in out.iter_mut().filter(|c| !c.project.is_empty()) {
+        c.title = title(state, &c.session_id);
+    }
+    out
+}
+
+/// A conversation's name, read from its transcript only when the file grew. A transcript whose end
+/// holds no title for a while (a long tool result) keeps the name read before. Takes the store, so
+/// call it without holding it.
+pub fn title(state: &AppState, session_id: &str) -> Option<String> {
+    let known = TITLES.lock().unwrap().iter().find(|t| t.session_id == session_id).map(|t| (t.path.clone(), t.len, t.title.clone()));
+    let path = match &known {
+        Some((path, ..)) => path.clone(),
+        None => state.db().claude_transcript(session_id).ok()??,
+    };
+    let len = std::fs::metadata(&path).ok()?.len();
+    if let Some((_, read, title)) = &known
+        && *read == len
+    {
+        return title.clone();
+    }
+    let title = tracker_core::sources::claude_code::conversation_title(&path).unwrap_or_else(|| known.and_then(|k| k.2));
+    let mut memo = TITLES.lock().unwrap();
+    memo.retain(|t| t.session_id != session_id);
+    if memo.len() >= 32 {
+        memo.remove(0);
+    }
+    memo.push(Titled { session_id: session_id.to_owned(), path, len, title: title.clone() });
+    title
 }
 
 /// Where a conversation runs, for a notification: "Terminal", "Claude desktop" and so on.
@@ -107,10 +151,14 @@ pub fn client_name(client: Option<&str>, tr: bool) -> Option<&'static str> {
     })
 }
 
-/// "notes · main": the project and what tells the conversation apart; `None` without a name.
+/// The conversation's own name, or "notes · main": the project and what tells it apart; `None`
+/// without a project name.
 pub fn label(c: &Cache, tr: bool) -> Option<String> {
     if c.project.is_empty() {
         return None;
+    }
+    if c.title.is_some() {
+        return c.title.clone();
     }
     let second = c.branch.clone().or_else(|| client_name(c.client.as_deref(), tr).map(str::to_owned));
     Some(second.map_or(c.project.clone(), |b| format!("{} · {b}", c.project)))
@@ -212,5 +260,7 @@ mod tests {
         assert_eq!(label(&cache("notes", None, Some("claude-desktop")), false).as_deref(), Some("notes · Claude desktop"));
         assert_eq!(label(&cache("notes", None, Some("sdk-ts")), false).as_deref(), Some("notes"));
         assert_eq!(label(&cache("", Some("main"), Some("cli")), false), None, "a hidden project");
+        let named = Cache { title: Some("Release notes".into()), ..cache("notes", Some("main"), Some("cli")) };
+        assert_eq!(label(&named, true).as_deref(), Some("Release notes"));
     }
 }

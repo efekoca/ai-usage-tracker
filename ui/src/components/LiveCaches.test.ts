@@ -25,7 +25,7 @@ const { app } = await import('../lib/store.svelte')
 const { default: LiveCaches } = await import('./LiveCaches.svelte')
 
 const now = Date.now()
-const cache = (over: Partial<LiveCache>): LiveCache => ({ session_id: 's', project: 'notes', branch: 'main', model: 'claude-opus-5-5', client: 'cli', ttl_ms: 3_600_000, expires_ms: now + 1_800_000, started_ms: now - 3_600_000, tokens: 1000, refresh_usd: 0.1, rewrite_usd: 1, refreshable: true, refreshing: false, refresh_failed: false, unasked: false, auto: false, auto_capped: false, refreshes: 0, refreshes_usd: 0, ...over })
+const cache = (over: Partial<LiveCache>): LiveCache => ({ session_id: 's', project: 'notes', branch: 'main', title: null, model: 'claude-opus-5-5', client: 'cli', ttl_ms: 3_600_000, expires_ms: now + 1_800_000, started_ms: now - 3_600_000, tokens: 1000, refresh_usd: 0.1, rewrite_usd: 1, refreshable: true, refreshing: false, refresh_failed: false, unasked: false, auto: false, auto_capped: false, refreshes: 0, refreshes_usd: 0, ...over })
 
 let done: (() => void)[] = []
 beforeEach(() => {
@@ -81,6 +81,17 @@ describe('the Live caches list', () => {
     expect(meta.filter((m) => m.includes('Since'))).toHaveLength(2)
     expect(new Set(meta.filter((m) => m.includes('Since'))).size).toBe(2)
     expect(meta.find((m) => !m.includes('Since'))).toBeDefined()
+  })
+
+  it('names a conversation by its title, with its project beside it', async () => {
+    const { target } = await render([
+      cache({ session_id: 'a', project: 'site', title: 'Landing page copy' }),
+      cache({ session_id: 'b', project: 'site', title: 'Pricing table fixes', expires_ms: now + 600_000 }),
+    ])
+    const names = [...target.querySelectorAll('li .name')].map((n) => n.textContent)
+    expect(names).toEqual(['Landing page copy', 'Pricing table fixes'])
+    const meta = [...target.querySelectorAll('li .meta')].map((m) => m.textContent ?? '')
+    expect(meta.every((m) => m.startsWith('site · ') && !m.includes('Since'))).toBe(true)
   })
 
   it('shows why a refresh could not be asked for', async () => {
