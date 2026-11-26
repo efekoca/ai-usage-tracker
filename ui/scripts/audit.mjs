@@ -7,9 +7,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const WAITING = {
-  'GHSA-fc5q-39xc-vjpf': 'picomatch ReDoS; only vite, vitest and svelte-check use it, on this project\'s own patterns; no fixed release on 2026-11-18',
-}
+const WAITING = {}
 const SEVERE = new Set(['high', 'critical'])
 
 const ui = join(dirname(fileURLToPath(import.meta.url)), '..')
