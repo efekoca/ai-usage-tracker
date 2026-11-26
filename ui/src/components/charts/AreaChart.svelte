@@ -2,6 +2,7 @@
   import { area, line, curveMonotoneX } from 'd3-shape'
   import { scaleLinear } from 'd3-scale'
   import { fmtDate } from '../../lib/i18n.svelte'
+  import { axisPicks, labelWidth } from '../../lib/axis'
 
   type Series = { key: string; label: string; color: string }
   let {
@@ -58,15 +59,8 @@
       .curve(curveMonotoneX),
   )
 
-  const xLabels = $derived.by(() => {
-    const n = dates.length
-    if (n === 0) return []
-    const step = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(iw / 90))))
-    const out: number[] = []
-    for (let i = 0; i < n; i += step) out.push(i)
-    if (out[out.length - 1] !== n - 1 && n > 1 && (n - 1 - out[out.length - 1]) * (iw / n) > 50) out.push(n - 1)
-    return out
-  })
+  // spaced by the widest label, so longer ones ("04:00 PM") never run into each other
+  const xLabels = $derived(axisPicks(dates.length, iw, Math.max(0, ...dates.map((d) => labelWidth(xLabel(d))))))
 
   function move(e: PointerEvent) {
     const r = (e.currentTarget as SVGRectElement).getBoundingClientRect()

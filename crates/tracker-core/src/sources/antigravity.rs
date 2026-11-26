@@ -251,6 +251,19 @@ pub fn client_for(data_dir: &Path) -> String {
     if name.is_empty() { "antigravity".into() } else { name.replace('-', "_") }
 }
 
+/// A row with a field of another type is skipped with a warning; any other error (the database
+/// went away, was locked) still ends the read, so the file is read again.
+fn skip_mistyped<T>(row: rusqlite::Result<T>, out: &mut ParseOutput, what: &str) -> rusqlite::Result<Option<T>> {
+    match row {
+        Ok(r) => Ok(Some(r)),
+        Err(e @ (rusqlite::Error::InvalidColumnType(..) | rusqlite::Error::FromSqlConversionFailure(..) | rusqlite::Error::IntegralValueOutOfRange(..))) => {
+            out.warn(format!("{what}: {e}"));
+            Ok(None)
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// Every subagent conversation the surface's summary DB names, as (conversation, parent, agent).
 fn subagents(data_dir: &Path) -> Vec<(String, String, Option<String>)> {
     let db = data_dir.join("conversation_summaries.db");
@@ -332,7 +345,7 @@ fn read(path: &Path) -> Result<ParseOutput, Box<dyn std::error::Error + Send + S
         })?;
         for row in rows {
             // a damaged step is skipped; the rest of the conversation is still read
-            let (Some(idx), status, meta, has_error) = row? else { continue };
+            let Some((Some(idx), status, meta, has_error)) = skip_mistyped(row, &mut out, "step")? else { continue };
             let (status, has_error) = (status.unwrap_or_default(), has_error.unwrap_or_default());
             let meta = meta.unwrap_or_default();
             let call = msg(&meta, 4).and_then(|c| Some((text(c, 1), text(c, 2)?)));
@@ -344,7 +357,10 @@ fn read(path: &Path) -> Result<ParseOutput, Box<dyn std::error::Error + Send + S
     let mut q = conn.prepare("SELECT idx, data FROM gen_metadata ORDER BY idx")?;
     let rows = q.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<Vec<u8>>>(1)?)))?;
     for row in rows {
-        let (idx, data) = row?;
+        let Some((idx, data)) = skip_mistyped(row, &mut out, "generation")? else {
+            out.lines_total += 1;
+            continue;
+        };
         out.lines_total += 1;
         let Some(g) = data.as_deref().and_then(|d| msg(d, 1)) else { continue };
         let Some(usage) = msg(g, 4) else { continue };

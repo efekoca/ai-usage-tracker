@@ -65,11 +65,11 @@ impl Range {
 /// Local midnight of `d` (DST-safe: the earliest instant of that local date).
 pub fn start_of_day<Tz: TimeZone>(tz: &Tz, d: NaiveDate) -> i64 {
     let naive = d.and_hms_opt(0, 0, 0).unwrap();
-    match tz.from_local_datetime(&naive).earliest() {
-        Some(t) => t.timestamp_millis(),
-        // midnight skipped by a DST jump: take 01:00
-        None => tz.from_local_datetime(&(naive + chrono::Duration::hours(1))).earliest().map(|t| t.timestamp_millis()).unwrap_or(0),
-    }
+    // midnight skipped by a clock jump: the first minute of the day that came, or of the next day
+    // when the whole day was skipped
+    (0..48 * 60)
+        .find_map(|m| tz.from_local_datetime(&(naive + chrono::Duration::minutes(m))).earliest())
+        .map_or(0, |t| t.timestamp_millis())
 }
 
 pub fn local_date<Tz: TimeZone>(tz: &Tz, ms: i64) -> NaiveDate {
@@ -586,7 +586,8 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
     // desktop history, Cowork and Claude Code readings describe the same account-wide pool
     type Key = (String, Option<String>, String, String);
     let mut newest: BTreeMap<Key, LimitSnapshot> = BTreeMap::new();
-    let mut known_reset: HashMap<Key, i64> = HashMap::new();
+    // the latest reset a source told, with the use it read then
+    let mut known_reset: HashMap<Key, (i64, Option<f64>)> = HashMap::new();
     for (s, owner) in store.latest_owned_limits()? {
         let owner = owner.filter(|_| several.contains(&s.provider));
         if owner.as_deref() == Some(crate::accounts::NAMELESS) {
@@ -594,8 +595,10 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
         }
         let k = (s.provider.as_str().to_owned(), owner, s.limit_id.clone(), s.window.clone());
         if let Some(r) = s.resets_at {
-            let e = known_reset.entry(k.clone()).or_insert(r);
-            *e = (*e).max(r);
+            let e = known_reset.entry(k.clone()).or_insert((r, s.used_pct));
+            if r > e.0 {
+                *e = (r, s.used_pct);
+            }
         }
         match newest.get(&k) {
             Some(cur) if cur.ts_ms >= s.ts_ms => {}
@@ -606,10 +609,13 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
     }
     // a reading without a reset time (Claude's desktop history) still belongs to the window
     // another source knows the end of, as long as that end comes after it
+    // another source knows the end of, as long as that end comes after it and its use has not
+    // fallen since (a window that started again early)
     for (k, s) in newest.iter_mut() {
         if s.resets_at.is_none()
-            && let Some(&r) = known_reset.get(k)
+            && let Some(&(r, then)) = known_reset.get(k)
             && r.saturating_mul(1000) > s.ts_ms
+            && !matches!((s.used_pct, then), (Some(now), Some(then)) if now + 10.0 < then)
         {
             s.resets_at = Some(r);
         }

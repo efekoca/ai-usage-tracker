@@ -20,7 +20,7 @@ vi.mock('./api', () => ({
   },
 }))
 
-const { app, init, setFilter } = await import('./store.svelte')
+const { app, init, refresh, setFilter, setPeriod } = await import('./store.svelte')
 
 afterEach(() => {
   vi.useRealTimers()
@@ -49,5 +49,33 @@ describe('the app state', () => {
     expect(app.limits).toEqual([])
     expect(app.accounts).toEqual([])
     expect(app.openSession).toBeNull()
+  })
+
+  it('does not bring back data a refresh asked for before "Delete all data"', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval'] })
+    const settings = { onboarded: true, theme: 'system', accent: 'blue', language: 'en', currency: 'USD', fx_rate: 1 } as unknown as Settings
+    handlers.get('settings-changed')!(settings)
+    let answer: (r: Report) => void = () => {}
+    mocks.report.mockReturnValueOnce(new Promise<Report>((r) => (answer = r)))
+    const asked = refresh()
+    handlers.get('settings-changed')!({ ...settings, onboarded: false })
+    answer({ hourly: [], range: { from_ms: 0, to_ms: 0 } } as unknown as Report)
+    await asked
+    expect(app.report).toBeNull()
+    expect(app.limits).toEqual([])
+  })
+
+  it('refreshes during a steady stream of changes', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'Date'] })
+    handlers.get('settings-changed')!({ onboarded: true, theme: 'system', accent: 'blue', language: 'en', currency: 'USD', fx_rate: 1 } as unknown as Settings)
+    setPeriod({ kind: 'all' })
+    mocks.report.mockClear()
+    await vi.advanceTimersByTimeAsync(20_000)
+    mocks.report.mockClear()
+    for (let i = 0; i < 80; i++) {
+      handlers.get('data-changed')!(undefined)
+      await vi.advanceTimersByTimeAsync(200)
+    }
+    expect(mocks.report).toHaveBeenCalled()
   })
 })

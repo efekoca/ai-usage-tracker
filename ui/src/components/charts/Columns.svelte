@@ -1,6 +1,7 @@
 <script lang="ts">
   import { scaleLinear } from 'd3-scale'
   import { fmtDate } from '../../lib/i18n.svelte'
+  import { labelWidth } from '../../lib/axis'
 
   type Series = { key: string; label: string; color: string }
   let {
@@ -60,10 +61,12 @@
         .filter((seg) => seg.val > 0)
     }),
   )
-  const labelEvery = $derived(labelStep > 0 ? labelStep : Math.max(1, Math.ceil(dates.length / Math.max(2, Math.floor(iw / 70)))))
+  // spaced by the widest label, so longer ones ("04:00 PM") never run into each other
+  const wide = $derived(Math.max(0, ...dates.map((d) => labelWidth(xLabel(d)))))
+  const labelEvery = $derived(labelStep > 0 ? labelStep : Math.max(1, Math.ceil(dates.length / Math.max(2, Math.floor(iw / Math.max(70, wide + 10))))))
   // the last bar gets a label too, unless it would touch the regular one before it
   const lastLabel = $derived(
-    labelStep === 0 && dates.length > 1 && (dates.length - 1) % labelEvery !== 0 && ((dates.length - 1) % labelEvery) * band >= 60 ? dates.length - 1 : -1,
+    labelStep === 0 && dates.length > 1 && (dates.length - 1) % labelEvery !== 0 && ((dates.length - 1) % labelEvery) * band >= wide + 8 ? dates.length - 1 : -1,
   )
 
   function barPath(x0: number, top: number, bottom: number, w: number, round: boolean): string {

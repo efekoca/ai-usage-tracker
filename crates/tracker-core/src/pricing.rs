@@ -236,8 +236,16 @@ pub enum PricingError {
     Invalid(String),
 }
 
+/// Far above any real price per million tokens or multiplier, and low enough that a cost of a
+/// billion tokens stays a finite number.
+const MAX_RATE: f64 = 1_000_000.0;
+
 fn check_rate(what: &str, v: f64) -> Result<(), PricingError> {
-    if v.is_finite() && v >= 0.0 { Ok(()) } else { Err(PricingError::Invalid(format!("{what} must be a finite non-negative number, got {v}"))) }
+    if v.is_finite() && (0.0..=MAX_RATE).contains(&v) {
+        Ok(())
+    } else {
+        Err(PricingError::Invalid(format!("{what} must be a number from 0 to {MAX_RATE}, got {v}")))
+    }
 }
 
 fn check_rates(id: &str, r: &Rates) -> Result<(), PricingError> {
@@ -819,6 +827,7 @@ mod tests {
         };
         assert!(edit(&|_| {}).is_ok());
         assert!(matches!(edit(&|f| f.models[0].rates.input = -1.0), Err(PricingError::Invalid(_))));
+        assert!(matches!(edit(&|f| f.models[0].rates.input = 1e308), Err(PricingError::Invalid(_))), "finite, but its cost would not be");
         assert!(edit(&|f| f.models[0].rates.cache_read = Some(-0.1)).is_err());
         assert!(edit(&|f| f.models[0].long_context = Some(LongContext { threshold: 1, rates: Rates { input: 1.0, output: -2.0, ..Default::default() } })).is_err());
         assert!(edit(&|f| {

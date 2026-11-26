@@ -280,6 +280,17 @@ fn reads_the_app_ide_and_cli_with_exact_tokens() {
 }
 
 #[test]
+fn a_row_of_another_type_skips_only_itself() {
+    let g = gemini();
+    g.conns[0].execute("INSERT INTO gen_metadata (idx, data, size) VALUES (99, 'not a blob', 0)", []).unwrap();
+    g.conns[0].execute("INSERT INTO steps (idx, status, metadata) VALUES (98, 3, 'not a blob')", []).unwrap();
+    let mut store = Store::open_in_memory().unwrap();
+    let rep = run_ag(&mut store, &g.env);
+    assert_eq!(rep.errors, vec![]);
+    assert_eq!(rows(&store).len(), 5, "the conversation's other generations are still read");
+}
+
+#[test]
 fn tool_calls_keep_names_and_outcomes_only() {
     let g = gemini();
     let mut store = Store::open_in_memory().unwrap();

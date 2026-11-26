@@ -138,8 +138,20 @@ fn error_code(e: &str) -> String {
 /// now. `target` is that account when its sign-in is known; another account's open window says
 /// nothing about it. Without a known account the readings count only while they are all one
 /// account's.
+/// A reading with its owner.
+type Owned<'a> = &'a (LimitSnapshot, Option<String>);
+
 fn open_until(limits: &[(LimitSnapshot, Option<String>)], target: Option<&str>, now: i64) -> Option<i64> {
-    let five: Vec<&(LimitSnapshot, Option<String>)> = limits.iter().filter(|(l, _)| l.provider == Provider::Anthropic && l.window == "five_hour").collect();
+    // each tool's newest reading of an owner: an older one of another source may name a window
+    // that started again early
+    let mut newest: std::collections::HashMap<(tracker_core::model::Tool, Option<&str>), Owned> = std::collections::HashMap::new();
+    for r in limits.iter().filter(|(l, _)| l.provider == Provider::Anthropic && l.window == "five_hour") {
+        let e = newest.entry((r.0.tool, r.1.as_deref())).or_insert(r);
+        if r.0.ts_ms > e.0.ts_ms {
+            *e = r;
+        }
+    }
+    let five: Vec<Owned> = newest.into_values().collect();
     let owners: std::collections::BTreeSet<Option<&str>> = five.iter().map(|(_, o)| o.as_deref()).collect();
     let counts = |owner: Option<&str>| match target {
         Some(t) => owner == Some(t),

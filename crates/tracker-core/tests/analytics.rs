@@ -200,6 +200,35 @@ fn the_last_reading_of_a_window_shown_after_its_reset_is_not_the_next_windows() 
 }
 
 #[test]
+fn a_newer_reading_without_a_reset_time_keeps_the_one_another_source_told() {
+    let mut store = Store::open_in_memory().unwrap();
+    let noon = ms(2026, 10, 2, 12, 0);
+    let mut tx = store.transaction().unwrap();
+    tx.insert_limits(&[
+        snap(noon - 10 * 60_000, Provider::Anthropic, Tool::ClaudeCode, "five_hour", 95.0, Some(noon / 1000), None, "claude_usage"),
+        snap(noon - 2 * 60_000, Provider::Anthropic, Tool::ClaudeCode, "five_hour", 99.0, None, None, "claude_statusline"),
+    ])
+    .unwrap();
+    tx.commit().unwrap();
+    let views = limits_view(&store, &PriceBook::default_book(), noon + 60_000, &[]).unwrap();
+    let v = views.iter().find(|v| v.window == "five_hour").unwrap();
+    assert_eq!((v.state, v.resets_at), (LimitState::Reset, Some(noon / 1000)));
+
+    // a window that started again early: the fallen use is a new window, not the old one's end
+    let mut store = Store::open_in_memory().unwrap();
+    let mut tx = store.transaction().unwrap();
+    tx.insert_limits(&[
+        snap(noon - 60 * 60_000, Provider::Anthropic, Tool::ClaudeCode, "five_hour", 80.0, Some((noon + 3 * 3_600_000) / 1000), None, "claude_statusline"),
+        snap(noon - 2 * 60_000, Provider::Anthropic, Tool::ClaudeCode, "five_hour", 5.0, None, None, "claude_usage"),
+    ])
+    .unwrap();
+    tx.commit().unwrap();
+    let views = limits_view(&store, &PriceBook::default_book(), noon, &[]).unwrap();
+    let v = views.iter().find(|v| v.window == "five_hour").unwrap();
+    assert_eq!((v.used_pct, v.resets_at), (Some(5.0), None));
+}
+
+#[test]
 fn a_reset_granted_inside_the_window_restarts_the_forecast_pace() {
     let mut store = Store::open_in_memory().unwrap();
     let now = ms(2026, 10, 2, 12, 0);
@@ -1219,6 +1248,9 @@ fn days_keep_their_local_bounds_across_a_daylight_saving_change() {
     let local = |m, day, h, mi| cet.with_ymd_and_hms(2026, m, day, h, mi, 0).earliest().unwrap().timestamp_millis();
     assert_eq!(start_of_day(&cet, d(3, 30)) - start_of_day(&cet, d(3, 29)), 23 * HOUR);
     assert_eq!(start_of_day(&cet, d(10, 26)) - start_of_day(&cet, d(10, 25)), 25 * HOUR);
+    // clocks that jump two hours at midnight: the day starts at 02:00
+    let jump = Dst { std: 0, dst: 7200, start: 1_774_742_400, end: 1_800_000_000 };
+    assert_eq!(start_of_day(&jump, d(3, 29)), 1_774_742_400_000);
 
     // today until 09:00 compares with yesterday until 09:00, however long yesterday was
     let spring = Range { from_ms: start_of_day(&cet, d(3, 30)), to_ms: start_of_day(&cet, d(3, 31)) };
