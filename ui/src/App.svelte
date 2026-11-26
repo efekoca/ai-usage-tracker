@@ -167,7 +167,7 @@ import Cards from './views/Cards.svelte'
           </div>
         {/if}
         {#if update && app.view !== 'settings'}
-          <div class="banner center update" role="status">
+          <div class="banner update" role="status">
             <span class="icon-text"><Icon name="download" size={16} /><span>{t('update.banner', { v: update.version })}</span></span>
             <button class="btn ghost small" onclick={() => (app.view = 'settings')}>{t('update.banner.details')}</button>
             <button class="btn primary small" disabled={app.update?.installing} onclick={() => installUpdate(update.version)}>{t('update.banner.install')}</button>
