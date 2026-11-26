@@ -648,6 +648,9 @@ mod tests {
             ("gemini-3.7-flash-high", "gemini-3.7-flash"),
             ("gemini-3.6-flash-medium", "gemini-3.6-flash"),
             ("gemini-3.1-pro-low", "gemini-3.1-pro-preview"),
+            ("gemini-4-neon-high", "gemini-4-neon"),
+            ("gemini-4-hydrogen-tiered-high", "gemini-4-hydrogen"),
+            ("gemini-4-hydrogen-tiered-xhigh", "gemini-4-hydrogen"),
             ("claude-opus-4-6-thinking", "claude-opus-4-6"),
             ("claude-sonnet-5-5-thinking", "claude-sonnet-5-5"),
             ("claude-sonnet-5-5-high", "claude-sonnet-5-5"),
@@ -855,6 +858,19 @@ mod tests {
         };
         assert!((at("2026-12-31T23:59:00Z") - 4.5).abs() < 1e-9, "introductory 0.75 + 3.75");
         assert!((at("2027-01-01T00:00:00Z") - 9.0).abs() < 1e-9, "1.50 + 7.50 from the first day");
+        let mix = tokens(1_000_000, 1_000_000, 0, 0, 1_000_000);
+        let writes = tokens(0, 0, 1_000_000, 0, 0);
+        let on = |model: &str, t: &Tokens, rfc: &str| {
+            let ms = chrono::DateTime::parse_from_rfc3339(rfc).unwrap().timestamp_millis();
+            b.cost(&CostInput { model, tokens: t, request_input: 0, web_search_requests: 0, speed: None, inference_geo: None, ts_ms: Some(ms) }).unwrap().total()
+        };
+        for model in ["gemini-4-carbon", "gemini-4-argon"] {
+            assert!((on(model, &mix, "2026-11-30T23:59:00Z") - 12.1).abs() < 1e-9, "{model}: introductory 2 + 0.10 + 10");
+            assert!((on(model, &mix, "2026-12-01T00:00:00Z") - 24.2).abs() < 1e-9, "{model}: 4 + 0.20 + 20 from the first day");
+        }
+        assert!((on("gemini-4-carbon-cyber-permissive", &mix, "2026-11-30T23:59:00Z") - 24.2).abs() < 1e-9, "no introductory price");
+        assert!((on("gemini-4-neon-cyber-permissive", &writes, "2027-01-11T23:59:00Z") - 3.0).abs() < 1e-9, "cache writes at the input price");
+        assert!((on("gemini-4-neon-cyber-permissive", &writes, "2027-01-12T00:00:00Z") - 3.75).abs() < 1e-9);
     }
 
     fn cost_on(book: &PriceBook, model: &str, request_input: u64, rfc: &str) -> f64 {
