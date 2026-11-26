@@ -2,6 +2,7 @@
   import type { Provider, WidgetData, WidgetItemKind, WidgetPeriod, WidgetSettings } from '../lib/api'
   import { fmtCompact, fmtDec, fmtDuration, fmtMoney, fmtPct, fmtTime, has, limitShown, lower, t, toolLabel, type LimitMode } from '../lib/i18n.svelte'
   import { nameAccount, toolColor } from '../lib/store.svelte'
+  import { poolRank } from '../lib/pools'
   import { page } from '../lib/page.svelte'
   import BrandIcon from './BrandIcon.svelte'
   import Icon from './Icon.svelte'
@@ -65,9 +66,8 @@
   function limit(p: Provider, kind: WidgetItemKind, pool: string | null, account: string | null) {
     const w = kind === 'limit_five_hour' ? 'five_hour' : 'seven_day'
     // with several pools (Antigravity) the fullest current one is shown, as in the tray
-    const rank = (x: { state: string; used_pct: number | null }) => (x.state === 'fresh' ? 1000 : 0) + (x.used_pct ?? -1)
     const mine = (x: { active: boolean; account: string | null }) => (account === null ? x.active : x.account === account)
-    const l = (data?.limits ?? []).filter((x) => x.provider === p && x.window === w && (pool === null || x.limit_id === pool) && mine(x)).sort((a, b) => rank(b) - rank(a))[0]
+    const l = (data?.limits ?? []).filter((x) => x.provider === p && x.window === w && (pool === null || x.limit_id === pool) && mine(x)).sort((a, b) => poolRank(b) - poolRank(a))[0]
     if (!l) return null
     // a full week leaves none of the five hours, whatever their own percentage says
     const locked = l.blocked && l.state !== 'reset' && l.state !== 'stale'

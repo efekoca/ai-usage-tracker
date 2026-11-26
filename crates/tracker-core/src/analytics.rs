@@ -698,6 +698,8 @@ pub fn limits_view(store: &Store, book: &PriceBook, now_ms: i64, thresholds: &[T
         let start = dur_ms.map(|d| match reset_ms {
             Some(r) if r > now_ms => r - d,
             Some(r) => r.max(now_ms - d),
+            // nothing used and no end: no window was open when it was read (an idle Antigravity pool)
+            None if s.used_pct == Some(0.0) => s.ts_ms.max(now_ms - d),
             None => now_ms - d,
         });
         // project shares of a limit only make sense against a current reading

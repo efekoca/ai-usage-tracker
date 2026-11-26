@@ -1085,6 +1085,21 @@ fn antigravity_pools_count_only_their_own_models() {
 }
 
 #[test]
+fn an_idle_antigravity_pool_does_not_show_its_ended_window_as_use() {
+    let now = 1_791_440_000_000;
+    let mut store = Store::open_in_memory().unwrap();
+    let mut tx = store.transaction().unwrap();
+    // used in a window that has since ended; the CLI now says 1970 for it, read as no reset
+    tx.upsert_events(&[ev("c1", now - 2 * 3_600_000, Tool::Antigravity, "claude-opus-4-6-thinking", r"C:\p\a", 2_000, 0)]).unwrap();
+    let idle = LimitSnapshot { limit_id: "3p".into(), ..snap(now - 60_000, Provider::Google, Tool::Antigravity, "five_hour", 0.0, None, None, "antigravity_cli_usage") };
+    tx.insert_limits(&[idle]).unwrap();
+    tx.commit().unwrap();
+    let views = limits_view(&store, &PriceBook::default_book(), now, &[]).unwrap();
+    let v = views.iter().find(|v| v.provider == Provider::Google && v.limit_id == "3p").unwrap();
+    assert_eq!((v.used_pct, v.window_usage.events), (Some(0.0), 0));
+}
+
+#[test]
 fn a_codex_pool_besides_the_main_one_counts_no_local_request() {
     use tracker_core::history::{add_local_usage, limit_history};
     let now = 1_791_440_000_000;

@@ -230,7 +230,7 @@
       <table>
         <thead>
           <tr>
-            {#if providers.length > 1 || accountsShown}<th scope="col">{t('history.col.provider')}</th>{/if}
+            {#if series.length > 1 || accountsShown}<th scope="col">{t('history.col.provider')}</th>{/if}
             <th scope="col"><button class="sort" onclick={() => sortBy('start')}>{t('history.col.start')}{sortKey === 'start' ? (sortDesc ? ' ↓' : ' ↑') : ''}</button></th>
             <th scope="col">{t('history.col.end')}</th>
             <th scope="col" class="num"><button class="sort" onclick={() => sortBy('peak')}>{t('history.col.peak')}{sortKey === 'peak' ? (sortDesc ? ' ↓' : ' ↑') : ''}</button></th>
@@ -245,7 +245,7 @@
           {#each visible as w (keyOf(w, w))}
             {@const st = stateOf(w)}
             <tr>
-              {#if providers.length > 1 || accountsShown}<td><span class="brandname"><BrandIcon provider={w.provider} size={13} color={markTint(w.provider)} />{nameOf(w)}</span></td>{/if}
+              {#if series.length > 1 || accountsShown}<td><span class="brandname"><BrandIcon provider={w.provider} size={13} color={markTint(w.provider)} />{nameOf(w)}</span></td>{/if}
               <td>{fmtDateTime(startOf(w))}</td>
               <td>
                 {fmtDateTime(w.end_ms ?? w.resets_at_ms ?? w.last_ms)}

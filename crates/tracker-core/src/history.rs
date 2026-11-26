@@ -489,8 +489,9 @@ const DOWNGRADE_MAX_PCT: f64 = 80.0;
 fn stats(history: &LimitHistory, provider: Provider, pick: &dyn Fn(&WindowSeries) -> bool, window: &str, plan_filter: Option<&str>, plans: &PlansFile, since_ms: i64) -> WindowStats {
     // a name no listed plan has tells no more than a reading without one
     let other = |want: &str, had: &str| !crate::plans::fits(provider, want, had) && plans.plans(provider).iter().any(|d| crate::plans::fits(provider, &d.id, had));
-    let mut s = WindowStats::default();
+    let mut all = WindowStats::default();
     for series in history.series.iter().filter(|x| x.provider == provider && x.window == window && pick(x)) {
+        let mut s = WindowStats::default();
         for w in &series.windows {
             if w.resets_at_ms.unwrap_or(w.last_ms) < since_ms {
                 continue;
@@ -512,8 +513,42 @@ fn stats(history: &LimitHistory, provider: Provider, pick: &dyn Fn(&WindowSeries
                 s.peak_complete = Some(s.peak_complete.unwrap_or(0.0).max(w.peak_pct));
             }
         }
+        // Antigravity's two pools run side by side in the same weeks: the fuller one tells the
+        // plan's room, as two full pools in one week are not two full weeks
+        all = if provider == Provider::Google { all.fuller(s) } else { all.plus(s) };
     }
-    s
+    all
+}
+
+impl WindowStats {
+    fn plus(self, o: WindowStats) -> WindowStats {
+        WindowStats {
+            windows: self.windows + o.windows,
+            complete: self.complete + o.complete,
+            full: self.full + o.full,
+            full_minutes: self.full_minutes + o.full_minutes,
+            peak_complete: max_of(self.peak_complete, o.peak_complete),
+            peak_seen: max_of(self.peak_seen, o.peak_seen),
+        }
+    }
+
+    fn fuller(self, o: WindowStats) -> WindowStats {
+        WindowStats {
+            windows: self.windows.max(o.windows),
+            complete: self.complete.max(o.complete),
+            full: self.full.max(o.full),
+            full_minutes: self.full_minutes.max(o.full_minutes),
+            peak_complete: max_of(self.peak_complete, o.peak_complete),
+            peak_seen: max_of(self.peak_seen, o.peak_seen),
+        }
+    }
+}
+
+fn max_of(a: Option<f64>, b: Option<f64>) -> Option<f64> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (a, b) => a.or(b),
+    }
 }
 
 /// Advice for the provider's account in use.

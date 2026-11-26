@@ -49,7 +49,7 @@ pub struct Cache {
 
 /// The caches the user follows, the soonest to run out first; none while the feature is off.
 pub fn followed(state: &AppState, s: &Settings, now_ms: i64) -> Vec<Cache> {
-    if !s.cache_timer {
+    if !s.onboarded || !s.cache_timer {
         return Vec::new();
     }
     let dropped = DROPPED.lock().unwrap().clone();

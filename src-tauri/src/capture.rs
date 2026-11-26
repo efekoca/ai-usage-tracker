@@ -1047,7 +1047,7 @@ pub(crate) fn sign_ins(app: &AppHandle, s: &Settings) -> [(Provider, SignIn); 3]
         // an API plan has no limits to read
         of(Provider::Anthropic, s.capture.claude_poll && s.plans.get("anthropic").map(String::as_str) != Some("api"), &rt.claude, claude_usage::NOT_SIGNED_IN),
         of(Provider::OpenAI, s.capture.codex_poll, &rt.codex, codex_limits::NOT_SIGNED_IN),
-        of(Provider::Google, s.capture.antigravity_poll, &rt.antigravity, antigravity_limits::NOT_SIGNED_IN),
+        of(Provider::Google, s.capture.antigravity_poll && s.plans.get("google").map(String::as_str) != Some("api"), &rt.antigravity, antigravity_limits::NOT_SIGNED_IN),
     ]
 }
 
@@ -1360,6 +1360,7 @@ pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
     match (kind, on) {
         ("codex", true) => {
             let bin = codex_binary(&settings).ok_or("codex_not_found")?;
+            state.capture.codex.lock().unwrap().binary = Some(bin.to_string_lossy().into_owned());
             let epoch = state.capture.wipes.load(Ordering::SeqCst);
             let snaps = codex_limits::query(&bin, Duration::from_secs(20), now_ms())?;
             store_limits(&state, epoch, &snaps)?;
@@ -1376,6 +1377,7 @@ pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
         }
         ("antigravity", true) => {
             let bin = agy_binary(&settings).ok_or("agy_not_found")?;
+            state.capture.antigravity.lock().unwrap().binary = Some(bin.to_string_lossy().into_owned());
             let epoch = state.capture.wipes.load(Ordering::SeqCst);
             let snaps = read_antigravity(&state, &bin)?;
             store_limits(&state, epoch, &snaps)?;
@@ -1392,6 +1394,7 @@ pub fn set(app: &AppHandle, kind: &str, on: bool) -> Result<String, String> {
         }
         ("claude", true) => {
             let bin = claude_binary(&settings).ok_or("claude_not_found")?;
+            state.capture.claude.lock().unwrap().binary = Some(bin.to_string_lossy().into_owned());
             let epoch = state.capture.wipes.load(Ordering::SeqCst);
             let read = match read_claude(&state, &settings, &bin) {
                 Ok(snaps) => {
@@ -1677,10 +1680,15 @@ fn start_antigravity_poller(app: &AppHandle) {
                 continue;
             }
             let Some(bin) = agy_binary(&s) else {
-                state.capture.antigravity.lock().unwrap().last_error = Some("agy_not_found".into());
+                let mut c = state.capture.antigravity.lock().unwrap();
+                c.binary = None;
+                c.last_error = Some("agy_not_found".into());
+                drop(c);
                 wait = Duration::from_secs(30 * 60);
                 continue;
             };
+            // known before the read, so a failed one can still show where the CLI is
+            state.capture.antigravity.lock().unwrap().binary = Some(bin.to_string_lossy().into_owned());
             let epoch = state.capture.wipes.load(Ordering::SeqCst);
             match read_antigravity(&state, &bin).and_then(|snaps| store_limits(&state, epoch, &snaps)) {
                 Ok(()) => {
@@ -1782,9 +1790,13 @@ fn start_claude_poller(app: &AppHandle) {
             seen_event_ms = latest;
             let Some(bin) = claude_binary(&s) else {
                 failures = failures.saturating_add(1);
-                state.capture.claude.lock().unwrap().last_error = Some("claude_not_found".into());
+                let mut c = state.capture.claude.lock().unwrap();
+                c.binary = None;
+                c.last_error = Some("claude_not_found".into());
                 continue;
             };
+            // known before the read, so a failed one can still show where the CLI is
+            state.capture.claude.lock().unwrap().binary = Some(bin.to_string_lossy().into_owned());
             let epoch = state.capture.wipes.load(Ordering::SeqCst);
             match read_claude(&state, &s, &bin).and_then(|snaps| store_limits(&state, epoch, &snaps)) {
                 Ok(()) => {
@@ -1904,10 +1916,15 @@ pub fn start(app: &AppHandle) {
                 continue;
             }
             let Some(bin) = codex_binary(&s) else {
-                state.capture.codex.lock().unwrap().last_error = Some("codex_not_found".into());
+                let mut c = state.capture.codex.lock().unwrap();
+                c.binary = None;
+                c.last_error = Some("codex_not_found".into());
+                drop(c);
                 wait = Duration::from_secs(30 * 60);
                 continue;
             };
+            // known before the read, so a failed one can still show where the CLI is
+            state.capture.codex.lock().unwrap().binary = Some(bin.to_string_lossy().into_owned());
             let epoch = state.capture.wipes.load(Ordering::SeqCst);
             match codex_limits::query(&bin, Duration::from_secs(20), now_ms()).and_then(|snaps| store_limits(&state, epoch, &snaps)) {
                 Ok(()) => {
