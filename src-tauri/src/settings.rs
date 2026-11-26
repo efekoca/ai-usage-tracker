@@ -1077,6 +1077,13 @@ impl Settings {
         self.normalize();
         store.set_setting(KEY, &serde_json::to_string(self).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
     }
+
+    /// The same, inside a transaction the caller runs on `store`.
+    pub fn save_raw(&mut self, store: &Store) -> tracker_core::rusqlite::Result<()> {
+        self.normalize();
+        let json = serde_json::to_string(self).map_err(|e| tracker_core::rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        store.set_setting(KEY, &json)
+    }
 }
 
 #[cfg(test)]

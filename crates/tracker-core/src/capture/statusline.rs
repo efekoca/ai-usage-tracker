@@ -51,6 +51,12 @@ fn rotate_lock(data_dir: &Path) -> PathBuf {
     capture_dir(data_dir).join("statusline.rotate.lock")
 }
 
+/// "Delete all data" pauses until the first setup is done again; meanwhile the hooks do nothing
+/// either.
+pub fn paused(data_dir: &Path) -> bool {
+    paused_file(data_dir).exists()
+}
+
 /// While paused the bridge still shows the status line but records nothing.
 pub fn set_paused(data_dir: &Path, paused: bool) -> std::io::Result<()> {
     if paused {

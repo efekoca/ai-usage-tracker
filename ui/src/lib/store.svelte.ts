@@ -98,11 +98,25 @@ function longPeriod(p: Period): boolean {
   return p.kind === 'months6' || p.kind === 'year1' || p.kind === 'all'
 }
 
-/** While a tool writes, data changes every second or two; a long period then refreshes at most every 15 s. */
+/** When the first change still waiting for a refresh came; 0 when none waits. */
+let waitingSince = 0
+
+/** While a tool writes, data changes every second or two; a long period then refreshes at most every 15 s. A steady
+ * stream of changes still refreshes: at the latest a second after the first that waits, 15 s for a long period. */
 export function refreshSoon() {
   clearTimeout(refreshTimer)
-  const wait = longPeriod(app.period) ? Math.max(250, refreshedAt + 15_000 - Date.now()) : 250
-  refreshTimer = setTimeout(refresh, wait)
+  const now = Date.now()
+  waitingSince ||= now
+  const long = longPeriod(app.period)
+  const settled = long ? Math.max(now + 250, refreshedAt + 15_000) : now + 250
+  const at = Math.min(settled, waitingSince + (long ? 15_000 : 1_000))
+  refreshTimer = setTimeout(
+    () => {
+      waitingSince = 0
+      refresh()
+    },
+    Math.max(0, at - now),
+  )
 }
 
 /** Runs `load` and passes its result on only while the caller still wants it; returns the cancel. */
@@ -154,6 +168,13 @@ export async function init() {
     if (!wasOnboarded && s.onboarded) refreshSoon()
     // "Delete all data" starts over: project ids are handed out again, so a kept filter could name another project
     if (wasOnboarded && !s.onboarded) {
+      // a refresh asked for before the data went must not bring it back
+      refreshGen++
+      clearTimeout(refreshTimer)
+      waitingSince = 0
+      fresh = false
+      app.loading = false
+      app.error = ''
       app.filter = {}
       app.report = null
       app.limits = []

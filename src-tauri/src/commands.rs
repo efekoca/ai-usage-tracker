@@ -628,21 +628,17 @@ fn wipe_all(app: &AppHandle) -> Res<()> {
     }
     let wiped = (|| {
         let _writers = state.writers.write().unwrap_or_else(|e| e.into_inner());
-        let s = {
-            let store = state.db();
-            let mut s = state.settings.read().unwrap().clone();
-            s.onboarded = false;
-            // they mark days of the use that is deleted
-            s.markers.clear();
-            store.wipe_data().map_err(err)?;
-            s.save(&store)?;
-            *state.settings.write().unwrap() = s.clone();
-            s
-        };
-        // the copies a Claude Code started from an MSIX app writes into, too
-        for dir in std::iter::once(state.data_dir.clone()).chain(crate::capture::package_data_dirs(&state.data_dir)) {
-            tracker_core::capture::statusline::delete_records(&dir).map_err(err)?;
-        }
+        // the record files first: one that cannot be deleted leaves the archive as it was, as a
+        // file left behind would be read back in after the first setup
+        delete_capture_records(&state.data_dir).map_err(|_| "wipe_files_failed".to_owned())?;
+        let store = state.db();
+        let mut s = state.settings.read().unwrap().clone();
+        s.onboarded = false;
+        // they mark days of the use that is deleted
+        s.markers.clear();
+        // with the data in one transaction: the archive is never emptied while scans stay on
+        store.wipe_data_and(|db| s.save_raw(db)).map_err(err)?;
+        *state.settings.write().unwrap() = s.clone();
         Ok::<_, String>(s)
     })();
     let s = match wiped {
@@ -666,6 +662,18 @@ fn wipe_all(app: &AppHandle) -> Res<()> {
     let _ = app.emit("settings-changed", &s);
     let _ = app.emit("data-changed", ());
     Ok(())
+}
+
+/// The status-line records, also the copies a Claude Code started from an MSIX app writes into.
+fn delete_capture_records(data_dir: &std::path::Path) -> Res<()> {
+    let mut left = Ok(());
+    for dir in std::iter::once(data_dir.to_owned()).chain(crate::capture::package_data_dirs(data_dir)) {
+        if let Err(e) = tracker_core::capture::statusline::delete_records(&dir) {
+            log::warn!("could not delete the status-line records in {}: {e}", dir.display());
+            left = Err(e.to_string());
+        }
+    }
+    left
 }
 
 #[tauri::command]

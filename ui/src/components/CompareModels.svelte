@@ -78,11 +78,13 @@
         </li>
       {/each}
     </ul>
-    <p class="subtle small note">
-      <span class="key"><i class="mk"></i>{t('compare.actual')}</span>
-      {t('compare.caveat')}
-      {#if c.excluded_events > 0}{t('compare.excluded', { n: fmtInt(c.excluded_events) })}{/if}
-    </p>
+    <div class="foot">
+      <span class="key small"><i class="mk"></i>{t('compare.actual')}</span>
+      <p class="subtle small">
+        {t('compare.caveat')}
+        {#if c.excluded_events > 0}{t('compare.excluded', { n: fmtInt(c.excluded_events) })}{/if}
+      </p>
+    </div>
   {/if}
 </section>
 
@@ -195,14 +197,20 @@
   .delta.up :global(svg) {
     color: var(--serious);
   }
-  .note {
-    margin: 12px 0 0;
+  /* the bar mark's key on a line of its own, the caveat under it */
+  .foot {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 12px;
+  }
+  .foot p {
+    margin: 0;
   }
   .key {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     gap: 6px;
-    margin-right: 10px;
     color: var(--ink-2);
   }
   .mk {

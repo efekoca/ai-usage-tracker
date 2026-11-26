@@ -192,7 +192,7 @@ pub fn statusline_main() -> i32 {
     let options = statusline::read_options(&data_dir);
     // each conversation's own windows, so the handoff hook never takes another account's
     let session = json.get("session_id").and_then(|v| v.as_str()).filter(|s| tracker_core::capture::refresh_hook::valid_session(s));
-    if let (true, Some(w), Some(session)) = (options.handoff, &windows, session) {
+    if let (true, Some(w), Some(session)) = (options.handoff && !statusline::paused(&data_dir), &windows, session) {
         let _ = handoff::record_reading(&handoff::dir(&data_dir), session, w, now_ms());
     }
     let state = cs::load_state(&data_dir);
@@ -246,7 +246,7 @@ pub fn cache_hook_main() -> i32 {
             rh::unasked(&dir, session);
             return 0;
         }
-        _ if scripted() => return 0,
+        _ if scripted() || statusline::paused(&data_dir) => return 0,
         _ => {}
     }
     let transcript = json.get("transcript_path").and_then(|v| v.as_str()).map(PathBuf::from);
@@ -285,7 +285,8 @@ pub fn limit_hook_main() -> i32 {
     let dir = rh::dir(&data_dir);
     let options = statusline::read_options(&data_dir);
     match json.get("hook_event_name").and_then(|v| v.as_str()) {
-        Some("StopFailure") if json.get("error").and_then(|v| v.as_str()) == Some("rate_limit") && options.resume && !rh::refresh_turn(&dir, session, now_ms()) && !scripted() => {}
+        Some("StopFailure")
+            if json.get("error").and_then(|v| v.as_str()) == Some("rate_limit") && options.resume && !statusline::paused(&data_dir) && !rh::refresh_turn(&dir, session, now_ms()) && !scripted() => {}
         Some("UserPromptSubmit" | "SessionEnd") => {
             rh::retire_limit(&dir, session);
             return 0;
@@ -312,7 +313,7 @@ pub fn limit_hook_main() -> i32 {
 /// slow one last, since it runs this often.
 pub fn handoff_hook_main() -> i32 {
     let Some(data_dir) = tracker_core::store::default_data_dir() else { return 0 };
-    if !statusline::read_options(&data_dir).handoff {
+    if !statusline::read_options(&data_dir).handoff || statusline::paused(&data_dir) {
         return 0;
     }
     let mut input = Vec::new();
@@ -363,7 +364,7 @@ pub fn handoff_hook_main() -> i32 {
 /// prompt whose hook ends with 2.
 pub fn codex_handoff_hook_main() -> i32 {
     let Some(data_dir) = tracker_core::store::default_data_dir() else { return 0 };
-    if !statusline::read_options(&data_dir).codex_handoff {
+    if !statusline::read_options(&data_dir).codex_handoff || statusline::paused(&data_dir) {
         return 0;
     }
     let mut input = Vec::new();
@@ -1861,9 +1862,13 @@ pub fn start(app: &AppHandle) {
     // the system language may have changed since the last run
     write_statusline_options(&app.state::<AppState>().data_dir, &s);
     if s.onboarded {
-        // a wipe interrupted before it deleted anything leaves the pause behind
-        if let Err(e) = statusline::set_paused(&app.state::<AppState>().data_dir, false) {
-            log::warn!("could not resume the status-line capture: {e}");
+        // a wipe interrupted before it deleted anything leaves the pause behind, in the copies an
+        // MSIX app writes into too, and the hooks would stay quiet
+        let data_dir = app.state::<AppState>().data_dir.clone();
+        for dir in std::iter::once(data_dir.clone()).chain(package_data_dirs(&data_dir)) {
+            if let Err(e) = statusline::set_paused(&dir, false) {
+                log::warn!("could not resume the status-line capture: {e}");
+            }
         }
         if s.capture.otel {
             start_otel(app);

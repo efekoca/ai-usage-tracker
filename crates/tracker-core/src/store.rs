@@ -845,20 +845,21 @@ impl Store {
         Ok(self.latest_owned_limits()?.into_iter().map(|(s, _)| s).collect())
     }
 
-    /// Latest snapshot per (provider, tool, account, owner, limit_id, window), with its owner (see
-    /// [`EventRow::account`]). A row dated before 1970 or ahead of the clock, stored by an older
-    /// version, is passed over so it cannot stand in for a real reading, and so is one of a window
-    /// that had reset before it was taken.
+    /// Latest snapshot per (provider, tool, account, owner, limit_id, window, source), with its owner
+    /// (see [`EventRow::account`]): each source's own, so one that tells a reset time is not hidden
+    /// by a newer one of another source that does not. A row dated before 1970 or ahead of the
+    /// clock, stored by an older version, is passed over so it cannot stand in for a real reading,
+    /// and so is one of a window that had reset before it was taken.
     pub fn latest_owned_limits(&self) -> Result<Vec<(LimitSnapshot, Option<String>)>> {
         let mut st = self.conn.prepare(
             "SELECT s.ts_ms, s.provider, s.tool, s.account, s.limit_id, s.window, s.used_pct, s.resets_at,
                     s.status, s.plan, s.source, s.accuracy, s.owner
              FROM limit_snapshot s
-             JOIN (SELECT provider, tool, account, owner, limit_id, window, MAX(ts_ms) AS m
+             JOIN (SELECT provider, tool, account, owner, limit_id, window, source, MAX(ts_ms) AS m
                    FROM limit_snapshot WHERE ts_ms BETWEEN 0 AND ?1 AND NOT (resets_at IS NOT NULL AND resets_at * 1000 + ?2 < ts_ms)
-                   GROUP BY provider, tool, account, owner, limit_id, window) g
+                   GROUP BY provider, tool, account, owner, limit_id, window, source) g
                ON s.provider = g.provider AND s.tool = g.tool AND s.account = g.account AND s.owner IS g.owner
-              AND s.limit_id = g.limit_id AND s.window = g.window AND s.ts_ms = g.m
+              AND s.limit_id = g.limit_id AND s.window = g.window AND s.source = g.source AND s.ts_ms = g.m
              WHERE NOT (s.resets_at IS NOT NULL AND s.resets_at * 1000 + ?2 < s.ts_ms)
              ORDER BY s.provider, s.window",
         )?;
@@ -967,6 +968,12 @@ impl Store {
 
     /// Deletes every usage record, snapshot and checkpoint (settings are kept).
     pub fn wipe_data(&self) -> Result<()> {
+        self.wipe_data_and(|_| Ok(()))
+    }
+
+    /// [`Store::wipe_data`], with `also` (for example the setting that starts the first setup over)
+    /// written in the same transaction: either both are kept or neither.
+    pub fn wipe_data_and(&self, also: impl FnOnce(&Store) -> Result<()>) -> Result<()> {
         self.project_cache.borrow_mut().clear();
         // rolled back when it fails, so the connection is never left inside the transaction
         let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
@@ -975,6 +982,7 @@ impl Store {
              DELETE FROM project; DELETE FROM account_session; DELETE FROM signin_span; DELETE FROM session_root;
              DELETE FROM cache_miss_report; DELETE FROM turn; DELETE FROM limit_stop; DELETE FROM session_carried;",
         )?;
+        also(self)?;
         tx.commit()?;
         // the data is gone once committed; a full disk only keeps the file from shrinking
         if let Err(e) = self.conn.execute_batch("VACUUM;") {
@@ -989,6 +997,10 @@ impl Store {
         // by canonical path: another spelling of the live file must not be attached to itself
         if self.is_live_file(other) {
             return Err(rusqlite::Error::InvalidPath(other.to_owned()));
+        }
+        // ATTACH would make an empty file where a backup went missing
+        if !other.is_file() {
+            return Err(rusqlite::Error::InvalidQuery);
         }
         self.conn.execute("ATTACH DATABASE ?1 AS other", [other.to_string_lossy()])?;
         let result = (|| {

@@ -545,6 +545,15 @@ fn archive_survives_reopen_and_backup_and_wipe() {
 }
 
 #[test]
+fn importing_a_backup_that_went_missing_makes_no_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(&dir.path().join("tracker.db")).unwrap();
+    let missing = dir.path().join("missing.db");
+    assert!(store.merge_from(&missing).is_err());
+    assert!(!missing.exists());
+}
+
+#[test]
 fn a_wipe_that_fails_leaves_the_data_and_the_connection_usable() {
     let store = Store::open_in_memory().unwrap();
     store.conn().execute("INSERT INTO project(path, name) VALUES('/w', 'W')", []).unwrap();
@@ -554,8 +563,15 @@ fn a_wipe_that_fails_leaves_the_data_and_the_connection_usable() {
     assert!(store.conn().is_autocommit(), "no transaction left open");
     store.conn().execute_batch("DROP TRIGGER temp.stop").unwrap();
     assert_eq!(store.projects().unwrap().len(), 1, "nothing deleted");
-    store.wipe_data().unwrap();
-    assert!(store.projects().unwrap().is_empty());
+    // what is written with it goes or stays with the data
+    let failed = store.wipe_data_and(|s| {
+        s.set_setting("settings.v1", "{}")?;
+        Err(tracker_core::rusqlite::Error::InvalidQuery)
+    });
+    assert!(failed.is_err() && store.conn().is_autocommit());
+    assert_eq!((store.projects().unwrap().len(), store.setting("settings.v1").unwrap()), (1, None));
+    store.wipe_data_and(|s| s.set_setting("settings.v1", "{}")).unwrap();
+    assert_eq!((store.projects().unwrap().len(), store.setting("settings.v1").unwrap()), (0, Some("{}".into())));
 }
 
 #[test]

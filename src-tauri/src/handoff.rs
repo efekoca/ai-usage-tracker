@@ -464,7 +464,9 @@ fn launch(dir: &Path, name: &str, bin: &Path, cwd: &Path, args: &[String]) -> st
     std::fs::create_dir_all(dir)?;
     std::fs::write(&script, body)?;
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700))?;
-    crate::spawn_reaped(std::process::Command::new("/usr/bin/open").arg(&script)).map(|_| ())
+    // `open` hands the script to Terminal and returns at once; a failure there is no handoff
+    let done = std::process::Command::new("/usr/bin/open").arg(&script).status()?;
+    if done.success() { Ok(()) } else { Err(std::io::Error::other(format!("open exited with {done}"))) }
 }
 
 /// A PowerShell window of its own, in the project's folder.
