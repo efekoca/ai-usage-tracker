@@ -59,6 +59,53 @@ fn project_folder(path: &Path) -> Option<String> {
     parts.get(at + 1).cloned()
 }
 
+/// Claude Code writes a conversation's title again near the end of its transcript as it goes on;
+/// a long tool result in between can push it further back.
+const TITLE_REACH: u64 = 1024 * 1024;
+const TITLE_MAX: usize = 100;
+
+/// The name a conversation has in Claude Code or the Claude app: the one given to it over the one
+/// made for it, read from the end of its transcript and never stored. `None` when that end holds no
+/// title, `Some(None)` when the conversation's name was taken away.
+pub fn conversation_title(path: &Path) -> Option<Option<String>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).ok()?;
+    // a byte more, to see whether the first line starts where the reach does
+    let from = f.metadata().ok()?.len().saturating_sub(TITLE_REACH + 1);
+    f.seek(SeekFrom::Start(from)).ok()?;
+    let mut buf = Vec::new();
+    f.take(TITLE_REACH + 1).read_to_end(&mut buf).ok()?;
+    let start = if from == 0 { 0 } else { buf.iter().position(|b| *b == b'\n').map_or(buf.len(), |i| i + 1) };
+    let own = path.file_stem().and_then(|s| s.to_str());
+    let (mut given, mut made) = (None, None);
+    for line in buf[start..].split(|b| *b == b'\n').filter(|l| l.windows(7).any(|w| w == b"-title\"")) {
+        let Ok(v) = serde_json::from_slice::<Value>(line) else { continue };
+        // a forked conversation's transcript starts with the lines of the one it came from
+        if v.get("sessionId").and_then(Value::as_str).is_some_and(|s| Some(s) != own) {
+            continue;
+        }
+        let named = |key| Some(v.get(key).and_then(Value::as_str).map(tidy_title).filter(|t| !t.is_empty()));
+        match v.get("type").and_then(Value::as_str) {
+            Some("custom-title") => given = named("customTitle"),
+            Some("ai-title") => made = named("aiTitle"),
+            _ => {}
+        }
+    }
+    if given.is_none() && made.is_none() {
+        return None;
+    }
+    Some(given.flatten().or(made.flatten()))
+}
+
+fn tidy_title(s: &str) -> String {
+    let one_line = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let clean: String = one_line.chars().filter(|c| !c.is_control()).collect();
+    if clean.chars().count() <= TITLE_MAX {
+        return clean;
+    }
+    format!("{}…", clean.chars().take(TITLE_MAX - 1).collect::<String>().trim_end())
+}
+
 /// The directory a session was launched in: the deepest ancestor of `cwd` (itself included)
 /// whose encoding is the transcript's project folder name. Falls back to `cwd`.
 fn launch_dir(cwd: &str, folder: Option<&str>) -> String {
@@ -449,6 +496,46 @@ mod tests {
         let p = Path::new("/x/Projects/cfg/projects/-p-app/sess/subagents/agent-a.jsonl");
         assert_eq!(project_folder(p).as_deref(), Some("-p-app"));
         assert_eq!(project_folder(Path::new("/home/u/.claude/projects/-p-app/s.jsonl")).as_deref(), Some("-p-app"));
+    }
+
+    #[test]
+    fn a_conversation_is_named_by_the_title_it_was_given_over_the_one_made_for_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.jsonl");
+        let write = |lines: &[Value], pad: usize| {
+            let mut text = format!("{}\n", "x".repeat(pad));
+            for l in lines {
+                text.push_str(&format!("{l}\n"));
+            }
+            std::fs::write(&path, text).unwrap();
+        };
+        let made = |t: &str| json!({"type": "ai-title", "aiTitle": t, "sessionId": "s"});
+        let given = |t: &str| json!({"type": "custom-title", "customTitle": t, "sessionId": "s"});
+        let user = json!({"type": "user", "message": {"content": "a \"-title\" in a prompt"}});
+        let name = || conversation_title(&path).flatten();
+
+        write(&[made("Fix the login"), user.clone()], 0);
+        assert_eq!(name().as_deref(), Some("Fix the login"));
+        write(&[given("Release notes"), made("Fix the login"), given("Release  notes\n1.7.4")], 0);
+        assert_eq!(name().as_deref(), Some("Release notes 1.7.4"), "the latest name given, on one line");
+        write(&[given("Release notes"), given(" ")], 0);
+        assert_eq!(conversation_title(&path), Some(None), "a name taken away");
+        write(std::slice::from_ref(&user), 0);
+        assert_eq!(conversation_title(&path), None, "no title at the end");
+        write(&[json!({"type": "custom-title", "customTitle": "Parent", "sessionId": "p"}), made("Fork")], 0);
+        assert_eq!(name().as_deref(), Some("Fork"), "a fork's copy of its parent's name");
+        write(&[given("Old"), user.clone()], 2 * TITLE_REACH as usize);
+        assert_eq!(name().as_deref(), Some("Old"));
+        let far = format!("{}\n{}\n", given("Gone"), "y".repeat(TITLE_REACH as usize));
+        std::fs::write(&path, far).unwrap();
+        assert_eq!(conversation_title(&path), None, "only the end is read");
+        let line = given("Edge").to_string();
+        let edge = format!("x\n{line}\n{}\n", "y".repeat(TITLE_REACH as usize - line.len() - 2));
+        std::fs::write(&path, edge).unwrap();
+        assert_eq!(name().as_deref(), Some("Edge"), "a line that starts where the reach does");
+        write(&[given(&"long ".repeat(40))], 0);
+        assert_eq!(name().unwrap().chars().count(), TITLE_MAX);
+        assert_eq!(conversation_title(&dir.path().join("none.jsonl")), None);
     }
 
     #[test]

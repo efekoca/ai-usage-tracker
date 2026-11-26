@@ -23,6 +23,8 @@ const twoAccounts = scenario.get('accounts') === '2'
 const parallelTimeline = scenario.get('timeline') === 'parallel'
 // ?early=1: a Claude week that started again days early (another account's limit)
 const early = scenario.get('early') === '1'
+// `?long=1`: long conversation, project and branch names, to check that nothing overflows
+const longNames = scenario.get('long') === '1'
 const ACCOUNT_A = '3f9c1a7e52b0d846'
 const ACCOUNT_B = 'b71e04c9a3d25f18'
 const CLAUDE_A = '5d2e8a14c07b9f63'
@@ -86,7 +88,7 @@ const settings: Settings = {
       pm({ kind: 'provider', provider: 'anthropic', size: 'm', style: 'ring' }),
       pm({ kind: 'provider', provider: 'openai', size: 'm', style: 'ring' }),
       pm({ kind: 'usage', period: 'today', size: 'w' }),
-      ...(showcase ? [pm({ kind: 'usage', provider: 'opencode', period: 'today', size: 'w' }), pm({ kind: 'caches', size: 'l' })] : []),
+      ...(showcase ? [pm({ kind: 'usage', provider: 'opencode', period: 'today', size: 'w' }), pm({ kind: 'caches', size: scenario.get('cachetile') === 't' ? 't' : 'l' })] : []),
       pm({ kind: 'forecast', provider: 'anthropic', window: 'five_hour', size: showcase ? 'l' : 'w' }),
       ...['open', 'widget', 'rescan', 'settings'].map((action) => pm({ kind: 'action', action, size: 's' })),
     ],
@@ -795,7 +797,8 @@ function mockTrayPreview(tray: TraySettings) {
           ? c && { text: '', logo: c.provider, bg, fg, dial: null, opacity: 1 }
           : { text: '', logo: tray.mark, bg, fg, dial: null, opacity: 1 }
   const soonest = settings.cache_menubar ? mockCaches()[0] : undefined
-  const cache = soonest ? `${soonest.project || (tr ? 'Önbellek' : 'Cache')} ${Math.ceil((soonest.expires_ms - Date.now()) / 60_000)}${tr ? ' dk' : 'm'}` : ''
+  const fit = (name: string) => ([...name].length <= 16 ? name : `${[...name].slice(0, 15).join('').replace(/[ \-_.]+$/, '')}…`)
+  const cache = soonest ? `${soonest.project ? fit(soonest.project) : tr ? 'Önbellek' : 'Cache'} ${Math.ceil((soonest.expires_ms - Date.now()) / 60_000)}${tr ? ' dk' : 'm'}` : ''
   const text = tray.title && shown.length ? `${tray.prefix}${shown.join(tray.separator)}${tray.suffix}` : ''
   return { title: platform !== 'windows' ? [text, cache].filter(Boolean).join('  ') : '', parts, catalog, icon: icon || null }
 }
@@ -840,10 +843,11 @@ function mockCaches(dropped = false) {
     const left = (((offset - (Date.now() - cacheStart)) % ttl) + ttl) % ttl
     return Date.now() + (left || ttl)
   }
-  const one = (session_id: string, project: string, branch: string | null, model: string, client: string, ttl: number, offset: number, tokens: number, read: number, write: number) => ({
+  const one = (session_id: string, project: string, branch: string | null, title: string | null, model: string, client: string, ttl: number, offset: number, tokens: number, read: number, write: number) => ({
     session_id,
     project,
     branch,
+    title,
     model,
     client,
     ttl_ms: ttl,
@@ -862,17 +866,26 @@ function mockCaches(dropped = false) {
     refreshes_usd: refreshLog.filter((r) => r.session === session_id).reduce((n, r) => n + r.usd, 0),
   })
   const all = [
-    one('c-notes', 'notes', null, 'claude-sonnet-5-5', 'cli', 300_000, 96_000, 64_000, 0.1, 2.5),
-    one('c-web', 'website', 'main', 'claude-opus-5-5', 'claude-desktop', 3_600_000, 228_000, 142_000, 0.2, 8),
-    one('c-demo', 'demo-app', 'cache-refresh', 'claude-opus-5-5', 'claude-desktop', 3_600_000, 2_472_000, 388_000, 0.2, 8),
-    one('c-demo-main', 'demo-app', 'main', 'claude-sonnet-5-5', 'cli', 3_600_000, 3_150_000, 96_000, 0.1, 4),
+    one('c-notes', 'notes', null, null, 'claude-sonnet-5-5', 'cli', 300_000, 96_000, 64_000, 0.1, 2.5),
+    one('c-web', 'website', 'main', 'Landing page copy', 'claude-opus-5-5', 'claude-desktop', 3_600_000, 228_000, 142_000, 0.2, 8),
+    one('c-demo', 'demo-app', 'cache-refresh', 'Cache refresh hook', 'claude-opus-5-5', 'claude-desktop', 3_600_000, 2_472_000, 388_000, 0.2, 8),
+    one('c-demo-main', 'demo-app', 'main', null, 'claude-sonnet-5-5', 'cli', 3_600_000, 3_150_000, 96_000, 0.1, 4),
+    one('c-web-2', 'website', 'main', 'Pricing table fixes', 'claude-opus-5-5', 'claude-desktop', 3_600_000, 1_380_000, 121_000, 0.2, 8),
   ]
+  const long = [
+    ['customer-portal-backend-services-monorepo-2026', 'Rework the onboarding flow so the first setup screen explains every source and asks only once', 'feature/onboarding-sources-explained-with-a-single-question'],
+    ['ai-usage-tracker', 'Önbellek listesinde aynı projedeki iki konuşmanın ayırt edilmesi ve menü çubuğu kısaltmaları', 'fix/cache-list-conversation-names-in-the-menu-bar'],
+    ['AVeryLongProjectNameWithoutAnySpacesOrDashesThatNeverBreaks', 'AVeryLongConversationTitleWithoutAnySpacesThatCouldBreakTheLayoutIfItWereNotCut', 'refactor/AVeryLongBranchNameWithoutAnySeparators0123456789'],
+    ['customer-portal-backend-services-monorepo-2026', 'Rework the onboarding flow so the first setup screen explains every source and asks twice', 'feature/onboarding-sources-explained-with-a-single-question'],
+    ['notes', null, null],
+  ]
+  const named = longNames ? all.map((c, i) => ({ ...c, project: long[i][0]!, title: long[i][1], branch: long[i][2] })) : all
   // `?caches=2` keeps only that many, to see how the views look with fewer
-  return all
+  return named
     .slice(0, Number(scenario.get('caches') ?? all.length))
     .filter((c) => droppedCaches.has(c.session_id) === dropped)
     .filter((c) => settings.cache_projects !== 'picked' || settings.cache_picked.includes(`C:\\Projects\\${c.project}`))
-    .map((c) => (settings.hide_project_names ? { ...c, project: '', branch: null } : c))
+    .map((c) => (settings.hide_project_names ? { ...c, project: '', branch: null, title: null } : c))
     .sort((a, b) => a.expires_ms - b.expires_ms)
 }
 
@@ -1140,7 +1153,7 @@ export function installMock() {
           if (codexMissing && a.id !== '0199c4d2-7e8f-7a1b-9c2d-3e4f5a6b7c8d') throw 'codex_not_found'
           return null
         case 'cache_project_choices':
-          return ['demo-app', 'website', 'notes', 'data-pipeline', 'client-x'].map((p, i) => ({ id: i + 1, path: `C:\\Projects\\${p}`, name: p === 'client-x' || settings.hide_project_names ? '' : p, hidden: p === 'client-x' || settings.hide_project_names }))
+          return [...(longNames ? ['customer-portal-backend-services-monorepo-2026', 'AVeryLongProjectNameWithoutAnySpacesOrDashesThatNeverBreaks'] : []), 'demo-app', 'website', 'notes', 'data-pipeline', 'client-x'].map((p, i) => ({ id: i + 1, path: `C:\\Projects\\${p}`, name: p === 'client-x' || settings.hide_project_names ? '' : p, hidden: p === 'client-x' || settings.hide_project_names }))
         case 'capture_status':
           return { claude_poll: settings.capture.claude_poll, claude: { binary: claudeMode === 'missing' ? null : 'C:/claude.exe', last_ok_ms: claudeMode ? null : Date.now() - 40000, last_error: claudeMode === 'nologin' ? 'claude_no_plan_limits' : claudeMode === 'missing' ? 'claude_not_found' : null }, claude_candidates_found: claudeMode !== 'missing', codex_poll: settings.capture.codex_poll, codex: { binary: codexMissing ? null : 'C:/codex.exe', last_ok_ms: codexMissing ? null : Date.now() - 120000, last_error: codexMissing ? 'codex_not_found' : codexOut ? 'codex_not_signed_in' : null }, codex_candidates_found: !codexMissing, antigravity_poll: settings.capture.antigravity_poll, antigravity: { binary: agyMissing ? null : 'C:/Users/you/AppData/Local/agy/bin/agy.exe', last_ok_ms: agyMissing ? null : Date.now() - 90000, last_error: agyMissing ? 'agy_not_found' : agyOut ? 'agy_not_signed_in' : null }, antigravity_candidates_found: !agyMissing, statusline: settings.capture.statusline, statusline_file: 'C:\\Users\\you\\.claude\\settings.json', statusline_chained: false, statusline_last_ms: Date.now() - 30000, otel: settings.capture.otel, otel_port: 43180, otel_listening: settings.capture.otel, otel_events: 42, otel_last_ms: Date.now() - 5000, otel_error: null, settings_file: 'C:\\Users\\you\\.claude\\settings.json' }
         case 'install_cli':

@@ -315,6 +315,8 @@ export interface LiveCache {
   /** Empty while the project's name is hidden or not known. */
   project: string
   branch: string | null
+  /** The conversation's name in Claude Code or the Claude app; null with a hidden project's name. */
+  title: string | null
   model: string
   /** "cli", "claude-desktop", "claude-vscode" and so on. */
   client: string | null

@@ -188,12 +188,11 @@
     padding: 12px;
   }
   .host[data-material='solid'] .cc {
+    --cc-tile: var(--surface);
+    --cc-tile-hover: var(--surface);
     border-radius: 16px;
     border: 0.5px solid var(--hairline-strong);
     background: var(--window);
-  }
-  .host[data-material='solid'] .cc :global(.mod) {
-    background: var(--surface);
   }
   .update {
     display: flex;

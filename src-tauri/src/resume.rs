@@ -113,13 +113,15 @@ pub fn installed(state: &AppState) -> bool {
     cs::load_state(&state.data_dir).resume.is_some_and(|c| cs::refresh_hook_in_place(&c))
 }
 
-/// The project a conversation runs in, its branch and where it runs, as the caches name them.
+/// The project a conversation runs in, its branch, where it runs and its title, as the caches name them.
 fn named(state: &AppState, s: &Settings, session: &str) -> crate::caches::Cache {
     let store = state.db();
     let last = store.session_events(session).unwrap_or_default().into_iter().rev().find(|e| e.tool == Tool::ClaudeCode && e.agent.is_none());
     let project = last.as_ref().and_then(|e| e.project_id).and_then(|id| store.projects().unwrap_or_default().into_iter().find(|p| p.id == id));
     let hidden = s.hide_project_names || project.as_ref().is_none_or(|p| p.hidden);
+    drop(store);
     crate::caches::Cache {
+        title: if hidden { None } else { crate::caches::title(state, session) },
         session_id: session.to_owned(),
         project: if hidden { String::new() } else { project.map(|p| p.name).unwrap_or_default() },
         branch: last.as_ref().and_then(|e| e.branch.clone()).filter(|_| !hidden),

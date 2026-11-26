@@ -13,7 +13,7 @@ afterEach(() => {
 
 // the tile itself counts down by the real clock
 const now = Date.now()
-const cache = (i: number) => ({ session_id: `s${i}`, project: `p${i}`, branch: null, model: 'claude-opus-5-5', client: 'cli', ttl_ms: 3_600_000, expires_ms: now + (i + 1) * 600_000, started_ms: now - 3_600_000, tokens: 1000, refresh_usd: 0.1, rewrite_usd: 1, refreshable: true, refreshing: false, refresh_failed: false, unasked: false, auto: false, auto_capped: false, refreshes: 0, refreshes_usd: 0 }) as LiveCache
+const cache = (i: number) => ({ session_id: `s${i}`, project: `p${i}`, branch: null, title: null, model: 'claude-opus-5-5', client: 'cli', ttl_ms: 3_600_000, expires_ms: now + (i + 1) * 600_000, started_ms: now - 3_600_000, tokens: 1000, refresh_usd: 0.1, rewrite_usd: 1, refreshable: true, refreshing: false, refresh_failed: false, unasked: false, auto: false, auto_capped: false, refreshes: 0, refreshes_usd: 0 }) as LiveCache
 const tile = { kind: 'caches', provider: '', pool: '', window: '', period: '', action: '', size: 't', style: '', account: '' } as PanelModule
 const settings = { cache_timer: true, limit_display: 'used', panel: { value: 'app' } } as unknown as Settings
 

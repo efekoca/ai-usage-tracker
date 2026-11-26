@@ -789,6 +789,16 @@ impl Store {
         self.conn.query_row("SELECT EXISTS(SELECT 1 FROM cache_miss_report)", [], |r| r.get(0))
     }
 
+    /// The transcript a Claude Code conversation is logged to; the latest written if there are several.
+    pub fn claude_transcript(&self, session_id: &str) -> Result<Option<PathBuf>> {
+        let name = format!("{session_id}.jsonl");
+        let mut st = self.conn.prepare_cached(
+            "SELECT path FROM file_checkpoint WHERE parser = 'claude_code_jsonl' AND typeof(path) = 'text' AND instr(path, ?1) > 0 ORDER BY mtime_ms DESC",
+        )?;
+        let paths = st.query_map(params![name], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>>>()?;
+        Ok(paths.into_iter().map(PathBuf::from).find(|p| p.file_name().is_some_and(|f| f == name.as_str())))
+    }
+
     /// When a session's first request was made.
     pub fn session_started_ms(&self, session_id: &str) -> Result<Option<i64>> {
         let mut st = self.conn.prepare_cached(&format!("SELECT MIN(ts_ms) FROM usage_event u WHERE session_id = ?1 AND {NOT_SUPERSEDED}"))?;

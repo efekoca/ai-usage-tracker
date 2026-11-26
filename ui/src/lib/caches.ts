@@ -24,12 +24,22 @@ export function cacheTone(c: Pick<LiveCache, 'ttl_ms'>, leftMs: number): CacheTo
   return 'ok'
 }
 
-export const cacheName = (c: Pick<LiveCache, 'project'>) => c.project || t('projects.hidden')
+/** The conversation's own name, or its project's while it has none. */
+export const cacheName = (c: Pick<LiveCache, 'project' | 'title'>) => c.title || c.project || t('projects.hidden')
 
-type Told = Pick<LiveCache, 'session_id' | 'project' | 'branch' | 'started_ms'>
+/** A long name cut to `max` characters, so what follows it on the line stays in sight. */
+export function clip(name: string, max: number): string {
+  const chars = [...name]
+  return chars.length <= max ? name : `${chars.slice(0, max - 1).join('').replace(/[\s\-_.]+$/, '')}…`
+}
 
-/** Another conversation of the same project and branch has a cache too, so the name alone cannot tell them apart. */
-export const cacheTwin = (c: Told, all: Told[]) => all.some((o) => o.session_id !== c.session_id && o.project === c.project && o.branch === c.branch)
+/** The project, shown beside a conversation named by its own title. */
+export const cacheProject = (c: Pick<LiveCache, 'project' | 'title'>, max = Infinity) => (c.title ? clip(c.project, max) : '')
+
+type Told = Pick<LiveCache, 'session_id' | 'project' | 'branch' | 'title' | 'started_ms'>
+
+/** Another conversation of the same project, branch and title has a cache too, so the name alone cannot tell them apart. */
+export const cacheTwin = (c: Told, all: Told[]) => all.some((o) => o.session_id !== c.session_id && o.project === c.project && o.branch === c.branch && o.title === c.title)
 
 /** "Since 14:02": when the conversation started, which tells it apart from a twin. */
 export const cacheSince = (c: Told) => t('cache.live.since', { at: clockCase(c.started_ms, 'from') })
