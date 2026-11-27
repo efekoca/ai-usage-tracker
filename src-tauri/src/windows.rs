@@ -520,7 +520,7 @@ pub fn handle_menu(app: &AppHandle, id: &str) {
             return;
         }
         "tray:rescan" => return state.worker.send(Msg::Scan),
-        "tray:update" => return show_main_at(app, Some("settings")),
+        "tray:update" => return show_main_at(app, Some("settings:updates")),
         _ => {}
     }
     if menu_change(id).is_none() {

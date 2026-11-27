@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, latest, refresh, setFilter } from '../lib/store.svelte'
+  import { app, latest, navigate, refresh, setFilter } from '../lib/store.svelte'
   import { api, type ProjectRow } from '../lib/api'
   import { fmtCompact, fmtMoney, fmtPct, t } from '../lib/i18n.svelte'
   import Toggle from '../components/Toggle.svelte'
@@ -42,7 +42,7 @@
   }
   function focus(id: number) {
     setFilter({ ...app.filter, projects: [id] })
-    app.view = 'overview'
+    navigate('overview', { from: true })
   }
   const name = (p: ProjectRow) => (hideAll || p.hidden ? `${t('projects.hidden')} #${p.id}` : p.name)
 </script>

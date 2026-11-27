@@ -166,7 +166,7 @@
   <div class="banner failed" role="alert"><Icon name="warning" size={16} />{t('common.error', { e: plansFailed })}</div>
 {/if}
 {#if plans}
-  <section class="card plans">
+  <section class="card plans" id="limits-plans">
     {#each providers as p (p)}
       <div class="plan-row">
         <label for="plan-{p}"><b class="brandname"><BrandIcon provider={p} color={markTint(p)} />{plans.providers[p].label}</b> · {t('limits.plan')}</label>

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { accountOf, app, saveSettings, toolColor } from '../lib/store.svelte'
+  import { accountOf, app, navigate, saveSettings, toolColor } from '../lib/store.svelte'
   import type { Accuracy } from '../lib/api'
   import { fmtCompact, fmtDate, fmtHour, fmtMoney, fmtPct, hourLabels, limitName, t, toolLabel, weekdayNames } from '../lib/i18n.svelte'
   import StatTile from '../components/StatTile.svelte'
@@ -74,7 +74,7 @@
           {#if cataloged.length}{t('overview.catalog', { n: cataloged.length, models: cataloged.join(', ') })}{/if}
         </span>
       </span>
-      <button class="btn" onclick={() => (app.view = 'settings')}>{t('overview.unpricedAction')}</button>
+      <button class="btn" onclick={() => navigate('settings:pricing', { from: true })}>{t('overview.unpricedAction')}</button>
       <button class="btn ghost dismiss" aria-label={t('overview.unpricedDismiss')} title={t('overview.unpricedDismiss')} onclick={dismissUnpriced}><Icon name="close" size={14} /></button>
     </div>
   {/if}
@@ -148,7 +148,7 @@
         <div class="card-head">
           <h2>{t('overview.limitsNow')}</h2>
           <span class="spacer"></span>
-          <button class="btn ghost" aria-label={t('overview.openLimits')} title={t('overview.openLimits')} onclick={() => (app.view = 'limits')}><Icon name="chevron" size={14} /></button>
+          <button class="btn ghost" aria-label={t('overview.openLimits')} title={t('overview.openLimits')} onclick={() => navigate('limits', { from: true })}><Icon name="chevron" size={14} /></button>
         </div>
         <LimitNotices />
         {#if headline.length === 0}

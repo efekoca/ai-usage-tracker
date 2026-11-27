@@ -125,7 +125,7 @@
 
   {#if st}
     {#each [['claude', st.claude_poll], ['codex', st.codex_poll], ['antigravity', st.antigravity_poll], ['statusline', st.statusline], ['otel', st.otel]] as const as [kind, on] (kind)}
-      <div class="method" class:on>
+      <div class="method" class:on id="sources-{kind}">
         <div class="top">
           <div class="txt">
             <b>{t(`cap.${kind}.name`)}</b>

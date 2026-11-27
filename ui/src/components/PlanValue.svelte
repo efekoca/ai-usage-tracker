@@ -1,7 +1,7 @@
 <script lang="ts">
   // Chat use is not in local logs, so the figure is a lower bound.
   import { untrack } from 'svelte'
-  import { accountName, app, latest, providerColor, saveSettings, tint, markTint } from '../lib/store.svelte'
+  import { accountName, app, latest, markTint, navigate, providerColor, saveSettings, tint } from '../lib/store.svelte'
   import { api, providersOf, type PlansFile, type PlanValue, type Provider, type ProviderValue } from '../lib/api'
   import { cycleOf, priceKey, valueRow, valueSplit, type Cycle } from '../lib/plans'
   import { fmtDate, fmtDec, fmtInt, fmtMoney, i18n, localDate, parseNumber, t } from '../lib/i18n.svelte'
@@ -276,7 +276,7 @@
     {#if !anyRenewal && used.length}
       <p class="subtle small hint">
         <span>{t('value.cycleHint')}</span>
-        <button class="btn ghost small" onclick={() => (app.view = 'limits')}>{t('value.cycleHintAction')}</button>
+        <button class="btn ghost small" onclick={() => navigate('limits:plans', { from: true })}>{t('value.cycleHintAction')}</button>
       </p>
     {/if}
   {/if}

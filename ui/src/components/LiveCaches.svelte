@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
   import { api, on, type LiveCache } from '../lib/api'
-  import { app } from '../lib/store.svelte'
+  import { app, navigate } from '../lib/store.svelte'
   import { clockCase, fmtCompact, fmtMoney, t } from '../lib/i18n.svelte'
   import { cacheClient, cacheName, cacheProject, cacheSince, cacheTone, cacheTwin, mmss, refreshError, shortModel } from '../lib/caches'
   import { ensureRefresh, loadRefreshInfo, refresh } from '../lib/refresh.svelte'
@@ -163,7 +163,7 @@
       {#if refresh.info?.today}
         <span class="today" title={t('cache.live.today.help')}><Icon name="refresh" size={13} />{t('cache.live.today', { n: refresh.info.today, cost: fmtMoney(refresh.info.today_usd) })}</span>
       {/if}
-      <button class="btn ghost square" aria-label={t('cache.live.settings')} title={t('cache.live.settings')} onclick={() => (app.view = 'settings')}><Icon name="gear" size={15} /></button>
+      <button class="btn ghost square" aria-label={t('cache.live.settings')} title={t('cache.live.settings')} onclick={() => navigate('settings:cache', { from: true })}><Icon name="gear" size={15} /></button>
     </div>
     {#if !live.length}
       {#if !gone.length}<p class="empty">{t('cache.live.empty')}</p>{/if}

@@ -21,7 +21,7 @@ vi.mock('./api', () => ({
   },
 }))
 
-const { app, init, refresh, saveSettings, setFilter, setPeriod } = await import('./store.svelte')
+const { app, back, goBack, init, navigate, refresh, saveSettings, setFilter, setPeriod } = await import('./store.svelte')
 
 afterEach(() => {
   vi.useRealTimers()
@@ -99,5 +99,28 @@ describe('the app state', () => {
       await vi.advanceTimersByTimeAsync(200)
     }
     expect(mocks.report).toHaveBeenCalled()
+  })
+})
+
+describe('moving between pages', () => {
+  it('keeps the page a link left for the way back, and a sidebar click forgets it', () => {
+    app.view = 'overview'
+    navigate('settings:pricing', { from: true })
+    expect(app.view).toBe('settings')
+    expect(back.view).toBe('overview')
+    goBack()
+    expect(app.view).toBe('overview')
+    expect(back.view).toBeNull()
+    navigate('limits:plans', { from: true })
+    navigate('daily')
+    expect(app.view).toBe('daily')
+    expect(back.view).toBeNull()
+  })
+
+  it('ignores a page it does not know', () => {
+    app.view = 'overview'
+    navigate('nowhere:pricing', { from: true })
+    expect(app.view).toBe('overview')
+    expect(back.view).toBeNull()
   })
 })

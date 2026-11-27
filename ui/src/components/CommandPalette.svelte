@@ -1,10 +1,9 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte'
-  import { app, latest, saveSettings, setFilter } from '../lib/store.svelte'
+  import { app, latest, navigate, saveSettings, setFilter } from '../lib/store.svelte'
   import { api, type ProjectRow, type SessionRow } from '../lib/api'
   import { NAV } from '../lib/nav'
   import { fmtDateTime, searchKey, t, toolLabel } from '../lib/i18n.svelte'
-  import { scrollPageTo } from '../lib/scroll'
   import Icon from './Icon.svelte'
 
   let { open = $bindable(false) }: { open?: boolean } = $props()
@@ -30,11 +29,7 @@
   const norm = (s: string) => searchKey(s).normalize('NFD').replace(/\p{M}/gu, '')
 
   function go(view: typeof app.view, section?: string) {
-    app.view = view
-    if (section) {
-      // after the page has rendered and scrolled to its top
-      tick().then(() => requestAnimationFrame(() => scrollPageTo(() => document.getElementById(`settings-${section}`))))
-    }
+    navigate(section ? `${view}:${section}` : view, { from: true })
   }
 
   const SETTINGS: [string, string][] = [
