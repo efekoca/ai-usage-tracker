@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { app, init, type View } from './lib/store.svelte'
+  import { app, back, goBack, init, navigate, type View } from './lib/store.svelte'
   import { refresh as consent } from './lib/refresh.svelte'
   import { t } from './lib/i18n.svelte'
   import Icon from './components/Icon.svelte'
@@ -51,9 +51,13 @@ import Cards from './views/Cards.svelte'
     return () => clearTimeout(timer)
   })
   let page: HTMLDivElement | undefined = $state()
+  // a page opened on one of its parts is already scrolled there when the page first appears
+  let shown = ''
   $effect(() => {
-    void app.view
-    page?.scrollTo({ top: 0 })
+    const view = app.view
+    if (!page || view === shown) return
+    if (shown) page.scrollTo({ top: 0 })
+    shown = view
   })
   onMount(() => {
     init().catch((e) => (failed = String(e)))
@@ -82,11 +86,11 @@ import Cards from './views/Cards.svelte'
     const i = flat.indexOf(app.view)
     if (e.key === 'ArrowDown') {
       e.preventDefault()
-      app.view = flat[(i + 1) % flat.length]
+      navigate(flat[(i + 1) % flat.length])
       document.getElementById(`nav-${app.view}`)?.focus()
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
-      app.view = flat[(i - 1 + flat.length) % flat.length]
+      navigate(flat[(i - 1 + flat.length) % flat.length])
       document.getElementById(`nav-${app.view}`)?.focus()
     }
   }
@@ -123,7 +127,7 @@ import Cards from './views/Cards.svelte'
                 aria-current={app.view === item.id ? 'page' : undefined}
                 tabindex={app.view === item.id ? 0 : -1}
                 title={t(`nav.${item.id}`)}
-                onclick={() => (app.view = item.id)}
+                onclick={() => navigate(item.id)}
                 onkeydown={navKey}
               >
                 <Icon name={item.icon} size={17} />
@@ -156,6 +160,11 @@ import Cards from './views/Cards.svelte'
       {#if withToolbar.includes(app.view)}
         <Toolbar />
       {/if}
+      {#if back.view && back.view !== app.view}
+        <div class="back">
+          <button class="btn ghost small" onclick={goBack}><Icon name="chevron" size={13} />{t('nav.back', { page: t(`nav.${back.view}`) })}</button>
+        </div>
+      {/if}
       <div class="page" class:titled={!withToolbar.includes(app.view)} bind:this={page} aria-busy={app.loading}>
         {#if app.error}
           <div class="banner" role="alert"><Icon name="warning" size={16} />{t('common.error', { e: app.error })}</div>
@@ -169,7 +178,7 @@ import Cards from './views/Cards.svelte'
         {#if update && app.view !== 'settings'}
           <div class="banner update" role="status">
             <span class="icon-text"><Icon name="download" size={16} /><span>{t('update.banner', { v: update.version })}</span></span>
-            <button class="btn ghost small" onclick={() => (app.view = 'settings')}>{t('update.banner.details')}</button>
+            <button class="btn ghost small" onclick={() => navigate('settings:updates', { from: true })}>{t('update.banner.details')}</button>
             <button class="btn primary small" disabled={app.update?.installing} onclick={() => installUpdate(update.version)}>{t('update.banner.install')}</button>
             <button class="btn ghost small" aria-label={t('common.close')} onclick={() => (updateDismissed = update.version)}><Icon name="close" size={14} /></button>
           </div>
@@ -414,6 +423,15 @@ import Cards from './views/Cards.svelte'
   }
   .banner {
     margin-bottom: 16px;
+  }
+  .back {
+    padding: 10px 20px 0;
+  }
+  .back button {
+    color: var(--ink-2);
+  }
+  .back :global(svg) {
+    transform: rotate(180deg);
   }
   /* a page with its own title starts it 16px down; a banner above it starts there too */
   .titled > .banner:first-child {

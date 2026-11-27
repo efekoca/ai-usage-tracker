@@ -2,7 +2,7 @@
   import { ask, open } from '@tauri-apps/plugin-dialog'
   import { saveAs } from '../lib/dialogs'
   import { onMount } from 'svelte'
-  import { app, latest, refresh, saveSettings } from '../lib/store.svelte'
+  import { app, latest, navigate, refresh, saveSettings } from '../lib/store.svelte'
   import { api, on, providersOf, type HotkeyStatus, type ModelPrice, type NotifySettings, type PricingFile, type PricingInfo, type ProjectChoice, type Provider } from '../lib/api'
   import { fmtDate, fmtDateTime, fmtDuration, fmtInput, fmtInt, fmtPct, has, localDate, parseNumber, t, windowLabel } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
@@ -447,7 +447,7 @@
       </div>
     {/if}
   </div>
-  <div class="bundle">
+  <div class="bundle" id="settings-cache">
     <div class="item">
       <div><span>{t('settings.cacheTimer')}</span><div class="subtle small">{t('settings.cacheTimer.help')}</div></div>
       <Toggle checked={s.cache_timer} label={t('settings.cacheTimer')} onchange={(v) => saveSettings({ cache_timer: v })} />
@@ -468,7 +468,7 @@
         <div class="choice">
           <span class="glyph"><Icon name="terminal" size={16} /></span>
           <span class="label">{t('settings.cacheTimer.statusline')}<span class="subtle small">{s.capture.statusline ? t('settings.cacheTimer.statusline.help') : t('settings.cacheTimer.statusline.off')}</span></span>
-          {#if !s.capture.statusline}<button class="btn ghost small" onclick={() => (app.view = 'sources')}>{t('settings.cacheTimer.statusline.open')}</button>{/if}
+          {#if !s.capture.statusline}<button class="btn ghost small" onclick={() => navigate('sources:statusline', { from: true })}>{t('settings.cacheTimer.statusline.open')}</button>{/if}
           <Toggle small checked={s.cache_statusline && s.capture.statusline} disabled={!s.capture.statusline} label="{t('settings.cacheTimer')}: {t('settings.cacheTimer.statusline')}" onchange={(v) => saveSettings({ cache_statusline: v })} />
         </div>
         <div class="choice">
@@ -556,7 +556,7 @@
       {/if}
     </div>
   </div>
-  <div class="item">
+  <div class="item" id="settings-budget">
     <div><span>{t('settings.budget')}</span><div class="subtle small">{t('settings.budget.help')}</div></div>
     <label class="row small muted">
       <input
@@ -653,7 +653,7 @@
   </div>
   <div class="item">
     <div><span>{t('ws.title')}</span><div class="subtle small">{t('settings.widget.studio')}</div></div>
-    <button class="btn" onclick={() => (app.view = 'widget')}><Icon name="widget" size={15} />{t('ws.open')}</button>
+    <button class="btn" onclick={() => navigate('widget', { from: true })}><Icon name="widget" size={15} />{t('ws.open')}</button>
   </div>
   <div class="item">
     <div>

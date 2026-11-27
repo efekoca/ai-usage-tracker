@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api, type CacheMisses, type MissEvent, type MissProject } from '../lib/api'
-  import { app, latest } from '../lib/store.svelte'
+  import { app, latest, navigate } from '../lib/store.svelte'
   import { fmtCompact, fmtDate, fmtDateTime, fmtInt, fmtMoney, fmtPct, has, localDate, t } from '../lib/i18n.svelte'
   import { shortModel } from '../lib/caches'
   import { rowToggles } from '../lib/scroll'
@@ -74,7 +74,7 @@
   }
   function openSession(e: MissEvent) {
     app.openSession = 'claude_code' + e.session_id
-    app.view = 'sessions'
+    navigate('sessions', { from: true })
   }
 </script>
 
@@ -91,7 +91,7 @@
       {#if !data.reported}
         <div class="setup">
           <p class="muted">{bridge ? t('cachemiss.waiting') : t('cachemiss.setup')}</p>
-          {#if !bridge}<button class="btn" onclick={() => (app.view = 'sources')}>{t('settings.cacheTimer.statusline.open')}</button>{/if}
+          {#if !bridge}<button class="btn" onclick={() => navigate('sources:statusline', { from: true })}>{t('settings.cacheTimer.statusline.open')}</button>{/if}
         </div>
       {:else if !any}
         <p class="muted empty">{t('cachemiss.none')}</p>

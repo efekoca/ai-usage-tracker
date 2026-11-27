@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, latest, toolColor } from '../lib/store.svelte'
+  import { app, latest, navigate, toolColor } from '../lib/store.svelte'
   import { api, type TurnCost, type TurnPart, type Turns } from '../lib/api'
   import { agentLabel, clientLabel, fmtCompact, fmtDateTime, fmtInt, fmtMoney, fmtPct, fmtSpan, has, t, toolLabel } from '../lib/i18n.svelte'
   import { rowToggles } from '../lib/scroll'
@@ -56,7 +56,7 @@
   function openSession(x: TurnCost) {
     if (x.session_id === null) return
     app.openSession = x.tool + x.session_id
-    app.view = 'sessions'
+    navigate('sessions', { from: true })
   }
 </script>
 

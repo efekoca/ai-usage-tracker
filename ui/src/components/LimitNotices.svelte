@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app } from '../lib/store.svelte'
+  import { app, navigate } from '../lib/store.svelte'
   import { api, type CaptureStatus } from '../lib/api'
   import { t } from '../lib/i18n.svelte'
   import Icon from './Icon.svelte'
@@ -81,7 +81,7 @@
 {#if agy}
   <div class="banner" role="status">
     <span class="icon-text"><Icon name="info" size={16} /><span>{t('limits.agyMissing')}</span></span>
-    <button class="btn small" onclick={() => (app.view = 'sources')}>{t('limits.agyMissing.action')}</button>
+    <button class="btn small" onclick={() => navigate('sources:antigravity', { from: true })}>{t('limits.agyMissing.action')}</button>
   </div>
 {/if}
 

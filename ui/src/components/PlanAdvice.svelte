@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { PlanAdvice, PlansFile } from '../lib/api'
   import { api } from '../lib/api'
-  import { accountName, app, markTint } from '../lib/store.svelte'
+  import { accountName, app, markTint, navigate } from '../lib/store.svelte'
   import { fmtDuration, fmtMoney, fmtPct, i18n, t } from '../lib/i18n.svelte'
   import Icon from './Icon.svelte'
   import BrandIcon from './BrandIcon.svelte'
@@ -101,10 +101,10 @@
   {#if !compact}
     <div class="foot">
       {#if source}<button class="btn ghost small" onclick={() => api.openUrl(source)}><Icon name="external" size={13} />{t('advice.source')}</button>{/if}
-      {#if a.kind === 'no_plan' && app.view !== 'limits'}<button class="btn ghost small" onclick={() => (app.view = 'limits')}>{t('nav.limits')}</button>{/if}
+      {#if a.kind === 'no_plan' && app.view !== 'limits'}<button class="btn ghost small" onclick={() => navigate('limits:plans', { from: true })}>{t('nav.limits')}</button>{/if}
     </div>
   {:else if app.view !== 'limits'}
-    <div class="foot"><button class="btn ghost small" onclick={() => { app.limitsTab = 'history'; app.view = 'limits' }}><Icon name="chevron" size={13} />{t('advice.open')}</button></div>
+    <div class="foot"><button class="btn ghost small" onclick={() => { app.limitsTab = 'history'; navigate('limits', { from: true }) }}><Icon name="chevron" size={13} />{t('advice.open')}</button></div>
   {/if}
 </article>
 

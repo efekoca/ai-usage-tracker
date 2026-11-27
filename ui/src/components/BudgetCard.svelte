@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, latest } from '../lib/store.svelte'
+  import { app, latest, navigate } from '../lib/store.svelte'
   import { api, type MonthSpend } from '../lib/api'
   import { fmtDate, fmtMoney, fmtPct, t } from '../lib/i18n.svelte'
   import Icon from './Icon.svelte'
@@ -32,7 +32,7 @@
     <h2>{t('budget.title')}</h2>
     <span class="spacer"></span>
     {#if spend}<span class="subtle small">{fmtDate(spend.month, 'monthLong')} · {t('budget.left', { n: daysLeft })}</span>{/if}
-    <button class="btn ghost" aria-label={t('budget.edit')} title={t('budget.edit')} onclick={() => (app.view = 'settings')}><Icon name="gear" size={14} /></button>
+    <button class="btn ghost" aria-label={t('budget.edit')} title={t('budget.edit')} onclick={() => navigate('settings:budget', { from: true })}><Icon name="gear" size={14} /></button>
   </div>
   {#if failed && !spend}
     <p class="muted small">{t('common.error', { e: failed })}</p>

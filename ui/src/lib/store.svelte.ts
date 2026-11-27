@@ -1,5 +1,7 @@
+import { tick } from 'svelte'
 import { api, on, type Account, type AppInfo, type Filter, type LimitView, type Period, type Provider, type Report, type ScanStatus, type Settings, type UpdateStatus } from './api'
 import { i18n, localDate, resolveLang, t } from './i18n.svelte'
+import { scrollPageBack, scrollPageTo } from './scroll'
 
 const VIEWS = ['overview', 'tips', 'daily', 'breakdown', 'sessions', 'cache', 'context', 'limits', 'projects', 'cards', 'sources', 'widget', 'menubar', 'settings'] as const
 export type View = (typeof VIEWS)[number]
@@ -29,6 +31,56 @@ export const app = $state({
   /** The local date (YYYY-MM-DD); it moves on at midnight, so "today" and the periods do too. */
   today: localDate(),
 })
+
+/** The page a link inside another page came from, so the page it opened can offer the way back. */
+export const back = $state({ view: null as View | null, top: 0 })
+
+const pageEl = () => document.querySelector<HTMLElement>('main.content > .page')
+
+/**
+ * Opens a page, or one part of it as `view:part`; that part's element has the id `view-part`.
+ * `from` marks a link inside a page: the page it leaves is kept for the way back.
+ */
+export function navigate(target: string, { from = false } = {}) {
+  const [view, part] = target.split(':')
+  if (!(VIEWS as readonly string[]).includes(view)) return
+  if (!from) back.view = null
+  else if (view !== app.view) {
+    back.view = app.view
+    back.top = pageEl()?.scrollTop ?? 0
+  }
+  app.view = view as View
+  if (part) reveal(`${view}-${part}`)
+}
+
+export function goBack() {
+  const { view, top } = back
+  if (!view) return
+  back.view = null
+  app.view = view
+  tick().then(() => requestAnimationFrame(() => scrollPageBack(top)))
+}
+
+// a part that waits for its data is looked for again for a while
+function reveal(id: string, tries = 15) {
+  tick().then(() =>
+    requestAnimationFrame(() => {
+      const el = document.getElementById(id)
+      if (!el) {
+        if (tries > 0) setTimeout(() => reveal(id, tries - 1), 100)
+        return
+      }
+      scrollPageTo(() => document.getElementById(id))
+      const heading = el.querySelector<HTMLElement>('h1, h2, h3') ?? el
+      if (!heading.hasAttribute('tabindex')) heading.tabIndex = -1
+      heading.focus({ preventScroll: true })
+      // a part the page cannot bring to its top still shows which one was meant
+      if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        el.animate([{ boxShadow: '0 0 0 2px var(--accent)' }, { boxShadow: '0 0 0 2px transparent' }], { duration: 1800, delay: 300, easing: 'ease-in' })
+      }
+    }),
+  )
+}
 
 export function applyAppearance(s: Settings, info: AppInfo | null) {
   const root = document.documentElement
@@ -163,8 +215,7 @@ export async function init() {
   app.settings = settings
   applyAppearance(settings, info)
   // the tray panel opens a new window straight on a page
-  const start = location.hash.slice(1)
-  if ((VIEWS as readonly string[]).includes(start)) app.view = start as View
+  navigate(decodeURIComponent(location.hash.slice(1)))
   app.scan = await api.scanStatus()
   app.ready = true
 
@@ -193,6 +244,7 @@ export async function init() {
       app.limits = []
       app.accounts = []
       app.openSession = null
+      back.view = null
     }
   })
   await on<{ done: number; total: number }>('scan-progress', (p) => {
@@ -205,9 +257,7 @@ export async function init() {
     app.update = u
   })
   // the tray menu and panel open pages in a window that is already open
-  await on<View>('navigate', (v) => {
-    app.view = v
-  })
+  await on<string>('navigate', (v) => navigate(v))
   app.update = await api.updateStatus().catch(() => null)
   // follow OS light/dark switches live
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => app.tick++)
