@@ -49,7 +49,7 @@
 
 <p class="subtle small help icon-text"><Icon name="lock" size={13} /> {t('projects.help')}</p>
 {#if saveFailed || loadFailed}
-  <div class="banner failed" role="alert"><Icon name="warning" size={16} />{t('common.error', { e: saveFailed || loadFailed })}</div>
+  <div class="banner failed error" role="alert"><Icon name="warning" size={16} />{t('common.error', { e: saveFailed || loadFailed })}</div>
 {/if}
 
 <section class="card list-card">

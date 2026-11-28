@@ -7,6 +7,7 @@
   import StatTile from './StatTile.svelte'
   import AccuracyBadge from './AccuracyBadge.svelte'
   import Icon from './Icon.svelte'
+  import Explain from './Explain.svelte'
   import BrandIcon from './BrandIcon.svelte'
   import BarValue from './BarValue.svelte'
   import WindowHistory from './charts/WindowHistory.svelte'
@@ -152,8 +153,8 @@
       onchange={(v) => (status = v as typeof status)}
     />
   </div>
+  <span class="more"><Explain text={t('history.lead')} label={t('history.explain')} /></span>
 </section>
-<p class="subtle small lead">{t('history.lead')}</p>
 
 {#if view}
   <section class="tiles card">
@@ -271,7 +272,7 @@
     {/if}
   </section>
 {:else if failed}
-  <div class="banner"><Icon name="warning" size={16} />{t('common.error', { e: failed })}</div>
+  <div class="banner error"><Icon name="warning" size={16} />{t('common.error', { e: failed })}</div>
 {/if}
 
 <style>
@@ -289,9 +290,9 @@
     flex-direction: column;
     gap: 6px;
   }
-  .lead {
-    margin: -6px 0 14px;
-    max-width: 820px;
+  .more {
+    margin-left: auto;
+    padding-bottom: 6px;
   }
   .tiles {
     display: grid;

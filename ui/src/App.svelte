@@ -167,10 +167,10 @@ import Cards from './views/Cards.svelte'
       {/if}
       <div class="page" class:titled={!withToolbar.includes(app.view)} bind:this={page} aria-busy={app.loading}>
         {#if app.error}
-          <div class="banner" role="alert"><Icon name="warning" size={16} />{t('common.error', { e: app.error })}</div>
+          <div class="banner error" role="alert"><Icon name="warning" size={16} />{t('common.error', { e: app.error })}</div>
         {/if}
         {#if updateFailed}
-          <div class="banner update" role="alert">
+          <div class="banner update error" role="alert">
             <span class="icon-text"><Icon name="warning" size={16} /><span>{updateFailed}</span></span>
             <button class="btn ghost small" aria-label={t('common.close')} onclick={() => (updateFailed = '')}><Icon name="close" size={14} /></button>
           </div>

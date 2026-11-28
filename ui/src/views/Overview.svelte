@@ -13,6 +13,7 @@
   import PlanValue from '../components/PlanValue.svelte'
   import BudgetCard from '../components/BudgetCard.svelte'
   import LimitNotices from '../components/LimitNotices.svelte'
+  import EmptyState from '../components/EmptyState.svelte'
 
   let metric: 'tokens' | 'cost' = $state(app.settings?.primary_metric ?? 'tokens')
   const r = $derived(app.report)
@@ -59,10 +60,7 @@
 {#if !r}
   <p class="muted">{t('common.loading')}</p>
 {:else if r.totals.events === 0}
-  <div class="empty card">
-    <Icon name="overview" size={28} />
-    <p>{t('common.empty')}</p>
-  </div>
+  <EmptyState />
 {:else}
   {#if unpriced.length || cataloged.length}
     <div class="banner" role="status">
@@ -80,7 +78,7 @@
   {/if}
 
   <section class="tiles card">
-    <StatTile hero label={t('overview.totalTokens')} value={fmtCompact(r.totals.total_tokens)} current={r.totals.total_tokens} previous={r.previous.total_tokens}>
+    <StatTile hero label={t('overview.totalTokens')} hint={hasClaude ? t('overview.excludesAux') : ''} value={fmtCompact(r.totals.total_tokens)} current={r.totals.total_tokens} previous={r.previous.total_tokens}>
       <AccuracyBadge kind={accuracy.kind} detail={accuracy.detail} />
     </StatTile>
     <StatTile label={t('overview.cost')} hint={t('metric.apiEq.help')} value={fmtMoney(r.totals.cost_usd)} current={r.totals.cost_usd} previous={r.previous.cost_usd} />
@@ -177,9 +175,6 @@
     </div>
   </div>
 
-  {#if hasClaude}
-    <p class="footnote subtle small icon-text"><Icon name="info" size={13} /> {t('overview.excludesAux')}</p>
-  {/if}
 {/if}
 
 <style>
@@ -250,19 +245,5 @@
     display: flex;
     gap: 14px;
     margin-top: 10px;
-  }
-  .empty {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-    padding: 60px;
-    color: var(--ink-2);
-  }
-  .footnote {
-    display: flex;
-    gap: 6px;
-    align-items: flex-start;
-    max-width: 760px;
   }
 </style>

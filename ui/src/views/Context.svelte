@@ -7,6 +7,8 @@
   import AreaChart from '../components/charts/AreaChart.svelte'
   import Icon from '../components/Icon.svelte'
   import StartingLoads from '../components/StartingLoads.svelte'
+  import EmptyState from '../components/EmptyState.svelte'
+  import Explain from '../components/Explain.svelte'
 
   let c = $state<ContextStats | null>(null)
   let failed = $state('')
@@ -54,11 +56,11 @@
 <p class="subtle small lead">{t('context.lead')}</p>
 
 {#if failed}
-  <div class="banner"><Icon name="warning" size={16} />{t('common.error', { e: failed })}</div>
+  <div class="banner error"><Icon name="warning" size={16} />{t('common.error', { e: failed })}</div>
 {:else if !c}
   <p class="muted">{t('common.loading')}</p>
 {:else if c.requests === 0}
-  <div class="banner"><Icon name="info" size={16} />{t('context.none')}</div>
+  <EmptyState icon="context" text={t('context.none')} />
 {:else}
   <section class="tiles card">
     <StatTile hero label={t('context.avg')} value={fmtCompact(c.avg)}>
@@ -88,7 +90,7 @@
   </div>
 
   <section class="card table-card">
-    <h2 class="pad">{t('context.byModel')}</h2>
+    <h2 class="pad">{t('context.byModel')} <Explain text={t('context.longHelp')} /></h2>
     <div class="scroll">
       <table>
         <thead>
@@ -119,7 +121,6 @@
         </tbody>
       </table>
     </div>
-    <p class="subtle small pad note">{t('context.longHelp')}</p>
   </section>
   <StartingLoads />
 {/if}
@@ -200,12 +201,5 @@
   }
   .pad {
     padding: 12px 20px 6px;
-  }
-  .note {
-    display: flex;
-    gap: 8px;
-    align-items: flex-start;
-    padding-bottom: 14px;
-    margin: 0;
   }
 </style>

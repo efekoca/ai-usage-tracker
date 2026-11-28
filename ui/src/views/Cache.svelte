@@ -5,11 +5,12 @@
   import StatTile from '../components/StatTile.svelte'
   import AreaChart from '../components/charts/AreaChart.svelte'
   import Segmented from '../components/Segmented.svelte'
-  import Icon from '../components/Icon.svelte'
   import BarValue from '../components/BarValue.svelte'
   import SubagentCache from '../components/SubagentCache.svelte'
   import CacheMisses from '../components/CacheMisses.svelte'
   import LiveCaches from '../components/LiveCaches.svelte'
+  import EmptyState from '../components/EmptyState.svelte'
+  import Explain from '../components/Explain.svelte'
 
   const r = $derived(app.report)
   const prompt = (k: Tokens) => k.input + k.cache_read + k.cache_write
@@ -46,7 +47,7 @@
 {#if !r || !tk}
   <p class="muted">{t('common.loading')}</p>
 {:else if prompt(tk) === 0}
-  <div class="banner"><Icon name="info" size={16} />{t('common.empty')}</div>
+  <EmptyState icon="cache" />
 {:else}
   <section class="tiles card">
     <StatTile hero label={t('cache.hitRate')} hint={t('cache.hitRate.help')} value={fmtPct(hit(tk) ?? 0, 1)} current={hit(tk)} previous={hit(r.previous.tokens)} points />
@@ -97,7 +98,7 @@
 
   <section class="card table-card">
     <div class="th">
-      <h2>{t('cache.breakdown')}</h2>
+      <h2>{t('cache.breakdown')} <Explain text={t('cache.method')} /></h2>
       <span class="spacer"></span>
       <Segmented label={t('cache.breakdown')} bind:value={breakdown} options={[{ value: 'model', label: t('common.model') }, { value: 'client', label: t('common.tool') }, { value: 'project', label: t('common.project') }]} />
     </div>
@@ -134,7 +135,6 @@
         </tbody>
       </table>
     </div>
-    <footer class="foot subtle small"><Icon name="info" size={13} /><span>{t('cache.method')}</span></footer>
   </section>
 {/if}
 
@@ -269,18 +269,6 @@
   }
   .neg {
     color: var(--bad-ink);
-  }
-  .foot {
-    display: flex;
-    gap: 8px;
-    align-items: flex-start;
-    padding: 14px 20px 16px;
-    border-top: 0.5px solid var(--hairline);
-    line-height: 1.5;
-  }
-  .foot :global(svg) {
-    flex: none;
-    margin-top: 2px;
   }
   @container main (max-width: 1040px) {
     .table-card th,

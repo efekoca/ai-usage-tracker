@@ -382,7 +382,7 @@
   {#if notice}<span class="notice" role="status"><Icon name="check" size={14} />{notice}</span>{/if}
 </header>
 {#if loadFailed}
-  <div class="banner failed" role="alert"><Icon name="warning" size={16} />{t('common.error', { e: loadFailed })}</div>
+  <div class="banner failed error" role="alert"><Icon name="warning" size={16} />{t('common.error', { e: loadFailed })}</div>
 {/if}
 
 <section class="card group" id="settings-general">

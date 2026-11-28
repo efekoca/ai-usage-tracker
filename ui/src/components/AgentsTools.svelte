@@ -5,6 +5,7 @@
   import Segmented from './Segmented.svelte'
   import Select from './Select.svelte'
   import Icon from './Icon.svelte'
+  import Explain from './Explain.svelte'
   import BarValue from './BarValue.svelte'
 
   let data = $state<AgentsTools | null>(null)
@@ -118,7 +119,13 @@
     <section class="card table-card">
       <div class="pad head">
         <div>
-          <h2>{t('tools.title')}</h2>
+          <h2>
+            {t('tools.title')}
+            <Explain>
+              <p>{t('tools.errorsHelp')}</p>
+              {#if toolTools.includes('codex')}<p>{t('tools.codexNote')}</p>{/if}
+            </Explain>
+          </h2>
           <p class="subtle small lead">{t('tools.lead')}</p>
         </div>
         {#if toolTools.length > 1}
@@ -164,12 +171,12 @@
           {/if}
           <span class="subtle small">{t('tools.total', { n: fmtInt(totalCalls) })}</span>
         </div>
-        <p class="subtle small pad note">{t('tools.errorsHelp')} {toolTools.includes('codex') ? t('tools.codexNote') : ''} {data.filtered_by_session ? t('tools.bySession') : ''}</p>
+        {#if data.filtered_by_session}<p class="subtle small pad note">{t('tools.bySession')}</p>{/if}
       {/if}
     </section>
   </div>
 {:else if failed}
-  <div class="banner"><Icon name="warning" size={16} />{t('common.error', { e: failed })}</div>
+  <div class="banner error"><Icon name="warning" size={16} />{t('common.error', { e: failed })}</div>
 {/if}
 
 <style>

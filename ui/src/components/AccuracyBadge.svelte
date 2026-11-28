@@ -5,10 +5,13 @@
   let { kind, compact = false, detail = '' }: { kind: Accuracy; compact?: boolean; detail?: string } = $props()
 </script>
 
-<span class="badge {kind}" class:compact title={detail ? `${t(`acc.${kind}.help`)}\n${t('acc.mix', { mix: detail })}` : t(`acc.${kind}.help`)}>
-  <Icon name={kind} size={compact ? 12 : 13} />
-  <span>{t(`acc.${kind}`)}</span>
-</span>
+<!-- exact and captured figures are the normal case, so only an estimate is marked -->
+{#if kind === 'estimated'}
+  <span class="badge {kind}" class:compact title={detail ? `${t(`acc.${kind}.help`)}\n${t('acc.mix', { mix: detail })}` : t(`acc.${kind}.help`)}>
+    <Icon name={kind} size={compact ? 12 : 13} />
+    <span>{t(`acc.${kind}`)}</span>
+  </span>
+{/if}
 
 <style>
   .badge {
@@ -34,8 +37,5 @@
   }
   .badge :global(svg) {
     color: var(--ink-3);
-  }
-  .badge.exact :global(svg) {
-    color: var(--good-ink);
   }
 </style>

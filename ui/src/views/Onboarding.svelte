@@ -64,7 +64,7 @@
     </div>
 
     {#if app.wipeLeft.length}
-      <div class="banner" role="status">
+      <div class="banner warn" role="status">
         <span class="icon-text"><Icon name="warning" size={16} /><span>{t('onb.wipeLeft', { dirs: app.wipeLeft.join(', ') })}</span></span>
         <button class="btn ghost" onclick={() => api.openDataFolder().catch(() => {})}>{t('settings.data.openFolder')}</button>
       </div>
@@ -73,7 +73,7 @@
     <section class="card">
       <h2>{t('onb.detected')}</h2>
       {#if loadError}
-        <div class="banner center" role="alert">
+        <div class="banner center error" role="alert">
           <span class="icon-text"><Icon name="warning" size={16} /><span>{t('common.error', { e: loadError })}</span></span>
           <button class="btn" onclick={detect}>{t('common.retry')}</button>
         </div>

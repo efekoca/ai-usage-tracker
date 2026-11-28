@@ -6,7 +6,7 @@
   import Toggle from './Toggle.svelte'
   import Select from './Select.svelte'
   import Icon from './Icon.svelte'
-  import AccuracyBadge from './AccuracyBadge.svelte'
+  import Explain from './Explain.svelte'
   import SignInSteps from './SignInSteps.svelte'
 
   let st = $state<CaptureStatus | null>(null)
@@ -118,8 +118,7 @@
 
 <section class="card">
   <div class="head">
-    <h2>{t('cap.title')}</h2>
-    <AccuracyBadge kind="captured" />
+    <h2>{t('cap.title')} <Explain text={t('cap.lead.more')} /></h2>
   </div>
   <p class="subtle small lead">{t('cap.lead')}</p>
 

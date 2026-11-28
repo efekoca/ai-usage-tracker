@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from './Icon.svelte'
+  import Explain from './Explain.svelte'
   import { fmtDec, fmtPct, t } from '../lib/i18n.svelte'
   import type { Snippet } from 'svelte'
 
@@ -30,7 +31,7 @@
 </script>
 
 <div class="tile" class:hero>
-  <div class="label" title={hint || undefined}>{label}</div>
+  <div class="label">{label}{#if hint} <Explain text={hint} />{/if}</div>
   <div class="value">{value}</div>
   <div class="foot">
     {#if delta !== null && Number.isFinite(delta)}

@@ -3,6 +3,7 @@
   import { api, type TurnCost, type TurnPart, type Turns } from '../lib/api'
   import { agentLabel, clientLabel, fmtCompact, fmtDateTime, fmtInt, fmtMoney, fmtPct, fmtSpan, has, t, toolLabel } from '../lib/i18n.svelte'
   import { rowToggles } from '../lib/scroll'
+  import Explain from './Explain.svelte'
   import Icon from './Icon.svelte'
   import Segmented from './Segmented.svelte'
 
@@ -64,7 +65,7 @@
   <section class="card table-card">
     <div class="head">
       <div class="title">
-        <h2>{t('turns.title')}</h2>
+        <h2>{t('turns.title')} <Explain text={t('turns.note')} /></h2>
         <p class="subtle small help">{t('turns.help')}</p>
       </div>
       {#if data.turns.length > 1}
@@ -174,10 +175,7 @@
         <div class="more"><button class="btn" onclick={() => (shown += STEP)}>{t('sessions.more', { n: fmtInt(rows.length - shown) })}</button></div>
       {/if}
     {/if}
-    <p class="subtle small pad note">
-      {t('turns.note')}
-      {#if data.requests_outside > 0}{t('turns.outside', { n: fmtInt(data.requests_outside) })}{/if}
-    </p>
+    {#if data.requests_outside > 0}<p class="subtle small pad note">{t('turns.outside', { n: fmtInt(data.requests_outside) })}</p>{/if}
   </section>
 {/if}
 

@@ -19,6 +19,7 @@
 
   let plans: PlansFile | null = $state(null)
   let plansFailed = $state('')
+  let notices = $state(0)
   onMount(async () => {
     try {
       plans = await api.plans()
@@ -163,7 +164,7 @@
   </div>
 {/each}
 {#if plansFailed}
-  <div class="banner failed" role="alert"><Icon name="warning" size={16} />{t('common.error', { e: plansFailed })}</div>
+  <div class="banner failed error" role="alert"><Icon name="warning" size={16} />{t('common.error', { e: plansFailed })}</div>
 {/if}
 {#if plans}
   <section class="card plans" id="limits-plans">
@@ -261,10 +262,10 @@
   </section>
 {/each}
 
-<LimitNotices />
+<LimitNotices bind:shown={notices} />
 {#if providers.includes('anthropic') && app.settings?.plans.anthropic !== 'api'}<EarlyRestartNotice />{/if}
 
-{#if app.limits.length === 0}
+{#if app.limits.length === 0 && notices === 0}
   <div class="banner"><Icon name="info" size={16} />{t('limits.none')}</div>
 {/if}
 
