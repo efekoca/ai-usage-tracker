@@ -122,7 +122,7 @@
 </script>
 
 {#if failed}
-  <div class="banner"><Icon name="warning" size={16} />{t('common.error', { e: failed })}</div>
+  <div class="banner error"><Icon name="warning" size={16} />{t('common.error', { e: failed })}</div>
 {:else if !data}
   <p class="muted">{t('common.loading')}</p>
 {:else}

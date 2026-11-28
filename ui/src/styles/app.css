@@ -361,6 +361,22 @@ select.field {
 .banner.center {
   align-items: center;
 }
+.banner.warn {
+  background: color-mix(in srgb, var(--warning) 9%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--hairline));
+}
+.banner.error {
+  background: color-mix(in srgb, var(--critical) 7%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--critical) 40%, var(--hairline));
+}
+.banner.warn > svg,
+.banner.warn .icon-text > svg {
+  color: var(--serious);
+}
+.banner.error > svg,
+.banner.error .icon-text > svg {
+  color: var(--bad-ink);
+}
 
 /* an icon in front of text keeps to the text's first line, however many lines follow:
    a line tall, the icon is drawn in the middle of it */

@@ -3,6 +3,7 @@
   import { api, type AdviceKind, type LimitHistoryView, type PlansFile, type Tip, type Tips } from '../lib/api'
   import { accountName, app, latest } from '../lib/store.svelte'
   import { fmtCompact, fmtInt, fmtMoney, fmtPct, has, t, toolLabel } from '../lib/i18n.svelte'
+  import Explain from '../components/Explain.svelte'
   import Icon from '../components/Icon.svelte'
   import PlanAdvice from '../components/PlanAdvice.svelte'
   import Experiments from '../components/Experiments.svelte'
@@ -92,8 +93,6 @@
   }
 </script>
 
-<p class="subtle small lead">{t('tips.lead')}</p>
-
 {#if history && history.advice.length}
   <h2 class="section">{t('advice.title')}</h2>
   <div class="advice-grid">
@@ -107,11 +106,17 @@
 {/if}
 
 {#if failed}
-  <div class="banner"><Icon name="warning" size={16} />{t('common.error', { e: failed })}</div>
+  <div class="banner error"><Icon name="warning" size={16} />{t('common.error', { e: failed })}</div>
 {:else if !data}
   <p class="muted">{t('common.loading')}</p>
 {:else}
-  <h2 class="section">{t('tips.findings')}</h2>
+  <h2 class="section">
+    {t('tips.findings')}
+    <Explain>
+      <p>{t('tips.lead')}</p>
+      <p>{t('tips.checked')}</p>
+    </Explain>
+  </h2>
   {#if data.tips.length === 0}
     <div class="card empty">
       <Icon name="check" size={18} />
@@ -148,16 +153,12 @@
       {/each}
     </div>
   {/if}
-  <p class="subtle small basis">{t('tips.basis', { requests: fmtInt(data.requests), calls: fmtInt(data.tool_calls) })} {data.tips.length ? t('tips.checked') : ''}</p>
+  <p class="subtle small basis">{t('tips.basis', { requests: fmtInt(data.requests), calls: fmtInt(data.tool_calls) })}</p>
 {/if}
 
 <Experiments />
 
 <style>
-  .lead {
-    max-width: 760px;
-    margin: 4px 0 16px;
-  }
   .section {
     margin: 8px 0 10px;
   }

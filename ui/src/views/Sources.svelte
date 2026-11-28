@@ -93,7 +93,7 @@
 </header>
 <p class="subtle small help icon-text"><Icon name="lock" size={13} /> {t('sources.help')}</p>
 {#if failed || loadFailed}
-  <div class="banner failed" role="alert"><Icon name="warning" size={16} />{t('common.error', { e: failed || loadFailed })}</div>
+  <div class="banner failed error" role="alert"><Icon name="warning" size={16} />{t('common.error', { e: failed || loadFailed })}</div>
 {/if}
 
 <section class="card list-card">

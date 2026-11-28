@@ -5,6 +5,9 @@
   import Icon from './Icon.svelte'
   import SignInSteps from './SignInSteps.svelte'
 
+  /** How many notices show, so the page can leave out what they already say. */
+  let { shown = $bindable(0) }: { shown?: number } = $props()
+
   let st = $state<CaptureStatus | null>(null)
   let open = $state<string | null>(null)
 
@@ -67,17 +70,22 @@
       (app.report?.by_tool ?? []).some((g) => g.key === 'antigravity') &&
       !live('google'),
   )
+  $effect(() => {
+    shown = signedOut.length + (agy ? 1 : 0)
+  })
 </script>
 
-{#each signedOut as s (s.kind)}
-  <div class="banner col" role="status">
-    <div class="line">
-      <span class="icon-text"><Icon name="warning" size={16} /><span>{t(`limits.signIn.${s.kind}`)}</span></span>
-      <button class="btn small" aria-expanded={open === s.kind} onclick={() => (open = open === s.kind ? null : s.kind)}>{t('limits.signIn.how')}</button>
-    </div>
-    {#if open === s.kind}<SignInSteps kind={s.kind} binary={s.binary} />{/if}
+{#if signedOut.length}
+  <div class="banner warn col" role="status">
+    {#each signedOut as s (s.kind)}
+      <div class="line">
+        <span class="icon-text"><Icon name="warning" size={16} /><span>{t(`limits.signIn.${s.kind}`)}</span></span>
+        <button class="btn small" aria-expanded={open === s.kind} onclick={() => (open = open === s.kind ? null : s.kind)}>{t('limits.signIn.how')}</button>
+      </div>
+      {#if open === s.kind}<SignInSteps kind={s.kind} binary={s.binary} />{/if}
+    {/each}
   </div>
-{/each}
+{/if}
 {#if agy}
   <div class="banner" role="status">
     <span class="icon-text"><Icon name="info" size={16} /><span>{t('limits.agyMissing')}</span></span>

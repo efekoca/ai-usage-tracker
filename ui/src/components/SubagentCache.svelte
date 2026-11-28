@@ -3,6 +3,7 @@
   import { app, latest, toolColor } from '../lib/store.svelte'
   import { agentLabel, fmtCompact, fmtDec, fmtInt, fmtMoney, fmtPct, t, toolLabel } from '../lib/i18n.svelte'
   import StatTile from './StatTile.svelte'
+  import Explain from './Explain.svelte'
   import BarValue from './BarValue.svelte'
   import Icon from './Icon.svelte'
 
@@ -85,7 +86,7 @@
 {:else if data}
   <section class="card intro">
     <header>
-      <h2>{t('subcache.title')}</h2>
+      <h2>{t('subcache.title')} <Explain text={t('subcache.method')} /></h2>
       <p class="subtle small lead">{t('subcache.lead')}</p>
     </header>
 
@@ -224,7 +225,6 @@
           {/each}
         </table>
       </div>
-      <footer class="foot subtle small"><Icon name="info" size={13} /><span>{t('subcache.method')}</span></footer>
     </section>
   {/if}
 {/if}
@@ -394,18 +394,6 @@
   }
   .info .badge {
     color: var(--ink-3);
-  }
-  .foot {
-    display: flex;
-    gap: 8px;
-    align-items: flex-start;
-    padding: 14px 20px 16px;
-    border-top: 0.5px solid var(--hairline);
-    line-height: 1.5;
-  }
-  .foot :global(svg) {
-    flex: none;
-    margin-top: 2px;
   }
   @container main (max-width: 1040px) {
     .table-card th,

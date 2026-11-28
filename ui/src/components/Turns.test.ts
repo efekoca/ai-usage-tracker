@@ -92,7 +92,7 @@ describe('what each prompt cost', () => {
 
   it('opens a turn to its parts and its session', async () => {
     const target = await render({ turns: [turn({ unpriced_requests: 4 })] })
-    target.querySelector<HTMLButtonElement>('button[aria-expanded]')?.click()
+    target.querySelector<HTMLButtonElement>('tbody button[aria-expanded]')?.click()
     flushSync()
     expect([...target.querySelectorAll('.parts li')].map(text)).toEqual(['Main conversation 20 requests $2.85', 'Explore × 3 64 requests $8.55'])
     expect(text(target.querySelector('.unpriced'))).toBe('4 requests have no known price and are left out of the cost.')
@@ -103,7 +103,7 @@ describe('what each prompt cost', () => {
 
   it('opens and closes a turn from anywhere on its row, but not when a click ends a text selection or double-clicks a word', async () => {
     const target = await render({ turns: [turn({})] })
-    const toggle = () => target.querySelector<HTMLButtonElement>('button[aria-expanded]')!
+    const toggle = () => target.querySelector<HTMLButtonElement>('tbody button[aria-expanded]')!
     const when = target.querySelector<HTMLElement>('tbody tr th')!
     when.click()
     flushSync()

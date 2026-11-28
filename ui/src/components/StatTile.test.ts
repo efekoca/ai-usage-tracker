@@ -9,7 +9,7 @@ afterEach(() => {
   done = []
 })
 
-function render(props: { current: number; previous: number; points?: boolean }) {
+function render(props: { current?: number; previous?: number; points?: boolean; hint?: string }) {
   const target = document.body.appendChild(document.createElement('div'))
   const c = mount(StatTile, { target, props: { label: 'Rate', value: 'x', ...props } })
   flushSync()
@@ -40,5 +40,23 @@ describe('StatTile', () => {
     expect(t.querySelector('.delta')?.textContent).toContain('20%')
     expect(t.querySelector('.delta.down svg')).not.toBeNull()
     expect(t.querySelector('.sr-only')?.textContent).toBe('Down')
+  })
+
+  it('opens its hint from a button and closes it with Escape', () => {
+    const t = render({ hint: 'Read tokens over prompt tokens.' })
+    const q = t.querySelector<HTMLButtonElement>('.q')!
+    expect(q.getAttribute('aria-expanded')).toBe('false')
+    expect(t.querySelector('.pop')).toBeNull()
+    q.click()
+    flushSync()
+    expect(q.getAttribute('aria-expanded')).toBe('true')
+    expect(t.querySelector('.pop')?.textContent).toBe('Read tokens over prompt tokens.')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    flushSync()
+    expect(t.querySelector('.pop')).toBeNull()
+  })
+
+  it('shows no button without a hint', () => {
+    expect(render({}).querySelector('.q')).toBeNull()
   })
 })

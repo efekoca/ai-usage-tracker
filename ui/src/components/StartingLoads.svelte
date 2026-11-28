@@ -3,6 +3,7 @@
   import { api, type StartingLoad } from '../lib/api'
   import { cacheClient } from '../lib/caches'
   import { fmtCompact, fmtDate, fmtDateTime, fmtInt, fmtMoney, t, toolLabel } from '../lib/i18n.svelte'
+  import Explain from './Explain.svelte'
 
   const [W, H, PAD] = [132, 30, 4]
 
@@ -61,7 +62,7 @@
 
 {#if loads.length}
   <section class="card table-card">
-    <h2 class="pad">{t('context.start')}</h2>
+    <h2 class="pad">{t('context.start')} <Explain text={t('context.start.note')} /></h2>
     <p class="subtle small help">{t('context.start.help')}</p>
     <div class="scroll">
       <table>
@@ -133,7 +134,6 @@
     {#if !all && loads.length > FIRST}
       <button class="btn ghost small more" onclick={() => (all = true)}>{t('tools.showAll', { n: loads.length })}</button>
     {/if}
-    <p class="subtle small pad note">{t('context.start.note')}</p>
   </section>
 {/if}
 
@@ -267,8 +267,5 @@
   }
   .pad {
     padding: 12px 20px 6px;
-  }
-  .note {
-    padding-bottom: 14px;
   }
 </style>

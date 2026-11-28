@@ -6,6 +6,7 @@
   import Select from './Select.svelte'
   import AccuracyBadge from './AccuracyBadge.svelte'
   import Icon from './Icon.svelte'
+  import Explain from './Explain.svelte'
 
   let c = $state<ModelCompare | null>(null)
   let failed = $state('')
@@ -33,7 +34,7 @@
 
 <section class="card">
   <div class="head">
-    <h2>{t('compare.title')}</h2>
+    <h2>{t('compare.title')} <Explain text={t('compare.caveat')} /></h2>
     <AccuracyBadge kind="estimated" compact />
     <span class="spacer"></span>
     <span class="wide"><Segmented label={t('compare.title')} value={provider} onchange={(v) => (provider = v as typeof provider)} options={choices} /></span>
@@ -80,10 +81,7 @@
     </ul>
     <div class="foot">
       <span class="key small"><i class="mk"></i>{t('compare.actual')}</span>
-      <p class="subtle small">
-        {t('compare.caveat')}
-        {#if c.excluded_events > 0}{t('compare.excluded', { n: fmtInt(c.excluded_events) })}{/if}
-      </p>
+      {#if c.excluded_events > 0}<p class="subtle small">{t('compare.excluded', { n: fmtInt(c.excluded_events) })}</p>{/if}
     </div>
   {/if}
 </section>
@@ -197,7 +195,7 @@
   .delta.up :global(svg) {
     color: var(--serious);
   }
-  /* the bar mark's key on a line of its own, the caveat under it */
+  /* the bar mark's key on a line of its own, the excluded count under it */
   .foot {
     display: flex;
     flex-direction: column;

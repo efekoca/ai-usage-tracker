@@ -8,6 +8,7 @@
   import Icon from './Icon.svelte'
   import BrandIcon from './BrandIcon.svelte'
   import AccuracyBadge from './AccuracyBadge.svelte'
+  import Explain from './Explain.svelte'
   import Select from './Select.svelte'
 
   let plans = $state<PlansFile | null>(null)
@@ -157,6 +158,11 @@
 <section class="card value">
   <div class="card-head">
     <h2>{t('value.title')}</h2>
+    <Explain>
+      <p>{t('value.notSavings')}</p>
+      <p>{t('value.lowerBound')}</p>
+      {#if plans?.prices_verified_at}<p>{t('value.source', { d: fmtDate(plans.prices_verified_at) })}</p>{/if}
+    </Explain>
     <AccuracyBadge kind="estimated" compact />
     <span class="spacer"></span>
     <span class="subtle small">{t(lead)}</span>
@@ -272,7 +278,6 @@
         {/if}
       {/each}
     </div>
-    <p class="subtle small foot">{t('value.notSavings')} {t('value.lowerBound')} {plans.prices_verified_at ? t('value.source', { d: fmtDate(plans.prices_verified_at) }) : ''}</p>
     {#if !anyRenewal && used.length}
       <p class="subtle small hint">
         <span>{t('value.cycleHint')}</span>
@@ -436,9 +441,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .foot {
-    margin: 14px 0 0;
   }
   .hint {
     display: flex;
