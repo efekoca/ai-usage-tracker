@@ -152,7 +152,7 @@ fn each_finished_step_is_one_request_in_this_apps_token_meaning() {
     let mut store = Store::open_in_memory().unwrap();
     let rep = run(&mut store, &db.env);
     assert!(rep.errors.is_empty(), "{:?}", rep.errors);
-    assert!(rep.warnings.iter().any(|(_, w)| w.contains("1 sessions from OpenCode before 1.3.16")), "{:?}", rep.warnings);
+    assert!(rep.warnings.iter().any(|(_, w)| w == "opencode_old_sessions:1"), "{:?}", rep.warnings);
 
     let ev = events(&store);
     let got: Vec<_> = ev

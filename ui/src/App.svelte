@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { app, back, goBack, init, navigate, type View } from './lib/store.svelte'
+  import { app, back, goBack, init, navLabel, navigate, type View } from './lib/store.svelte'
   import { refresh as consent } from './lib/refresh.svelte'
   import { t } from './lib/i18n.svelte'
   import Icon from './components/Icon.svelte'
@@ -126,12 +126,12 @@ import Cards from './views/Cards.svelte'
                 class:active={app.view === item.id}
                 aria-current={app.view === item.id ? 'page' : undefined}
                 tabindex={app.view === item.id ? 0 : -1}
-                title={t(`nav.${item.id}`)}
+                title={navLabel(item.id)}
                 onclick={() => navigate(item.id)}
                 onkeydown={navKey}
               >
                 <Icon name={item.icon} size={17} />
-                <span class="label">{t(`nav.${item.id}`)}</span>
+                <span class="label">{navLabel(item.id)}</span>
               </button>
             </li>
           {/each}
@@ -162,7 +162,7 @@ import Cards from './views/Cards.svelte'
       {/if}
       {#if back.view && back.view !== app.view}
         <div class="back">
-          <button class="btn ghost small" onclick={goBack}><Icon name="chevron" size={13} />{t('nav.back', { page: t(`nav.${back.view}`) })}</button>
+          <button class="btn ghost small" onclick={goBack}><Icon name="chevron" size={13} />{t('nav.back', { page: navLabel(back.view) })}</button>
         </div>
       {/if}
       <div class="page" class:titled={!withToolbar.includes(app.view)} bind:this={page} aria-busy={app.loading}>

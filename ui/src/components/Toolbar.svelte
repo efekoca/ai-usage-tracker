@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte'
-  import { accountKey, app, latest, providerAccount, setFilter, setPeriod } from '../lib/store.svelte'
+  import { accountKey, app, latest, navLabel, providerAccount, setFilter, setPeriod } from '../lib/store.svelte'
   import { localDate, t, toolLabel } from '../lib/i18n.svelte'
   import { api, type Period, type Tool } from '../lib/api'
   import Segmented from './Segmented.svelte'
@@ -58,7 +58,7 @@
 </script>
 
 <header class="bar">
-  <h1>{t(`nav.${app.view}`)}</h1>
+  <h1>{navLabel(app.view)}</h1>
   <div class="spacer"></div>
   <span class="wide"><Segmented label={t('period.label')} options={kinds.map((k) => ({ value: k, label: t(`period.${k}`) }))} bind:value={kind} onchange={pick} /></span>
   <span class="narrow">

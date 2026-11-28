@@ -53,6 +53,9 @@ export function navigate(target: string, { from = false } = {}) {
   if (part) reveal(`${view}-${part}`)
 }
 
+/** A page's name: outside macOS the page for the icon by the clock is named after the taskbar. */
+export const navLabel = (view: View) => t(view === 'menubar' && app.info && app.info.platform !== 'macos' ? 'nav.taskbar' : `nav.${view}`)
+
 export function goBack() {
   const { view, top } = back
   if (!view) return

@@ -402,7 +402,7 @@
 {/snippet}
 
 <header class="head">
-  <h1>{t('menubar.title')}</h1>
+  <h1>{t(app.info?.platform === 'macos' ? 'menubar.title' : 'menubar.title.taskbar')}</h1>
   <p class="subtle">{t('menubar.subtitle')}</p>
 </header>
 

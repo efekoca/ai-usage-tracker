@@ -426,7 +426,7 @@ pub fn popup_widget_menu(app: &AppHandle) {
     let tr = s.language == "tr" || (s.language == "system" && system_is_turkish());
     let t = |en: &'static str, tr_: &'static str| if tr { tr_ } else { en };
     let build = || -> tauri::Result<Menu<tauri::Wry>> {
-        let open = MenuItem::with_id(app, "w:open", t("Open dashboard", "Uygulamayı aç"), true, None::<&str>)?;
+        let open = MenuItem::with_id(app, "w:open", t("Open app", "Uygulamayı aç"), true, None::<&str>)?;
         let op = |v: f64, label: &str| CheckMenuItem::with_id(app, format!("w:opacity:{v}"), label, true, (s.widget.opacity - v).abs() < 0.01, None::<&str>);
         let opacity = Submenu::with_items(app, t("Opacity", "Saydamlık"), true, &[&op(1.0, "100%")?, &op(0.85, "85%")?, &op(0.7, "70%")?, &op(0.55, "55%")?])?;
         let sz = |v: &str, label: &str| CheckMenuItem::with_id(app, format!("w:size:{v}"), label, true, s.widget.size == v, None::<&str>);

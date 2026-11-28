@@ -82,7 +82,7 @@ fn read(path: &Path, state: &Value) -> Result<ParseOutput, Box<dyn std::error::E
         }
     }
     if skipped > 0 {
-        out.warn(format!("{skipped} sessions from OpenCode before 1.3.16 are not counted"));
+        out.warn(format!("opencode_old_sessions:{skipped}"));
     }
 
     // Both come from indexes. Parts alone miss a revert followed by as many new parts (SQLite

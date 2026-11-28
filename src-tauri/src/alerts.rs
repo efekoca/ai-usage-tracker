@@ -268,10 +268,10 @@ fn unused_text<Tz: TimeZone>(l: &Limit, used: f64, at: i64, f: &Format<'_, Tz>) 
     let hours = ((at - f.now_ms / 1000 + 1800) / 3600).max(1);
     let clock = f.clock(at).unwrap_or_default();
     if f.tr {
-        (format!("{who} haftalık limit: %{left} kullanılmadı"), format!("{hours} saat sonra ({clock}) sıfırlanacak; kalan kısım sonraki haftaya geçmez."))
+        (format!("{who} haftalık limit: %{left} kullanılmadı"), format!("{hours} saat sonra ({clock}) sıfırlanacak. Kalan kısım sonraki haftaya geçmez."))
     } else {
         let unit = if hours == 1 { "hour" } else { "hours" };
-        (format!("{who} weekly limit: {left}% unused"), format!("It resets in {hours} {unit} ({clock}); what is left does not carry over."))
+        (format!("{who} weekly limit: {left}% unused"), format!("It resets in {hours} {unit} ({clock}). What is left does not carry over."))
     }
 }
 
@@ -326,7 +326,7 @@ fn route_text(r: &tracker_core::analytics::Route, names: &HashMap<String, String
         if tr { format!("%{v}") } else { format!("{v}%") }
     };
     match (r.renewed, tr) {
-        (true, true) => format!("“{to}” ile devam edin: haftalık limiti yenilendi."),
+        (true, true) => format!("“{to}” ile devam edin: haftalık limiti sıfırlandı."),
         (true, false) => format!("Continue with “{to}”: its week has started again."),
         (false, true) => match r.five_hour {
             Some(five) => format!("“{to}” ile devam edin: haftalık {}, 5 saatlik {} dolu.", pct(r.seven_day), pct(five)),
@@ -341,15 +341,15 @@ fn route_text(r: &tracker_core::analytics::Route, names: &HashMap<String, String
 
 fn sign_in_text(p: Provider, tr: bool) -> (String, String) {
     let title = match (p, tr) {
-        (Provider::Anthropic, true) => "Claude Code'da oturum açın",
+        (Provider::Anthropic, true) => "Claude Code'da giriş yapın",
         (Provider::Anthropic, false) => "Sign in to Claude Code",
-        (Provider::OpenAI, true) => "Codex'te oturum açın",
+        (Provider::OpenAI, true) => "Codex'te giriş yapın",
         (Provider::OpenAI, false) => "Sign in to Codex",
-        (Provider::Google, true) => "Antigravity'de oturum açın",
+        (Provider::Google, true) => "Antigravity'de giriş yapın",
         (Provider::Google, false) => "Sign in to Antigravity",
     };
     let body = if tr {
-        "Oturum kapalı olduğu için limitleriniz okunamıyor. Giriş adımları için tıklayın."
+        "Giriş yapılmadığı için limitleriniz okunamıyor. Adımları görmek için tıklayın."
     } else {
         "Your limits can't be read while you're signed out. Click to see how to sign in."
     };
@@ -637,7 +637,7 @@ fn text<Tz: TimeZone>(a: &Alert, f: &Format<'_, Tz>) -> (String, String) {
         };
         format!("{} {window}", name(l.provider, &l.pool, tr))
     };
-    let resets = |at: Option<i64>| at.and_then(|at| f.clock(at)).map(|c| if tr { format!("Yenilenme: {c}.") } else { format!("Resets: {c}.") });
+    let resets = |at: Option<i64>| at.and_then(|at| f.clock(at)).map(|c| if tr { format!("Sıfırlanma: {c}.") } else { format!("Resets: {c}.") });
     match a {
         Alert::Close { limit: l, used, fills_at_ms, resets_at } => {
             let v = shown_value(*used, f.app_remaining);
@@ -659,7 +659,7 @@ fn text<Tz: TimeZone>(a: &Alert, f: &Format<'_, Tz>) -> (String, String) {
             (title, resets(*resets_at).unwrap_or_default())
         }
         Alert::Reset { limit: l } => {
-            let title = if tr { format!("{} limitiniz yenilendi", limit(l)) } else { format!("Your {} limit has reset", limit(l)) };
+            let title = if tr { format!("{} limitiniz sıfırlandı", limit(l)) } else { format!("Your {} limit has reset", limit(l)) };
             (title, if tr { "Kullanmaya başlayabilirsiniz." } else { "You can start using it." }.to_owned())
         }
     }
@@ -1084,7 +1084,7 @@ mod tests {
         let f = |tr| Format { cfg: &cfg, tr, app_remaining: false, warn_at: 70.0, currency: "USD", fx: 1.0, now_ms, tz: &tz };
         let (l, used, at) = &due[0];
         let clock = f(true).clock(*at).unwrap();
-        assert_eq!(unused_text(l, *used, *at, &f(true)), ("Claude haftalık limit: %60 kullanılmadı".into(), format!("6 saat sonra ({clock}) sıfırlanacak; kalan kısım sonraki haftaya geçmez.")));
+        assert_eq!(unused_text(l, *used, *at, &f(true)), ("Claude haftalık limit: %60 kullanılmadı".into(), format!("6 saat sonra ({clock}) sıfırlanacak. Kalan kısım sonraki haftaya geçmez.")));
         assert_eq!(unused_text(l, *used, *at, &f(false)).0, "Claude weekly limit: 60% unused");
     }
 
@@ -1177,7 +1177,7 @@ mod tests {
         assert_eq!(told(&mut seen, SignIn::Out), vec![], "still the same sign-out");
         assert_eq!(told(&mut seen, SignIn::Clear), vec![], "signed in to Codex");
         assert_eq!(told(&mut seen, SignIn::Out), vec![Provider::OpenAI], "signed out of Codex again");
-        assert_eq!(sign_in_text(Provider::OpenAI, true).0, "Codex'te oturum açın");
+        assert_eq!(sign_in_text(Provider::OpenAI, true).0, "Codex'te giriş yapın");
     }
 
     #[test]
@@ -1223,7 +1223,7 @@ mod tests {
         let close = Alert::Close { limit: claude.clone(), used: 72.0, fills_at_ms: Some((NOW + 1800) * 1000), resets_at: Some(NOW + 3600) };
         let clock = |secs| f(true, false).clock(NOW + secs).unwrap();
         let (half, hour) = (clock(1800), clock(3600));
-        assert_eq!(text(&close, &f(true, false)), ("Claude 5 saatlik limit: %72 kullanıldı".into(), format!("Bu hızla {half} civarında dolacak. Yenilenme: {hour}.")));
+        assert_eq!(text(&close, &f(true, false)), ("Claude 5 saatlik limit: %72 kullanıldı".into(), format!("Bu hızla {half} civarında dolacak. Sıfırlanma: {hour}.")));
         assert_eq!(text(&close, &f(false, true)), ("Claude 5-hour limit: 28% left".into(), format!("At this pace it will fill around {half}. Resets: {hour}.")));
         let week = Limit { provider: Provider::OpenAI, pool: "codex".into(), window: "seven_day".into(), account: None };
         assert_eq!(text(&Alert::Full { limit: week.clone(), resets_at: None }, &f(true, false)), ("Codex haftalık limitiniz doldu".into(), String::new()));

@@ -74,7 +74,7 @@ describe('the window scheduler', () => {
     const day = { first_minute: 9 * 60 + 5, last_minute: 18 * 60 + 40, days: 12, open_minute: 6 * 60 + 15, windows: 3 }
     const target = await render(info({ day }))
     const bracket = target.querySelector<HTMLElement>('.workday')!
-    expect([bracket.textContent?.trim(), bracket.style.getPropertyValue('--from'), bracket.style.getPropertyValue('--to')]).toEqual(['Your day 09:05–18:40', `${((545 / 1440) * 100).toString()}%`, `${((1120 / 1440) * 100).toString()}%`])
+    expect([bracket.textContent?.trim(), bracket.style.getPropertyValue('--from'), bracket.style.getPropertyValue('--to')]).toEqual(['Your day 09:05 to 18:40', `${((545 / 1440) * 100).toString()}%`, `${((1120 / 1440) * 100).toString()}%`])
     const suggest = target.querySelector('.suggest')!
     expect(suggest.textContent).toContain('Opening the window at 06:15 fits 3 windows into your day. Resets at 11:15 and 16:15.')
     suggest.querySelector<HTMLButtonElement>('button')!.click()
@@ -85,7 +85,7 @@ describe('the window scheduler', () => {
     const set = await render(info({ day }))
     expect(set.querySelector('.suggest'), 'within a quarter hour of the one set').toBeNull()
     expect([...set.querySelectorAll('.band')].map((b) => b.textContent), 'every window the day reaches into').toEqual(['Window 1', 'Window 2', 'Window 3'])
-    expect((await render(info())).querySelector('.workday')?.textContent?.trim(), 'too few days to tell').toBe('Working day 09:00–18:00')
+    expect((await render(info())).querySelector('.workday')?.textContent?.trim(), 'too few days to tell').toBe('Working day 09:00 to 18:00')
   })
 
   it('shows only what it does and what it costs while it is off', async () => {

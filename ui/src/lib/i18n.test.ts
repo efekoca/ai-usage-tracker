@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { dicts, fmtInput, i18n, parseNumber, t } from './i18n.svelte'
+import { dicts, fmtInput, i18n, parseNumber, t, warningText } from './i18n.svelte'
 
 const langs = ['tr', 'en'] as const
 afterEach(() => {
@@ -66,6 +66,17 @@ describe('t', () => {
   it('puts a value in as it is, dollar signs and all', () => {
     expect(t('common.error', { e: "unexpected '$' here" })).toContain("unexpected '$' here")
     expect(t('common.error', { e: "a$'b $& $$" })).toContain("a$'b $& $$")
+  })
+})
+
+describe('warningText', () => {
+  it('puts a warning the app knows in words and leaves any other as it came', () => {
+    i18n.lang = 'tr'
+    expect(warningText('opencode_old_sessions:3')).toBe("OpenCode 1.3.16'dan eski 3 konuşma sayıma girmiyor.")
+    i18n.lang = 'en'
+    expect(warningText('opencode_old_sessions:1')).toBe('1 session made with OpenCode before 1.3.16 is left out.')
+    expect(warningText('invalid JSON at byte 12')).toBe('invalid JSON at byte 12')
+    expect(warningText('session 4: a part with unexpected fields was skipped')).toBe('session 4: a part with unexpected fields was skipped')
   })
 })
 
