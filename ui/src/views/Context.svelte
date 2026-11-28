@@ -33,7 +33,7 @@
       key: String(b.from),
       label: bucketLabel(b.from, b.to),
       value: b.requests,
-      detail: `${fmtPct((b.requests / Math.max(1, c?.requests ?? 1)) * 100, 1)} · ${fmtMoney(b.cost_usd)}`,
+      detail: [fmtPct((b.requests / Math.max(1, c?.requests ?? 1)) * 100, 1), fmtMoney(b.cost_usd)],
     })),
   )
   const series = [

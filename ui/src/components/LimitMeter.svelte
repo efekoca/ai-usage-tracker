@@ -118,7 +118,7 @@
           {t('forecast.insufficient')}
         {/if}
         {#if !compact && f.rate_per_hour !== null && (f.kind === 'fills' || f.kind === 'safe')}
-          <span class="subtle">{' · '}{t('forecast.rate', { n: fmtDec(f.rate_per_hour, 1) })}</span>
+          <span class="subtle trail">{t('forecast.rate', { n: fmtDec(f.rate_per_hour, 1) })}</span>
         {/if}
       </span>
       {#if !compact}<AccuracyBadge kind="estimated" compact />{/if}

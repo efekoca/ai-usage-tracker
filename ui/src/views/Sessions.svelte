@@ -228,7 +228,7 @@
                         <div class="meta">
                           <span class="tool" title={t('sessions.tool')}>
                             <i class="dot" style:background={toolColor[s.tool]}></i><span class="ink">{toolLabel(s.tool)}</span>
-                            {#if s.client}<span aria-hidden="true">·</span><span>{clientLabel(`${s.tool}:${s.client}`, s.client)}</span>{/if}
+                            {#if s.client}<span>{clientLabel(`${s.tool}:${s.client}`, s.client)}</span>{/if}
                           </span>
                           <span class="id">
                             <code title={t('sessions.id')}>{s.session_id}</code>

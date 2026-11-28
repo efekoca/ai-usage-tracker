@@ -254,7 +254,7 @@
       <div class="shot {format}" class:loading={!current} style:aspect-ratio="{size.w} / {size.h}">
         <canvas bind:this={preview} class:hidden={!current}>{t('cards.aria', { title: label })}</canvas>
       </div>
-      <p class="tiny subtle num caption">{t(`cards.format.${format}`)} · {fmtInt(size.w)} × {fmtInt(size.h)}</p>
+      <p class="tiny subtle num caption spaced"><span>{t(`cards.format.${format}`)}</span> <span>{fmtInt(size.w)} × {fmtInt(size.h)}</span></p>
       {#if active === 'wrapped' && built}
         <div class="rail" role="radiogroup" aria-label={t('cards.slides')} tabindex="-1" onkeydown={(e) => arrows(e, built.map((_, i) => i), slide, (i) => (slide = i))}>
           {#each built as c, i (i)}

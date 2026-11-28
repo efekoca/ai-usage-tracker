@@ -4,7 +4,7 @@
   import { accountName, app, latest, markTint, navigate, providerColor, saveSettings, tint } from '../lib/store.svelte'
   import { api, providersOf, type PlansFile, type PlanValue, type Provider, type ProviderValue } from '../lib/api'
   import { cycleOf, priceKey, valueRow, valueSplit, type Cycle } from '../lib/plans'
-  import { fmtDate, fmtDec, fmtInt, fmtMoney, i18n, localDate, parseNumber, t } from '../lib/i18n.svelte'
+  import { fmtDate, fmtDec, fmtInt, fmtMoney, i18n, listText, localDate, parseNumber, t } from '../lib/i18n.svelte'
   import Icon from './Icon.svelte'
   import BrandIcon from './BrandIcon.svelte'
   import AccuracyBadge from './AccuracyBadge.svelte'
@@ -121,7 +121,7 @@
       <dd class="num">{fmtMoney(cost)}</dd>
       <dt>{t(cyc ? 'value.planShareCycle' : 'value.planShare')}</dt>
       <dd class="num">{fmtMoney(share)}</dd>
-      <dd class="note subtle small">{cyc ? `${note} · ${renewsOn(cyc)}` : note}</dd>
+      <dd class="note subtle small">{cyc ? listText([note, renewsOn(cyc)]) : note}</dd>
     </dl>
   </div>
   <svg class="spark" viewBox="0 0 {W} {H}" preserveAspectRatio="none" role="img"
@@ -144,7 +144,7 @@
   <p class="verdict small icon-text">
     {#if (ratio ?? 0) >= 1}
       <Icon name="check" size={13} />
-      {t('value.saved', { v: fmtMoney(cost - share) })} · {day >= 0 ? t(cyc ? 'value.breakevenCycle' : 'value.breakeven', { d: day + 1 }) : t('value.notYet')}
+      {t('value.saved', { v: fmtMoney(cost - share) })} {day >= 0 ? t(cyc ? 'value.breakevenCycle' : 'value.breakeven', { d: day + 1 }) : t('value.notYet')}
     {:else if cyc}
       <Icon name="info" size={13} />
       {t('value.toGo', { v: fmtMoney(share - cost), n: Math.max(0, cyc.days - cyc.elapsed) })}
@@ -188,10 +188,10 @@
               {@render usage(p, m.pv)}
               {#key miss.id}
               <div class="pick">
-                <span class="small"><b>{accountName(miss.id, p)}</b> · {miss.plan ? (miss.plan.price_note?.[i18n.lang] ?? t('value.enterPrice')) : t('value.pickAccount')}</span>
+                <span class="small"><b>{accountName(miss.id, p)}</b>: {miss.plan ? (miss.plan.price_note?.[i18n.lang] ?? t('value.enterPrice')) : t('value.pickAccount')}</span>
                 {#if !miss.plan}
                   <Select
-                    label="{accountName(miss.id, p)} · {t('limits.plan')}"
+                    label={listText([accountName(miss.id, p), t('limits.plan')])}
                     placeholder={t('value.pickPlan')}
                     minWidth={170}
                     options={plans.providers[p]?.plans.map((pl) => ({ value: pl.id, label: pl.name, sub: pl.relative })) ?? []}
@@ -202,7 +202,7 @@
                   {#each plan.price_options ?? [] as o (o)}
                     <button class="btn small" onclick={() => setAccountPrice(priceKey(miss.id, plan.id), String(o))}>{fmtMoney(o)}</button>
                   {/each}
-                  <input class="field price" inputmode="decimal" placeholder={t('value.price')} aria-label="{accountName(miss.id, p)} · {t('value.price')}" onchange={(e) => setAccountPrice(priceKey(miss.id, plan.id), e.currentTarget.value)} />
+                  <input class="field price" inputmode="decimal" placeholder={t('value.price')} aria-label={listText([accountName(miss.id, p), t('value.price')])} onchange={(e) => setAccountPrice(priceKey(miss.id, plan.id), e.currentTarget.value)} />
                 {/if}
               </div>
               {/key}
@@ -211,7 +211,7 @@
             {:else if m.events === 0}
               <p class="muted small">{t('value.noUse')}</p>
             {:else}
-              {@render compare(p, m.cost, m.share, m.ratio, m.day, m.cumulative, `${t('value.perMonth', { price: fmtMoney(m.monthly) })} ${m.custom ? t('value.customPrice') : t('value.listPrice')} · ${t('value.accounts', { n: m.accounts })}`, m.cycle)}
+              {@render compare(p, m.cost, m.share, m.ratio, m.day, m.cumulative, `${t('value.perMonth', { price: fmtMoney(m.monthly) })} ${m.custom ? t('value.customPrice') : t('value.listPrice')}, ${t('value.accounts', { n: m.accounts })}`, m.cycle)}
               <ul class="parts small">
                 {#each m.parts as x (x.id)}
                   <li>
@@ -248,7 +248,7 @@
             <div class="pick">
               <span class="small">{t('value.pickLead')}</span>
               <Select
-                label="{t(`provider.${p}`)} · {t('limits.plan')}"
+                label={listText([t(`provider.${p}`), t('limits.plan')])}
                 placeholder={t('value.pickPlan')}
                 minWidth={170}
                 options={plans.providers[p]?.plans.map((pl) => ({ value: pl.id, label: pl.name, sub: pl.relative })) ?? []}

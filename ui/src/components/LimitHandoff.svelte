@@ -198,7 +198,7 @@
             <svg class="state" role="img" aria-label={t('limits.handoff.state')} width="22" height="22" viewBox="0 0 22 22"><rect x="4" y="2.5" width="14" height="17" rx="2.5" fill="none" stroke="var(--accent)" stroke-width="2" /><path d="M7.5 8h7M7.5 11.5h7M7.5 15h4" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" /></svg>
             <div class="who">
               <span class="name"><b>{project(n)}</b></span>
-              <span class="subtle small">{toolName(n.agent)} · {t('limits.handoff.written', { when: clock(n.written_ms) })}</span>
+              <span class="subtle small spaced"><span>{toolName(n.agent)}</span> <span>{t('limits.handoff.written', { when: clock(n.written_ms) })}</span></span>
               {#if failed?.id === n.id}<span class="error small" role="alert">{failed.why}</span>{/if}
             </div>
             <div class="buttons">

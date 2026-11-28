@@ -173,8 +173,8 @@ describe('the handoff note', () => {
   it('goes on in the other tool than the one that wrote the note', async () => {
     const target = await render(info())
     const rows = [...target.querySelectorAll('.row.note')]
-    expect(rows[0].textContent).toContain('Claude ·')
-    expect(rows[1].textContent).toContain('Codex ·')
+    expect(rows[0].textContent).toContain('Claude written')
+    expect(rows[1].textContent).toContain('Codex written')
     button(target, 'Open the note: site').click()
     await settle()
     expect(mocks.openHandoffNote).toHaveBeenCalledWith('0c2a1f3e-5b7d-4c9e-8a1b-2d3e4f5a6b7c')

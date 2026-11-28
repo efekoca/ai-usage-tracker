@@ -2,7 +2,7 @@
   import { onDestroy, untrack } from 'svelte'
   import { app, latest, nameAccount, saveSettings } from '../lib/store.svelte'
   import { api, type PanelData, type PanelModule, type PanelSize, type Provider, type TrayItem, type TrayMark, type TrayPreview, type TraySettings } from '../lib/api'
-  import { fmtClock, fmtPct, limitName, searchKey, t, toolLabel, windowLabel } from '../lib/i18n.svelte'
+  import { fmtClock, fmtPct, limitName, limitWindow, named, searchKey, t, toolLabel } from '../lib/i18n.svelte'
   import { cacheShown, setCacheShown } from '../lib/caches'
   import Segmented from '../components/Segmented.svelte'
   import Select from '../components/Select.svelte'
@@ -98,7 +98,7 @@
   const who = (provider: string, pool: string, account: string) =>
     !idsOf(provider).length
       ? limitName(provider, pool)
-      : `${t(`provider.${provider}`)} · ${account ? nameAccount(account, provider as Provider, app.accounts, app.settings?.account_names, true) : t('menubar.inUse')}`
+      : named(t(`provider.${provider}`), account ? nameAccount(account, provider as Provider, app.accounts, app.settings?.account_names, true) : t('menubar.inUse'))
   const baseCatalog: PanelModule[] = [
     ...POOLS.map(([provider, pool]) => mk({ kind: 'provider', provider, pool, style: 'ring' })),
     ...POOLS.flatMap(([provider, pool]) => ['five_hour', 'seven_day'].map((window) => mk({ kind: 'limit', provider, pool, window, style: 'ring' }))),
@@ -124,13 +124,13 @@
     const name = who(m.provider, m.pool, m.account)
     switch (m.kind) {
       case 'provider':
-        return `${name} · ${t('menubar.mod.both')}`
+        return `${name}: ${t('menubar.mod.both')}`
       case 'limit':
-        return `${name} · ${windowLabel(m.window)}`
+        return limitWindow(name, m.window)
       case 'forecast':
-        return t('menubar.mod.forecast', { name: `${name} · ${windowLabel(m.window)}` })
+        return t('menubar.mod.forecast', { name: limitWindow(name, m.window) })
       case 'usage':
-        return `${m.provider === 'opencode' ? toolLabel('opencode') : t('menubar.mod.usage')} · ${t(`widget.period.${m.period}`)}`
+        return `${m.provider === 'opencode' ? toolLabel('opencode') : t('menubar.mod.usage')}: ${t(`widget.period.${m.period}`)}`
       case 'caches':
         return t('menubar.mod.caches')
       case 'scan':
@@ -333,11 +333,11 @@
   )
   const itemKey = (it: TrayItem) => `${it.kind}:${it.provider}:${it.window}:${it.pool}:${it.period}:${it.account}`
   const itemName = (it: TrayItem) => {
-    const lim = `${who(it.provider, it.pool, it.account)} · ${windowLabel(it.window)}`
+    const lim = limitWindow(who(it.provider, it.pool, it.account), it.window)
     if (it.kind === 'limit') return lim
     if (it.kind === 'forecast') return t('menubar.item.forecast', { name: lim })
     if (it.kind === 'scan') return t('menubar.item.scan')
-    return `${it.provider === 'opencode' ? `${toolLabel('opencode')} · ` : ''}${t(`menubar.item.${it.kind}`)} · ${t(`widget.period.${it.period}`)}`
+    return `${it.provider === 'opencode' ? `${toolLabel('opencode')} ` : ''}${t(`menubar.item.${it.kind}`)}: ${t(`widget.period.${it.period}`)}`
   }
   const addable = $derived(textCatalog.filter((it) => !tray.items.some((x) => itemKey(x) === itemKey(it))))
   function moveItem(i: number, d: -1 | 1) {
@@ -669,7 +669,7 @@
         value={tray.limit}
         disabled={!tray.show_percent}
         minWidth={220}
-        options={[{ value: 'auto', label: t('settings.tray.auto') }, ...iconLimits.map(([p, w]) => ({ value: `${p}:${w}`, label: `${t(`provider.${p}`)} · ${windowLabel(w)}` }))]}
+        options={[{ value: 'auto', label: t('settings.tray.auto') }, ...iconLimits.map(([p, w]) => ({ value: `${p}:${w}`, label: limitWindow(t(`provider.${p}`), w) }))]}
         onchange={(v) => set('limit', v)}
       />
     </div>

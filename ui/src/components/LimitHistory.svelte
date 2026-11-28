@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, providersOf, type LimitHistoryView, type Provider, type WindowRecord } from '../lib/api'
   import { accountKey, accountName, accountOf, app, latest, markTint, providerAccount } from '../lib/store.svelte'
-  import { fmtCompact, fmtDateTime, fmtDuration, fmtInt, fmtMoney, fmtPct, i18n, limitName, t, windowLabel } from '../lib/i18n.svelte'
+  import { fmtCompact, fmtDateTime, fmtDuration, fmtInt, fmtMoney, fmtPct, i18n, limitName, limitWindow, t, windowLabel } from '../lib/i18n.svelte'
   import Segmented from './Segmented.svelte'
   import Select from './Select.svelte'
   import StatTile from './StatTile.svelte'
@@ -54,7 +54,7 @@
     if (acct !== 'all' && !accountChoices.some((a) => accountKey(a.provider, a.id) === acct)) acct = 'all'
   })
   const accountsShown = $derived(new Set(series.map((s) => accountOf(s))).size > 1)
-  const nameOf = (s: { provider: Provider; limit_id: string; account: string | null }) => [limitName(s.provider, s.limit_id), accountOf(s)].filter(Boolean).join(' · ')
+  const nameOf = (s: { provider: Provider; limit_id: string; account: string | null }) => limitName(s.provider, s.limit_id, accountOf(s))
   type Row = WindowRecord & { provider: Provider; limit_id: string; account: string | null }
   const startOf = (w: WindowRecord) => w.start_ms ?? w.first_ms
   const toFull = (w: WindowRecord) => (w.full_at_ms !== null && w.start_ms !== null ? w.full_at_ms - w.start_ms : null)
@@ -175,7 +175,7 @@
       {#each series.filter((s) => s.capacity) as s (s.provider + (s.account ?? '') + s.limit_id)}
         {@const c = s.capacity!}
         <div class="cap" title={t('history.stat.capacityHelp')}>
-          <div class="small muted">{t('history.stat.capacity', { p: nameOf(s) })} · {windowLabel(s.window)}</div>
+          <div class="small muted">{t('history.stat.capacity', { p: limitWindow(nameOf(s), s.window) })}</div>
           <div class="capv">≈ {fmtMoney(c.median_usd)} <AccuracyBadge kind="estimated" compact /></div>
           <div class="subtle small">{t('history.stat.capacitySub', { n: c.windows, min: fmtMoney(c.min_usd), max: fmtMoney(c.max_usd) })}</div>
         </div>
@@ -204,7 +204,7 @@
             fromMs={chartFrom}
             toMs={view.history.to_ms}
             height={190}
-            ariaLabel="{nameOf(s)} · {windowLabel(win)}"
+            ariaLabel={limitWindow(nameOf(s), win)}
           />
         </div>
       {/each}
@@ -250,7 +250,7 @@
               <td>{fmtDateTime(startOf(w))}</td>
               <td>
                 {fmtDateTime(w.end_ms ?? w.resets_at_ms ?? w.last_ms)}
-                {#if early(w)}<span class="subtle small">{' · '}{t('history.state.early')}</span>{/if}
+                {#if early(w)}<span class="subtle small trail">{t('history.state.early')}</span>{/if}
               </td>
               <td class="num">
                 <BarValue pct={w.peak_pct} tone={w.full ? 'critical' : 'series'} text="{w.complete || w.full || w.in_progress ? '' : '≥ '}{fmtPct(w.peak_pct)}" />
@@ -259,7 +259,7 @@
               <td class="num">{toFull(w) === null ? '—' : fmtDuration(toFull(w)!)}</td>
               <td class="num">{w.full_minutes ? fmtDuration(w.full_minutes * 60000) : '—'}</td>
               <td class="num">
-                {#if w.local.requests === 0}—{:else}{fmtCompact(w.local.tokens)} <span class="subtle">· {fmtMoney(w.local.cost_usd)}</span>{/if}
+                {#if w.local.requests === 0}—{:else}{fmtCompact(w.local.tokens)} <span class="subtle trail">{fmtMoney(w.local.cost_usd)}</span>{/if}
               </td>
               <td class="num opt">{fmtInt(w.readings)}</td>
             </tr>

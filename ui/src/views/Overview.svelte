@@ -1,7 +1,7 @@
 <script lang="ts">
   import { accountOf, app, navigate, saveSettings, toolColor } from '../lib/store.svelte'
   import type { Accuracy } from '../lib/api'
-  import { fmtCompact, fmtDate, fmtHour, fmtMoney, fmtPct, hourLabels, limitName, t, toolLabel, weekdayNames } from '../lib/i18n.svelte'
+  import { fmtCompact, fmtDate, fmtHour, fmtMoney, fmtPct, hourLabels, limitName, limitWindow, listText, t, toolLabel, weekdayNames } from '../lib/i18n.svelte'
   import StatTile from '../components/StatTile.svelte'
   import Segmented from '../components/Segmented.svelte'
   import AreaChart from '../components/charts/AreaChart.svelte'
@@ -52,7 +52,7 @@
     const total = kinds.reduce((a, k) => a + by[k], 0)
     return {
       kind: kinds[0] ?? 'exact',
-      detail: kinds.length > 1 ? kinds.map((k) => `${t(`acc.${k}`)} ${fmtPct((by[k] / total) * 100, 0)}`).join(' · ') : '',
+      detail: kinds.length > 1 ? listText(kinds.map((k) => `${t(`acc.${k}`)} ${fmtPct((by[k] / total) * 100, 0)}`)) : '',
     }
   })
 </script>
@@ -156,7 +156,7 @@
             {#each headline as l (l.provider + l.limit_id + l.window)}
               <LimitMeter
                 compact
-                title={[limitName(l.provider, l.limit_id), accountOf(l), t(`limits.window.${l.window}`)].filter(Boolean).join(' · ')}
+                title={limitWindow(limitName(l.provider, l.limit_id, accountOf(l)), l.window)}
                 brand={l.provider}
                 window={l.window}
                 used={l.used_pct}

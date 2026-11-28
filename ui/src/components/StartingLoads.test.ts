@@ -53,8 +53,8 @@ describe('the starting load of each project', () => {
     const hidden = load({ project_id: 7, project: '', hidden: true, tool: 'codex', client: null, cost_usd: null }, [19_000])
     const target = await render([grown, shrunk, hidden])
     const [a, b, c] = rows(target)
-    expect(a).toBe('notes Claude Code · Terminal 6 50.2K 37.9K $0.25 +12.2K Nov 4')
-    expect(b).toBe('site Claude Code · Claude desktop 5 30.1K 30K $0.25 −19.9K Nov 3')
+    expect(a).toBe('notes Claude Code (Terminal) 6 50.2K 37.9K $0.25 +12.2K Nov 4')
+    expect(b).toBe('site Claude Code (Claude desktop) 5 30.1K 30K $0.25 −19.9K Nov 3')
     expect(c).toBe('Hidden project #7 Codex 1 19K 19K — —')
     const steps = [...target.querySelectorAll('.step')]
     expect(steps.map((s) => s.classList.contains('up'))).toEqual([true, false])

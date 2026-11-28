@@ -2,7 +2,7 @@
   import type { PlanAdvice, PlansFile } from '../lib/api'
   import { api } from '../lib/api'
   import { accountName, app, markTint, navigate } from '../lib/store.svelte'
-  import { fmtDuration, fmtMoney, fmtPct, i18n, t } from '../lib/i18n.svelte'
+  import { fmtDuration, fmtMoney, fmtPct, i18n, named, t } from '../lib/i18n.svelte'
   import Icon from './Icon.svelte'
   import BrandIcon from './BrandIcon.svelte'
 
@@ -77,7 +77,7 @@
     <span class="mark" aria-hidden="true"><Icon name={icon} size={16} /></span>
     <div class="titles">
       <div class="who">
-        <BrandIcon provider={a.provider} size={13} color={markTint(a.provider)} />{t(`provider.${a.provider}`)}{#if a.account}{` · ${accountName(a.account, a.provider)}`}{/if}{#if a.plan}{` · ${name(a.plan)}`}{/if}
+        <BrandIcon provider={a.provider} size={13} color={markTint(a.provider)} />{named(t(`provider.${a.provider}`), a.account && accountName(a.account, a.provider))}{#if a.plan}{' '}<span>{name(a.plan)}</span>{/if}
         {#if a.detected}<span class="pill">{t('advice.detected')}</span>{/if}
       </div>
       <h3>{title}</h3>

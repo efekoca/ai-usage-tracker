@@ -118,7 +118,7 @@
   </div>
   <div class="foot">
     {#if hi !== null}
-      <span><b>{fmtDate(days[hi].date, 'long')}</b> · <span class="num">{format(value(hi))}</span></span>
+      <span><b>{fmtDate(days[hi].date, 'long')}</b> <span class="num trail">{format(value(hi))}</span></span>
     {:else}
       <span></span>
     {/if}

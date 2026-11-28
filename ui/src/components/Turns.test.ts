@@ -66,8 +66,8 @@ describe('what each prompt cost', () => {
     const cheap = turn({ id: 'cc:b', started_ms: t0 + 3_600_000, ended_ms: t0 + 3_600_000 + 40_000, ordinal: 4, requests: 2, agents: 0, tool_calls: 0, tool_failed: 0, cost_usd: 0.31, parts: [{ agent: null, threads: 0, requests: 2, cost_usd: 0.31 }] })
     const target = await render({ turns: [cheap, turn({})] })
     expect(rows(target)).toEqual([
-      'Nov 12, 02:32 PM notes · Turn 3 | 84 | 3 | 120 2 failed | 18 min | $11.40',
-      'Nov 12, 03:32 PM notes · Turn 4 | 2 | — | — | < 1 min | $0.31',
+      'Nov 12, 02:32 PM notes Turn 3 | 84 | 3 | 120 2 failed | 18 min | $11.40',
+      'Nov 12, 03:32 PM notes Turn 4 | 2 | — | — | < 1 min | $0.31',
     ])
     // three quarters of the first turn's cost came from its subagents
     const bars = [...target.querySelectorAll<HTMLElement>('.split i')].map((b) => Math.round(parseFloat(b.style.width)))
@@ -87,7 +87,7 @@ describe('what each prompt cost', () => {
         turn({ id: 'cx:s', tool: 'codex', origin: 'sdk', project: '', project_id: null, agents: 0, cost_usd: 1 }),
       ],
     })
-    expect(rows(target).map((r) => r.split(' | ')[0].replace('Nov 12, 02:32 PM ', ''))).toEqual(['notes · Turn 3 Background task', 'Hidden project #7 · Turn 3 Automatic', 'No project · Turn 3 Program'])
+    expect(rows(target).map((r) => r.split(' | ')[0].replace('Nov 12, 02:32 PM ', ''))).toEqual(['notes Turn 3 Background task', 'Hidden project #7 Turn 3 Automatic', 'No project Turn 3 Program'])
   })
 
   it('opens a turn to its parts and its session', async () => {
@@ -149,7 +149,7 @@ describe('what each prompt cost', () => {
 
   it('leaves the tool calls out of a turn the filter splits', async () => {
     const target = await render({ turns: [turn({ calls_hidden: true, tool_calls: 0, tool_failed: 0 })] })
-    expect(rows(target)[0]).toBe('Nov 12, 02:32 PM notes · Turn 3 | 84 | 3 | — | 18 min | $11.40')
+    expect(rows(target)[0]).toBe('Nov 12, 02:32 PM notes Turn 3 | 84 | 3 | — | 18 min | $11.40')
     expect(target.querySelector('tbody td[title]')?.getAttribute('title')).toContain('the tool calls are not counted')
   })
 

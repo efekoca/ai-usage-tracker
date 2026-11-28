@@ -207,7 +207,7 @@ pub fn render_default(windows: Option<&Map<String, Value>>) -> String {
             parts.push(format!("{label} {p:.0}%"));
         }
     }
-    parts.join(" · ")
+    parts.join(" | ")
 }
 
 /// What the app asks of the programs Claude Code runs for it: the bridge and the hooks.
@@ -345,7 +345,7 @@ pub fn append(out: &str, part: &str) -> String {
         return part.to_owned();
     }
     let reset = if body.contains('\u{1b}') { "\u{1b}[0m" } else { "" };
-    format!("{body}{reset} · {part}")
+    format!("{body}{reset} | {part}")
 }
 
 pub fn parse_file(path: &Path, offset: u64) -> std::io::Result<ParseOutput> {
@@ -419,7 +419,7 @@ mod tests {
         assert_eq!(w.len(), 2);
         assert_eq!(serde_json::to_string(&w).unwrap(), r#"{"five_hour":{"used_percentage":23.5,"resets_at":1738425600},"seven_day":{"used_percentage":41.2,"resets_at":1738857600}}"#);
         assert!(extract_windows(&json!({"model": {}})).is_none());
-        assert_eq!(render_default(Some(&w)), "5h 24% · 7d 41%");
+        assert_eq!(render_default(Some(&w)), "5h 24% | 7d 41%");
     }
 
     #[test]
@@ -574,10 +574,10 @@ mod tests {
         assert_eq!(cache_text(at, true, &tz).unwrap(), "önbellek 13:32'de silinir");
         let endings: Vec<String> = [(13, 30), (13, 40), (13, 0), (12, 0), (13, 5), (13, 6), (13, 9), (13, 50), (0, 0), (10, 0)].iter().map(|&(h, m)| format!("{h}:{m:02}'{}", turkish_at(h, m))).collect();
         assert_eq!(endings, ["13:30'da", "13:40'ta", "13:00'te", "12:00'de", "13:05'te", "13:06'da", "13:09'da", "13:50'de", "0:00'da", "10:00'da"]);
-        assert_eq!(append("5h 24% · 7d 41%", "cache until 13:32"), "5h 24% · 7d 41% · cache until 13:32");
+        assert_eq!(append("5h 24% | 7d 41%", "cache until 13:32"), "5h 24% | 7d 41% | cache until 13:32");
         assert_eq!(append("", "cache until 13:32"), "cache until 13:32");
-        assert_eq!(append("first\nsecond\n", "x"), "first\nsecond · x");
-        assert_eq!(append("\u{1b}[32mmine\n", "x"), "\u{1b}[32mmine\u{1b}[0m · x");
+        assert_eq!(append("first\nsecond\n", "x"), "first\nsecond | x");
+        assert_eq!(append("\u{1b}[32mmine\n", "x"), "\u{1b}[32mmine\u{1b}[0m | x");
     }
 
     #[test]

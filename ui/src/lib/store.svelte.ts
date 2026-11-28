@@ -1,6 +1,6 @@
 import { tick } from 'svelte'
 import { api, on, type Account, type AppInfo, type Filter, type LimitView, type Period, type Provider, type Report, type ScanStatus, type Settings, type UpdateStatus } from './api'
-import { i18n, localDate, resolveLang, t } from './i18n.svelte'
+import { i18n, localDate, named, resolveLang, t } from './i18n.svelte'
 import { scrollPageBack, scrollPageTo } from './scroll'
 
 const VIEWS = ['overview', 'tips', 'daily', 'breakdown', 'sessions', 'cache', 'context', 'limits', 'projects', 'cards', 'sources', 'widget', 'menubar', 'settings'] as const
@@ -315,8 +315,8 @@ export function accountOf(v: { provider: Provider; account: string | null }): st
   return v.account === null ? t('accounts.unknown') : nameAccount(v.account, v.provider, app.accounts, app.settings?.account_names, true)
 }
 
-/** An account in a list of several providers' accounts: "Codex · İş", "Claude · Hesap 2". */
-export const providerAccount = (provider: Provider, id: string | null) => `${t(`provider.${provider}`)} · ${accountOf({ provider, account: id })}`
+/** An account in a list of several providers' accounts: "Codex (İş)", "Claude (Hesap 2)". */
+export const providerAccount = (provider: Provider, id: string | null) => named(t(`provider.${provider}`), accountOf({ provider, account: id }))
 
 /** The user's name for an account, else its number among its provider's accounts in order of first use. */
 export function accountName(id: string | null, provider: Provider): string {

@@ -52,11 +52,11 @@ describe('cliScripts', () => {
       return outs[0]
     }
     try {
-      expect(line(limit('five_hour', 46.7))).toBe('5h 46% · 7d 64% · $12.84')
-      expect(line(limit('five_hour', 46.7, 'behind'))).toBe('5h ~46% · 7d 64% · $12.84')
-      expect(line(limit('five_hour', 46.7, 'stale'))).toBe('7d 64% · $12.84')
-      expect(line(limit('five_hour', null, 'reset'))).toBe('7d 64% · $12.84')
-      expect(line(limit('five_hour', 46.7, 'fresh', true))).toBe('7d 64% · $12.84')
+      expect(line(limit('five_hour', 46.7))).toBe('5h 46% | 7d 64% | $12.84')
+      expect(line(limit('five_hour', 46.7, 'behind'))).toBe('5h ~46% | 7d 64% | $12.84')
+      expect(line(limit('five_hour', 46.7, 'stale'))).toBe('7d 64% | $12.84')
+      expect(line(limit('five_hour', null, 'reset'))).toBe('7d 64% | $12.84')
+      expect(line(limit('five_hour', 46.7, 'fresh', true))).toBe('7d 64% | $12.84')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

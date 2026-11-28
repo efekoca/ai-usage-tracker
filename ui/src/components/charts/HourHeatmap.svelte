@@ -61,7 +61,7 @@
 </div>
 <div class="foot" aria-live="polite">
   {#if hover}
-    <span><b>{names[hover[0]]} {fmtHour(hover[1])}</b> · <span class="num">{format(grid[hover[0]]?.[hover[1]] ?? 0)}</span></span>
+    <span><b>{names[hover[0]]} {fmtHour(hover[1])}</b> <span class="num trail">{format(grid[hover[0]]?.[hover[1]] ?? 0)}</span></span>
   {:else}
     <span></span>
   {/if}

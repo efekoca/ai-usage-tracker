@@ -55,7 +55,7 @@
 
   function toolName(tool: string, name: string) {
     const mcp = name.match(/^mcp__(.+?)__(.+)$/)
-    if (mcp) return `${mcp[2]} (MCP · ${mcp[1].replaceAll('_', ' ')})`
+    if (mcp) return `${mcp[2]} (MCP: ${mcp[1].replaceAll('_', ' ')})`
     return has(`tools.${tool}.${name}`) ? t(`tools.${tool}.${name}`) : name
   }
   function text(tip: Tip): { title: string; body: string; icon: string; amount: string | null; share: string | null } {

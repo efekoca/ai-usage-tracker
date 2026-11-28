@@ -1,7 +1,7 @@
 <script lang="ts">
   import { app, latest, navigate, toolColor } from '../lib/store.svelte'
   import { api, type TurnCost, type TurnPart, type Turns } from '../lib/api'
-  import { agentLabel, clientLabel, fmtCompact, fmtDateTime, fmtInt, fmtMoney, fmtPct, fmtSpan, has, t, toolLabel } from '../lib/i18n.svelte'
+  import { agentLabel, clientLabel, fmtCompact, fmtDateTime, fmtInt, fmtMoney, fmtPct, fmtSpan, has, named, t, toolLabel } from '../lib/i18n.svelte'
   import { rowToggles } from '../lib/scroll'
   import Explain from './Explain.svelte'
   import Icon from './Icon.svelte'
@@ -113,7 +113,6 @@
                   <span class="when"><i class="dot" style:background={toolColor[x.tool]} title={toolLabel(x.tool)}></i>{fmtDateTime(x.started_ms)}</span>
                   <span class="where subtle small">
                     <span class="project" title={project(x)}>{project(x)}</span>
-                    <span aria-hidden="true">·</span>
                     <span>{t('turns.nth', { n: fmtInt(x.ordinal) })}</span>
                     {#if origin(x)}<span class="origin">{origin(x)}</span>{/if}
                   </span>
@@ -154,7 +153,7 @@
                           {#if x.models.length > 3}<span class="subtle small">+{x.models.length - 3}</span>{/if}
                         </span>
                         <span>{t('turns.tokens', { tokens: fmtCompact(x.total_tokens) })}</span>
-                        <span>{toolLabel(x.tool)}{x.client ? ` · ${clientLabel(`${x.tool}:${x.client}`, x.client)}` : ''}</span>
+                        <span>{named(toolLabel(x.tool), x.client && clientLabel(`${x.tool}:${x.client}`, x.client))}</span>
                         <span class="spacer"></span>
                         {#if x.session_id !== null}
                           <button class="btn ghost small" onclick={() => openSession(x)}>{t('turns.openSession')}</button>
@@ -261,7 +260,7 @@
     white-space: nowrap;
   }
   .where {
-    gap: 5px;
+    gap: 8px;
     padding-left: 16px;
     font-weight: 400;
   }

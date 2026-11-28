@@ -58,7 +58,7 @@ describe('continuing after a limit resets', () => {
     )
     const [known, unknown, held, due, went] = rows(target)
     // late in the evening the time is tomorrow's and carries its day
-    expect(known).toMatch(/^notes · main Terminal 5-hour limit full .*\d\d:\d\d.* continues in 1 h Don't continue$/)
+    expect(known).toMatch(/^notes main Terminal 5-hour limit full .*\d\d:\d\d.* continues in 1 h Don't continue$/)
     expect(unknown).toBe("Hidden project Terminal Reset time not known yet stopped 1 min ago Don't continue")
     expect(held).toContain('Continued too often today')
     expect(due).toContain('Continues shortly')

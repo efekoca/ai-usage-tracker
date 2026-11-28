@@ -31,7 +31,7 @@
   <div class="card-head">
     <h2>{t('budget.title')}</h2>
     <span class="spacer"></span>
-    {#if spend}<span class="subtle small">{fmtDate(spend.month, 'monthLong')} · {t('budget.left', { n: daysLeft })}</span>{/if}
+    {#if spend}<span class="subtle small spaced"><span>{fmtDate(spend.month, 'monthLong')}</span> <span>{t('budget.left', { n: daysLeft })}</span></span>{/if}
     <button class="btn ghost" aria-label={t('budget.edit')} title={t('budget.edit')} onclick={() => navigate('settings:budget', { from: true })}><Icon name="gear" size={14} /></button>
   </div>
   {#if failed && !spend}

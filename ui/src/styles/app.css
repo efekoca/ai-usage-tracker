@@ -422,3 +422,9 @@ select.field {
   border: 3px solid transparent;
   background-clip: content-box;
 }
+
+/* the parts of a details line, spaced apart instead of joined with a separator */
+.spaced > * + *,
+.trail {
+  margin-left: 0.5em;
+}

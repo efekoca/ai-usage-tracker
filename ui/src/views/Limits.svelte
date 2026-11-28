@@ -3,7 +3,7 @@
   import { accountName, accountOf, app, latest, saveSettings, markTint } from '../lib/store.svelte'
   import { api, providersOf, type PlanDef, type PlansFile, type Provider, type Route, type Threshold } from '../lib/api'
   import { accountPlan, autoPlan, priceKey } from '../lib/plans'
-  import { fmtCompact, fmtDate, fmtInput, fmtMoney, fmtPct, i18n, limitName, parseNumber, t, windowLabel } from '../lib/i18n.svelte'
+  import { fmtCompact, fmtDate, fmtInput, fmtMoney, fmtPct, i18n, limitName, limitWindow, listText, parseNumber, t, windowLabel } from '../lib/i18n.svelte'
   import LimitMeter from '../components/LimitMeter.svelte'
   import AccuracyBadge from '../components/AccuracyBadge.svelte'
   import Icon from '../components/Icon.svelte'
@@ -170,10 +170,10 @@
   <section class="card plans" id="limits-plans">
     {#each providers as p (p)}
       <div class="plan-row">
-        <label for="plan-{p}"><b class="brandname"><BrandIcon provider={p} color={markTint(p)} />{plans.providers[p].label}</b> · {t('limits.plan')}</label>
+        <label for="plan-{p}"><b class="brandname"><BrandIcon provider={p} color={markTint(p)} />{plans.providers[p].label}</b>{' '}<span class="trail">{t('limits.plan')}</span></label>
         <Select
           id="plan-{p}"
-          label="{plans.providers[p].label} · {t('limits.plan')}"
+          label={listText([plans.providers[p].label, t('limits.plan')])}
           value={app.settings?.plans[p] ?? ''}
           minWidth={200}
           options={[{ value: '', label: t('onb.plan.none') }, ...plans.providers[p].plans.map((pl) => ({ value: pl.id, label: pl.name, sub: pl.relative }))]}
@@ -191,7 +191,7 @@
             {@const day = app.settings?.renewal_days?.[p]}
             <label class="price" title={t('value.renewal.help')}>
               <span class="subtle small">{t('value.renewal')}</span>
-              <input class="field day" inputmode="numeric" maxlength="2" value={day ?? ''} placeholder="—" aria-label="{plans.providers[p].label} · {t('value.renewal')}" onchange={(e) => { if (!setRenewal(p, e.currentTarget.value)) e.currentTarget.value = String(day ?? '') }} />
+              <input class="field day" inputmode="numeric" maxlength="2" value={day ?? ''} placeholder="—" aria-label={listText([plans.providers[p].label, t('value.renewal')])} onchange={(e) => { if (!setRenewal(p, e.currentTarget.value)) e.currentTarget.value = String(day ?? '') }} />
             </label>
           {/if}
           {#if pl.note}<span class="subtle small">{pl.note[i18n.lang]}</span>{/if}
@@ -230,7 +230,7 @@
           {@const plan = accountPlan(plans, app.settings, a)}
           {@const auto = autoPlan(plans, app.settings, a)}
           <Select
-            label="{accountName(id, p)} · {t('limits.plan')}"
+            label={listText([accountName(id, p), t('limits.plan')])}
             value={app.settings?.account_plans?.[id] ?? ''}
             options={[{ value: '', label: auto ? t('accounts.plan.auto', { plan: auto.name }) : t('value.pickPlan') }, ...plans.providers[p].plans.map((pl) => ({ value: pl.id, label: pl.name, sub: pl.relative }))]}
             onchange={(v) => setAccountPlan(id, v)}
@@ -241,12 +241,12 @@
               {@const own = app.settings?.account_prices?.[key]}
               <label class="price">
                 <span class="subtle small">{t('value.price')}</span>
-                <input class="field" inputmode="decimal" value={fmtInput(own)} placeholder={fallbackPrice(p, plan)} aria-label="{accountName(id, p)} · {t('value.price')}" onchange={(e) => { if (!setAccountPrice(key, e.currentTarget.value)) e.currentTarget.value = fmtInput(own) }} title={plan.price_note?.[i18n.lang] ?? ''} />
+                <input class="field" inputmode="decimal" value={fmtInput(own)} placeholder={fallbackPrice(p, plan)} aria-label={listText([accountName(id, p), t('value.price')])} onchange={(e) => { if (!setAccountPrice(key, e.currentTarget.value)) e.currentTarget.value = fmtInput(own) }} title={plan.price_note?.[i18n.lang] ?? ''} />
               </label>
               {@const day = app.settings?.renewal_days?.[id]}
               <label class="price" title={t('value.renewal.help')}>
                 <span class="subtle small">{t('value.renewal')}</span>
-                <input class="field day" inputmode="numeric" maxlength="2" value={day ?? ''} placeholder={String(app.settings?.renewal_days?.[p] ?? '—')} aria-label="{accountName(id, p)} · {t('value.renewal')}" onchange={(e) => { if (!setRenewal(id, e.currentTarget.value)) e.currentTarget.value = String(day ?? '') }} />
+                <input class="field day" inputmode="numeric" maxlength="2" value={day ?? ''} placeholder={String(app.settings?.renewal_days?.[p] ?? '—')} aria-label={listText([accountName(id, p), t('value.renewal')])} onchange={(e) => { if (!setRenewal(id, e.currentTarget.value)) e.currentTarget.value = String(day ?? '') }} />
               </label>
             {:else if !plan && a.read_plan}
               <span class="subtle small">{t('accounts.plan.which')}</span>
@@ -333,7 +333,7 @@
   <h2>{t('limits.thresholds')}</h2>
   <p class="subtle small help">{t('limits.thresholds.help')}</p>
   {#each app.settings?.thresholds ?? [] as th (th.provider + th.window)}
-    {@const name = `${t(`provider.${th.provider}`)} · ${windowLabel(th.window)}`}
+    {@const name = limitWindow(t(`provider.${th.provider}`), th.window)}
     <div class="list-row">
       <span>{name}</span>
       <span class="spacer"></span>

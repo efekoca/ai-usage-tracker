@@ -1,6 +1,6 @@
 <script lang="ts">
   import { app, toolColor } from '../lib/store.svelte'
-  import { clientLabel, fmtCompact, fmtDec, fmtMoney, fmtPct, hourLabels, t, toolLabel } from '../lib/i18n.svelte'
+  import { clientLabel, fmtCompact, fmtDec, fmtMoney, fmtPct, hourLabels, named, t, toolLabel } from '../lib/i18n.svelte'
   import type { Group, Tokens } from '../lib/api'
   import StatTile from '../components/StatTile.svelte'
   import AreaChart from '../components/charts/AreaChart.svelte'
@@ -25,7 +25,7 @@
     return [...g].filter((x) => prompt(x.totals.tokens) > 0).sort((a, b) => prompt(b.totals.tokens) - prompt(a.totals.tokens))
   })
   function label(g: Group): string {
-    if (breakdown === 'client') return `${clientLabel(g.key, g.label)} · ${toolLabel(g.key.split(':')[0])}`
+    if (breakdown === 'client') return named(toolLabel(g.key.split(':')[0]), clientLabel(g.key, g.label))
     if (breakdown === 'project') return g.key === 'none' ? t('projects.noProject') : g.hidden ? `${t('projects.hidden')} #${g.key}` : g.label
     return g.label
   }

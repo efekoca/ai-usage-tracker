@@ -2,7 +2,7 @@
   import { onMount, tick } from 'svelte'
   import { api, on, type LiveCache } from '../lib/api'
   import { app, navigate } from '../lib/store.svelte'
-  import { clockCase, fmtCompact, fmtMoney, t } from '../lib/i18n.svelte'
+  import { clockCase, fmtCompact, fmtMoney, listText, t } from '../lib/i18n.svelte'
   import { cacheClient, cacheName, cacheProject, cacheSince, cacheTone, cacheTwin, mmss, refreshError, shortModel } from '../lib/caches'
   import { ensureRefresh, loadRefreshInfo, refresh } from '../lib/refresh.svelte'
   import CachePie from './CachePie.svelte'
@@ -130,9 +130,8 @@
     ;(triggers[c.session_id] ?? droppedToggle)?.focus()
   }
 
-  const details = (c: LiveCache) =>
-    [shortModel(c.model), cacheClient(c.client), t(c.ttl_ms <= 300_000 ? 'cache.live.ttl.5' : 'cache.live.ttl.60'), (!c.branch && !c.title) || cacheTwin(c, live) ? cacheSince(c) : ''].filter(Boolean).join(' · ')
-  const meta = (c: LiveCache, max = Infinity) => [cacheProject(c, max), details(c)].filter(Boolean).join(' · ')
+  const meta = (c: LiveCache, max = Infinity) =>
+    [cacheProject(c, max), shortModel(c.model), cacheClient(c.client), t(c.ttl_ms <= 300_000 ? 'cache.live.ttl.5' : 'cache.live.ttl.60'), (!c.branch && !c.title) || cacheTwin(c, live) ? cacheSince(c) : ''].filter(Boolean)
   const money = (usd: number | null) => (usd === null ? '—' : fmtMoney(usd))
 
   // the row menu takes the focus when it opens and gives it back to its button when it closes
@@ -187,7 +186,7 @@
                     {#if c.branch}<span class="chip" title={c.branch}><Icon name="branch" size={11} /><span class="clip">{c.branch}</span></span>{/if}
                     <span class="chev" class:open={open === c.session_id}><Icon name="chevron" size={12} /></span>
                   </span>
-                  <span class="meta" title={meta(c)}>{meta(c, 28)}</span>
+                  <span class="meta spaced" title={listText(meta(c))}>{#each meta(c, 28) as x, i}{#if i > 0}{' '}{/if}<span>{x}</span>{/each}</span>
                 </span>
               </button>
               <span class="status {st.tone}" class:urgent={tone === 'urgent' && !st.auto && !st.tone} title={st.help}>
@@ -240,11 +239,11 @@
             {#each gone as c (c.session_id)}
               {@const name = cacheName(c)}
               {@const left = t('cache.live.left', { t: mmss(c.expires_ms - now) })}
-              {@const rest = [shortModel(c.model), cacheClient(c.client)].filter(Boolean).join(' · ')}
+              {@const parts = (max: number) => [left, cacheProject(c, max), shortModel(c.model), cacheClient(c.client)].filter(Boolean)}
               <div class="gone-row">
                 <span class="name" class:hidden={!c.project} title={name}>{name}</span>
                 {#if c.branch}<span class="chip" title={c.branch}><Icon name="branch" size={11} /><span class="clip">{c.branch}</span></span>{/if}
-                <span class="meta" title={[left, cacheProject(c), rest].filter(Boolean).join(' · ')}>{[left, cacheProject(c, 20), rest].filter(Boolean).join(' · ')}</span>
+                <span class="meta spaced" title={listText(parts(Infinity))}>{#each parts(20) as x, i}{#if i > 0}{' '}{/if}<span>{x}</span>{/each}</span>
                 <button class="restore" aria-label={t('cache.live.restoreOne', { name })} onclick={() => restore(c)}>{t('cache.live.restore')}</button>
               </div>
             {/each}

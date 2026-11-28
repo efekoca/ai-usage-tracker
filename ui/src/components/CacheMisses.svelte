@@ -66,11 +66,11 @@
   const most = $derived(Math.max(1, ...(data?.projects ?? []).map((p) => p.misses)))
   let opened = $state<string | null>(null)
 
-  /** "Tool definitions changed", "2 misses · ...", or a rebuild Claude Code expected. */
+  /** "Tool definitions changed", "Tool definitions changed (2 misses)", or a rebuild Claude Code expected. */
   function what(e: MissEvent): string {
     if (!e.misses) return t('cachemiss.rebuild')
     const why = e.causes.length ? e.causes.map(label).join(', ') : t('cachemiss.undetermined')
-    return e.misses > 1 ? `${t('cachemiss.count', { n: fmtInt(e.misses) })} · ${why}` : why
+    return e.misses > 1 ? `${why} (${t('cachemiss.count', { n: fmtInt(e.misses) })})` : why
   }
   function openSession(e: MissEvent) {
     app.openSession = 'claude_code' + e.session_id
