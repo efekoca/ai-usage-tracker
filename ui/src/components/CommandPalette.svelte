@@ -3,7 +3,7 @@
   import { app, latest, navLabel, navigate, saveSettings, setFilter } from '../lib/store.svelte'
   import { api, type ProjectRow, type SessionRow } from '../lib/api'
   import { NAV } from '../lib/nav'
-  import { fmtDateTime, searchKey, t, toolLabel } from '../lib/i18n.svelte'
+  import { fmtDateTime, listText, searchKey, t, toolLabel } from '../lib/i18n.svelte'
   import Icon from './Icon.svelte'
 
   let { open = $bindable(false) }: { open?: boolean } = $props()
@@ -147,8 +147,8 @@
       out.push({
         id: `session:${r.tool}${r.session_id}`,
         group: 'sessions',
-        label: `${name} · ${fmtDateTime(r.started_ms)}`,
-        detail: [toolLabel(r.tool), ...r.models.slice(0, 2).map((m) => m.model)].join(' · '),
+        label: listText([name, fmtDateTime(r.started_ms)]),
+        detail: listText([toolLabel(r.tool), ...r.models.slice(0, 2).map((m) => m.model)]),
         icon: 'sessions',
         keys: [r.hidden ? name : r.project, r.session_id, ...r.models.map((m) => m.model)].join(' '),
         run: () => {
@@ -169,7 +169,7 @@
         .filter((i) => i.group === g)
         .map((i) => {
           const label = norm(i.label)
-          const score = !q ? 0 : label.startsWith(q) ? 0 : label.split(/[\s·/›-]+/).some((w) => w.startsWith(q)) ? 1 : norm(i.keys).includes(q) ? 2 : -1
+          const score = !q ? 0 : label.startsWith(q) ? 0 : label.split(/[\s,/›-]+/).some((w) => w.startsWith(q)) ? 1 : norm(i.keys).includes(q) ? 2 : -1
           return { i, score }
         })
         .filter((x) => x.score >= 0)

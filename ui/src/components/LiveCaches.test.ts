@@ -91,7 +91,7 @@ describe('the Live caches list', () => {
     const names = [...target.querySelectorAll('li .name')].map((n) => n.textContent)
     expect(names).toEqual(['Landing page copy', 'Pricing table fixes'])
     const meta = [...target.querySelectorAll('li .meta')].map((m) => m.textContent ?? '')
-    expect(meta.every((m) => m.startsWith('site · ') && !m.includes('Since'))).toBe(true)
+    expect(meta.every((m) => m.startsWith('site ') && !m.includes('Since'))).toBe(true)
   })
 
   it('shows why a refresh could not be asked for', async () => {

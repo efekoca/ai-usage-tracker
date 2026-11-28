@@ -75,7 +75,7 @@ describe('the cache misses card', () => {
     flushSync()
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
     const rows = [...t.querySelectorAll('tr.detail .events li')]
-    expect(rows.map((r) => r.querySelector('.what')?.textContent)).toEqual(['The 5-minute lifetime ran out', 'Rebuilt after a compaction or clearing', '2 misses · Tool definitions changed, The 5-minute lifetime ran out'])
+    expect(rows.map((r) => r.querySelector('.what')?.textContent)).toEqual(['The 5-minute lifetime ran out', 'Rebuilt after a compaction or clearing', 'Tool definitions changed, The 5-minute lifetime ran out (2 misses)'])
     expect(rows[0].querySelector('.where .model')?.textContent).toBe('Opus 5.5')
     expect(rows[2].querySelector<HTMLElement>('.chip')?.title).toBe('a-very-long-branch-name')
     expect(rows[1].querySelector('.dot.hollow')).not.toBeNull()

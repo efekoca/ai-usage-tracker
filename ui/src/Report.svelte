@@ -5,7 +5,7 @@
   import { accountKey, applyAppearance, toolColor } from './lib/store.svelte'
   import { api, providerOfSource, providersOf, type Account, type ContextStats, type LimitView, type PlansFile, type Provider, type Report, type Sessions, type Settings } from './lib/api'
   import { accountPlan, planPrice } from './lib/plans'
-  import { fmtCompact, fmtDate, fmtDateTime, fmtDec, fmtInt, fmtLimit, fmtMoney, fmtPct, fmtSpan, limitName, t, toolLabel, windowLabel } from './lib/i18n.svelte'
+  import { fmtCompact, fmtDate, fmtDateTime, fmtDec, fmtInt, fmtLimit, fmtMoney, fmtPct, fmtSpan, limitName, limitWindow, listText, t, toolLabel } from './lib/i18n.svelte'
   import Columns from './components/charts/Columns.svelte'
 
   const qs = new URLSearchParams(location.search)
@@ -115,7 +115,7 @@
       const left = list.length > paid.length ? unpaidCost?.[p] : 0
       const cost = total - (left ?? 0)
       const names = [...new Set(paid.map((x) => x.plan?.name).filter(Boolean))].join(' + ')
-      const label = [names, paid.length > 1 ? t('value.accounts', { n: paid.length }) : ''].filter(Boolean).join(' · ')
+      const label = listText([names, paid.length > 1 && t('value.accounts', { n: paid.length })])
       const missing = paid.some((x) => !x.plan || x.usd === null)
       const share = missing || left === undefined ? null : shareOf(paid.reduce((t, x) => t + (x.usd ?? 0), 0))
       const note = paid.some((x) => !x.plan) ? t('rep.noPlan') : missing ? t('value.enterPrice') : left === undefined ? t('rep.valueUnpaid') : list.every((x) => x.plan?.id === 'api') ? t('value.api') : t('value.free')
@@ -141,7 +141,7 @@
         <h1>{t('rep.title')}</h1>
         <p class="range">
           {from ? fmtDate(from, 'long') : ''} – {to ? fmtDate(to, 'long') : ''}
-          {#if r}<span class="muted">{' · '}{t('rep.days', { n: r.days_in_range })}</span>{/if}
+          {#if r}<span class="muted trail">{t('rep.days', { n: r.days_in_range })}</span>{/if}
         </p>
       </div>
     </div>
@@ -160,7 +160,7 @@
         <div class="kpi">
           <span class="lab">{t('rep.tokens')}</span>
           <b class="num">{fmtCompact(r.totals.total_tokens)}</b>
-          <span class="muted small">{t('rep.requests', { n: fmtInt(r.totals.events) })}{#if ct !== null} · {ct >= 0 ? '+' : ''}{fmtPct(ct)} {t('rep.vsPrev')}{/if}</span>
+          <span class="muted small">{t('rep.requests', { n: fmtInt(r.totals.events) })}{#if ct !== null}{' '}<span class="trail">{ct >= 0 ? '+' : ''}{fmtPct(ct)} {t('rep.vsPrev')}</span>{/if}</span>
         </div>
         <div class="kpi">
           <span class="lab">{t('rep.cost')}</span>
@@ -212,7 +212,7 @@
           {#each providers as p (p)}
             {@const v = value(p)}
             <p class="line">
-              <b>{t(`provider.${p}`)}</b>{#if v.label}<span class="muted">&nbsp;· {v.label}</span>{/if}<br />
+              <b>{t(`provider.${p}`)}</b>{#if v.label}{' '}<span class="muted trail">{v.label}</span>{/if}<br />
               {#if v.share !== null}
                 <span class="big num">{fmtDec(v.ratio ?? 0, (v.ratio ?? 0) < 10 ? 1 : 0)}×</span>
                 <span class="muted small">{t('rep.valueLine', { c: fmtMoney(v.cost), n: days, s: fmtMoney(v.share) })}</span>
@@ -232,7 +232,7 @@
               <tbody>
                 {#each currentLimits as l (l.provider + l.limit_id + l.window + l.source)}
                   <tr>
-                    <th scope="row">{limitName(l.provider, l.limit_id)} · {windowLabel(l.window)}</th>
+                    <th scope="row">{limitWindow(limitName(l.provider, l.limit_id), l.window)}</th>
                     <td class="num">
                       <!-- a five-hour window its full week locks, as every other view shows it -->
                       {#if l.blocked && (l.state === 'fresh' || l.state === 'behind')}{t('limits.status.locked')}
@@ -311,7 +311,7 @@
                 <tr>
                   <th scope="row" class="ell">
                     <i class="sw" style="background:{toolColor[x.tool]}"></i>{fmtDateTime(x.started_ms)}
-                    <span class="muted">{' · '}{projectLabel(x.project, x.hidden, x.project_id)}</span>
+                    <span class="muted trail">{projectLabel(x.project, x.hidden, x.project_id)}</span>
                   </th>
                   <td class="num">{fmtSpan(x.ended_ms - x.started_ms)}</td>
                   <td class="num">{x.totals.unpriced_events === x.totals.events ? '—' : fmtMoney(x.totals.cost_usd)}</td>

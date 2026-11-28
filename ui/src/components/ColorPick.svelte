@@ -4,7 +4,7 @@
 </script>
 
 <script lang="ts">
-  import { t } from '../lib/i18n.svelte'
+  import { listText, t } from '../lib/i18n.svelte'
 
   // '' is the theme's accent color
   let {
@@ -24,7 +24,7 @@
       {#if !c}<span aria-hidden="true">A</span>{/if}
     </button>
   {/each}
-  <input type="color" class="picker" value={value || '#2f6feb'} aria-label="{label} · {customLabel}" onchange={(e) => onchange(e.currentTarget.value)} />
+  <input type="color" class="picker" value={value || '#2f6feb'} aria-label={listText([label, customLabel])} onchange={(e) => onchange(e.currentTarget.value)} />
 </div>
 
 <style>

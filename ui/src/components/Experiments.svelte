@@ -3,6 +3,7 @@
   import { api, type ExperimentSide, type MarkerView, type ProjectRow, type Tool } from '../lib/api'
   import { fmtCompact, fmtDate, fmtInt, fmtMoney, fmtPct, t, toolLabel } from '../lib/i18n.svelte'
   import Icon from './Icon.svelte'
+  import Parts from './Parts.svelte'
   import Select from './Select.svelte'
 
   const DAY = 86_400_000
@@ -168,7 +169,7 @@
     {#if full}
       {t('experiment.full', { n: MOST })}
     {:else if Number.isFinite(dayStart)}
-      {t('experiment.compares', { before: beforeDays(dayStart, Number(days)), after: afterDays(dayStart, Number(days)) })} · {t('experiment.enter')}
+      {t('experiment.compares', { before: beforeDays(dayStart, Number(days)), after: afterDays(dayStart, Number(days)) })} {t('experiment.enter')}
     {/if}
   </p>
   {#if error}<p class="error small" role="alert">{t('common.error', { e: error })}</p>{/if}
@@ -181,7 +182,7 @@
       <div class="what">
         <h3>{m.label}</h3>
         <span class="subtle small">
-          {[fmtDate(m.at_ms, 'long'), ...scope(m), t('experiment.span', { n: m.days }), !waiting(m) && passed(m) < m.days ? t('experiment.running', { done: passed(m), days: m.days }) : ''].filter(Boolean).join(' · ')}
+          <Parts items={[fmtDate(m.at_ms, 'long'), ...scope(m), t('experiment.span', { n: m.days }), !waiting(m) && passed(m) < m.days && t('experiment.running', { done: passed(m), days: m.days })]} />
         </span>
       </div>
       <span class="legend subtle small" aria-hidden="true"><span class="swatch"></span>{t('experiment.before')}<span class="swatch after"></span>{t('experiment.after')}</span>
@@ -205,8 +206,9 @@
         </div>
       {/each}
     </div>
-    <p class="subtle small basis">
-      {beforeDays(m.at_ms, m.days)}: {used(m.before)} · {afterDays(m.at_ms, m.days)}: {waiting(m) ? t('experiment.notYet') : used(m.after)}
+    <p class="subtle small basis spaced">
+      <span>{beforeDays(m.at_ms, m.days)}: {used(m.before)}</span>
+      <span>{afterDays(m.at_ms, m.days)}: {waiting(m) ? t('experiment.notYet') : used(m.after)}</span>
     </p>
     {#if !waiting(m) && !m.project_gone && thin(m)}<p class="subtle small thin"><Icon name="info" size={13} />{t('experiment.thin')}</p>{/if}
     {#if muchUnpriced(m)}<p class="subtle small thin"><Icon name="info" size={13} />{t('experiment.unpriced', { n: fmtInt(unpriced(m)) })}</p>{/if}

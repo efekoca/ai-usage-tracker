@@ -1251,7 +1251,7 @@ mod tests {
         assert!(cache_due(&mut told, &later, 15 * MIN).is_empty(), "run out");
         assert_eq!(ids(cache_due(&mut told, &later[1..], 55 * MIN)), [("b".into(), 5)], "each conversation on its own");
         assert_eq!(told.len(), 1, "one that ran out is forgotten");
-        assert_eq!(cache_text(&first[0], 1, true), ("Önbellek 1 dakika sonra silinecek".into(), "notes · main".into()));
+        assert_eq!(cache_text(&first[0], 1, true), ("Önbellek 1 dakika sonra silinecek".into(), "notes (main)".into()));
         assert_eq!(cache_text(&cache("x", 0, 0), 5, false).0, "Cache runs out in 5 minutes");
     }
 }

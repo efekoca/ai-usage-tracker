@@ -3,7 +3,7 @@
   import { api, type ResumeInfo } from '../lib/api'
   import { cacheClient } from '../lib/caches'
   import { backToSwitch } from '../lib/focus'
-  import { fmtClock, fmtDuration, fmtWhen, has, hookError, t, windowLabel } from '../lib/i18n.svelte'
+  import { fmtClock, fmtDuration, fmtWhen, has, hookError, named, t, windowLabel } from '../lib/i18n.svelte'
   import AutoCard from './AutoCard.svelte'
   import Icon from './Icon.svelte'
   import HooksOff from './HooksOff.svelte'
@@ -70,7 +70,7 @@
   }
 
   const project = (c: { project: string }) => c.project || t('projects.hidden')
-  const name = (c: { project: string; branch: string | null }) => [project(c), c.branch].filter(Boolean).join(' · ')
+  const name = (c: { project: string; branch: string | null }) => named(project(c), c.branch)
   const stopped = (w: string) => (has(`limits.resume.stopped.${w}`) ? t(`limits.resume.stopped.${w}`) : t('limits.resume.stopped', { window: windowLabel(w) }))
   // today's times are a clock time; another day's carries its day
   const clock = (ms: number) => (new Date(ms).toDateString() === new Date(now).toDateString() ? fmtClock(ms) : fmtWhen(ms))
@@ -153,7 +153,7 @@
               <svg class="state" role="img" aria-label={t('limits.resume.state.unknown')} width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="9" fill="none" stroke="var(--ink-3)" stroke-width="2" stroke-dasharray="2.7 2.95" stroke-linecap="round" /></svg>
             {/if}
             <div class="who">
-              <span class="name"><b>{project(w)}</b>{#if w.branch}<span class="subtle">{` · ${w.branch}`}</span>{/if}</span>
+              <span class="name"><b>{project(w)}</b>{#if w.branch}{' '}<span class="subtle trail">{w.branch}</span>{/if}</span>
               <span class="chips">
                 {#if cacheClient(w.client)}<span class="chip">{cacheClient(w.client)}</span>{/if}
                 {#if w.window}<span class="chip">{stopped(w.window)}</span>{/if}
@@ -177,7 +177,7 @@
           <div class="row done">
             <svg class="state" role="img" aria-label={t('limits.resume.state.done')} width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="10" fill="var(--good-ink)" /><path d="M6.8 11.3l2.8 2.8 5.6-6" fill="none" stroke="var(--surface)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
             <div class="who">
-              <span class="name"><b>{project(r)}</b>{#if r.branch}<span class="subtle">{` · ${r.branch}`}</span>{/if}</span>
+              <span class="name"><b>{project(r)}</b>{#if r.branch}{' '}<span class="subtle trail">{r.branch}</span>{/if}</span>
               <span class="subtle small">{t('limits.resume.went')}</span>
             </div>
             <div class="when">

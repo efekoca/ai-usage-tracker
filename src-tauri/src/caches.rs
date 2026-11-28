@@ -151,7 +151,7 @@ pub fn client_name(client: Option<&str>, tr: bool) -> Option<&'static str> {
     })
 }
 
-/// The conversation's own name, or "notes · main": the project and what tells it apart; `None`
+/// The conversation's own name, or "notes (main)": the project and what tells it apart; `None`
 /// without a project name.
 pub fn label(c: &Cache, tr: bool) -> Option<String> {
     if c.project.is_empty() {
@@ -161,7 +161,7 @@ pub fn label(c: &Cache, tr: bool) -> Option<String> {
         return c.title.clone();
     }
     let second = c.branch.clone().or_else(|| client_name(c.client.as_deref(), tr).map(str::to_owned));
-    Some(second.map_or(c.project.clone(), |b| format!("{} · {b}", c.project)))
+    Some(second.map_or(c.project.clone(), |b| format!("{} ({b})", c.project)))
 }
 
 #[tauri::command]
@@ -255,9 +255,9 @@ mod tests {
 
     #[test]
     fn a_cache_is_named_by_its_project_and_branch_or_where_it_runs() {
-        assert_eq!(label(&cache("notes", Some("main"), Some("cli")), true).as_deref(), Some("notes · main"));
-        assert_eq!(label(&cache("notes", None, Some("claude-desktop")), true).as_deref(), Some("notes · Claude masaüstü"));
-        assert_eq!(label(&cache("notes", None, Some("claude-desktop")), false).as_deref(), Some("notes · Claude desktop"));
+        assert_eq!(label(&cache("notes", Some("main"), Some("cli")), true).as_deref(), Some("notes (main)"));
+        assert_eq!(label(&cache("notes", None, Some("claude-desktop")), true).as_deref(), Some("notes (Claude masaüstü)"));
+        assert_eq!(label(&cache("notes", None, Some("claude-desktop")), false).as_deref(), Some("notes (Claude desktop)"));
         assert_eq!(label(&cache("notes", None, Some("sdk-ts")), false).as_deref(), Some("notes"));
         assert_eq!(label(&cache("", Some("main"), Some("cli")), false), None, "a hidden project");
         let named = Cache { title: Some("Release notes".into()), ..cache("notes", Some("main"), Some("cli")) };

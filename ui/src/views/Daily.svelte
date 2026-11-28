@@ -1,7 +1,7 @@
 <script lang="ts">
   import { accountName, app, latest, toolColor } from '../lib/store.svelte'
   import { api, type DayDetail, type DayPoint } from '../lib/api'
-  import { fmtClock, fmtCompact, fmtDate, fmtHour, fmtInt, fmtMoney, fmtPct, limitName, t, toolLabel, weekdayNames, windowLabel } from '../lib/i18n.svelte'
+  import { fmtClock, fmtCompact, fmtDate, fmtHour, fmtInt, fmtMoney, fmtPct, limitName, limitWindow, t, toolLabel, weekdayNames } from '../lib/i18n.svelte'
   import Segmented from '../components/Segmented.svelte'
   import StatTile from '../components/StatTile.svelte'
   import Icon from '../components/Icon.svelte'
@@ -211,7 +211,7 @@
                 {#each detail.limit_peaks as p (p.provider + (p.account ?? '') + p.limit_id + p.window)}
                   {@const several = p.account !== null || detail.limit_peaks.some((x) => x !== p && x.provider === p.provider && x.limit_id === p.limit_id && x.window === p.window)}
                   <span class="peak" class:full={p.peak_pct >= 99.5}>
-                    {limitName(p.provider, p.limit_id)}{several ? ` (${accountName(p.account, p.provider)})` : ''} · {windowLabel(p.window)} <b>{fmtPct(p.peak_pct)}</b><span class="subtle">{' · '}{fmtClock(p.at_ms)}</span>
+                    {limitWindow(limitName(p.provider, p.limit_id, several ? accountName(p.account, p.provider) : ''), p.window)} <b>{fmtPct(p.peak_pct)}</b>{' '}<span class="subtle trail">{fmtClock(p.at_ms)}</span>
                   </span>
                 {/each}
               </div>

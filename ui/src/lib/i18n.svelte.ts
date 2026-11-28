@@ -485,8 +485,8 @@ const tr: Dict = {
   'experiment.allTools': 'Tüm araçlar',
   'experiment.around': '±{n} gün',
   'experiment.today': 'Bugün',
-  'experiment.compares': '{before} ile {after} karşılaştırılacak',
-  'experiment.enter': 'Enter ile ekleyin',
+  'experiment.compares': '{before} ile {after} karşılaştırılacak.',
+  'experiment.enter': 'Eklemek için Enter tuşuna basın.',
   'experiment.add': 'İşaret ekle',
   'experiment.span': 'her iki yanda {n} gün',
   'experiment.metric.cost': 'Konuşma başına maliyet',
@@ -526,7 +526,7 @@ const tr: Dict = {
   'opener.run.sent': 'İstek gönderildi',
   'opener.run.tokens': '{tokens} token',
   'opener.run.open': 'Pencere zaten açıktı',
-  'opener.run.notSent': 'istek gönderilmedi',
+  'opener.run.notSent': 'İstek gönderilmedi',
   'opener.run.resets': 'Pencere {at} sıfırlanır',
   'opener.run.reset': 'Pencere {at} sıfırlandı',
   'opener.unavailable': 'Claude Code bulunamadı. İstek onunla gönderildiği için bu özellik çalışamaz.',
@@ -1470,10 +1470,10 @@ const tr: Dict = {
   "value.multipleHelp": "API eşdeğeri ÷ planın 30 güne düşen ücreti",
   "value.apiEq": "API eşdeğeri (30 gün)",
   "value.planShare": "Plan ücreti (30 güne düşen)",
-  "value.saved": "Bu kullanım API liste fiyatlarıyla {v} daha pahalıya gelirdi",
+  "value.saved": "Bu kullanım API liste fiyatlarıyla {v} daha pahalıya gelirdi.",
   "value.lost": "Bu kullanım API liste fiyatlarıyla plandan {v} daha ucuza gelirdi",
-  "value.breakeven": 'API eşdeğeri {d}. günde plan ücretini geçti',
-  "value.notYet": 'API eşdeğeri henüz plan ücretini geçmedi',
+  "value.breakeven": 'API eşdeğeri {d}. günde plan ücretini geçti.',
+  "value.notYet": 'API eşdeğeri henüz plan ücretini geçmedi.',
   "value.pickLead": "Planınızı seçin, aboneliğinizin bu kullanıma göre kaç kat değer kattığını görün.",
   "value.pickPlan": "Plan seçin",
   "value.api": "API (kullandıkça öde) planında abonelik karşılaştırması yapılmaz.",
@@ -1544,7 +1544,7 @@ const tr: Dict = {
   "value.renews": "her ayın {d}. günü yenilenir",
   "value.renewsMany": "yenilenme günleri: {d}",
   "value.cycleDay": "{of} günlük dönemin {n}. günü",
-  "value.breakevenCycle": 'API eşdeğeri dönemin {d}. gününde plan ücretini geçti',
+  "value.breakevenCycle": 'API eşdeğeri dönemin {d}. gününde plan ücretini geçti.',
   "value.toGo": 'Plan ücretine {v} kaldı, dönemin bitmesine {n} gün var',
   "value.unknownShareCycle": "Tanımlanmamış hesabın kullanımı yalnızca toplama girer ve en son başlayan dönemden itibaren sayılır. Bu yüzden hesapların kendi oranları olduğundan düşük görünebilir.",
   "value.cyclePartly": "Dönem görünümü için bu sağlayıcının tüm hesaplarına yenilenme günü girin. O zamana kadar son 30 gün gösterilir.",
@@ -1790,7 +1790,7 @@ const tr: Dict = {
   'cap.statusline.what': 'Claude Code\'un resmi durum satırı verisinden 5 saatlik ve haftalık limit yüzdesini kaydeder (Pro/Max).',
   'cap.statusline.changes': 'statusLine ayarı, şu dosyada:',
   'cap.statusline.ok': 'Son kayıt {t}',
-  'cap.statusline.chained': 'kendi durum satırınız korunuyor',
+  'cap.statusline.chained': 'Kendi durum satırınız korunuyor',
   'cap.statusline.cost': 'Konuşmanın maliyeti',
   'cap.statusline.cost.help': 'Durum satırının sonuna konuşmanın şimdiye kadarki tutarını ekler: "konuşma $3,42". Tutarı Claude Code kendisi hesaplar, uygulama bunu kendi para biriminde gösterir.',
   'cap.statusline.note': 'Önceden bir durum satırınız varsa aynen çalışmaya devam eder. Dosyanın yedeği alınır. Bu seçeneği kapatınca ya da uygulamayı kaldırınca dosya eski hâline döner.',
@@ -2341,8 +2341,8 @@ const en: Dict = {
   'experiment.allTools': 'All tools',
   'experiment.around': '±{n} {n|day|days}',
   'experiment.today': 'Today',
-  'experiment.compares': '{before} will be compared with {after}',
-  'experiment.enter': 'Press Enter to add',
+  'experiment.compares': '{before} will be compared with {after}.',
+  'experiment.enter': 'Press Enter to add it.',
   'experiment.add': 'Add marker',
   'experiment.span': '{n} {n|day|days} on each side',
   'experiment.metric.cost': 'Cost per session',
@@ -2382,7 +2382,7 @@ const en: Dict = {
   'opener.run.sent': 'Request sent',
   'opener.run.tokens': '{tokens} tokens',
   'opener.run.open': 'A window was already open',
-  'opener.run.notSent': 'no request sent',
+  'opener.run.notSent': 'No request sent',
   'opener.run.resets': 'Window resets at {at}',
   'opener.run.reset': 'Window reset at {at}',
   'opener.unavailable': 'Claude Code was not found. The request is sent with it, so this cannot run.',
@@ -3326,10 +3326,10 @@ const en: Dict = {
   "value.multipleHelp": "API equivalent ÷ the plan price for 30 days",
   "value.apiEq": "API equivalent (30 days)",
   "value.planShare": "Plan price (30 days)",
-  "value.saved": "At API list prices this use would cost {v} more",
+  "value.saved": "At API list prices this use would cost {v} more.",
   "value.lost": "At API list prices this use would cost {v} less than the plan",
-  "value.breakeven": "The API equivalent passed the plan price on day {d}",
-  "value.notYet": "The API equivalent has not passed the plan price yet",
+  "value.breakeven": "The API equivalent passed the plan price on day {d}.",
+  "value.notYet": "The API equivalent has not passed the plan price yet.",
   "value.pickLead": "Choose your plan to see how many times over your subscription pays for this use.",
   "value.pickPlan": "Choose a plan",
   "value.api": "There is no subscription to compare on the API (pay as you go) plan.",
@@ -3400,7 +3400,7 @@ const en: Dict = {
   "value.renews": "renews on day {d}",
   "value.renewsMany": "renews on days {d}",
   "value.cycleDay": "Day {n} of {of}",
-  "value.breakevenCycle": "The API equivalent passed the plan price on day {d} of the period",
+  "value.breakevenCycle": "The API equivalent passed the plan price on day {d} of the period.",
   "value.toGo": '{v} short of the plan price, with {n} {n|day|days} left in the period',
   "value.unknownShareCycle": "Use by an unidentified account counts only toward the total, from the latest period start on. So the accounts' own figures can look lower than they are.",
   "value.cyclePartly": "Enter a renewal day for every account of this provider to see the billing period. Until then the last 30 days are shown.",
@@ -3645,7 +3645,7 @@ const en: Dict = {
   'cap.statusline.what': 'Records the five-hour and weekly limit percentages from Claude Code\'s official status-line data (Pro/Max).',
   'cap.statusline.changes': 'The statusLine setting in:',
   'cap.statusline.ok': 'Last record {t}',
-  'cap.statusline.chained': 'your own status line is kept',
+  'cap.statusline.chained': 'Your own status line is kept',
   'cap.statusline.cost': 'Conversation cost',
   'cap.statusline.cost.help': "Adds what the conversation has cost so far to the end of the status line: \"conversation $3.42\". Claude Code works out the amount itself, and it shows in the app's currency.",
   'cap.statusline.note': 'If you already had a status line it keeps working unchanged. The file is backed up and restored when you turn this off or uninstall.',
@@ -3930,14 +3930,29 @@ export function agentLabel(agent: string | null): string {
   return agent === null ? t('agent.main') : has(`agent.${agent}`) ? t(`agent.${agent}`) : agent
 }
 
-/** Provider name, plus the pool when a provider has more than one (Antigravity). */
-export function limitName(provider: string, limitId: string): string {
+/** Parts of a description in plain text, for a tooltip or a screen reader: "claude-opus-5, Terminal". */
+export const listText = (parts: (string | null | undefined | false)[]) => parts.filter(Boolean).join(', ')
+
+/** A name with what tells it apart in parentheses: "Codex (İş)", "notes (main)". */
+export function named(main: string, ...extra: (string | null | undefined | false)[]): string {
+  const rest = extra.filter(Boolean)
+  return rest.length ? `${main} (${rest.join(', ')})` : main
+}
+
+/** Provider name, plus the pool when a provider has more than one (Antigravity) and the account when one is given. */
+export function limitName(provider: string, limitId: string, account = ''): string {
   const pool = `limits.pool.${provider}.${limitId}`
-  return has(pool) ? `${t(`provider.${provider}`)} · ${t(pool)}` : t(`provider.${provider}`)
+  return named(t(`provider.${provider}`), has(pool) && t(pool), account)
 }
 
 export function windowLabel(w: string): string {
   return has(`limits.window.${w}`) ? t(`limits.window.${w}`) : w
+}
+
+/** A limit and its window as one name: "Claude haftalık limit", "Codex (İş) 5-hour limit". */
+export function limitWindow(name: string, w: string): string {
+  const label = windowLabel(w)
+  return `${name} ${label.charAt(0).toLocaleLowerCase(i18n.lang) + label.slice(1)}`
 }
 
 /** Why a hook could not be added or taken out: a code the app sends ("codex_hooks_unparseable:<why>") in words, any other error as it came. */

@@ -699,7 +699,7 @@
           {#if upd.installing}
             {t('settings.updates.installing', { pct: upd.total ? fmtPct((upd.downloaded / upd.total) * 100) : '…' })}
           {:else if upd.available}
-            {t('settings.updates.available', { v: upd.available.version })}{upd.available.notes ? ` · ${upd.available.notes}` : ''}
+            {t('settings.updates.available', { v: upd.available.version })}{#if upd.available.notes}{' '}<span class="trail">{upd.available.notes}</span>{/if}
           {:else if upd.last_error}
             {t('settings.updates.error', { e: upd.last_error })}
           {:else if upd.last_check_ms}
@@ -740,7 +740,7 @@
     <div class="row">
       <h2>{t('settings.pricing')}</h2>
       <span class="spacer"></span>
-      <span class="subtle small">{t(`settings.pricing.origin.${pricingOrigin}`)} · {t('settings.pricing.updated', { d: fmtDate(pricing.updated_at) })}</span>
+      <span class="subtle small spaced"><span>{t(`settings.pricing.origin.${pricingOrigin}`)}</span> <span>{t('settings.pricing.updated', { d: fmtDate(pricing.updated_at) })}</span></span>
     </div>
     <p class="subtle small prose">{t('settings.pricing.help')}</p>
     {#if canUpdatePrices}
@@ -775,7 +775,7 @@
           {#each shownPrices as m (m.id)}
             <tr>
               <th scope="row" title={m.notes ?? ''}>
-                {m.id}{#if m.long_context}<span class="subtle small">{' · '}&gt;{fmtInt(m.long_context.threshold / 1000)}K</span>{/if}
+                {m.id}{#if m.long_context}{' '}<span class="subtle small trail">&gt;{fmtInt(m.long_context.threshold / 1000)}K</span>{/if}
                 {#if !baseOf(m)}<span class="mark mine">{t('settings.pricing.mine')}</span>{:else if changed(m)}<span class="mark">{t('settings.pricing.changed')}</span>{/if}
               </th>
               {#each ['input', 'output', 'cache_read', 'cache_write_5m', 'cache_write_1h'] as const as k (k)}
@@ -934,7 +934,7 @@
 <section class="card group" id="settings-about">
   <h2>{t('settings.about')}</h2>
   <div class="item">
-    <span>{t('app.name')} · {t('settings.version', { v: app.info?.version ?? '' })}</span>
+    <span class="spaced"><span>{t('app.name')}</span> <span>{t('settings.version', { v: app.info?.version ?? '' })}</span></span>
     <button class="btn" onclick={() => api.quit()}><Icon name="power" size={15} />{t('settings.quit')}</button>
   </div>
 </section>

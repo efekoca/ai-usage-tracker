@@ -506,7 +506,7 @@ export function buildHours(f: Facts): Card | null {
     extra = { kind: 'punch', values: r.heatmap, weekdays: weekdays('short') }
   }
   return {
-    eyebrow: upper(`${periodText(f)} · ${t('cards.eyebrow.hours')}`),
+    eyebrow: upper(`${t('cards.eyebrow.hours')}: ${periodText(f)}`),
     pager: '',
     title,
     squareTitle: title,

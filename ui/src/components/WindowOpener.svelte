@@ -154,9 +154,9 @@
                 <span class="at num">{fmtWhen(r.at_ms)}</span>
                 <span>
                   {#if r.outcome === 'sent'}
-                    {t('opener.run.sent')}<span class="subtle">{` · ${t('opener.run.tokens', { tokens: fmtCompact(r.tokens ?? 0) })}`}</span>
+                    {t('opener.run.sent')}{' '}<span class="subtle trail">{t('opener.run.tokens', { tokens: fmtCompact(r.tokens ?? 0) })}</span>
                   {:else if r.outcome === 'open'}
-                    {t('opener.run.open')}<span class="subtle">{` · ${t('opener.run.notSent')}`}</span>
+                    {t('opener.run.open')}{' '}<span class="subtle trail">{t('opener.run.notSent')}</span>
                   {:else}
                     <span class="failed">{t('opener.run.failed', { why: why(r.error ?? '') })}</span>
                   {/if}

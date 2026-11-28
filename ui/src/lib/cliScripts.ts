@@ -11,7 +11,7 @@ const STATUS_LINE = String.raw`jq -r '
     | (if .window == "five_hour" then "5h " else "7d " end)
       + (if .state == "behind" then "~" else "" end) + "\(.used_pct | floor)%" ]
   + [ "$\(.usage.cost_usd * 100 | floor / 100)" ]
-  | join(" · ")'`
+  | join(" | ")'`
 
 /** `command` is the installation's own JSON command, so every script carries its real path. */
 export function cliScripts(command: string, platform: string): ScriptTab[] {

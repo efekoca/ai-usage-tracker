@@ -1,7 +1,8 @@
 <script lang="ts">
   import { scaleLinear } from 'd3-scale'
+  import Parts from '../Parts.svelte'
 
-  type Bar = { key: string; label: string; value: number; detail?: string }
+  type Bar = { key: string; label: string; value: number; detail?: string[] }
   let {
     bars,
     format,
@@ -70,7 +71,7 @@
     <div class="tip" style="left:{Math.min(width - 180, Math.max(0, m.left + hover * band + band / 2 - 90))}px">
       <b>{b.label}</b>
       <span>{format(b.value)}</span>
-      {#if b.detail}<span class="subtle">{b.detail}</span>{/if}
+      {#if b.detail}<span class="subtle"><Parts items={b.detail} /></span>{/if}
     </div>
   {/if}
 </div>

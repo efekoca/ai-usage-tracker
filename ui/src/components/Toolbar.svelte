@@ -74,7 +74,7 @@
     />
   </span>
   <button class="btn" class:primary={activeFilters > 0} aria-expanded={showFilters} onclick={() => (showFilters = !showFilters)}>
-    <Icon name="filter" size={15} />{t('common.filters')}{activeFilters ? ` · ${activeFilters}` : ''}
+    <Icon name="filter" size={15} />{t('common.filters')}{activeFilters ? ` (${activeFilters})` : ''}
   </button>
 </header>
 {#if kind === 'custom'}

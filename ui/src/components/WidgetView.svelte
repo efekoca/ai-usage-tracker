@@ -7,7 +7,7 @@
   import BrandIcon from './BrandIcon.svelte'
   import Icon from './Icon.svelte'
   import CachePie from './CachePie.svelte'
-  import { cacheTone, mmss } from '../lib/caches'
+  import { cacheTone, clip, mmss } from '../lib/caches'
 
   let {
     data,
@@ -206,7 +206,8 @@
     {@const tone = cacheTone(c, cacheLeft)}
     <span class="cache" title={t('widget.cache.help')}>
       <CachePie frac={cacheLeft / c.ttl_ms} {tone} size={11} />
-      <span class="who">{c.project || t('widget.cache')}</span>
+      <!-- cut as the menu bar cuts it, so a long project name does not widen the widget -->
+      <span class="who" title={c.project && clip(c.project, 16) !== c.project ? c.project : undefined}>{c.project ? clip(c.project, 16) : t('widget.cache')}</span>
       <b class="left {tone}">{mmss(cacheLeft)}</b>
       {#if c.more}<span class="more" title={t('widget.cache.more', { n: c.more })}>+{c.more}</span>{/if}
     </span>

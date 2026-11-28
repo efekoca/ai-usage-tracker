@@ -59,7 +59,7 @@ describe('before and after a marker', () => {
   it('shows each figure before and after, and calls a clear change better or worse', async () => {
     const target = await render([marker()])
     const card = target.querySelector('.marker')!
-    expect(card.querySelector('.what')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Shorter CLAUDE.md Wednesday, November 4, 2026 · notes · Claude Code · 7 days on each side')
+    expect(card.querySelector('.what')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Shorter CLAUDE.md Wednesday, November 4, 2026 notes Claude Code 7 days on each side')
     expect(figures(card)).toEqual([
       'Cost per session | $2.86 → $2.21 | −23% better',
       'Starting load | 38.4K → 29.5K | −23% better',
@@ -67,7 +67,7 @@ describe('before and after a marker', () => {
       'Cache hit rate | 91.4% → 95.8% | +4.4 pp better',
     ])
     expect(tones(card)).toEqual(['good', 'good', 'good', 'good'])
-    expect(card.querySelector('.basis')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Oct 28 – Nov 3: 11 sessions, 341 requests · Nov 4 – Nov 10: 12 sessions, 372 requests')
+    expect(card.querySelector('.basis')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Oct 28 – Nov 3: 11 sessions, 341 requests Nov 4 – Nov 10: 12 sessions, 372 requests')
     expect(card.querySelector('.thin')).toBeNull()
     // each pair of bars is drawn against the larger of the two
     expect(widths(card)).toEqual([[100, 77], [100, 77], [100, 62], [95, 100]])
@@ -84,7 +84,7 @@ describe('before and after a marker', () => {
     expect(tones(card)).toEqual(['', '', '', ''])
     expect(card.querySelector('.thin')?.textContent).toContain('fewer than three sessions')
     expect(card.querySelector('.basis')?.textContent).toContain('Nov 4 – Nov 10: 2 sessions, 62 requests')
-    expect(card.querySelector('.what .subtle')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Wednesday, November 4, 2026 · 7 days on each side · 2 of 7 days have passed')
+    expect(card.querySelector('.what .subtle')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Wednesday, November 4, 2026 7 days on each side 2 of 7 days have passed')
     // enough sessions, but too few tool calls to judge the error rate
     const calls = await render([marker({ after: after({ tool_calls: 12, tool_error_pct: 25 }) })])
     expect(tones(calls.querySelector('.marker')!)).toEqual(['good', 'good', '', 'good'])
@@ -174,7 +174,7 @@ describe('before and after a marker', () => {
     expect(target.querySelector('.none')?.textContent).toContain('No marker yet')
     // the bar says which days a marker set today would compare
     expect(target.querySelector('.chip.day')?.textContent?.trim()).toBe('Today')
-    expect(target.querySelector('.under')?.textContent).toMatch(/will be compared with .* · Press Enter to add/)
+    expect(target.querySelector('.under')?.textContent).toMatch(/will be compared with .*\. Press Enter to add it\./)
     const add = target.querySelector<HTMLButtonElement>('button[type=submit]')!
     expect(add.disabled).toBe(true)
     const [label, date] = target.querySelectorAll<HTMLInputElement>('form input')
@@ -192,7 +192,7 @@ describe('before and after a marker', () => {
     expect(saved[0].id).toBeTruthy()
     expect(label.value).toBe('')
     expect(target.querySelector('.chip.day')?.textContent?.trim()).toBe('Nov 2')
-    expect(target.querySelector('.under')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Oct 26 – Nov 1 will be compared with Nov 2 – Nov 8 · Press Enter to add')
+    expect(target.querySelector('.under')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Oct 26 – Nov 1 will be compared with Nov 2 – Nov 8. Press Enter to add it.')
 
     // a second Enter while the first is still being saved adds nothing more
     let saveNow: (s: Settings) => void = () => {}

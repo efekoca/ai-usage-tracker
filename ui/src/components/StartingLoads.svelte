@@ -2,7 +2,7 @@
   import { app, latest } from '../lib/store.svelte'
   import { api, type StartingLoad } from '../lib/api'
   import { cacheClient } from '../lib/caches'
-  import { fmtCompact, fmtDate, fmtDateTime, fmtInt, fmtMoney, t, toolLabel } from '../lib/i18n.svelte'
+  import { fmtCompact, fmtDate, fmtDateTime, fmtInt, fmtMoney, named, t, toolLabel } from '../lib/i18n.svelte'
   import Explain from './Explain.svelte'
 
   const [W, H, PAD] = [132, 30, 4]
@@ -27,7 +27,7 @@
   })
 
   const name = (l: StartingLoad) => (l.hidden ? `${t('projects.hidden')}${l.project_id === null ? '' : ` #${l.project_id}`}` : l.project || t('context.start.noProject'))
-  const where = (l: StartingLoad) => [toolLabel(l.tool), cacheClient(l.client)].filter(Boolean).join(' · ')
+  const where = (l: StartingLoad) => named(toolLabel(l.tool), cacheClient(l.client))
   const delta = (l: StartingLoad) => (l.change ? l.change.after - l.change.before : 0)
   const signed = (n: number) => `${n > 0 ? '+' : '−'}${fmtCompact(Math.abs(n))}`
 

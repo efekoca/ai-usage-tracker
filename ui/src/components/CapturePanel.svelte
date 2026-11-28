@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import { app, saveSettings } from '../lib/store.svelte'
   import { api, type CaptureKind, type CaptureStatus } from '../lib/api'
-  import { fmtDuration, fmtInt, t } from '../lib/i18n.svelte'
+  import { fmtDuration, fmtInt, listText, t } from '../lib/i18n.svelte'
   import Toggle from './Toggle.svelte'
   import Select from './Select.svelte'
   import Icon from './Icon.svelte'
@@ -142,7 +142,7 @@
             <dt>{t('cap.interval')}</dt>
             <dd>
               {#key unsaved}
-                <Select label="{t(`cap.${kind}.name`)} · {t('cap.interval')}" value={String(every(kind))} options={steps(kind)} onchange={(v) => setEvery(kind, Number(v))} />
+                <Select label={listText([t(`cap.${kind}.name`), t('cap.interval')])} value={String(every(kind))} options={steps(kind)} onchange={(v) => setEvery(kind, Number(v))} />
               {/key}
               {#if kind === 'claude'}<span class="subtle small">{t('cap.claude.idle')}</span>{/if}
               {#if everyError[kind]}<Icon name="warning" size={13} /> <span class="msg">{everyError[kind]}</span>{/if}
@@ -175,7 +175,7 @@
               {:else if on}<Icon name="check" size={13} /> {t('cap.codex.ok', { t: ago(st.antigravity.last_ok_ms) })}
               {:else}{t('common.off')}{/if}
             {:else if kind === 'statusline'}
-              {#if on}<Icon name="check" size={13} /> {t('cap.statusline.ok', { t: ago(st.statusline_last_ms) })}{#if st.statusline_chained} · {t('cap.statusline.chained')}{/if}
+              {#if on}<Icon name="check" size={13} /> {t('cap.statusline.ok', { t: ago(st.statusline_last_ms) })}{#if st.statusline_chained}{' '}<span class="trail">{t('cap.statusline.chained')}</span>{/if}
               {:else}{t('common.off')}{/if}
             {:else}
               {#if on && st.otel_listening}<Icon name="check" size={13} /> {t('cap.otel.ok', { port: st.otel_port, n: fmtInt(st.otel_events), t: ago(st.otel_last_ms) })}
