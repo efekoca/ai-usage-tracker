@@ -126,7 +126,7 @@ impl<Tz: TimeZone> Format<'_, Tz> {
         Some(match item.kind.as_str() {
             "tokens" => self.tokens(u.tokens),
             "cost" => self.money(u.cost_usd),
-            "sessions" if tr => format!("{} oturum", u.sessions),
+            "sessions" if tr => format!("{} konuşma", u.sessions),
             "sessions" => format!("{} {}", u.sessions, if u.sessions == 1 { "session" } else { "sessions" }),
             "cache" if u.prompt == 0 => return None,
             "cache" => {
@@ -494,9 +494,9 @@ mod tests {
         let mut f = fmt(&c, true, &tz);
         f.currency = "TRY";
         f.fx = 41.5;
-        assert_eq!(f.title(&d), "Bugün 12,4 Mn · Bugün ₺132,80 · 7g 1 oturum · 30g önbellek %87");
+        assert_eq!(f.title(&d), "Bugün 12,4 Mn · Bugün ₺132,80 · 7g 1 konuşma · 30g önbellek %87");
         let d = Data { usage: Some([Usage { tokens: 950, cost_usd: 30.0, ..Usage::default() }; 3]), ..Data::default() };
-        assert_eq!(f.title(&d), "Bugün 950 · Bugün ₺1.245 · 7g 0 oturum", "no hit rate without prompts");
+        assert_eq!(f.title(&d), "Bugün 950 · Bugün ₺1.245 · 7g 0 konuşma", "no hit rate without prompts");
         assert_eq!(f.title(&Data::default()), "", "usage is shown only when it was read");
     }
 

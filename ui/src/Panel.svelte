@@ -157,7 +157,7 @@
       {#if settings.panel.modules.length}
         <PanelGrid modules={settings.panel.modules} data={view} {settings} {now} scanned={done} onaction={act} />
       {:else}
-        <p class="empty">{t('panel.empty')}</p>
+        <p class="empty">{t(info?.platform === 'macos' ? 'panel.empty' : 'panel.empty.taskbar')}</p>
       {/if}
       <footer>
         <span class="when">{data ? t('widget.updated', { t: fmtClock(loadedAt) }) : ''}</span>

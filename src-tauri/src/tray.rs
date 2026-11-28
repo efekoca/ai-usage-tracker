@@ -47,7 +47,7 @@ pub(crate) fn turkish(s: &Settings) -> bool {
 
 fn menu(app: &AppHandle, tr: bool, update: Option<&str>, hotkey: &str) -> tauri::Result<Menu<tauri::Wry>> {
     let t = |en: &str, tr_: &str| if tr { tr_.to_owned() } else { en.to_owned() };
-    let open = MenuItem::with_id(app, "tray:open", t("Open dashboard", "Uygulamayı aç"), true, None::<&str>)?;
+    let open = MenuItem::with_id(app, "tray:open", t("Open app", "Uygulamayı aç"), true, None::<&str>)?;
     let widget_text = t("Show/hide widget", "Widget'ı göster/gizle");
     // macOS draws the shortcut (⌃⌥⇧W) in the menu's key column; a combination the menu cannot
     // parse just goes without it, so it can never break the menu

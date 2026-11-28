@@ -2,7 +2,7 @@
   import { open } from '@tauri-apps/plugin-dialog'
   import { app, saveSettings, type SettingsPatch } from '../lib/store.svelte'
   import { api, type ParserWarning, type SourceId, type SourceInfo } from '../lib/api'
-  import { fmtDuration, t } from '../lib/i18n.svelte'
+  import { fmtDuration, t, warningText } from '../lib/i18n.svelte'
   import Toggle from '../components/Toggle.svelte'
   import Icon from '../components/Icon.svelte'
   import CapturePanel from '../components/CapturePanel.svelte'
@@ -143,7 +143,7 @@
       <div class="list-row warn">
         <span class="path small">{w.path}</span>
         <span class="spacer"></span>
-        <span class="subtle small">{w.last} ({w.count})</span>
+        <span class="subtle small">{warningText(w.last)} ({w.count})</span>
       </div>
     {/each}
   </section>

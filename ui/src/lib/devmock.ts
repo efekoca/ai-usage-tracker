@@ -1199,7 +1199,7 @@ export function installMock() {
             { id: 'chatgpt_desktop', found: false, supported: false, roots: [], file_count: 0, cloud_only: false, enabled: false },
           ]
         case 'parser_warnings':
-          return ocMissing ? [] : [{ path: 'C:\\Users\\you\\.local\\share\\opencode\\opencode.db', parser: 'opencode_db', count: 1, last: '3 sessions from OpenCode before 1.3.16 are not counted' }]
+          return ocMissing ? [] : [{ path: 'C:\\Users\\you\\.local\\share\\opencode\\opencode.db', parser: 'opencode_db', count: 1, last: 'opencode_old_sessions:3' }]
         case 'list_projects':
         case 'list_projects_for_settings':
           return projects.map((p, i) => ({ id: i + 1, name: p, path: `C:\\Projects\\${p}`, hidden: hiddenProjects.has(i + 1) }))

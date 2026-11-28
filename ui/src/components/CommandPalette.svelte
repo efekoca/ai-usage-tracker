@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte'
-  import { app, latest, navigate, saveSettings, setFilter } from '../lib/store.svelte'
+  import { app, latest, navLabel, navigate, saveSettings, setFilter } from '../lib/store.svelte'
   import { api, type ProjectRow, type SessionRow } from '../lib/api'
   import { NAV } from '../lib/nav'
   import { fmtDateTime, searchKey, t, toolLabel } from '../lib/i18n.svelte'
@@ -57,14 +57,17 @@
   ]
   const sectionName: Record<string, string> = Object.fromEntries(SETTINGS.slice(0, 8).map(([k, s]) => [s, k]))
 
+  // names a page had before, so a search with an old name still finds it
+  const FORMER: Record<string, string> = { sessions: 'oturumlar sessions', menubar: 'menü çubuğu menu bar tepsi tray görev çubuğu taskbar' }
+
   const projectName = (s: SessionRow) => (s.hidden ? `${t('projects.hidden')}${s.project_id !== null ? ` #${s.project_id}` : ''}` : s.project || t('projects.noProject'))
 
   const items = $derived.by((): Item[] => {
     const out: Item[] = []
     for (const g of NAV) {
       for (const p of g.items) {
-        const label = t(`nav.${p.id}`)
-        out.push({ id: `page:${p.id}`, group: 'pages', label, icon: p.icon, keys: label, run: () => go(p.id) })
+        const label = navLabel(p.id)
+        out.push({ id: `page:${p.id}`, group: 'pages', label, icon: p.icon, keys: `${label} ${FORMER[p.id] ?? ''}`, run: () => go(p.id) })
       }
     }
     const autostart = app.info && app.info.platform !== 'windows' ? 'settings.autostart.mac' : 'settings.autostart'

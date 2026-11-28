@@ -10,7 +10,7 @@ A private app for Windows, macOS, and Linux that reads the usage logs your AI to
 
 ![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square&logo=windows&logoColor=white) ![macOS 11+](https://img.shields.io/badge/macOS-11%2B-000000?style=flat-square&logo=apple&logoColor=white) ![Linux x86_64](https://img.shields.io/badge/Linux-x86__64-FCC624?style=flat-square&logo=linux&logoColor=black) [![License: MIT](https://img.shields.io/badge/license-MIT-64748b?style=flat-square)](LICENSE)
 
-[Features](#features) · [Install](#install) · [Privacy](#privacy) · [How it works](#how-it-works) · [Build from source](#build-from-source) · [Türkçe](README.tr.md)
+[Features](#features), [Install](#install), [Privacy](#privacy), [How it works](#how-it-works), [Build from source](#build-from-source), [Türkçe](README.tr.md)
 
 ![The AI Usage Tracker overview with a 30-day trend for Claude Code, Codex, Antigravity and OpenCode and the plan value, and the desktop widget showing today's tokens, the conversation whose cache runs out first, limit rings and OpenCode usage](assets/readme/hero-en.webp)
 
@@ -117,7 +117,7 @@ Press **Cmd+K** on a Mac or **Ctrl+K** on Windows and Linux to jump to any page,
 
 ### A widget that stays out of the way
 
-An always-on-top mini window sits in the bottom-right corner of the screen by default. Drag it anywhere, or right-click it to open the dashboard or change its opacity, size and position.
+An always-on-top mini window sits in the bottom-right corner of the screen by default. Drag it anywhere, or right-click it to open the app or change its opacity, size and position.
 
 ![The desktop widget showing today's tokens and cost, the conversation whose cache runs out first, five-hour rings and weekly percentages for two Claude accounts, Antigravity and two Codex accounts, and today's OpenCode usage](assets/readme/widget-en.webp)
 
@@ -127,13 +127,13 @@ The **Widget studio** page changes what the widget shows, its layout, limit styl
 
 A system-wide shortcut shows or hides the widget (**Ctrl+Alt+Shift+W**, on macOS **⌃⌥⇧W**). Change it in **Settings → Widget**.
 
-### Limits in the menu bar and tray
+### Limits in the menu bar and taskbar
 
 The app's icon sits next to the clock on Windows, in the menu bar on macOS, and in the system tray on Linux. Click it to open the control panel, or right-click it for a short menu. Linux trays report no clicks, so there the panel opens from that menu.
 
 ![The control panel open under the menu bar on a Mac: next to the clock, the usage dial and the text with Claude's and Codex's limits as bars and percentages, with a warning mark on Claude's weekly limit. Below, rings for Claude's and Codex's 5-hour and weekly limits, today's usage, OpenCode usage, the conversation whose cache runs out first with a refresh button, a forecast for Claude's 5-hour limit, and four buttons](assets/readme/panel-en.webp)
 
-The panel shows the tiles you pick: limits, forecasts, usage, live caches, the last scan and buttons. Arrange them on the **Menu bar** page by dragging tiles from the gallery into a live preview.
+The panel shows the tiles you pick: limits, forecasts, usage, live caches, the last scan and buttons. Arrange them on the **Menu bar** page (**Taskbar** on Windows and Linux) by dragging tiles from the gallery into a live preview.
 
 ![Menu bar page with a live preview: the icon showing the Claude logo on a square in Claude's color, and under it the control panel with Claude and Codex limit rings, today's usage, OpenCode usage, live caches, a forecast and buttons, next to the gallery of tiles with every account](assets/readme/menubar-en.webp)
 
@@ -172,7 +172,7 @@ ai-usage-tracker --json | jq '.limits[] | select(.window == "five_hour") | .used
 | Source | What is read | Tokens | Limits | Notes |
 |---|---|---|---|---|
 | **Claude Code** (CLI, VS Code, Claude desktop "Code") | `$CLAUDE_CONFIG_DIR` or `~/.claude/projects/**/*.jsonl` | **Exact** | Only when a limit is hit | Background helper calls are not in these logs |
-| **Cowork sessions** (Claude desktop) | *Claude folder*`/local-agent-mode-sessions/**` | **Exact** | **Exact %** (5 h / 7 d) | Only tasks that ran on your computer. Cloud tasks count toward your limits but leave no local token counts |
+| **Cowork tasks** (Claude desktop) | *Claude folder*`/local-agent-mode-sessions/**` | **Exact** | **Exact %** (5 h / 7 d) | Only tasks that ran on your computer. Cloud tasks count toward your limits but leave no local token counts |
 | **Claude desktop: plan usage** | *Claude folder*`/plan-usage-history.json` | None | **Exact %** | Chat tokens are not stored locally |
 | **Codex** (CLI and desktop) | `$CODEX_HOME` or `~/.codex/{sessions,archived_sessions}` | **Exact** | **Exact %** (every request) | Compressed sessions (`.jsonl.zst`) are read too |
 | **Antigravity** (app, IDE and `agy` CLI) | `~/.gemini/{antigravity,antigravity-ide,antigravity-cli}/conversations/*.db` or `$ANTIGRAVITY_APP_DATA_DIR` | **Exact** | **Captured %** (through `agy`) | A copy is read, so Antigravity's files are never touched |
@@ -285,7 +285,7 @@ Everything runs on your computer:
 1. Your AI tools write usage logs to disk, as they already do.
 2. The app reads each log from where it left off and keeps only counts and metadata in a local SQLite archive. Records repeated by streaming, resumed or forked sessions are counted once.
 3. When the limit reads are on, your own `claude`, `codex` and `agy` CLIs supply the limit percentages.
-4. The dashboard, widget, tray icon and PDF summary read from that archive.
+4. The app, widget, tray icon and PDF summary read from that archive.
 
 ## Updates
 
@@ -312,7 +312,7 @@ npx --prefix ui tauri dev
 npm --prefix ui run release
 ```
 
-`npm --prefix ui run dev` on its own opens the dashboard in a browser with sample data. Bug reports and pull requests are welcome.
+`npm --prefix ui run dev` on its own opens the app in a browser with sample data. Bug reports and pull requests are welcome.
 
 ## Code signing policy
 

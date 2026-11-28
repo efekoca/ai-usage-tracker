@@ -55,6 +55,7 @@
   }
   const saveNotify = (patch: Partial<NotifySettings>) => saveSettings((c) => ({ notify: { ...c.notify, ...patch } }))
   const autostartKey = $derived(app.info && app.info.platform !== 'windows' ? 'settings.autostart.mac' : 'settings.autostart')
+  const barKey = $derived(app.info?.platform === 'macos' ? 'settings.cacheTimer.menubar' : 'settings.cacheTimer.taskbar')
   let pricing: PricingFile | null = $state(null)
   let pricingOrigin = $state('bundled')
   let pricingDirty = $state(false)
@@ -462,8 +463,8 @@
         </div>
         <div class="choice">
           <span class="glyph"><Icon name="menubar" size={16} /></span>
-          <span class="label">{t('settings.cacheTimer.menubar')}<span class="subtle small">{t('settings.cacheTimer.menubar.help')}</span></span>
-          <Toggle small checked={s.cache_menubar} label="{t('settings.cacheTimer')}: {t('settings.cacheTimer.menubar')}" onchange={(v) => saveSettings({ cache_menubar: v })} />
+          <span class="label">{t(barKey)}<span class="subtle small">{t('settings.cacheTimer.menubar.help')}</span></span>
+          <Toggle small checked={s.cache_menubar} label="{t('settings.cacheTimer')}: {t(barKey)}" onchange={(v) => saveSettings({ cache_menubar: v })} />
         </div>
         <div class="choice">
           <span class="glyph"><Icon name="terminal" size={16} /></span>
